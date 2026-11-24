@@ -1,0 +1,456 @@
+import {
+  backendOutcomeError,
+  type BindProviderAccountCredentialArgs,
+  buildMutationFallbackEnvelope,
+  type IntegrationPluginExportHandoffArgs,
+  livePArgsMutationResult,
+  liveRpc,
+  nextResourceId,
+  readLiveResourceListReadback,
+  requireLiveEvidence,
+  requireLiveResourceReadback,
+  requireLiveRpcRecord,
+  requireProviderAuthConfigDirectoryReadback,
+  resolveProviderAuthConfigId,
+  resolveSettings,
+  sleep,
+  ui_list_resource_v1,
+  type UnbindProviderAccountCredentialArgs,
+  type UpsertApiGatewayRouteMappingArgs,
+} from '../data-source';
+import {
+  assertLogisticsCustomerMigrationConfigEvidence,
+  assertLogisticsCustomerMigrationResultEvidence,
+  isPersistedLogisticsCustomerMigrationOutcome,
+  isPersistedLogisticsCustomerMigrationValidationFailure,
+  type LogisticsCustomerMigrationArgs,
+  type LogisticsCustomerMigrationConfigArgs,
+  type LogisticsCustomerMigrationConfigResult,
+  type LogisticsCustomerMigrationResult,
+} from './customer-logistics-migration';
+import {
+  asNonEmptyString,
+  type ResourceRow,
+} from './shared';
+
+export async function ui_delete_mapping_config_v1(
+  args: { mapping_config_id: string },
+): Promise<Record<string, unknown>> {
+  const mappingConfigId = asNonEmptyString(args.mapping_config_id);
+  if (!mappingConfigId) throw new Error('ui_delete_mapping_config_v1 requires mapping_config_id');
+
+  const live = await liveRpc<Record<string, unknown>>('ui_delete_resource_v1', {
+    p_resource: 'mapping_configs',
+    p_id: mappingConfigId,
+  });
+  if (live) {
+    const rec = requireLiveRpcRecord(live.data, 'ui_delete_mapping_config_v1 returned no backend outcome');
+    const outcomeError = backendOutcomeError(rec, 'ui_delete_mapping_config_v1 was rejected by the backend');
+    if (outcomeError) throw outcomeError;
+    const deletedId =
+      asNonEmptyString(rec.mapping_config_id) ??
+      asNonEmptyString(rec.id);
+    if (deletedId !== mappingConfigId) {
+      throw new Error('ui_delete_mapping_config_v1 backend outcome did not match the requested mapping');
+    }
+    const mappingReadback = await ui_list_resource_v1<Record<string, unknown>>('mapping_configs', {
+      filter: { id: mappingConfigId },
+      page_size: 1,
+    });
+    if (mappingReadback.rows.some((row) => asNonEmptyString(row.id) === mappingConfigId)) {
+      throw new Error('ui_delete_mapping_config_v1 confirmation still shows the mapping in Intake mappings');
+    }
+    const directoryReadback = await ui_list_resource_v1<Record<string, unknown>>('mapping_config_directory', {
+      filter: { id: mappingConfigId },
+      page_size: 1,
+    });
+    if (directoryReadback.rows.some((row) => asNonEmptyString(row.id) === mappingConfigId)) {
+      throw new Error('ui_delete_mapping_config_v1 confirmation still shows the mapping in External Intake usage');
+    }
+    return {
+      ...rec,
+      mapping_config_id: mappingConfigId,
+    };
+  }
+
+  await sleep(60);
+  return buildMutationFallbackEnvelope({ mapping_config_id: mappingConfigId }, 'mapping_config');
+}
+
+export async function ui_upsert_api_gateway_route_mapping_v1(
+  args: UpsertApiGatewayRouteMappingArgs,
+): Promise<Record<string, unknown>> {
+  const live = await liveRpc<Record<string, unknown>>('ui_upsert_api_gateway_route_mapping_v1', {
+    p_args: args,
+  });
+  if (live) {
+    const rec = requireLiveRpcRecord(live.data, 'ui_upsert_api_gateway_route_mapping_v1 returned no backend outcome');
+    const outcomeError = backendOutcomeError(rec, 'ui_upsert_api_gateway_route_mapping_v1 was rejected by the backend');
+    if (outcomeError) throw outcomeError;
+    const routeId =
+      asNonEmptyString(rec.api_route_id) ??
+      asNonEmptyString(args.api_route_id);
+    const mappingConfigId =
+      asNonEmptyString(rec.mapping_config_id) ??
+      asNonEmptyString(args.mapping_config_id);
+    if (!routeId) throw new Error('ui_upsert_api_gateway_route_mapping_v1 did not return api_route_id');
+    if (!mappingConfigId) throw new Error('ui_upsert_api_gateway_route_mapping_v1 did not return mapping_config_id');
+    await requireLiveResourceReadback('api_routes', routeId, 'ui_upsert_api_gateway_route_mapping_v1');
+    await requireLiveResourceReadback('mapping_config_directory', mappingConfigId, 'ui_upsert_api_gateway_route_mapping_v1');
+    return rec;
+  }
+
+  await sleep(60);
+  return buildMutationFallbackEnvelope(args, 'api_route');
+}
+
+export async function ui_test_mapping_config_v1(
+  mappingConfigId: string,
+  payload: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const mappingId = asNonEmptyString(mappingConfigId);
+  const live = await liveRpc<Record<string, unknown>>('ui_test_mapping_config_v1', {
+    p_mapping_config_id: mappingId,
+    p_payload: payload ?? {},
+  });
+  if (live) {
+    const rec = requireLiveRpcRecord(live.data, 'ui_test_mapping_config_v1 returned no result');
+    const outcomeError = backendOutcomeError(rec, 'ui_test_mapping_config_v1 was rejected by the backend');
+    if (outcomeError) throw outcomeError;
+    requireLiveEvidence(rec, [
+      'mapping_operation_report_id',
+      'operation_report_id',
+      'report_id',
+      'report',
+    ], 'ui_test_mapping_config_v1 did not return backend mapping operation report evidence');
+    const reportId =
+      asNonEmptyString(rec.mapping_operation_report_id) ??
+      asNonEmptyString(rec.operation_report_id) ??
+      asNonEmptyString(rec.report_id);
+    if (reportId) {
+      await requireLiveResourceReadback('mapping_operation_reports', reportId, 'ui_test_mapping_config_v1');
+    }
+    return rec;
+  }
+  await sleep(60);
+  return {
+    ok: true,
+    status: 'succeeded',
+    mapping_config_id: mappingId,
+    transformed_payload: payload ?? {},
+    report_id: `mor_${Date.now()}`,
+  };
+}
+
+export async function ui_bind_provider_account_credential_v1(
+  args: BindProviderAccountCredentialArgs,
+): Promise<Record<string, unknown>> {
+  const live = await livePArgsMutationResult('ui_bind_provider_account_credential_v1', args, [
+    'provider_auth_config_id',
+    'auth_config_id',
+    'settings_version_id',
+    'settings_id',
+  ]);
+  if (live) {
+    const configId = resolveProviderAuthConfigId(live, args);
+    if (!configId) throw new Error('ui_bind_provider_account_credential_v1 did not return provider_auth_config_id');
+    // Provider-account bindings can attach tenant settings to a global route
+    // provider. The direct secret table may stay outside tenant RLS; the
+    // redacted credential directory is the browser-safe readback contract.
+    const readback = await requireLiveResourceReadback(
+      'integration_credential_directory',
+      configId,
+      'ui_bind_provider_account_credential_v1',
+    );
+    requireProviderAuthConfigDirectoryReadback(readback, args, 'ui_bind_provider_account_credential_v1', configId);
+    return { ...live, provider_auth_config_id: configId };
+  }
+  await sleep(60);
+  return buildMutationFallbackEnvelope(args, 'provider_account_credential');
+}
+
+export async function ui_unbind_provider_account_credential_v1(
+  args: UnbindProviderAccountCredentialArgs,
+): Promise<Record<string, unknown>> {
+  const live = await livePArgsMutationResult('ui_unbind_provider_account_credential_v1', args, [
+    'settings_version_id',
+    'settings_id',
+    'provider_account_category',
+    'auth_config_id',
+  ]);
+  if (live) {
+    const providerAccountCategory = asNonEmptyString(live.provider_account_category)
+      ?? asNonEmptyString(args.provider_account_category)
+      ?? 'logestechs_v2_account';
+    const scopeType = asNonEmptyString(live.scope_type)
+      ?? asNonEmptyString(args.scope_type)
+      ?? 'tenant';
+    const orgId =
+      asNonEmptyString(live.organization_id)
+      ?? asNonEmptyString(args.organization_id)
+      ?? asNonEmptyString(args.tenant_id);
+    const scopeId =
+      asNonEmptyString(live.scope_id)
+      ?? asNonEmptyString(args.scope_id)
+      ?? (scopeType === 'tenant' ? orgId : asNonEmptyString(args.source_id));
+    const scopeContext =
+      scopeType === 'source'
+        ? { webhook_source_id: scopeId, organization_id: orgId }
+        : { tenant: { id: scopeId ?? orgId } };
+    const readback = await resolveSettings(providerAccountCategory, scopeContext);
+    const readbackValue =
+      readback.value && typeof readback.value === 'object' && !Array.isArray(readback.value)
+        ? readback.value as Record<string, unknown>
+        : {};
+    if (asNonEmptyString(readbackValue.auth_config_id)) {
+      throw new Error('ui_unbind_provider_account_credential_v1 backend readback still exposes auth_config_id');
+    }
+    if (readbackValue.enabled !== false) {
+      throw new Error('ui_unbind_provider_account_credential_v1 backend readback did not disable provider account');
+    }
+    return { ...live, bound: false, auth_config_id: null };
+  }
+  await sleep(60);
+  return { ...buildMutationFallbackEnvelope(args, 'provider_account_credential_unbound'), bound: false };
+}
+
+export async function ui_execute_provider_circuit_reset_v1(
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const live = await livePArgsMutationResult('ui_execute_provider_circuit_reset_v1', args, [
+    'provider_id',
+    'operation_name',
+    'circuit_breaker_id',
+    'decision_log_id',
+  ]);
+  if (live) {
+    const providerId = asNonEmptyString(live.provider_id) ?? asNonEmptyString(args.provider_id);
+    const operationName = asNonEmptyString(live.operation_name) ?? asNonEmptyString(args.operation_name);
+    if (!providerId || !operationName) {
+      throw new Error('ui_execute_provider_circuit_reset_v1 did not return provider circuit identity');
+    }
+
+    const breakerRows = await readLiveResourceListReadback(
+      'circuit_breaker_dashboard',
+      { provider_id: providerId, operation_name: operationName },
+      'ui_execute_provider_circuit_reset_v1',
+    );
+    const breaker = breakerRows.find(
+      (row) => asNonEmptyString(row.provider_id) === providerId && asNonEmptyString(row.operation_name) === operationName,
+    );
+    if (!breaker || asNonEmptyString(breaker.state) !== 'closed') {
+      throw new Error('ui_execute_provider_circuit_reset_v1 backend readback did not close the circuit breaker');
+    }
+
+    const healthRows = await readLiveResourceListReadback(
+      'provider_health_latest',
+      { provider_id: providerId },
+      'ui_execute_provider_circuit_reset_v1',
+    );
+    const health = healthRows.find((row) => asNonEmptyString(row.provider_id) === providerId);
+    if (!health || asNonEmptyString(health.status) !== 'healthy') {
+      throw new Error('ui_execute_provider_circuit_reset_v1 backend readback did not mark provider healthy');
+    }
+
+    return live;
+  }
+
+  await sleep(60);
+  return {
+    ...buildMutationFallbackEnvelope(args, 'provider_circuit_reset'),
+    provider_id: args.provider_id,
+    operation_name: args.operation_name,
+    state: 'closed',
+    health_status: 'healthy',
+  };
+}
+
+export async function ui_execute_provider_circuit_probe_v1(
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const live = await livePArgsMutationResult('ui_execute_provider_circuit_probe_v1', args, [
+    'provider_id',
+    'operation_name',
+    'circuit_breaker_id',
+    'decision_log_id',
+  ]);
+  if (live) {
+    const providerId = asNonEmptyString(live.provider_id) ?? asNonEmptyString(args.provider_id);
+    const operationName = asNonEmptyString(live.operation_name) ?? asNonEmptyString(args.operation_name);
+    if (!providerId || !operationName) {
+      throw new Error('ui_execute_provider_circuit_probe_v1 did not return provider circuit identity');
+    }
+
+    const breakerRows = await readLiveResourceListReadback(
+      'circuit_breaker_dashboard',
+      { provider_id: providerId, operation_name: operationName },
+      'ui_execute_provider_circuit_probe_v1',
+    );
+    const breaker = breakerRows.find(
+      (row) => asNonEmptyString(row.provider_id) === providerId && asNonEmptyString(row.operation_name) === operationName,
+    );
+    if (!breaker || asNonEmptyString(breaker.state) !== 'closed') {
+      throw new Error('ui_execute_provider_circuit_probe_v1 backend readback did not close the circuit breaker');
+    }
+
+    const healthRows = await readLiveResourceListReadback(
+      'provider_health_latest',
+      { provider_id: providerId },
+      'ui_execute_provider_circuit_probe_v1',
+    );
+    const health = healthRows.find((row) => asNonEmptyString(row.provider_id) === providerId);
+    if (!health || asNonEmptyString(health.status) !== 'healthy') {
+      throw new Error('ui_execute_provider_circuit_probe_v1 backend readback did not mark provider healthy');
+    }
+
+    return live;
+  }
+
+  await sleep(60);
+  return {
+    ...buildMutationFallbackEnvelope(args, 'provider_circuit_probe'),
+    provider_id: args.provider_id,
+    operation_name: args.operation_name,
+    state: 'closed',
+    health_status: 'healthy',
+  };
+}
+
+export async function ui_upsert_logistics_customer_migration_config_v1(
+  args: LogisticsCustomerMigrationConfigArgs,
+): Promise<LogisticsCustomerMigrationConfigResult> {
+  const rpcName = 'ui_upsert_logistics_customer_migration_config_v1';
+  const live = await liveRpc<LogisticsCustomerMigrationConfigResult>(rpcName, { p_args: args });
+  if (!live) throw new Error(`${rpcName} requires a live backend`);
+
+  const result = requireLiveRpcRecord(
+    live.data,
+    `${rpcName} returned no backend outcome`,
+  ) as LogisticsCustomerMigrationConfigResult;
+  const outcomeError = backendOutcomeError(result, 'Customer migration config was rejected by the backend');
+  if (outcomeError) throw outcomeError;
+  assertLogisticsCustomerMigrationConfigEvidence(result);
+  await Promise.all([
+    requireLiveResourceReadback('logistics_migration_sources', result.source_id, rpcName),
+    requireLiveResourceReadback('logistics_migration_profiles', result.profile_id, rpcName),
+    requireLiveResourceReadback('integration_plugin_directory', result.plugin_id, rpcName),
+    requireLiveResourceReadback('integration_plugin_versions', result.plugin_version_id, rpcName),
+    requireLiveResourceReadback('integration_plugin_bindings', result.plugin_binding_id, rpcName),
+    requireLiveResourceReadback('decision_log', result.decision_log_id, rpcName),
+  ]);
+  return result;
+}
+
+export async function ui_execute_logistics_customer_migration_v1(
+  args: LogisticsCustomerMigrationArgs,
+): Promise<LogisticsCustomerMigrationResult> {
+  const rpcName = 'ui_execute_logistics_customer_migration_v1';
+  const live = await liveRpc<LogisticsCustomerMigrationResult>(rpcName, { p_args: args });
+  if (!live) throw new Error(`${rpcName} requires a live backend`);
+
+  const result = requireLiveRpcRecord(
+    live.data,
+    `${rpcName} returned no backend outcome`,
+  ) as LogisticsCustomerMigrationResult;
+  if (
+    !isPersistedLogisticsCustomerMigrationValidationFailure(result)
+    && !isPersistedLogisticsCustomerMigrationOutcome(result)
+  ) {
+    const outcomeError = backendOutcomeError(result, 'Customer migration was rejected by the backend');
+    if (outcomeError) throw outcomeError;
+  }
+  assertLogisticsCustomerMigrationResultEvidence(result);
+
+  const readbacks: Array<Promise<ResourceRow>> = [
+    requireLiveResourceReadback('logistics_migration_requests', result.request_id, rpcName),
+    requireLiveResourceReadback('import_jobs', result.import_job_id, rpcName),
+    requireLiveResourceReadback('integration_plugin_directory', result.plugin_id, rpcName),
+    requireLiveResourceReadback('integration_plugin_versions', result.plugin_version_id, rpcName),
+    requireLiveResourceReadback('integration_plugin_bindings', result.plugin_binding_id, rpcName),
+  ];
+  if (result.workflow_run_id) {
+    readbacks.push(requireLiveResourceReadback('workflow_run_directory', result.workflow_run_id, rpcName));
+  }
+  if (result.decision_log_id) {
+    readbacks.push(requireLiveResourceReadback('decision_log', result.decision_log_id, rpcName));
+  }
+  if (result.imported_client_id) {
+    readbacks.push(requireLiveResourceReadback('clients', result.imported_client_id, rpcName));
+  }
+  for (const recipientId of result.imported_recipient_ids ?? []) {
+    if (recipientId) {
+      readbacks.push(requireLiveResourceReadback('recipients', String(recipientId), rpcName));
+    }
+  }
+  for (const itemId of result.migration_item_ids ?? []) {
+    if (itemId) {
+      readbacks.push(requireLiveResourceReadback('logistics_migration_items', String(itemId), rpcName));
+    }
+  }
+  for (const eventId of result.domain_event_ids ?? []) {
+    if (eventId) {
+      readbacks.push(requireLiveResourceReadback('recent_workflow_events', String(eventId), rpcName));
+    }
+  }
+  await Promise.all(readbacks);
+  return result;
+}
+
+export async function integration_plugin_export_handoff_v1(
+  args: IntegrationPluginExportHandoffArgs,
+): Promise<Record<string, unknown>> {
+  const live = await liveRpc<Record<string, unknown>>('integration_plugin_export_handoff_v1', {
+    p_plugin_version_id: args.plugin_version_id,
+    p_base_url: args.base_url ?? null,
+  });
+  if (live) {
+    const rec = requireLiveRpcRecord(live.data, 'integration_plugin_export_handoff_v1 returned no backend outcome');
+    const outcomeError = backendOutcomeError(rec, 'integration_plugin_export_handoff_v1 was rejected by the backend');
+    if (outcomeError) throw outcomeError;
+    requireLiveEvidence(
+      rec,
+      ['plugin_id', 'plugin_version_id', 'kind', 'endpoint', 'token', 'sample_curl'],
+      'integration_plugin_export_handoff_v1 did not return backend handoff evidence',
+    );
+    const issuedToken = asNonEmptyString(rec.token);
+    if (!issuedToken || issuedToken.includes('{{') || issuedToken.includes('}}')) {
+      throw new Error('integration_plugin_export_handoff_v1 did not return an issued source token');
+    }
+    const endpoint = asNonEmptyString(rec.endpoint);
+    const sampleCurl = asNonEmptyString(rec.sample_curl);
+    if (!endpoint || endpoint.includes('{{') || endpoint.includes('}}') || !sampleCurl || sampleCurl.includes('{{') || sampleCurl.includes('}}')) {
+      throw new Error('integration_plugin_export_handoff_v1 did not return a concrete endpoint handoff');
+    }
+    const pluginVersionId = asNonEmptyString(rec.plugin_version_id) ?? args.plugin_version_id;
+    const versionRow = await requireLiveResourceReadback(
+      'integration_plugin_versions',
+      pluginVersionId,
+      'integration_plugin_export_handoff_v1',
+    );
+    const versionPluginId = asNonEmptyString(versionRow.plugin_id);
+    const pluginId = asNonEmptyString(rec.plugin_id) ?? versionPluginId;
+    if (!pluginId) throw new Error('integration_plugin_export_handoff_v1 did not return integration_plugin_id');
+    if (versionPluginId && pluginId !== versionPluginId) {
+      throw new Error('integration_plugin_export_handoff_v1 plugin readback did not match version lineage');
+    }
+    await requireLiveResourceReadback('integration_plugins', pluginId, 'integration_plugin_export_handoff_v1');
+    await requireLiveResourceReadback('integration_plugin_directory', pluginId, 'integration_plugin_export_handoff_v1');
+    return rec;
+  }
+  await sleep(40);
+  return {
+    ok: true,
+    plugin_id: nextResourceId('plg'),
+    plugin_version_id: args.plugin_version_id,
+    kind: 'webhook',
+    endpoint: `${args.base_url ?? '{{BASE_URL}}'}/functions/v1/webhook-receiver`,
+    token: '{{TOKEN}}',
+    headers: { authorization: 'Bearer {{TOKEN}}' },
+    instructions: [
+      'Point webhook destination to endpoint.',
+      'Send Authorization: Bearer {token}.',
+      'Keep payload shape per plugin mapping configuration.',
+    ],
+    sample_curl: `curl -X POST "${args.base_url ?? '{{BASE_URL}}'}/functions/v1/webhook-receiver" -H "authorization: Bearer {{TOKEN}}" -H "content-type: application/json" -d '{}'`,
+  };
+}

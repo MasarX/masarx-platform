@@ -1,3 +1,5 @@
+import type { PageConfig } from '@masarx/ui/label-designer/canvas-types';
+
 export interface LabelSpec extends Record<string, unknown> {
   id: string;                          // SSOT: label_template_specs.id
   name?: string;                       // Legacy alias for label_template_specs.template_key

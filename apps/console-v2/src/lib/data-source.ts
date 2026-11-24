@@ -58,39 +58,8 @@ import { seed as seedNamespace, SEED_MODE_ENABLED } from './seed-loader';
 import { getSupabaseClient } from './supabase';
 import { hostedInviteRedirect } from './hosted-redirect';
 import { normalizeShipmentTimelineRows, type ShipmentTimelineRow } from './shipment-timeline';
-import { isShipmentCreateIntent } from './webhook-intents';
-import { coordinatePairFromUnknown } from './geo-coordinates';
 import { asNonEmptyString, type ResourceRow } from './data-source/shared';
 import {
-  API_GATEWAY_AUTH_REJECTION_QUICK_READBACK_INTERVAL_MS,
-  API_GATEWAY_AUTH_REJECTION_QUICK_READBACK_TIMEOUT_MS,
-  API_GATEWAY_EDGE_INVOKE_TIMEOUT_MESSAGE,
-  API_GATEWAY_EDGE_INVOKE_TIMEOUT_MS,
-  API_GATEWAY_REQUEST_READBACK_AFTER_INVOKE_TIMEOUT_MS,
-  API_GATEWAY_REQUEST_READBACK_INTERVAL_MS,
-  API_GATEWAY_REQUEST_READBACK_TIMEOUT_MS,
-  API_GATEWAY_TERMINAL_SETTLE_AFTER_FIRST_READBACK_MS,
-  WEBHOOK_RECEIVER_EDGE_INVOKE_TIMEOUT_MS,
-  WEBHOOK_RECEIVER_AUTH_REJECTION_READBACK_INTERVAL_MS,
-  WEBHOOK_RECEIVER_AUTH_REJECTION_READBACK_TIMEOUT_MS,
-  WEBHOOK_RECEIVER_READBACK_AFTER_INVOKE_TIMEOUT_MS,
-  WEBHOOK_RECEIVER_READBACK_INTERVAL_MS,
-  WEBHOOK_RECEIVER_TERMINAL_READBACK_TIMEOUT_MS,
-  apiGatewayAuthRejectionMessage,
-  apiGatewayEdgeAuthErrorMessage,
-  apiGatewayReadbackOccurredAfter,
-  apiGatewayReadbackTerminal,
-  assertApiGatewaySelectedSourceMatchesReadback,
-  buildApiGatewayRequestResult,
-  buildApiGatewaySyntheticResult,
-  buildWebhookReceiverTestResult,
-  buildWebhookReceiverSyntheticResult,
-  findNestedNumber,
-  findNestedString,
-  normalizeApiGatewayMethod,
-  splitApiGatewayPath,
-  withApiGatewayInvokeTimeout,
-  type ApiGatewayInvokeMethod,
   type RunApiGatewayRequestTestArgs,
   type RunApiGatewayRequestTestResult,
   type RunWebhookReceiverTestArgs,
@@ -103,17 +72,12 @@ import {
   projectWebhookSourceDirectory as _projectWebhookSourceDirectory,
 } from './data-source/integration-directory-projections';
 import {
-  assertLogisticsCustomerMigrationConfigEvidence,
-  assertLogisticsCustomerMigrationResultEvidence,
-  isPersistedLogisticsCustomerMigrationOutcome,
-  isPersistedLogisticsCustomerMigrationValidationFailure,
   type LogisticsCustomerMigrationArgs,
   type LogisticsCustomerMigrationConfigArgs,
   type LogisticsCustomerMigrationConfigResult,
   type LogisticsCustomerMigrationResult,
 } from './data-source/customer-logistics-migration';
 import {
-  CAP,
   LEGACY_WILDCARD_CAPABILITY,
   WILDCARD_CAPABILITY,
   hasWildcardCapability,
@@ -134,9 +98,9 @@ export type {
   LogisticsCustomerMigrationResult,
 } from './data-source/customer-logistics-migration';
 
-const seed: any = seedNamespace;
+export const seed: any = seedNamespace;
 
-function liveBackendUnavailableError(adapterName: string): Error {
+export function liveBackendUnavailableError(adapterName: string): Error {
   return new Error(
     `${adapterName}: VITE_USE_SEED=false disables Console V2 seed fallbacks; configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY so the request reaches the live api-schema backend.`,
   );
@@ -168,7 +132,7 @@ const seedCurrentUser = (seed.current_user as Record<string, unknown> | undefine
 const seedCurrentCapabilities = (seed.current_capabilities as string[] | undefined) ?? [];
 const seedCurrentScope = (seed.current_scope as Record<string, unknown> | undefined) ?? {};
 
-const state: RuntimeState = {
+export const state: RuntimeState = {
   // Pre-auth bootstrap user. In seed mode the seed catalog populates every
   // field (role/scope/org_id) at module init. In live mode the seed namespace
   // is empty (`{}`) and these fields stay empty/null until IdentityProvider
@@ -367,7 +331,7 @@ interface SettingsCategoryRow {
   [key: string]: unknown;
 }
 
-const liveMetadataCache: {
+export const liveMetadataCache: {
   navigation?: unknown;
   readRegistry?: unknown;
   commandRegistry?: unknown;
@@ -2213,7 +2177,7 @@ type ZoneGeometryRecord = {
   paths: Array<[number, number]>;
 };
 
-function _numberFromUnknown(value: unknown): number | null {
+export function _numberFromUnknown(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim().length > 0) {
     const parsed = Number(value);
@@ -5155,7 +5119,7 @@ function _projectRoutePlanDirectory(): ResourceRow[] {
   });
 }
 
-const RESOURCE_DATA = (): ResourceMap => ({
+export const RESOURCE_DATA = (): ResourceMap => ({
   shipments: seed.shipments,
   // W24 — paired projection view `public.v_shipment_directory`
   // (supabase/migrations/202604302230_v_shipment_directory.sql). Read-only;
@@ -5959,13 +5923,13 @@ type LiveRpcClient = LiveRpcTarget & {
   schema?: (schema: string) => LiveRpcTarget;
 };
 
-function liveRpcTarget(): LiveRpcTarget | null {
+export function liveRpcTarget(): LiveRpcTarget | null {
   const client = getSupabaseClient() as unknown as LiveRpcClient | null;
   if (!client) return null;
   return typeof client.schema === 'function' ? client.schema('api') : client;
 }
 
-async function liveRpc<T = unknown>(
+export async function liveRpc<T = unknown>(
   rpcName: string,
   args?: Record<string, unknown>,
 ): Promise<{ data: T | null } | null> {
@@ -6001,18 +5965,18 @@ async function optionalLiveRpc<T = unknown>(
   }
 }
 
-function firstRpcRow<T = Record<string, unknown>>(data: unknown): T | null {
+export function firstRpcRow<T = Record<string, unknown>>(data: unknown): T | null {
   if (Array.isArray(data)) return (data[0] ?? null) as T | null;
   if (data && typeof data === 'object') return data as T;
   return null;
 }
 
-function isRouteStopCloseoutTransition(toStatus: string, payload: Record<string, unknown>): boolean {
+export function isRouteStopCloseoutTransition(toStatus: string, payload: Record<string, unknown>): boolean {
   if (toStatus.trim().toLowerCase() !== 'completed') return false;
   return Boolean(payload.delivery_completion || payload.route_stop_completion);
 }
 
-async function finalizeRouteStopCloseoutEvent(taskEventId: string): Promise<void> {
+export async function finalizeRouteStopCloseoutEvent(taskEventId: string): Promise<void> {
   const result = await liveRpc('ui_finalize_route_stop_closeout_event_v1', {
     p_task_event_id: taskEventId,
   });
@@ -6022,7 +5986,7 @@ async function finalizeRouteStopCloseoutEvent(taskEventId: string): Promise<void
   }
 }
 
-function normalizeLiveListResult<T = ResourceRow>(
+export function normalizeLiveListResult<T = ResourceRow>(
   data: unknown,
   page: number,
   pageSize: number,
@@ -6052,7 +6016,7 @@ function liveSort(sort?: { key: string; dir?: 'asc' | 'desc' }): Record<string, 
   return { key: sort.key, direction: sort.dir ?? 'asc' };
 }
 
-function compactRecord(input: Record<string, unknown>): Record<string, unknown> {
+export function compactRecord(input: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(input).filter(([, value]) => value !== undefined && value !== ''),
   );
@@ -6078,7 +6042,7 @@ function primeLiveMetadata<T>(
     });
 }
 
-function objectRecord(value: unknown): Record<string, unknown> {
+export function objectRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
@@ -6347,7 +6311,7 @@ export async function hydrateConsoleLiveMetadata(): Promise<void> {
   return liveMetadataHydration;
 }
 
-async function loadLiveWorkflowTemplateId(templateKey: string): Promise<string | null> {
+export async function loadLiveWorkflowTemplateId(templateKey: string): Promise<string | null> {
   const live = await ui_list_resource_v1<Record<string, unknown>>('workflow_templates', {
     filter: { template_key: templateKey, status: 'active' },
     page_size: 1,
@@ -6357,11 +6321,11 @@ async function loadLiveWorkflowTemplateId(templateKey: string): Promise<string |
   return typeof id === 'string' && id ? id : null;
 }
 
-function looksLikeUuid(value: string): boolean {
+export function looksLikeUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function nestedScopeId(input: Record<string, unknown>, key: string): string | null {
+export function nestedScopeId(input: Record<string, unknown>, key: string): string | null {
   const direct = input[key];
   if (typeof direct === 'string') return direct || null;
   if (direct && typeof direct === 'object') {
@@ -6371,7 +6335,7 @@ function nestedScopeId(input: Record<string, unknown>, key: string): string | nu
   return null;
 }
 
-function normalizePolicyContext(scopeContext: Record<string, unknown> = state.scope): Record<string, unknown> {
+export function normalizePolicyContext(scopeContext: Record<string, unknown> = state.scope): Record<string, unknown> {
   return compactRecord({
     ...scopeContext,
     organization_id:
@@ -6391,7 +6355,7 @@ function normalizePolicyContext(scopeContext: Record<string, unknown> = state.sc
   });
 }
 
-function normalizeSettingsScope(scope: unknown): { scope_type: string; scope_id: string | null } {
+export function normalizeSettingsScope(scope: unknown): { scope_type: string; scope_id: string | null } {
   const rec = (scope && typeof scope === 'object' ? scope : {}) as Record<string, unknown>;
   if (typeof rec.scope_type === 'string') {
     return {
@@ -6411,7 +6375,7 @@ function normalizeSettingsScope(scope: unknown): { scope_type: string; scope_id:
   };
 }
 
-async function getLiveShipmentClientId(shipmentId?: string | null): Promise<string | null> {
+export async function getLiveShipmentClientId(shipmentId?: string | null): Promise<string | null> {
   if (!shipmentId) return null;
   const live = await liveRpc<Record<string, unknown> | null>('ui_get_resource_v1', {
     p_resource: 'shipments',
@@ -6421,7 +6385,7 @@ async function getLiveShipmentClientId(shipmentId?: string | null): Promise<stri
   return (row?.client_id as string | undefined) ?? null;
 }
 
-function normalizeDeliverySlotWindow(row: Record<string, unknown>): DeliverySlotWindow {
+export function normalizeDeliverySlotWindow(row: Record<string, unknown>): DeliverySlotWindow {
   const slotDate = String(row.slot_date ?? '');
   const start = String(row.window_start_local ?? '');
   const end = String(row.window_end_local ?? '');
@@ -6759,58 +6723,8 @@ export async function ui_get_shipment_timeline_v1(shipmentId: string): Promise<S
 export async function dashboardKpis(): Promise<
   Array<{ label: string; key: string; value: number | string; delta?: string; tone?: string; spark?: number[] }>
 > {
-  const live = await liveRpc('ui_list_resource_v1', {
-    p_resource: 'kpi_rollup_directory',
-    p_filters: {},
-    p_limit: 12,
-    p_offset: 0,
-    p_sort: { key: 'rank', direction: 'asc' },
-  });
-  if (live) {
-    return normalizeLiveListResult<Record<string, unknown>>(live.data, 0, 12).rows.map((row) => ({
-      label: String(row.label ?? row.name ?? row.group_label ?? row.kpi_key ?? row.key ?? 'KPI'),
-      key: String(row.kpi_key ?? row.key ?? row.id ?? ''),
-      value: (row.display_value ?? row.value ?? row.value_num ?? row.numerator ?? 0) as number | string,
-      delta: row.delta == null ? undefined : String(row.delta),
-      tone: row.tone == null ? undefined : String(row.tone),
-      spark: Array.isArray(row.spark) ? (row.spark as number[]) : undefined,
-    }));
-  }
-
-  await sleep(20);
-  const runs = seed.route_runs as Array<{ status: string; stops: number; risk?: boolean }>;
-  const tasks = seed.tasks as Array<{ task_type: string; status: string }>;
-  return [
-    {
-      label: 'Active runs',
-      key: 'active_runs',
-      value: runs.filter((r) => r.status !== 'completed' && r.status !== 'cancelled').length,
-      delta: '+12 vs avg',
-      tone: 'neutral',
-      spark: [4, 8, 6, 9, 12, 11, 14],
-    },
-    {
-      label: 'Stops in flight',
-      key: 'stops',
-      value: runs.reduce((s, r) => s + r.stops, 0),
-      delta: '94% on-time',
-      tone: 'good',
-      spark: [22, 28, 30, 27, 35, 32, 38],
-    },
-    {
-      label: 'At-risk SLA',
-      key: 'at_risk',
-      value:
-        runs.filter((r) => r.risk).length +
-        tasks.filter((t) => t.task_type === 'dispatch_exception_review' && t.status === 'open').length,
-      delta: '↑ in last 15m',
-      tone: 'warn',
-      spark: [2, 1, 3, 4, 3, 5, 6],
-    },
-    { label: 'Failed attempts', key: 'failed', value: 14, delta: 'NDR queue · 6', tone: 'danger', spark: [1, 0, 2, 1, 2, 3, 1] },
-    { label: 'Unassigned', key: 'unassigned', value: 23, delta: '4 partner-eligible', tone: 'info', spark: [5, 4, 6, 5, 7, 6, 8] },
-    { label: 'Avg solve', key: 'avg_solve', value: '1.4s', delta: 'p95 · 3.8s', tone: 'neutral', spark: [1.2, 1.4, 1.3, 1.5, 1.2, 1.4, 1.4] },
-  ];
+  const { dashboardKpis } = await import('./data-source/insights');
+  return dashboardKpis();
 }
 
 // ----------- KPI rollup resolver (Phase F1 / CLAIM-INSIGHTS-REPORTING) -----------
@@ -6849,159 +6763,11 @@ export interface ComputeKpiRollupArgs {
   scope?: { organization_id?: string | null } | null;
 }
 
-function _resolveKpiTone(
-  defn: Record<string, unknown> | undefined,
-  value: number | null,
-): KpiRollupResolution['tone'] {
-  if (value === null || value === undefined) return 'neutral';
-  const block = (defn?.tone_thresholds as Record<string, unknown> | undefined) ?? undefined;
-  const fallback = (defn?.tone as KpiRollupResolution['tone'] | undefined) ?? 'neutral';
-  if (!block) return fallback;
-  const ga = typeof block.good_at_or_above === 'number' ? (block.good_at_or_above as number) : null;
-  const wb = typeof block.warn_below === 'number' ? (block.warn_below as number) : null;
-  const gb = typeof block.good_at_or_below === 'number' ? (block.good_at_or_below as number) : null;
-  const wa = typeof block.warn_above === 'number' ? (block.warn_above as number) : null;
-  const da = typeof block.danger_above === 'number' ? (block.danger_above as number) : null;
-  // Higher-is-better
-  if (ga !== null) {
-    if (value >= ga) return 'good';
-    if (wb !== null && value < wb) return 'danger';
-    return 'warn';
-  }
-  // Lower-is-better
-  if (gb !== null) {
-    if (value <= gb) return 'good';
-    if (da !== null && value > da) return 'danger';
-    if (wa !== null && value > wa) return 'warn';
-  }
-  return fallback;
-}
-
-function _resolveKpiDelta(
-  rollupMeta: Record<string, unknown> | undefined,
-  defnMeta: Record<string, unknown> | undefined,
-  todayValue: number | null,
-  prevValue: number | null,
-  format: string,
-): string | null {
-  const explicit = (rollupMeta?.delta_text as string | undefined) ?? null;
-  if (explicit && explicit.trim()) return explicit;
-  const label = (defnMeta?.delta_label as string | undefined) ?? '';
-  if (todayValue === null || prevValue === null) return label || null;
-  const diff = todayValue - prevValue;
-  if (Math.abs(diff) < 0.0001) return label || null;
-  const sign = diff > 0 ? '+' : '−';
-  const abs = Math.abs(diff);
-  let formatted: string;
-  if (format === 'percent') formatted = `${sign}${abs.toFixed(1)} pts`;
-  else if (format === 'duration_minutes') formatted = `${sign}${abs.toFixed(0)}m`;
-  else if (format === 'duration_seconds') formatted = `${sign}${abs.toFixed(1)}s`;
-  else formatted = `${sign}${Math.round(abs)}`;
-  return label ? `${formatted} · ${label}` : formatted;
-}
-
 export async function compute_kpi_rollup_v1(
   args: ComputeKpiRollupArgs,
 ): Promise<KpiRollupResolution> {
-  const client = getSupabaseClient();
-  if (client) {
-    // W44 cutover: use canonical (p_args jsonb) RETURNS jsonb sibling
-    // `compute_kpi_rollup_v2` (migration 202605020200_w44_rpc_v2_normalizations.sql).
-    // Envelope: { ok, rows: [<row>] } where each row matches the *_v1 RETURNS
-    // TABLE shape. The exported adapter signature is unchanged.
-    const { data, error } = await client.rpc('compute_kpi_rollup_v2', {
-      p_args: {
-        definition_key: args.definition_key,
-        day: args.day ?? null,
-        window_days: args.window_days ?? 1,
-        scope_organization_id:
-          args.scope?.organization_id ?? state.user.organization_id ?? null,
-      },
-    });
-    if (error) {
-      // Tolerate the canonical RPC not yet existing — fall through to the
-      // direct-read path below so the surface remains functional during the
-      // backend rollout window.
-      if (!/function|not found|undefined|does not exist/i.test(error.message)) {
-        throw new Error(error.message);
-      }
-    } else if (data) {
-      const envelope = data as { ok?: boolean; rows?: unknown[] };
-      const rows = Array.isArray(envelope?.rows) ? envelope.rows : [];
-      const row = rows[0];
-      if (row) return row as KpiRollupResolution;
-    }
-    if (!SEED_MODE_ENABLED) throw new Error(`KPI rollup did not return a row for ${args.definition_key}`);
-  }
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC compute_kpi_rollup_v1');
-  await sleep(20);
-
-  const orgId = args.scope?.organization_id ?? state.user.organization_id ?? null;
-  const defs = (RESOURCE_DATA().kpi_definitions ?? []) as Array<{
-    key: string;
-    organization_id: string;
-    name: string;
-    unit: string | null;
-    definition: Record<string, unknown>;
-  }>;
-  const rolls = (RESOURCE_DATA().kpi_rollups_daily ?? []) as Array<{
-    organization_id: string;
-    kpi_key: string;
-    day: string;
-    value_num: number | null;
-    numerator: number | null;
-    denominator: number | null;
-    metadata: Record<string, unknown>;
-  }>;
-
-  const def = defs.find(
-    (d) => d.key === args.definition_key && (orgId === null || d.organization_id === orgId),
-  );
-  if (!def) {
-    throw new Error(`kpi_definition_not_found:${args.definition_key}`);
-  }
-  const matching = rolls
-    .filter(
-      (r) =>
-        r.kpi_key === args.definition_key &&
-        (orgId === null || r.organization_id === orgId),
-    )
-    .sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0));
-  const target = args.day
-    ? (matching.find((r) => r.day === args.day) ?? matching[0] ?? null)
-    : (matching[0] ?? null);
-  const previous = (matching[1] ?? null) as
-    | { value_num: number | null; numerator: number | null; denominator: number | null; day: string }
-    | null;
-
-  const definition = (def.definition ?? {}) as Record<string, unknown>;
-  const format = (definition.format as string | undefined) ?? 'integer';
-  const groupKey = (definition.group as string | undefined) ?? 'general';
-
-  const tone = _resolveKpiTone(definition, target?.value_num ?? null);
-  const delta = _resolveKpiDelta(
-    target?.metadata,
-    definition,
-    target?.value_num ?? null,
-    previous?.value_num ?? null,
-    format,
-  );
-
-  return {
-    kpi_key: def.key,
-    label: def.name,
-    group: groupKey,
-    value_num: target?.value_num ?? null,
-    numerator: target?.numerator ?? null,
-    denominator: target?.denominator ?? null,
-    format,
-    unit: def.unit ?? null,
-    tone,
-    delta,
-    day: target?.day ?? null,
-    scope_organization_id: orgId,
-    settings_resolution_id: `srlv_kpi_${def.key}`,
-  };
+  const { compute_kpi_rollup_v1 } = await import('./data-source/insights');
+  return compute_kpi_rollup_v1(args);
 }
 
 // ----------- Bank account balance projection (W11-1 / W8-4 paired) -----------
@@ -7040,93 +6806,8 @@ export interface ComputeBankAccountBalanceArgs {
 export async function compute_bank_account_balance_v1(
   args: ComputeBankAccountBalanceArgs,
 ): Promise<BankAccountBalanceResult> {
-  const client = getSupabaseClient();
-  if (client) {
-    const { data, error } = await client.rpc('compute_bank_account_balance_v1', {
-      p_args: { bank_account_id: args.bank_account_id },
-    });
-    if (error) throw new Error(error.message);
-    if (data) return data as BankAccountBalanceResult;
-    if (!SEED_MODE_ENABLED) throw new Error(`Bank balance did not return a row for ${args.bank_account_id}`);
-  }
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC compute_bank_account_balance_v1');
-  await sleep(20);
-
-  // Fallback: project from seed bank_accounts + finance_events_bank_statement
-  // + bank_recon_matches. Mirrors the SQL contract in
-  // 202604301110_compute_bank_account_balance_v1.sql:99-134.
-  const accounts = (RESOURCE_DATA().bank_accounts ?? []) as Array<{
-    id: string;
-    organization_id?: string;
-    currency?: string;
-    balance?: number;
-    last_match_at?: string | null;
-    open_items?: number;
-  }>;
-  const account = accounts.find((a) => a.id === args.bank_account_id);
-  if (!account) {
-    throw new Error(`bank_account_not_found:${args.bank_account_id}`);
-  }
-  const statements = (RESOURCE_DATA().finance_events_bank_statement ?? []) as Array<{
-    id: string;
-    account_id?: string;
-    direction?: 'in' | 'out';
-    amount?: number;
-    occurred_at?: string;
-    attached?: boolean;
-  }>;
-  const matches = (RESOURCE_DATA().bank_recon_matches ?? []) as Array<{
-    id: string;
-    bank_statement_event_id?: string;
-    status?: 'matched' | 'unmatched';
-    updated_at?: string;
-  }>;
-
-  // Ledger-derived balance: sum(in) - sum(out) over this account's bank-statement events.
-  const accountStatements = statements.filter((s) => s.account_id === args.bank_account_id);
-  let derivedBalance = 0;
-  for (const s of accountStatements) {
-    const amt = typeof s.amount === 'number' ? s.amount : 0;
-    if (s.direction === 'in') derivedBalance += amt;
-    else if (s.direction === 'out') derivedBalance -= amt;
-  }
-
-  // Open items: bank_statement events without an active matched row.
-  const matchedStatementIds = new Set(
-    matches
-      .filter((m) => m.status === 'matched' && m.bank_statement_event_id)
-      .map((m) => m.bank_statement_event_id as string),
-  );
-  const derivedOpenItems = accountStatements.filter(
-    (s) => !matchedStatementIds.has(s.id) && s.attached !== true,
-  ).length;
-
-  // Last match: MAX(updated_at) of matched matches whose statement event belongs to this account.
-  const accountStatementIds = new Set(accountStatements.map((s) => s.id));
-  let derivedLastMatchAt: string | null = null;
-  for (const m of matches) {
-    if (m.status !== 'matched') continue;
-    if (!m.bank_statement_event_id || !accountStatementIds.has(m.bank_statement_event_id)) continue;
-    const updated = m.updated_at ?? null;
-    if (!updated) continue;
-    if (derivedLastMatchAt === null || updated > derivedLastMatchAt) derivedLastMatchAt = updated;
-  }
-
-  // Tolerate empty-ledger demo seeds: prefer derived values when the seed
-  // produced any bank-statement events for this account; otherwise fall back
-  // to the seed's pre-computed snapshot (so demo cards keep showing data).
-  const hasLedgerActivity = accountStatements.length > 0 || matches.length > 0;
-  return {
-    ok: true,
-    bank_account_id: args.bank_account_id,
-    organization_id: account.organization_id ?? state.user.organization_id ?? null,
-    currency: account.currency ?? null,
-    balance: hasLedgerActivity ? derivedBalance : (account.balance ?? 0),
-    last_match_at: derivedLastMatchAt ?? account.last_match_at ?? null,
-    open_items: hasLedgerActivity ? derivedOpenItems : (account.open_items ?? 0),
-    correlation_id: `cor_demo_${args.bank_account_id}`,
-    settings_resolution_id: `srlv_demo_${args.bank_account_id}`,
-  };
+  const { compute_bank_account_balance_v1 } = await import('./data-source/insights');
+  return compute_bank_account_balance_v1(args);
 }
 
 // ----------- Settings + ladder -----------
@@ -7161,173 +6842,12 @@ export interface MobilePolicyResolutionResult {
   resolver: string;
 }
 
-function mobilePolicyResolverName(category: string): string {
-  if (!/^[a-z][a-z0-9_]*_policy$/.test(category)) {
-    throw new Error(`Invalid mobile policy category: ${category}`);
-  }
-  return `resolve_${category}`;
-}
-
-function mobilePolicyResolutionFromRow(
-  category: string,
-  resolver: string,
-  row: Record<string, unknown>,
-): MobilePolicyResolutionResult {
-  const scopePath = Array.isArray(row.scope_path) ? (row.scope_path as Array<Record<string, unknown>>) : [];
-  const resolvedFrom = String(row.scope_type ?? 'global');
-  const resolvedScopeId = (row.scope_id as string | null | undefined) ?? null;
-  const ladderPath = scopePath.length > 0
-    ? scopePath.map((step, index) => {
-        const scopeType = String(step.scope_type ?? '');
-        const scopeId = (step.scope_id as string | null | undefined) ?? null;
-        const isWinner = scopeType === resolvedFrom && (scopeId ?? null) === (resolvedScopeId ?? null);
-        return {
-          rank: typeof step.rank === 'number' ? step.rank : index,
-          scope_type: scopeType,
-          scope_id: scopeId,
-          has_value: isWinner,
-          value: isWinner ? row.value : null,
-        };
-      })
-    : [{
-        rank: 0,
-        scope_type: resolvedFrom,
-        scope_id: resolvedScopeId,
-        has_value: true,
-        value: row.value,
-      }];
-
-  return {
-    category,
-    value: row.value,
-    resolved_from: resolvedFrom,
-    ladder_path: ladderPath,
-    settings_resolution_id: String(row.settings_resolution_id ?? row.settings_version_id ?? row.settings_id ?? ''),
-    override_of: null,
-    resolver,
-  };
-}
-
 export async function resolveSettings(
   category: string,
   scopeContext: Record<string, unknown> = state.scope,
 ): Promise<SettingsResolutionResult> {
-  const live = await liveRpc<unknown>('resolve_settings_row_from_policy_context_v1', {
-    p_category: category,
-    p_context: normalizePolicyContext(scopeContext),
-  });
-  if (live) {
-    const row = firstRpcRow<Record<string, unknown>>(live.data);
-    if (!row) throw new Error(`resolve_settings_row_from_policy_context_v1 returned no row for ${category}`);
-    const scopePath = Array.isArray(row.scope_path) ? (row.scope_path as Array<Record<string, unknown>>) : [];
-    const resolvedFrom = String(row.scope_type ?? 'global');
-    const resolvedScopeId = (row.scope_id as string | null | undefined) ?? null;
-    return {
-      value: row.value,
-      resolved_from: resolvedFrom,
-      ladder_path: scopePath.map((step, index) => {
-        const scopeType = String(step.scope_type ?? '');
-        const scopeId = (step.scope_id as string | null | undefined) ?? null;
-        const isWinner = scopeType === resolvedFrom && (scopeId ?? null) === (resolvedScopeId ?? null);
-        return {
-          rank: index,
-          scope_type: scopeType,
-          scope_id: scopeId,
-          has_value: isWinner,
-          version: isWinner ? row.version : undefined,
-          value: isWinner ? row.value : undefined,
-        };
-      }),
-      settings_resolution_id: String(row.settings_resolution_id ?? row.settings_version_id ?? row.settings_id ?? ''),
-      override_of: null,
-    };
-  }
-
-  await sleep(30);
-  // AGENTS.md §3 (ROW-DRIVEN) + §4 (SSOT): derive the ladder ordering from
-  // the canonical `scope_type_registry` rows (sorted by `ladder_rank`)
-  // instead of an inline literal tuple. Adding a new tier or re-ranking is
-  // a row mutation; the FE picks it up without source change.
-  type ScopeRegistryRow = {
-    scope_type: string;
-    ladder_rank: number;
-    is_enabled: boolean;
-  };
-  const scopeRegistry = (seed.scope_type_registry as ScopeRegistryRow[]) ?? [];
-  const enabledScopes = scopeRegistry
-    .filter((r) => r.is_enabled !== false)
-    .slice()
-    .sort((a, b) => a.ladder_rank - b.ladder_rank);
-  // Highest specificity first (descending ladder_rank) so we pick the most
-  // specific override before falling through to less specific scopes.
-  const ranksDesc = enabledScopes.slice().reverse();
-
-  const path: SettingsResolutionResult['ladder_path'] = [];
-  let winning: { scope_type: string; scope_id: string | null; version: unknown; value: unknown; ladder_rank: number } | null = null;
-  const settingsVersions = seed.settings_versions as Array<{
-    category: string;
-    scope_type: string;
-    scope_id: string;
-    status: string;
-    version: unknown;
-    value: unknown;
-  }>;
-
-  for (let i = 0; i < enabledScopes.length; i++) {
-    // Walk LSB-first (global → tenant → ...) for path order; reverse for
-    // pick-most-specific-first uses below.
-    const reg = enabledScopes[i]!;
-    const scopeType = reg.scope_type;
-    const scopeIdRaw = (scopeContext as Record<string, { id?: string } | undefined>)[scopeType]?.id ?? (scopeType === 'global' ? 'global' : null);
-    const scopeId: string | null = scopeIdRaw ?? null;
-    const row = scopeId
-      ? settingsVersions.find(
-          (s) => s.category === category && s.scope_type === scopeType && s.scope_id === scopeId && s.status === 'active',
-        )
-      : null;
-    path.push({
-      rank: reg.ladder_rank,
-      scope_type: scopeType,
-      scope_id: scopeId,
-      has_value: !!row,
-      version: row?.version,
-      value: row?.value,
-    });
-  }
-
-  // Pick winner — most specific (highest ladder_rank) row that has a value.
-  for (const reg of ranksDesc) {
-    const entry = path.find((p) => p.scope_type === reg.scope_type);
-    if (entry?.has_value) {
-      winning = {
-        scope_type: reg.scope_type,
-        scope_id: entry.scope_id,
-        version: entry.version,
-        value: entry.value,
-        ladder_rank: reg.ladder_rank,
-      };
-      break;
-    }
-  }
-
-  // override_of: the next-most-specific row that ALSO had a value (the row
-  // that the winner overrides).
-  let override_of: unknown = null;
-  if (winning) {
-    const lessSpecific = ranksDesc
-      .filter((reg) => reg.ladder_rank < winning!.ladder_rank)
-      .map((reg) => path.find((p) => p.scope_type === reg.scope_type))
-      .filter((entry): entry is NonNullable<typeof entry> => entry?.has_value === true);
-    if (lessSpecific.length > 0) override_of = lessSpecific[0];
-  }
-
-  return {
-    value: winning?.value,
-    resolved_from: winning?.scope_type ?? 'global',
-    ladder_path: path,
-    settings_resolution_id: `srlv_${Math.floor(Math.random() * 9000) + 1000}`,
-    override_of,
-  };
+  const { resolveSettings } = await import('./data-source/settings');
+  return resolveSettings(category, scopeContext);
 }
 
 // Mobile policies share the canonical ladder shape with `resolveSettings` so
@@ -7338,53 +6858,8 @@ export async function resolveMobilePolicy(
   category: string,
   scopeContext: Record<string, unknown> = state.scope,
 ): Promise<MobilePolicyResolutionResult | null> {
-  const resolver = mobilePolicyResolverName(category);
-  const live = await liveRpc<unknown>(resolver, {
-    p_context: normalizePolicyContext(scopeContext),
-  });
-  if (live) {
-    const row = firstRpcRow<Record<string, unknown>>(live.data);
-    return row ? mobilePolicyResolutionFromRow(category, resolver, row) : null;
-  }
-
-  await sleep(20);
-  const resolvedSeed = (seed.mobile_policy_resolved?.[category] as Record<string, unknown> | undefined) ?? null;
-  if (resolvedSeed == null) return null;
-  const value = resolvedSeed.value ?? resolvedSeed;
-  const seedResolvedFrom = typeof resolvedSeed.resolved_from === 'string'
-    ? resolvedSeed.resolved_from
-    : null;
-  // Walk the canonical ladder for visualization. Seed snapshots store the
-  // winning value only, so non-winning steps intentionally render as inherited.
-  const reg = (seed.settings_category_registry as Array<{ category: string; scopes?: string[] }>).
-    find((c) => c.category === category);
-  const allowedScopes = (reg?.scopes ?? ['global', 'tenant']) as string[];
-  const scopeRanks: Record<string, number> = { global: 0, tenant: 1, client: 2, sender: 3, source: 4, resource: 5 };
-  const winningScope = seedResolvedFrom ?? 'global';
-  const ladder_path = allowedScopes.map((scopeType) => {
-    const scopeId = scopeType === 'global'
-      ? 'global'
-      : ((scopeContext as Record<string, { id?: string } | undefined>)[scopeType]?.id ?? null);
-    const isWinning = scopeType === winningScope;
-    return {
-      rank: scopeRanks[scopeType] ?? 99,
-      scope_type: scopeType,
-      scope_id: scopeId,
-      has_value: isWinning,
-      value: isWinning ? value : null,
-    };
-  });
-  // override_of: the next-lower-rank scope below winning that also "had" a value
-  // (always null in synthetic mode — production will compute correctly).
-  return {
-    category,
-    value,
-    resolved_from: winningScope,
-    ladder_path,
-    settings_resolution_id: String(resolvedSeed.settings_resolution_id ?? resolvedSeed.srlv ?? `srlv_${Math.floor(Math.random() * 9000) + 1000}`),
-    override_of: typeof resolvedSeed.overrides === 'string' ? resolvedSeed.overrides : null,
-    resolver,
-  };
+  const { resolveMobilePolicy } = await import('./data-source/settings');
+  return resolveMobilePolicy(category, scopeContext);
 }
 
 // ----------- Access control policy resolver -----------
@@ -7415,120 +6890,8 @@ export interface AccessPolicyResolutionResult {
 export async function resolve_access_control_policy_v1(
   args: { scope_type?: string; scope_id?: string | null } = {},
 ): Promise<AccessPolicyResolutionResult> {
-  const live = await liveRpc<AccessPolicyResolutionResult & { ok?: boolean }>('resolve_access_control_policy_v2', {
-    p_args: {
-      scope_type: args.scope_type ?? null,
-      scope_id: args.scope_id ?? null,
-    },
-  });
-  if (live) {
-    // W44 cutover: use canonical (p_args jsonb) RETURNS jsonb sibling
-    // `resolve_access_control_policy_v2` (migration
-    // 202605020200_w44_rpc_v2_normalizations.sql). Envelope:
-    // { ok, policy, settings_id, settings_version_id, scope_type, scope_id,
-    //   scope_path, settings_resolution_id }. The exported adapter signature
-    // is unchanged.
-    const envelope = (live.data ?? null) as
-      | (AccessPolicyResolutionResult & { ok?: boolean })
-      | null;
-    if (!envelope || envelope.settings_id == null) {
-      throw new Error('resolve_access_control_policy_v1 returned no rows');
-    }
-    return {
-      policy: envelope.policy,
-      settings_id: envelope.settings_id,
-      settings_version_id: envelope.settings_version_id,
-      scope_type: envelope.scope_type,
-      scope_id: envelope.scope_id,
-      scope_path: envelope.scope_path,
-      settings_resolution_id: envelope.settings_resolution_id,
-    };
-  }
-
-  await sleep(30);
-
-  // Resolve effective scope: caller-provided -> user's access_scope -> 'global'.
-  const effectiveScopeType =
-    args.scope_type ??
-    (state.user.access_scope_type === 'platform' ? 'global' : state.user.access_scope_type) ??
-    'global';
-  const effectiveScopeId = args.scope_id ?? state.user.access_scope_id ?? null;
-
-  // Synthesize ladder scope_path from current scope context (matches the
-  // backend `resolve_scope_path_v1` shape: ordered ancestor walk
-  // most-specific -> root). We mirror the JSONB array contract verbatim.
-  const scope_path: Array<{ scope_type: string; scope_id: string | null }> = [];
-  if (effectiveScopeType === 'global') {
-    scope_path.push({ scope_type: 'global', scope_id: null });
-  } else {
-    const scopeCtx = state.scope as Record<string, { id?: string } | undefined>;
-    const ladderOrder: string[] = ['tenant', 'client', 'sender', 'source', 'resource'];
-    const includeUpTo = ladderOrder.indexOf(effectiveScopeType);
-    if (includeUpTo >= 0) {
-      // Most-specific-first walk down to root for canonical scope_path order.
-      for (let i = includeUpTo; i >= 0; i--) {
-        const key = ladderOrder[i] as string;
-        const id = key === effectiveScopeType ? effectiveScopeId : (scopeCtx[key]?.id ?? null);
-        scope_path.push({ scope_type: key, scope_id: id });
-      }
-    } else {
-      scope_path.push({ scope_type: effectiveScopeType, scope_id: effectiveScopeId });
-    }
-    // Always include 'global' as the root.
-    scope_path.push({ scope_type: 'global', scope_id: null });
-  }
-
-  // Build a representative `policy` JSONB body that mirrors the canonical
-  // access_control_policy seed shape (capabilities catalog + roles +
-  // resource_map). The capability catalog comes from registry.capabilities
-  // (re-exported through seed.js) which is itself pinned to the backend SSOT
-  // in 202601022113_access_control_policy_core.sql.
-  const seedCapabilities = (seed.capabilities ?? []) as string[];
-  const capabilities = seedCapabilities.map((key) => ({ key, label: key }));
-  const devRoles = (seed.dev_roles ?? []) as Array<{ id: string; label: string; capabilities: string[] | string }>;
-  const roles = devRoles.map((r) => ({
-    key: r.id,
-    label: r.label,
-    capability_keys:
-      typeof r.capabilities === 'string' && isWildcardCapability(r.capabilities)
-        ? ['*']
-        : Array.isArray(r.capabilities)
-          ? r.capabilities
-          : [r.capabilities],
-  }));
-  const readRegistry = (seed.ui_read_registry ?? {}) as Record<
-    string,
-    { capability_read?: string; capability_write?: string }
-  >;
-  const resource_map: Record<string, { read?: string; write?: string }> = {};
-  for (const [resourceKey, def] of Object.entries(readRegistry)) {
-    const r = def?.capability_read;
-    const w = def?.capability_write;
-    if (r || w) {
-      resource_map[resourceKey] = {
-        ...(r ? { read: r } : {}),
-        ...(w ? { write: w } : {}),
-      };
-    }
-  }
-
-  const policy = {
-    capabilities,
-    roles,
-    assignments: { user_type: Object.fromEntries(roles.map((r) => [r.key, [r.key]])) },
-    resource_map,
-    denies: [] as unknown[],
-  };
-
-  return {
-    policy,
-    settings_id: 'set_access_control_policy_demo',
-    settings_version_id: 'sv_access_control_policy_demo',
-    scope_type: effectiveScopeType,
-    scope_id: effectiveScopeId,
-    scope_path,
-    settings_resolution_id: `srlv_${Math.floor(Math.random() * 9000) + 1000}`,
-  };
+  const { resolve_access_control_policy_v1 } = await import('./data-source/settings');
+  return resolve_access_control_policy_v1(args);
 }
 
 // ----------- Per-capability evaluator (LadderViz drilldown) -----------
@@ -7575,84 +6938,8 @@ export interface UserCapabilityEvalArgs {
 export async function user_capability_eval_v1(
   args: UserCapabilityEvalArgs,
 ): Promise<UserCapabilityEvalResult> {
-  const rpcName = args.user_id ? 'user_capability_eval_for_user_v1' : 'user_capability_eval_v2';
-  const live = await liveRpc<{ ok?: boolean; eval?: UserCapabilityEvalResult } | UserCapabilityEvalResult>(rpcName, {
-    p_args: {
-      capability_key: args.capability_key,
-      scope_type: args.scope_type ?? null,
-      scope_id: args.scope_id ?? null,
-      target_user_id: args.user_id ?? null,
-      user_id: args.user_id ?? null,
-    },
-  });
-  if (live) {
-    // W44 cutover: use canonical (p_args jsonb) RETURNS jsonb sibling
-    // `user_capability_eval_v2` (migration
-    // 202605020200_w44_rpc_v2_normalizations.sql). Envelope:
-    // { ok, eval: <UserCapabilityEvalResult> }. The exported adapter
-    // signature is unchanged.
-    const envelope = (live.data ?? {}) as { ok?: boolean; eval?: UserCapabilityEvalResult };
-    return (envelope.eval ?? (live.data as UserCapabilityEvalResult));
-  }
-
-  // Demo synthesis — reuses the in-memory access-control resolver to derive a
-  // canonical-shaped envelope. Mirrors the SQL evaluator path:
-  //   resolve_access_control_policy_v1 -> access_eval_capability_v1 ->
-  //   user_capability_eval_v1.
-  await sleep(20);
-
-  const resolution = await resolve_access_control_policy_v1({
-    scope_type: args.scope_type,
-    scope_id: args.scope_id ?? null,
-  });
-
-  // Determine the role keys for the evaluated user. In demo mode we evaluate
-  // against the current logged-in user (data-source state) — the production
-  // RPC always evaluates for `auth.uid()`. When `user_id` is supplied, we
-  // log it but still use the current user's role/cap set since the demo
-  // `users` table is single-user.
-  const userRole = state.user.role;
-  const userCaps = new Set<string>(state.capabilities);
-
-  // `granted_capabilities` mirrors the backend resolver: the union of all
-  // capability keys produced by the user's role assignments inside the
-  // resolved policy. In demo mode, the in-memory `state.capabilities` is the
-  // SSOT for this user × scope.
-  const grantedCapabilities = Array.from(userCaps);
-
-  // Wildcard role (`WILDCARD_CAPABILITY` = '*') — backend's `super_admin`
-  // analog — short-circuits to allowed. Otherwise check explicit catalog
-  // membership.
-  const wildcard = hasWildcardCapability(userCaps);
-  const allowed = wildcard || userCaps.has(args.capability_key);
-
-  // Reason taxonomy mirrors `access_eval_capability_v1`:
-  //   - 'allowed_by_role'        -> capability granted via role assignment
-  //   - 'allowed_by_wildcard'    -> role has '*' (super_admin)
-  //   - 'denied_no_role_grant'   -> resolved policy has no grant for this cap
-  //   - 'unauthenticated'        -> no auth.uid() (not reachable in demo)
-  const reason = wildcard
-    ? 'allowed_by_wildcard'
-    : allowed
-      ? 'allowed_by_role'
-      : 'denied_no_role_grant';
-
-  return {
-    allowed,
-    reason,
-    capability_key: args.capability_key,
-    scope_type: resolution.scope_type,
-    scope_id: resolution.scope_id,
-    role_keys: [userRole],
-    granted_capabilities: grantedCapabilities,
-    policy_source: {
-      settings_id: resolution.settings_id,
-      settings_version_id: resolution.settings_version_id,
-      policy_scope_type: resolution.scope_type,
-      policy_scope_id: resolution.scope_id,
-      scope_path: resolution.scope_path,
-    },
-  };
+  const { user_capability_eval_v1 } = await import('./data-source/settings');
+  return user_capability_eval_v1(args);
 }
 
 export async function proposeSettingsChange(
@@ -7668,70 +6955,8 @@ export async function proposeSettingsChange(
   dry_run: boolean;
   justification: string | null;
 }> {
-  const normalizedScope = normalizeSettingsScope(scope);
-  const liveTarget = liveRpcTarget();
-  if (liveTarget) {
-    if (opts.dryRun) {
-      const current = await resolveSettings(category, {
-        [normalizedScope.scope_type]: normalizedScope.scope_id ? { id: normalizedScope.scope_id } : undefined,
-      });
-      return {
-        diff: { from: 'current', to: value },
-        blast_radius:
-          normalizedScope.scope_type === 'global'
-            ? 'global · all tenants'
-            : `${normalizedScope.scope_type} · ${normalizedScope.scope_id ?? 'unscoped'}`,
-        approval_required: true,
-        settings_resolution_id: current.settings_resolution_id,
-        dry_run: true,
-        justification: opts.justification ?? null,
-      };
-    }
-    const { data, error } = await liveTarget.rpc('request_settings_change_v1', {
-      p_category: category,
-      p_scope_type: normalizedScope.scope_type,
-      p_scope_id: normalizedScope.scope_id,
-      p_value: value,
-      p_change_reason: opts.justification ?? 'requested via Console V2',
-      p_effective_from: null,
-    });
-    if (error) throw new Error(error.message);
-    const rec = firstRpcRow<Record<string, unknown>>(data) ?? ((data ?? {}) as Record<string, unknown>);
-    return {
-      diff: { from: 'current', to: value },
-      blast_radius:
-        normalizedScope.scope_type === 'global'
-          ? 'global · all tenants'
-          : `${normalizedScope.scope_type} · ${normalizedScope.scope_id ?? 'unscoped'}`,
-      approval_required: Boolean(rec.approval_required ?? true),
-      settings_resolution_id: String(
-        rec.settings_resolution_id ??
-          rec.settings_version_id ??
-          rec.settings_change_request_id ??
-          rec.id ??
-          '',
-      ),
-      dry_run: false,
-      justification: opts.justification ?? null,
-    };
-  }
-
-  await sleep(80);
-  const seedScope = normalizeSettingsScope(scope);
-  const reg = (seed.settings_category_registry as Array<{
-    category: string;
-    scopes?: string[];
-    approval_required?: boolean;
-  }>).find((c) => c.category === category);
-  return {
-    diff: { from: 'previous', to: value },
-    blast_radius:
-      reg?.scopes?.indexOf(seedScope.scope_type) === 0 ? 'global · all tenants' : `${seedScope.scope_type} · ${seedScope.scope_id}`,
-    approval_required: !!reg?.approval_required,
-    settings_resolution_id: `srlv_${Math.floor(Math.random() * 9000) + 1000}`,
-    dry_run: !!opts.dryRun,
-    justification: opts.justification ?? null,
-  };
+  const { proposeSettingsChange } = await import('./data-source/settings');
+  return proposeSettingsChange(category, scope, value, opts);
 }
 
 export interface ApplySettingsValueResult {
@@ -7753,87 +6978,12 @@ export async function applySettingsValue(
   value: unknown,
   opts: { justification?: string } = {},
 ): Promise<ApplySettingsValueResult> {
-  const normalizedScope = normalizeSettingsScope(scope);
-  const liveTarget = liveRpcTarget();
-  if (liveTarget) {
-    const { data, error } = await liveTarget.rpc('ui_apply_settings_value_v1', {
-      p_category: category,
-      p_scope_type: normalizedScope.scope_type,
-      p_scope_id: normalizedScope.scope_id,
-      p_value: value,
-      p_change_reason: opts.justification ?? 'applied via Console V2',
-    });
-    if (error) throw new Error(error.message);
-    const rec = firstRpcRow<Record<string, unknown>>(data) ?? ((data ?? {}) as Record<string, unknown>);
-    return {
-      ok: Boolean(rec.ok ?? true),
-      applied: Boolean(rec.applied ?? true),
-      category: String(rec.category ?? category),
-      scope_type: String(rec.scope_type ?? normalizedScope.scope_type),
-      scope_id: (rec.scope_id as string | null | undefined) ?? normalizedScope.scope_id,
-      settings_id: rec.settings_id ? String(rec.settings_id) : undefined,
-      settings_version_id: String(rec.settings_version_id ?? rec.settings_resolution_id ?? ''),
-      settings_version_number:
-        typeof rec.settings_version_number === 'number' ? rec.settings_version_number : undefined,
-      settings_resolution_id: String(rec.settings_resolution_id ?? rec.settings_version_id ?? ''),
-      domain_event_id: rec.domain_event_id ? String(rec.domain_event_id) : undefined,
-    };
-  }
-
-  await sleep(80);
-  const settingsVersions = seed.settings_versions as Array<{
-    category: string;
-    scope_type: string;
-    scope_id: string;
-    status: string;
-    version: number;
-    value: unknown;
-  }>;
-  for (const row of settingsVersions) {
-    if (
-      row.category === category &&
-      row.scope_type === normalizedScope.scope_type &&
-      row.scope_id === (normalizedScope.scope_id ?? 'global') &&
-      row.status === 'active'
-    ) {
-      row.status = 'superseded';
-    }
-  }
-  const version =
-    Math.max(
-      0,
-      ...settingsVersions
-        .filter(
-          (row) =>
-            row.category === category &&
-            row.scope_type === normalizedScope.scope_type &&
-            row.scope_id === (normalizedScope.scope_id ?? 'global'),
-        )
-        .map((row) => Number(row.version) || 0),
-    ) + 1;
-  const settingsVersionId = `sv_apply_${Date.now()}`;
-  settingsVersions.push({
-    category,
-    scope_type: normalizedScope.scope_type,
-    scope_id: normalizedScope.scope_id ?? 'global',
-    status: 'active',
-    version,
-    value,
-  });
-  return {
-    ok: true,
-    applied: true,
-    category,
-    scope_type: normalizedScope.scope_type,
-    scope_id: normalizedScope.scope_id,
-    settings_version_id: settingsVersionId,
-    settings_version_number: version,
-    settings_resolution_id: settingsVersionId,
-  };
+  const { applySettingsValue } = await import('./data-source/settings');
+  return applySettingsValue(category, scope, value, opts);
 }
 
 // ----------- Decision / Resolution / UI Event / Audit -----------
-type LogFilter = {
+export type LogFilter = {
   category?: string;
   id?: string;
   resource_id?: string;
@@ -7842,104 +6992,20 @@ type LogFilter = {
 };
 
 export async function listDecisionLog(filters: LogFilter = {}): Promise<Record<string, unknown>[]> {
-  const pageSize = filters.limit ?? 50;
-  const liveFilters: Record<string, unknown> = {};
-  if (filters.category) liveFilters.decision_category = filters.category;
-  if (filters.id) liveFilters.id = filters.id;
-  if (filters.resource_id) liveFilters.resource_id = filters.resource_id;
-  if (filters.resource_type) liveFilters.resource_type = filters.resource_type;
-  const live = await liveRpc<Record<string, unknown>>('ui_list_resource_v1', {
-    p_resource: 'decision_log',
-    p_filters: liveFilters,
-    p_limit: pageSize,
-    p_offset: 0,
-    p_sort: { key: 'timestamp', direction: 'desc' },
-  });
-  if (live) {
-    return normalizeLiveListResult<Record<string, unknown>>(live.data, 0, pageSize).rows;
-  }
-
-  await sleep(30);
-  let rows = [...((seed.decision_log as Record<string, unknown>[]) ?? [])];
-  if (filters.category) rows = rows.filter((r) => (r as { decision_category?: string }).decision_category === filters.category);
-  if (filters.id) rows = rows.filter((r) => String((r as { id?: unknown }).id ?? '') === filters.id);
-  if (filters.resource_id) rows = rows.filter((r) => String((r as { resource_id?: unknown }).resource_id ?? '') === filters.resource_id);
-  if (filters.resource_type) rows = rows.filter((r) => String((r as { resource_type?: unknown }).resource_type ?? '') === filters.resource_type);
-  if (filters.limit) rows = rows.slice(0, filters.limit);
-  return rows;
+  const { listDecisionLog } = await import('./data-source/insights');
+  return listDecisionLog(filters);
 }
 export async function listResolutionLog(filters: LogFilter = {}): Promise<Record<string, unknown>[]> {
-  const pageSize = filters.limit ?? 50;
-  const live = await liveRpc<Record<string, unknown>>('ui_list_resource_v1', {
-    p_resource: 'settings_resolution_log',
-    p_filters: filters.category ? { category: filters.category } : {},
-    p_limit: pageSize,
-    p_offset: 0,
-    p_sort: { key: 'resolved_at', direction: 'desc' },
-  });
-  if (live) {
-    return normalizeLiveListResult<Record<string, unknown>>(live.data, 0, pageSize).rows;
-  }
-
-  await sleep(30);
-  let rows = [...((seed.settings_resolution_log as Record<string, unknown>[]) ?? [])];
-  if (filters.category) rows = rows.filter((r) => (r as { category?: string }).category === filters.category);
-  if (filters.limit) rows = rows.slice(0, filters.limit);
-  return rows;
+  const { listResolutionLog } = await import('./data-source/insights');
+  return listResolutionLog(filters);
 }
 export async function listAuditLog(filters: { limit?: number } = {}): Promise<Record<string, unknown>[]> {
-  const pageSize = filters.limit ?? 50;
-  const live = await liveRpc<Record<string, unknown>>('ui_list_resource_v1', {
-    p_resource: 'audit_table_changes',
-    p_filters: {},
-    p_limit: pageSize,
-    p_offset: 0,
-    p_sort: { key: 'created_at', direction: 'desc' },
-  });
-  if (live) {
-    return normalizeLiveListResult<Record<string, unknown>>(live.data, 0, pageSize).rows.map((row) => {
-      const pk = row.pk;
-      return {
-        ...row,
-        occurred_at: row.occurred_at ?? row.created_at,
-        table: row.table ?? row.table_name,
-        actor: row.actor ?? row.changed_by,
-        pk: pk && typeof pk === 'object' && 'id' in pk ? (pk as { id?: unknown }).id : pk,
-      };
-    });
-  }
-
-  if (!hasCapability(CAP.AUDIT_LOG_READ)) {
-    const err = new Error(`Capability denied: ${CAP.AUDIT_LOG_READ}`) as Error & {
-      code?: string;
-      capability?: string;
-    };
-    err.code = 'capability_denied';
-    err.capability = CAP.AUDIT_LOG_READ;
-    throw err;
-  }
-  await sleep(30);
-  let rows = [...((seed.audit_log as Record<string, unknown>[]) ?? [])];
-  if (filters.limit) rows = rows.slice(0, filters.limit);
-  return rows;
+  const { listAuditLog } = await import('./data-source/insights');
+  return listAuditLog(filters);
 }
 export async function listUiEventLog(filters: { limit?: number } = {}): Promise<Record<string, unknown>[]> {
-  const pageSize = filters.limit ?? 50;
-  const live = await liveRpc<Record<string, unknown>>('ui_list_resource_v1', {
-    p_resource: 'ui_event_log',
-    p_filters: {},
-    p_limit: pageSize,
-    p_offset: 0,
-    p_sort: { key: 'created_at', direction: 'desc' },
-  });
-  if (live) {
-    return normalizeLiveListResult<Record<string, unknown>>(live.data, 0, pageSize).rows;
-  }
-
-  await sleep(30);
-  let rows = [...((seed.ui_event_log as Record<string, unknown>[]) ?? [])];
-  if (filters.limit) rows = rows.slice(0, filters.limit);
-  return rows;
+  const { listUiEventLog } = await import('./data-source/insights');
+  return listUiEventLog(filters);
 }
 
 export function streamEvidence(callback: EvidenceCallback): () => void {
@@ -8083,7 +7149,7 @@ function normalizeDriverHoursOfServiceRecord(value: unknown): DriverHoursOfServi
   };
 }
 
-async function loadLiveDriverHoursOfService(
+export async function loadLiveDriverHoursOfService(
   driverId: string,
 ): Promise<DriverHoursOfServiceRecord | null> {
   if (!driverId.trim()) return null;
@@ -8120,19 +7186,8 @@ export function resolve_driver_hours_of_service_v1(
 export async function read_driver_hours_of_service_v1(
   driver_id: string,
 ): Promise<DriverHoursOfServiceRecord | null> {
-  const map = ((seed as Record<string, unknown>).driver_hours_of_service ?? {}) as Record<
-    string,
-    DriverHoursOfServiceRecord | undefined
-  >;
-  if (getSupabaseClient()) {
-    const live = await loadLiveDriverHoursOfService(driver_id);
-    liveMetadataCache.driverHoursOfService[driver_id] = live;
-    return SEED_MODE_ENABLED ? live ?? map[driver_id] ?? null : live;
-  }
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC resolve_driver_hours_of_service_v1');
-  const value = map[driver_id] ?? null;
-  liveMetadataCache.driverHoursOfService[driver_id] = value;
-  return value;
+  const { read_driver_hours_of_service_v1 } = await import('./data-source/fleet');
+  return read_driver_hours_of_service_v1(driver_id);
 }
 
 // ----------- Zone performance metrics (canonical accessor) ------------
@@ -8206,199 +7261,26 @@ export function resolve_workflow_template_id_v1(template_key: string): string | 
 }
 
 // ----------- Tasks -----------
-type TaskFilter = { task_type?: string; assigned_to?: string; at_risk?: boolean };
-
-function normalizeTaskListRow(row: Record<string, unknown>): Record<string, unknown> {
-  const metadata = objectRecord(row.metadata) ?? {};
-  const id = asNonEmptyString(row.id);
-  const taskType =
-    asNonEmptyString(row.task_type) ??
-    asNonEmptyString(row.task_type_key) ??
-    asNonEmptyString(metadata.task_type_key) ??
-    asNonEmptyString(metadata.task_type);
-  const queue =
-    asNonEmptyString(row.queue) ??
-    asNonEmptyString(row.queue_key) ??
-    asNonEmptyString(metadata.queue_key) ??
-    asNonEmptyString(metadata.queue);
-  const subject =
-    asNonEmptyString(row.subject) ??
-    asNonEmptyString(metadata.subject) ??
-    asNonEmptyString(metadata.title);
-  const description =
-    asNonEmptyString(row.description) ??
-    asNonEmptyString(metadata.description);
-  const resourceType = asNonEmptyString(row.resource_type) ?? asNonEmptyString(metadata.resource_type);
-  const resourceId = asNonEmptyString(row.resource_id) ?? asNonEmptyString(metadata.resource_id);
-  const shipmentId =
-    asNonEmptyString(row.shipment_id) ??
-    asNonEmptyString(metadata.shipment_id) ??
-    (resourceType === 'shipment' ? resourceId : null);
-  const allowedActionsRaw = row.allowed_actions ?? metadata.allowed_actions ?? metadata.allowed_ndr_actions;
-  const allowedActions = Array.isArray(allowedActionsRaw)
-    ? allowedActionsRaw.map((action) => asNonEmptyString(action)).filter((action): action is string => !!action)
-    : null;
-
-  const normalized: Record<string, unknown> = { ...row };
-  const taskId = asNonEmptyString(row.task_id) ?? asNonEmptyString(metadata.task_id) ?? (id ? `TSK-${id.slice(0, 8).toUpperCase()}` : null);
-  if (taskId) normalized.task_id = taskId;
-  if (taskType) {
-    normalized.task_type = taskType;
-    normalized.task_type_key = asNonEmptyString(row.task_type_key) ?? taskType;
-  }
-  if (queue) {
-    normalized.queue = queue;
-    normalized.queue_key = asNonEmptyString(row.queue_key) ?? queue;
-  }
-  if (subject) normalized.subject = subject;
-  if (description) normalized.description = description;
-  if (shipmentId) normalized.shipment_id = shipmentId;
-  if (allowedActions) normalized.allowed_actions = allowedActions;
-  if (row.evidence_required == null && typeof metadata.evidence_required === 'boolean') {
-    normalized.evidence_required = metadata.evidence_required;
-  }
-  return normalized;
-}
+export type TaskFilter = { task_type?: string; assigned_to?: string; at_risk?: boolean };
 
 export async function listTasks(filters: TaskFilter = {}): Promise<Record<string, unknown>[]> {
-  const target = liveRpcTarget();
-  if (target) {
-    const p_filters = compactRecord({
-      task_type_key: filters.task_type,
-      assigned_to: filters.assigned_to,
-    });
-    const result = await ui_list_resource_complete<Record<string, unknown>>('tasks', {
-      filter: p_filters,
-      sort: { key: 'created_at', dir: 'desc' },
-    });
-    let rows = result.rows.map(normalizeTaskListRow);
-    if (filters.at_risk) {
-      rows = rows.filter((r) => new Date((r as { sla_due_at?: string }).sla_due_at ?? 0).getTime() < Date.now());
-    }
-    return rows;
-  }
-
-  await sleep(30);
-  let rows = [...((seed.tasks as Record<string, unknown>[]) ?? [])];
-  if (filters.task_type) rows = rows.filter((r) => (r as { task_type?: string }).task_type === filters.task_type);
-  if (filters.assigned_to) rows = rows.filter((r) => (r as { assigned_to?: string }).assigned_to === filters.assigned_to);
-  if (filters.at_risk)
-    rows = rows.filter((r) => new Date((r as { sla_due_at?: string }).sla_due_at ?? 0).getTime() < Date.now());
-  return rows.map(normalizeTaskListRow);
+  const { listTasks } = await import('./data-source/tasks');
+  return listTasks(filters);
 }
 export async function transition_task_v1(
   taskId: string,
   transition: { next_status?: string; payload?: Record<string, unknown>; [k: string]: unknown },
 ): Promise<{ ok: true; task: Record<string, unknown> | undefined; task_event_id?: string | null }> {
-  const target = liveRpcTarget();
-  if (target) {
-    const toStatus = String(transition.next_status ?? transition.to_status ?? 'completed');
-    const payload = (transition.payload && typeof transition.payload === 'object')
-      ? transition.payload
-      : {};
-    const { data, error } = await target.rpc('transition_task_v1', {
-      p_task_id: taskId,
-      p_to_status: toStatus,
-      p_status_reason: transition.status_reason ?? null,
-      p_payload: payload,
-      p_idempotency_key: transition.idempotency_key ?? null,
-    });
-    if (error) throw new Error(error.message);
-    requireLiveMutationResult(data, 'transition_task_v1', ['task_id', 'id', 'task_event_id']);
-    const taskEventId = asNonEmptyString(firstRpcRow<Record<string, unknown>>(data)?.task_event_id);
-    if (taskEventId && isRouteStopCloseoutTransition(toStatus, payload)) {
-      await finalizeRouteStopCloseoutEvent(taskEventId);
-    }
-    await requireLiveTaskEventReadback('transition_task_v1', taskId, taskEventId);
-    const task = await ui_get_resource_v1<Record<string, unknown>>('tasks', taskId);
-    if (!task) throw new Error('transition_task_v1 backend readback missing tasks');
-    const taskStatus = String(task.status ?? '').trim().toLowerCase();
-    const expectedStatus = toStatus.trim().toLowerCase();
-    const statusMatches = taskStatus === expectedStatus;
-    if (!statusMatches) {
-      throw new Error(`transition_task_v1 backend readback status mismatch: expected ${expectedStatus}, got ${taskStatus || 'missing'}`);
-    }
-    return { ok: true, task: normalizeTaskListRow(task), task_event_id: taskEventId };
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('transition_task_v1');
-  await sleep(80);
-  const tasks = seed.tasks as Array<Record<string, unknown> & { id: string; status: string }>;
-  const task = tasks.find((t) => t.id === taskId);
-  let taskEventId: string | null = null;
-  if (task) {
-    const previousStatus = task.status;
-    const toStatus = transition.next_status || String(transition.to_status ?? 'completed');
-    task.status = toStatus;
-    // Persist arbitrary payload fields (e.g. snooze_until ISO) so callers
-    // can verify the seam received the row-driven payload, mirroring how
-    // `transition_task_v1` would land columns/JSON on the real task row.
-    const payload = transition.payload;
-    if (payload && typeof payload === 'object') {
-      for (const [k, v] of Object.entries(payload)) {
-        (task as Record<string, unknown>)[k] = v;
-      }
-    }
-    taskEventId = `tev_transition_${taskId}_${Date.now()}`;
-    const taskEvents = seed.task_events as Array<Record<string, unknown>> | undefined;
-    taskEvents?.push?.({
-      id: taskEventId,
-      task_id: taskId,
-      occurred_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      event_type: 'status_changed',
-      event: 'status_changed',
-      actor: state.user.id,
-      from_status: previousStatus,
-      to_status: toStatus,
-      payload: payload ?? {},
-      idempotency_key: transition.idempotency_key ?? null,
-    });
-  }
-  return { ok: true, task: task as Record<string, unknown> | undefined, task_event_id: taskEventId };
+  const { transition_task_v1 } = await import('./data-source/tasks');
+  return transition_task_v1(taskId, transition);
 }
 
 export async function resolve_manual_review_task_v1(
   taskId: string,
   resolution: { resolution_outcome?: string; resolution_notes?: string | null },
 ): Promise<Record<string, unknown>> {
-  const target = liveRpcTarget();
-  if (target) {
-    const outcome = String(resolution.resolution_outcome ?? 'approved').trim().toLowerCase();
-    const { data, error } = await target.rpc('resolve_manual_review_task_v1', {
-      p_task_id: taskId,
-      p_resolution_outcome: outcome,
-      p_resolution_notes: resolution.resolution_notes ?? null,
-    });
-    if (error) throw new Error(error.message);
-    requireLiveMutationResult(data, 'resolve_manual_review_task_v1', ['id', 'status', 'resolution_outcome']);
-    const row = await requireLiveResourceReadback(
-      'manual_review_tasks',
-      taskId,
-      'resolve_manual_review_task_v1',
-    );
-    const status = String(row.status ?? '').trim().toLowerCase();
-    const readbackOutcome = String(row.resolution_outcome ?? '').trim().toLowerCase();
-    if (status !== 'resolved') {
-      throw new Error(`resolve_manual_review_task_v1 backend readback status mismatch: expected resolved, got ${status || 'missing'}`);
-    }
-    if (readbackOutcome !== outcome) {
-      throw new Error(`resolve_manual_review_task_v1 backend readback outcome mismatch: expected ${outcome}, got ${readbackOutcome || 'missing'}`);
-    }
-    return row;
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('resolve_manual_review_task_v1');
-  await sleep(60);
-  const seedRows = (seed as { manual_review_tasks?: Array<Record<string, unknown> & { id: string }> }).manual_review_tasks ?? [];
-  const task = seedRows.find((t) => t.id === taskId);
-  if (!task) throw new Error(`manual_review_task not found: ${taskId}`);
-  task.status = 'resolved';
-  task.resolution_outcome = resolution.resolution_outcome ?? 'approved';
-  task.resolution_notes = resolution.resolution_notes ?? null;
-  task.resolved_at = new Date().toISOString();
-  task.updated_at = task.resolved_at;
-  return task;
+  const { resolve_manual_review_task_v1 } = await import('./data-source/tasks');
+  return resolve_manual_review_task_v1(taskId, resolution);
 }
 
 export interface AssignTaskArgs extends Record<string, unknown> {
@@ -8421,107 +7303,16 @@ export interface OpenOpsSessionResult extends Record<string, unknown> {
   created: boolean;
 }
 
-async function requireLiveTaskEventReadback(
-  rpcName: string,
-  taskId: string,
-  taskEventId?: string | null,
-): Promise<void> {
-  const normalizedEventId = asNonEmptyString(taskEventId);
-  if (normalizedEventId) {
-    await requireLiveResourceReadback('task_events', normalizedEventId, rpcName);
-  } else {
-    await requireLiveResourceListReadback('task_events', { task_id: taskId }, rpcName);
-  }
-}
-
 export async function assign_task_v1(
   args: AssignTaskArgs,
 ): Promise<{ task_id: string; task_event_id: string | null; task?: Record<string, unknown> }> {
-  const taskId = asNonEmptyString(args.task_id);
-  const assignedTo = asNonEmptyString(args.assigned_to);
-  if (!taskId) throw new Error('assign_task_v1 requires task_id');
-  if (!assignedTo) throw new Error('assign_task_v1 requires assigned_to');
-
-  const live = await liveRpc<Record<string, unknown> | Record<string, unknown>[]>('assign_task_v1', {
-    p_task_id: taskId,
-    p_assigned_to: assignedTo,
-    p_idempotency_key: args.idempotency_key ?? null,
-    p_notes: args.notes ?? null,
-  });
-  if (live) {
-    const row = requireLiveMutationResult(live.data, 'assign_task_v1', ['task_id', 'task_event_id']);
-    const returnedTaskId = requireLiveStringField(
-      row,
-      ['task_id', 'id'],
-      'assign_task_v1 did not return task_id',
-    );
-    const taskEventId = asNonEmptyString(row.task_event_id);
-    const task = await requireLiveResourceReadback('tasks', returnedTaskId, 'assign_task_v1');
-    await requireLiveTaskEventReadback('assign_task_v1', returnedTaskId, taskEventId);
-    return {
-      task_id: returnedTaskId,
-      task_event_id: taskEventId,
-      task: normalizeTaskListRow(task),
-    };
-  }
-
-  await sleep(80);
-  const tasks = seed.tasks as Array<Record<string, unknown> & { id: string; assigned_to?: string | null; version?: number }>;
-  const task = tasks.find((t) => t.id === taskId);
-  if (!task) throw new Error(`assign_task_v1 task not found: ${taskId}`);
-  task.assigned_to = assignedTo;
-  task.assigned_at = new Date().toISOString();
-  task.version = typeof task.version === 'number' ? task.version + 1 : 1;
-  const taskEventId = `tev_assign_${taskId}_${Date.now()}`;
-  const taskEvents = seed.task_events as Array<Record<string, unknown>> | undefined;
-  taskEvents?.push?.({
-    id: taskEventId,
-    task_id: taskId,
-    occurred_at: task.assigned_at,
-    event: 'assigned',
-    actor: state.user.id,
-    assigned_to: assignedTo,
-    notes: args.notes ?? null,
-    idempotency_key: args.idempotency_key ?? null,
-  });
-  return { task_id: taskId, task_event_id: taskEventId, task: normalizeTaskListRow(task) };
+  const { assign_task_v1 } = await import('./data-source/tasks');
+  return assign_task_v1(args);
 }
 
 export async function open_ops_session_v1(args: OpenOpsSessionArgs): Promise<OpenOpsSessionResult> {
-  const sessionType = asNonEmptyString(args.session_type);
-  const idempotencyKey = asNonEmptyString(args.idempotency_key);
-  if (!sessionType) throw new Error('open_ops_session_v1 requires session_type');
-  if (!idempotencyKey) throw new Error('open_ops_session_v1 requires idempotency_key');
-
-  const live = await liveRpc<Record<string, unknown> | Record<string, unknown>[]>('open_ops_session_v1', {
-    p_input: compactRecord({
-      session_type: sessionType,
-      branch_id: args.branch_id ?? null,
-      session_code: args.session_code ?? null,
-      idempotency_key: idempotencyKey,
-      metadata: args.metadata ?? {},
-    }),
-  });
-  if (live) {
-    const row = requireLiveMutationResult(live.data, 'open_ops_session_v1', ['ops_session_id']);
-    const opsSessionId = requireLiveStringField(
-      row,
-      ['ops_session_id', 'id'],
-      'open_ops_session_v1 did not return ops_session_id',
-    );
-    await requireLiveResourceReadback('ops_sessions', opsSessionId, 'open_ops_session_v1');
-    return {
-      ...row,
-      ops_session_id: opsSessionId,
-      created: row.created === true,
-    };
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('open_ops_session_v1');
-  return {
-    ops_session_id: `ops_${sessionType}_${Date.now().toString(36)}`,
-    created: true,
-  };
+  const { open_ops_session_v1 } = await import('./data-source/tasks');
+  return open_ops_session_v1(args);
 }
 
 // ----------- Shipments -----------
@@ -8563,317 +7354,11 @@ export interface UiCreateShipmentResult extends Record<string, unknown> {
   dry_run?: boolean;
 }
 
-function normalizeUiCreateShipmentResult(
-  rec: Record<string, unknown>,
-  dryRun: boolean,
-): UiCreateShipmentResult {
-  return {
-    ...rec,
-    status: String(rec.status ?? (dryRun ? 'shipment_create_preview' : 'workflow_started')),
-    workflow_template_id: rec.workflow_template_id == null ? null : String(rec.workflow_template_id),
-    workflow_run_id: rec.workflow_run_id == null ? null : String(rec.workflow_run_id),
-    workflow_status: rec.workflow_status == null ? null : String(rec.workflow_status),
-    correlation_id: rec.correlation_id == null ? null : String(rec.correlation_id),
-    shipment_id: rec.shipment_id == null ? null : String(rec.shipment_id),
-    tracking_number: rec.tracking_number == null ? null : String(rec.tracking_number),
-    operation: rec.operation == null ? null : String(rec.operation),
-    recipient_id: rec.recipient_id == null ? null : String(rec.recipient_id),
-    label_job_id: rec.label_job_id == null ? null : String(rec.label_job_id),
-    address_workflow_run_id: rec.address_workflow_run_id == null ? null : String(rec.address_workflow_run_id),
-    dry_run: Boolean(rec.dry_run ?? dryRun),
-  };
-}
-
-function promoteManualShipmentIntakeEvidence(
-  rec: Record<string, unknown>,
-  dryRun: boolean,
-): Record<string, unknown> {
-  const nested = objectRecord(dryRun ? rec.shipment_preview : rec.shipment_result);
-  const addressResult = objectRecord(rec.address_result);
-  const promoted: Record<string, unknown> = { ...rec };
-  const promoteString = (targetKey: string, values: unknown[]): void => {
-    if (asNonEmptyString(promoted[targetKey])) return;
-    const value = values.map(asNonEmptyString).find(Boolean);
-    if (value) promoted[targetKey] = value;
-  };
-
-  promoteString('workflow_template_id', [
-    nested.workflow_template_id,
-    nested.workflow_template,
-    nested.template_id,
-  ]);
-  promoteString('workflow_run_id', [nested.workflow_run_id, nested.run_id]);
-  promoteString('workflow_status', [nested.workflow_status]);
-  promoteString('correlation_id', [nested.correlation_id]);
-  promoteString('shipment_id', [nested.shipment_id]);
-  promoteString('tracking_number', [nested.tracking_number]);
-  promoteString('operation', [nested.operation]);
-  promoteString('recipient_id', [nested.recipient_id]);
-  promoteString('label_job_id', [nested.label_job_id]);
-  promoteString('address_workflow_run_id', [addressResult.workflow_run_id, nested.address_workflow_run_id]);
-
-  return promoted;
-}
-
-function isManualShipmentIntakeReuseResult(rec: Record<string, unknown>): boolean {
-  const status = String(rec.status ?? '').toLowerCase();
-  const operation = String(rec.operation ?? '').toLowerCase();
-  return (
-    rec.duplicate_reused === true ||
-    status === 'manual_shipment_intake_reused' ||
-    operation === 'reused' ||
-    operation.startsWith('reused_')
-  );
-}
-
-function seedCreateManualShipmentResult(
-  args: UiCreateShipmentArgs,
-  dryRun: boolean,
-): UiCreateShipmentResult {
-  const nowMs = Date.now();
-  const nowIso = new Date(nowMs).toISOString();
-  const tracking = args.tracking_number ?? `SHP-${Math.floor(1000000 + Math.random() * 8999999)}`;
-  const shipmentId = `shp_${nowMs}`;
-  const recipientId = args.recipient_id ?? (args.new_recipient ? `rcp_${nowMs}` : null);
-  const addressId = args.destination_address ? `addr_${nowMs}` : null;
-  const labelId = `lbl_${shipmentId}_1`;
-  const labelJobId = `lj_${nowMs}`;
-  const labelSpec = ((seed.label_template_specs ?? []) as Array<Record<string, unknown>>)
-    .find((spec) => String(spec.status ?? 'active') === 'active')
-    ?? ((seed.label_template_specs ?? []) as Array<Record<string, unknown>>)[0]
-    ?? {};
-  const rendererConfig = (labelSpec.renderer_config ?? {}) as Record<string, unknown>;
-  const serviceLookups = ((seed.lookups?.service_type ?? []) as Array<Record<string, unknown>>)
-    .map((row) => String(row.value ?? '').trim())
-    .filter(Boolean);
-  const serviceOffering = ((seed.service_offerings ?? []) as Array<Record<string, unknown>>)
-    .find((offering) => offering.id === args.service_offering_id);
-  const serviceLevel = ((seed.service_levels ?? []) as Array<Record<string, unknown>>)
-    .find((level) => level.id === serviceOffering?.service_level_id);
-  const serviceLevelKey = String(serviceLevel?.key ?? '').trim();
-  const requestedServiceType = String(args.service_type ?? '').trim();
-  const serviceType =
-    (serviceLookups.includes(serviceLevelKey) && serviceLevelKey)
-    || (serviceLookups.includes(requestedServiceType) && requestedServiceType)
-    || serviceLookups[0]
-    || requestedServiceType
-    || null;
-
-  if (!dryRun) {
-    const newRecipient = (args.new_recipient ?? null) as Record<string, unknown> | null;
-    const destinationAddress = (args.destination_address ?? null) as Record<string, unknown> | null;
-    if (newRecipient && recipientId) {
-      const recipients = (seed.recipients ?? []) as Array<Record<string, unknown>>;
-      if (!recipients.some((recipient) => recipient.id === recipientId)) {
-        recipients.unshift({
-          id: recipientId,
-          organization_id: args.organization_id ?? null,
-          client_id: args.client_id ?? null,
-          status: 'active',
-          created_at: nowIso,
-          updated_at: nowIso,
-          ...newRecipient,
-        });
-      }
-    }
-    if (destinationAddress && addressId) {
-      const addresses = (seed.addresses ?? []) as Array<Record<string, unknown>>;
-      addresses.unshift({
-        id: addressId,
-        organization_id: args.organization_id ?? null,
-        client_id: args.client_id ?? null,
-        recipient_id: recipientId,
-        normalized_line1: destinationAddress.line1 ?? null,
-        street: destinationAddress.line1 ?? null,
-        district: destinationAddress.district ?? null,
-        city: destinationAddress.city ?? null,
-        country: destinationAddress.country ?? null,
-        postal_code: destinationAddress.postal_code ?? null,
-        validation_status: 'pending',
-        created_at: nowIso,
-        updated_at: nowIso,
-        ...destinationAddress,
-      });
-    }
-    const shipments = (seed.shipments ?? []) as Array<Record<string, unknown>>;
-    shipments.unshift({
-      id: shipmentId,
-      tracking_number: tracking,
-      client_reference_number: args.client_reference_number ?? null,
-      carrier_reference_number: args.carrier_reference_number ?? null,
-      client_id: args.client_id ?? null,
-      sender_id: args.sender_id ?? null,
-      organization_id: args.organization_id ?? null,
-      recipient_id: recipientId,
-      destination_address_id: addressId,
-      service_type: serviceType,
-      status: args.status ?? 'pending',
-      cod_amount: args.cod_amount ?? 0,
-      cod_currency: args.cod_currency ?? null,
-      promised_delivery_date: args.promised_delivery_date ?? null,
-      box_count: 1,
-      created_at: nowIso,
-      updated_at: nowIso,
-      destination_city: (args.destination_address as Record<string, unknown> | null | undefined)?.city ?? null,
-      metadata: {
-        ...(args.metadata ?? {}),
-        requested_service_type: args.service_type ?? null,
-        service_offering_id: args.service_offering_id ?? null,
-        service_offering_label: serviceOffering?.display_name ?? serviceOffering?.name ?? null,
-        service_level_id: serviceLevel?.id ?? null,
-        service_level_key: serviceLevelKey || null,
-        manual_intake_source: 'console_v2.shipment_create',
-      },
-    });
-    ((seed.shipment_boxes ?? []) as Array<Record<string, unknown>>).push({
-      id: `sbx_${shipmentId}_1`,
-      shipment_id: shipmentId,
-      box_number: 1,
-      barcode: `${tracking}:1`,
-    });
-    ((seed.labels ?? []) as Array<Record<string, unknown>>).push({
-      id: labelId,
-      shipment_id: shipmentId,
-      barcode: `${tracking}:1`,
-      active_version_id: rendererConfig.active_version_id ?? null,
-      print_count: 0,
-      last_printed_at: null,
-    });
-    ((seed.label_jobs ?? []) as Array<Record<string, unknown>>).push({
-      id: labelJobId,
-      label_id: labelId,
-      target_id: shipmentId,
-      target_box_id: `sbx_${shipmentId}_1`,
-      target_metadata: { box_index: 1 },
-      spec_id: labelSpec.id ?? null,
-      status: 'queued',
-      queued_at: nowIso,
-      completed_at: null,
-      file_url: null,
-    });
-  }
-
-  return {
-    status: dryRun ? 'shipment_create_preview' : 'shipment_created',
-    workflow_template_id: 'tpl_create_shipment',
-    workflow_run_id: dryRun ? null : `wfr_${nowMs}`,
-    workflow_status: dryRun ? 'preview' : 'completed',
-    correlation_id: `cor_${Math.random().toString(36).slice(2, 10)}`,
-    shipment_id: dryRun ? null : shipmentId,
-    tracking_number: tracking,
-    operation: dryRun ? 'preview' : 'inserted',
-    recipient_id: dryRun ? null : recipientId,
-    label_job_id: dryRun ? null : labelJobId,
-    address_workflow_run_id: dryRun || !args.destination_address ? null : `wfr_address_${nowMs}`,
-    dry_run: dryRun,
-  };
-}
-
 export async function ui_create_shipment_v1(
   args: UiCreateShipmentArgs,
 ): Promise<UiCreateShipmentResult> {
-  const dryRun = Boolean(args.dry_run);
-  const hasManualIntakeEnvelope = Boolean(args.new_recipient || args.destination_address);
-  const metadata: Record<string, unknown> = {
-    ...(args.metadata ?? {}),
-  };
-  if (args.service_offering_id) metadata.service_offering_id = args.service_offering_id;
-  if (args.organization_id) metadata.organization_id = args.organization_id;
-  if (args.recipient_id) metadata.recipient_id = args.recipient_id;
-  if (args.cod_amount != null) metadata.cod_amount = args.cod_amount;
-  if (args.cod_currency) metadata.cod_currency = args.cod_currency;
-  if (args.promised_delivery_date) metadata.promised_delivery_date = args.promised_delivery_date;
-  if (args.promised_window_start_at) metadata.promised_window_start_at = args.promised_window_start_at;
-  if (args.promised_window_end_at) metadata.promised_window_end_at = args.promised_window_end_at;
-  if (args.priority_score != null) metadata.priority_score = args.priority_score;
-
-  if (hasManualIntakeEnvelope) {
-    const liveManual = await liveRpc<Record<string, unknown>>('ui_create_manual_shipment_intake_v1', {
-      p_args: {
-        organization_id: args.organization_id ?? null,
-        client_id: args.client_id ?? null,
-        sender_id: args.sender_id ?? null,
-        recipient_id: args.recipient_id ?? null,
-        new_recipient: args.new_recipient ?? null,
-        destination_address: args.destination_address ?? null,
-        service_type: args.service_type ?? null,
-        service_offering_id: args.service_offering_id ?? null,
-        tracking_number: args.tracking_number ?? null,
-        client_reference_number: args.client_reference_number ?? null,
-        carrier_reference_number: args.carrier_reference_number ?? null,
-        status: args.status ?? 'pending',
-        cod_amount: args.cod_amount ?? null,
-        cod_currency: args.cod_currency ?? null,
-        metadata,
-        request_label: true,
-        dry_run: dryRun,
-      },
-    });
-    if (liveManual) {
-      const rec = requireLiveManualShipmentIntakeResult(liveManual.data, dryRun);
-      const reusedManualIntake = isManualShipmentIntakeReuseResult(rec);
-      if (!dryRun) {
-        requireLiveStringField(
-          rec,
-          ['shipment_id'],
-          'ui_create_manual_shipment_intake_v1 did not return shipment_id',
-        );
-        if (!reusedManualIntake) {
-          requireLiveStringField(
-            rec,
-            ['workflow_run_id'],
-            'ui_create_manual_shipment_intake_v1 did not return workflow_run_id',
-          );
-        }
-        requireLiveStringField(
-          rec,
-          ['tracking_number'],
-          'ui_create_manual_shipment_intake_v1 did not return tracking_number',
-        );
-      }
-      const result = normalizeUiCreateShipmentResult(rec, dryRun);
-      if (!dryRun) {
-        await requireLiveShipmentCreateReadback('ui_create_manual_shipment_intake_v1', args, result, rec);
-      }
-      return result;
-    }
-  }
-
-  const live = await liveRpc<Record<string, unknown>>('ui_create_shipment_v1', {
-    p_client_id: args.client_id ?? null,
-    p_sender_id: args.sender_id ?? null,
-    p_service_type: args.service_type ?? null,
-    p_tracking_number: args.tracking_number ?? null,
-    p_client_reference_number: args.client_reference_number ?? null,
-    p_carrier_reference_number: args.carrier_reference_number ?? null,
-    p_status: args.status ?? 'pending',
-    p_metadata: dryRun
-      ? { ...metadata, ui: { dry_run: true } }
-      : metadata,
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(
-      live.data,
-      'ui_create_shipment_v1',
-      dryRun
-        ? ['correlation_id', 'workflow_template_id', 'workflow_run_id', 'tracking_number']
-        : ['shipment_id', 'workflow_run_id', 'tracking_number'],
-    );
-    if (!dryRun) {
-      requireLiveStringField(rec, ['shipment_id'], 'ui_create_shipment_v1 did not return shipment_id');
-      requireLiveStringField(rec, ['workflow_run_id'], 'ui_create_shipment_v1 did not return workflow_run_id');
-      requireLiveStringField(rec, ['tracking_number'], 'ui_create_shipment_v1 did not return tracking_number');
-    }
-    const result = normalizeUiCreateShipmentResult(rec, dryRun);
-    if (!dryRun) {
-      await requireLiveShipmentCreateReadback('ui_create_shipment_v1', args, result, rec);
-    }
-    return result;
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('ui_create_shipment_v1');
-  await sleep(120);
-  return seedCreateManualShipmentResult(args, dryRun);
+  const { ui_create_shipment_v1 } = await import('./data-source/shipments');
+  return ui_create_shipment_v1(args);
 }
 
 export async function shipment_amend_cancel_v1(
@@ -8891,149 +7376,15 @@ export async function shipment_amend_cancel_v1(
   diff: Record<string, unknown> | null;
   settings_resolution_id: string;
 }> {
-  const rawOp = typeof op === 'string' ? op : String((op as Record<string, unknown>).action ?? 'amend');
-  const lookupBackendOperation = lookupCommandContractRow('shipment_amend_op', rawOp)?.metadata?.backend_operation;
-  const operation =
-    typeof lookupBackendOperation === 'string' && lookupBackendOperation.length > 0
-      ? lookupBackendOperation
-      : rawOp === 'amend_field' || rawOp === 'amend'
-        ? 'modify'
-        : rawOp;
-  const effectivePayload = typeof op === 'string' ? payload : op;
-  const mutationSource =
-    typeof effectivePayload.source === 'string' && effectivePayload.source.trim()
-      ? effectivePayload.source
-      : null;
-  const payloadWithoutSource =
-    mutationSource && operation === 'modify'
-      ? Object.fromEntries(Object.entries(effectivePayload).filter(([key]) => key !== 'source'))
-      : effectivePayload;
-  const inputPayload =
-    payloadWithoutSource && (payloadWithoutSource.changes || payloadWithoutSource.address || payloadWithoutSource.destination_address)
-      ? payloadWithoutSource
-      : operation === 'address'
-        ? { address: payloadWithoutSource }
-        : operation === 'modify'
-          ? { changes: payloadWithoutSource }
-          : payloadWithoutSource;
-  const live = await liveRpc<Record<string, unknown>>('shipment_amend_cancel_v1', {
-    p_input: {
-      shipment_id: shipmentId,
-      operation,
-      surface: 'console',
-      dry_run: !!opts.dryRun,
-      ...(mutationSource ? { source: mutationSource } : {}),
-      ...inputPayload,
-    },
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(
-      live.data,
-      'Shipment mutation returned no backend outcome',
-    );
-    const outcomeError = backendOutcomeError(rec, 'Shipment mutation was rejected by the backend');
-    if (outcomeError) throw outcomeError;
-    const dryRun = Boolean(rec.dry_run ?? opts.dryRun);
-    const workflowRunId = asNonEmptyString(rec.workflow_run_id);
-    let workflowTemplate = asNonEmptyString(
-      rec.workflow_template ??
-      rec.workflow_template_name ??
-      rec.workflow_template_id,
-    );
-    if (!dryRun && !workflowRunId) {
-      throw new Error('Shipment mutation did not return workflow_run_id');
-    }
-    if (!dryRun && !workflowTemplate && workflowRunId) {
-      const workflowRun = await requireLiveResourceReadback('workflow_runs', workflowRunId, 'shipment_amend_cancel_v1');
-      workflowTemplate = asNonEmptyString(
-        workflowRun.workflow_template_name ??
-        workflowRun.template_name ??
-        workflowRun.workflow_template_id,
-      );
-    }
-    if (!dryRun && !workflowTemplate) {
-      throw new Error('Shipment mutation did not return workflow_template or readable workflow run template evidence');
-    }
-    if (!dryRun) {
-      await requireLiveShipmentMutationReadback('shipment_amend_cancel_v1', {
-        shipmentId,
-        workflowRunId,
-        operation,
-        payload: inputPayload,
-        result: rec,
-        // Shipment operators may not have workflow-log read permission. The
-        // RPC response carries workflow template/run evidence, while shipment
-        // visibility is proven from shipment/domain readback below.
-        requireWorkflowRunReadback: false,
-      });
-    }
-    return {
-      ...rec,
-      ok: true,
-      workflow_template: workflowTemplate ?? '',
-      workflow_run_id: workflowRunId ?? '',
-      started_via: String(rec.started_via ?? (dryRun ? 'dry_run_preview' : 'start_workflow_run')),
-      canonical_entrypoint: String(rec.canonical_entrypoint ?? (dryRun ? 'not_started' : 'progress_workflow_run')),
-      dry_run: dryRun,
-      diff: (rec.diff as Record<string, unknown> | null | undefined) ?? null,
-      settings_resolution_id: String(rec.settings_resolution_id ?? ''),
-    };
-  }
-
-  await sleep(150);
-  return {
-    ok: true,
-    workflow_template: 'tpl_amend_cancel',
-    workflow_run_id: opts.dryRun ? '' : 'wfr_synthetic_' + Date.now(),
-    started_via: opts.dryRun ? 'dry_run_preview' : 'start_workflow_run',
-    canonical_entrypoint: opts.dryRun ? 'not_started' : 'progress_workflow_run',
-    dry_run: !!opts.dryRun,
-    diff: opts.dryRun ? { ...effectivePayload } : null,
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { shipment_amend_cancel_v1 } = await import('./data-source/shipments');
+  return shipment_amend_cancel_v1(shipmentId, op, payload, opts);
 }
 
 export async function shipment_amend_cancel_options_v1(
   shipmentId: string,
 ): Promise<Record<string, unknown>> {
-  const live = await liveRpc<Record<string, unknown>>('shipment_amend_cancel_options_v1', {
-    p_shipment_id: shipmentId,
-  });
-  if (live) {
-    return requireLiveRpcRecord(
-      live.data,
-      'Shipment operation policy returned no backend state',
-    );
-  }
-
-  await sleep(60);
-  const shipment = ((seed as { shipments?: Array<Record<string, unknown>> }).shipments ?? [])
-    .find((row) => String(row.id ?? row.shipment_id ?? '') === shipmentId);
-  const status = String(shipment?.status ?? 'unknown');
-  const allowedStatuses = ['created', 'pending'];
-  const isSeedPolicyEligible = Boolean(shipment) && allowedStatuses.includes(status);
-  const guard = (operation: string) => ({
-    operation,
-    allowed: isSeedPolicyEligible,
-    reason: isSeedPolicyEligible ? null : (shipment ? 'status_not_allowed' : 'backend_policy_unavailable'),
-    lock_source: 'shipment_operation_policy',
-    status,
-    allowed_statuses: allowedStatuses,
-  });
-
-  return {
-    shipment_id: shipmentId,
-    tracking_number: shipment?.tracking_number ?? null,
-    status,
-    lock_source: 'shipment_operation_policy',
-    policy: {},
-    operations: {
-      modify: guard('modify'),
-      reschedule: guard('reschedule'),
-      address: guard('address'),
-      cancel: guard('cancel'),
-    },
-  };
+  const { shipment_amend_cancel_options_v1 } = await import('./data-source/shipments');
+  return shipment_amend_cancel_options_v1(shipmentId);
 }
 export interface ShipmentResortResult extends Record<string, unknown> {
   ok: true;
@@ -9041,7 +7392,7 @@ export interface ShipmentResortResult extends Record<string, unknown> {
   basket_policy_applied: boolean;
 }
 
-function backendOutcomeError(rec: Record<string, unknown>, fallback: string): Error | null {
+export function backendOutcomeError(rec: Record<string, unknown>, fallback: string): Error | null {
   if (rec.ok === false) {
     const rawError = rec.error;
     if (typeof rawError === 'string' && rawError.trim()) return new Error(rawError);
@@ -9098,13 +7449,13 @@ function backendReadbackFailureError(rec: Record<string, unknown>, fallback: str
   return new Error(reason ? `${fallback}: ${reason}` : fallback);
 }
 
-function requireLiveRpcRecord(data: unknown, fallback: string): Record<string, unknown> {
+export function requireLiveRpcRecord(data: unknown, fallback: string): Record<string, unknown> {
   const rec = firstRpcRow<Record<string, unknown>>(data);
   if (!rec || Object.keys(rec).length === 0) throw new Error(fallback);
   return rec;
 }
 
-function requireLiveStringField(
+export function requireLiveStringField(
   rec: Record<string, unknown>,
   keys: readonly string[],
   fallback: string,
@@ -9116,7 +7467,7 @@ function requireLiveStringField(
   throw new Error(fallback);
 }
 
-function requireLiveNumberField(
+export function requireLiveNumberField(
   rec: Record<string, unknown>,
   keys: readonly string[],
   fallback: string,
@@ -9129,7 +7480,7 @@ function requireLiveNumberField(
   throw new Error(fallback);
 }
 
-const LIVE_MUTATION_EVIDENCE_KEYS = [
+export const LIVE_MUTATION_EVIDENCE_KEYS = [
   'correlation_id',
   'settings_resolution_id',
   'workflow_run_id',
@@ -9188,7 +7539,7 @@ function hasLiveEvidenceField(rec: Record<string, unknown>, keys: readonly strin
   });
 }
 
-function requireLiveEvidence(
+export function requireLiveEvidence(
   rec: Record<string, unknown>,
   keys: readonly string[],
   fallback: string,
@@ -9196,7 +7547,7 @@ function requireLiveEvidence(
   if (!hasLiveEvidenceField(rec, keys)) throw new Error(fallback);
 }
 
-function requireLiveMutationResult(
+export function requireLiveMutationResult(
   data: unknown,
   rpcName: string,
   evidenceKeys: readonly string[] = [],
@@ -9212,29 +7563,7 @@ function requireLiveMutationResult(
   return rec;
 }
 
-function requireLiveManualShipmentIntakeResult(data: unknown, dryRun: boolean): Record<string, unknown> {
-  const rpcName = 'ui_create_manual_shipment_intake_v1';
-  const rec = requireLiveRpcRecord(data, `${rpcName} returned no backend outcome`);
-  const outcomeError = backendOutcomeError(rec, `${rpcName} was rejected by the backend`);
-  if (outcomeError) throw outcomeError;
-  const promoted = promoteManualShipmentIntakeEvidence(rec, dryRun);
-  const reusedManualIntake = isManualShipmentIntakeReuseResult(promoted);
-  requireLiveEvidence(
-    promoted,
-    [
-      ...(dryRun
-        ? ['correlation_id', 'workflow_template_id', 'workflow_run_id', 'tracking_number']
-        : reusedManualIntake
-          ? ['shipment_id', 'tracking_number']
-          : ['shipment_id', 'workflow_run_id', 'tracking_number']),
-      ...LIVE_MUTATION_EVIDENCE_KEYS,
-    ],
-    `${rpcName} did not return backend execution evidence`,
-  );
-  return promoted;
-}
-
-async function livePArgsMutationResult(
+export async function livePArgsMutationResult(
   rpcName: string,
   args: Record<string, unknown>,
   evidenceKeys: readonly string[],
@@ -9244,7 +7573,7 @@ async function livePArgsMutationResult(
   return requireLiveMutationResult(live.data, rpcName, evidenceKeys);
 }
 
-function requireLiveDomainEvidence(
+export function requireLiveDomainEvidence(
   rec: Record<string, unknown>,
   rpcName: string,
   keys: readonly string[],
@@ -9253,7 +7582,7 @@ function requireLiveDomainEvidence(
   requireLiveEvidence(rec, keys, `${rpcName} did not return backend ${label} evidence`);
 }
 
-function withRequiredLiveStringField<T>(
+export function withRequiredLiveStringField<T>(
   rec: Record<string, unknown>,
   keys: readonly string[],
   targetKey: string,
@@ -9263,7 +7592,7 @@ function withRequiredLiveStringField<T>(
   return { ...rec, [targetKey]: value } as T;
 }
 
-function requireLiveLabelDraftResult(data: unknown, rpcName: string): LabelDesignerDraftMutationResult {
+export function requireLiveLabelDraftResult(data: unknown, rpcName: string): LabelDesignerDraftMutationResult {
   const rec = requireLiveRpcRecord(data, `${rpcName} returned no backend outcome`);
   if (rec.ok === false) return rec as LabelDesignerDraftMutationResult;
   const draft = objectRecord(rec.draft);
@@ -9276,7 +7605,7 @@ function requireLiveLabelDraftResult(data: unknown, rpcName: string): LabelDesig
   return rec as LabelDesignerDraftMutationResult;
 }
 
-async function requireLiveLabelDraftMutationReadback(
+export async function requireLiveLabelDraftMutationReadback(
   result: LabelDesignerDraftMutationResult,
   rpcName: string,
 ): Promise<LabelDesignerDraftMutationResult> {
@@ -9296,7 +7625,7 @@ async function requireLiveLabelDraftMutationReadback(
   return { ...result, draft: readbackDraft };
 }
 
-function requireLiveLabelValidationResult(data: unknown): LabelDesignerDraftValidationResult {
+export function requireLiveLabelValidationResult(data: unknown): LabelDesignerDraftValidationResult {
   const rec = requireLiveRpcRecord(
     data,
     'label_designer_validate_label_design_draft returned no backend validation outcome',
@@ -9316,7 +7645,7 @@ function requireLiveLabelValidationResult(data: unknown): LabelDesignerDraftVali
   } as LabelDesignerDraftValidationResult;
 }
 
-function requireLiveLabelPublishResult(data: unknown): LabelDesignerDraftPublishResult {
+export function requireLiveLabelPublishResult(data: unknown): LabelDesignerDraftPublishResult {
   const rec = requireLiveRpcRecord(
     data,
     'label_designer_publish_label_design_draft returned no backend publish outcome',
@@ -9336,7 +7665,7 @@ function requireLiveLabelPublishResult(data: unknown): LabelDesignerDraftPublish
   return rec as LabelDesignerDraftPublishResult;
 }
 
-async function requireLiveResourceReadback(
+export async function requireLiveResourceReadback(
   resourceKey: string,
   id: string,
   rpcName: string,
@@ -9357,7 +7686,7 @@ async function requireLiveResourceReadback(
   return row;
 }
 
-async function readLiveResourceListReadback(
+export async function readLiveResourceListReadback(
   resourceKey: string,
   filters: Record<string, unknown>,
   rpcName: string,
@@ -9373,7 +7702,7 @@ async function readLiveResourceListReadback(
   return normalizeLiveListResult<Record<string, unknown>>(live.data, 0, 25).rows;
 }
 
-async function requireLiveResourceListReadback(
+export async function requireLiveResourceListReadback(
   resourceKey: string,
   filters: Record<string, unknown>,
   rpcName: string,
@@ -9385,7 +7714,7 @@ async function requireLiveResourceListReadback(
   return rows;
 }
 
-async function requireLiveResourceAbsenceReadback(
+export async function requireLiveResourceAbsenceReadback(
   resourceKey: string,
   filters: Record<string, unknown>,
   rpcName: string,
@@ -9397,34 +7726,7 @@ async function requireLiveResourceAbsenceReadback(
   }
 }
 
-async function requireLiveShipmentWorkflowReadback(
-  rpcName: string,
-  {
-    shipmentId,
-    workflowRunId,
-    labelJobId,
-  }: {
-    shipmentId?: string | null;
-    workflowRunId?: string | null;
-    labelJobId?: string | null;
-  },
-): Promise<void> {
-  const normalizedShipmentId = asNonEmptyString(shipmentId);
-  const normalizedWorkflowRunId = asNonEmptyString(workflowRunId);
-  const normalizedLabelJobId = asNonEmptyString(labelJobId);
-
-  if (normalizedShipmentId) {
-    await requireLiveResourceReadback('shipments', normalizedShipmentId, rpcName);
-  }
-  if (normalizedWorkflowRunId) {
-    await requireLiveResourceReadback('workflow_runs', normalizedWorkflowRunId, rpcName);
-  }
-  if (normalizedLabelJobId) {
-    await requireLiveResourceReadback('label_jobs', normalizedLabelJobId, rpcName);
-  }
-}
-
-const SA_SHORT_ADDRESS_READBACK_KEYS = [
+export const SA_SHORT_ADDRESS_READBACK_KEYS = [
   'sa_short_code',
   'short_national_address',
   'short_address',
@@ -9434,298 +7736,7 @@ const SA_SHORT_ADDRESS_READBACK_KEYS = [
   'shortCode',
 ] as const;
 
-function normalizeSaShortAddress(value: unknown): string | null {
-  const text = asNonEmptyString(value);
-  if (!text) return null;
-  return text.replace(/\s+/g, '').toUpperCase();
-}
-
-function parseJsonRecord(value: unknown): Record<string, unknown> {
-  if (typeof value === 'string' && value.trim().length > 0) {
-    try {
-      return objectRecord(JSON.parse(value));
-    } catch {
-      return {};
-    }
-  }
-  return objectRecord(value);
-}
-
-function addressSubmissionCandidates(row: Record<string, unknown>): Array<Record<string, unknown>> {
-  const rawInput = parseJsonRecord(row.raw_input);
-  return [
-    row,
-    rawInput,
-    objectRecord(rawInput.provided_coordinates),
-    objectRecord(rawInput.coordinates),
-    objectRecord(row.coordinates),
-    objectRecord(row.geocoding_context),
-    objectRecord(row.metadata),
-  ];
-}
-
-function canonicalAddressReadbackCandidates(row: Record<string, unknown>): Array<Record<string, unknown>> {
-  return [
-    row,
-    objectRecord(row.coordinates),
-    objectRecord(row.geocoding_context),
-    objectRecord(row.metadata),
-  ];
-}
-
-function pickAddressShortCode(row: Record<string, unknown>, canonicalOnly = false): string | null {
-  const candidates = canonicalOnly ? canonicalAddressReadbackCandidates(row) : addressSubmissionCandidates(row);
-  for (const candidate of candidates) {
-    for (const key of SA_SHORT_ADDRESS_READBACK_KEYS) {
-      const normalized = normalizeSaShortAddress(candidate[key]);
-      if (normalized) return normalized;
-    }
-  }
-  return null;
-}
-
-function pickAddressCoordinate(row: Record<string, unknown>, axis: 'lat' | 'lng', canonicalOnly = false): number | null {
-  const keys = axis === 'lat'
-    ? ['latitude', 'lat', 'destination_latitude', 'dest_latitude']
-    : ['longitude', 'lng', 'destination_longitude', 'dest_longitude'];
-  const candidates = canonicalOnly ? canonicalAddressReadbackCandidates(row) : addressSubmissionCandidates(row);
-  for (const candidate of candidates) {
-    const directPair = coordinatePairFromUnknown(candidate.coordinates);
-    if (directPair) return directPair[axis];
-    for (const key of keys) {
-      const value = _numberFromUnknown(candidate[key]);
-      if (value != null) return value;
-    }
-  }
-  return null;
-}
-
-function requireSubmittedAddressReadback(
-  rpcName: string,
-  submittedAddress: Record<string, unknown>,
-  addressRow: Record<string, unknown>,
-): void {
-  const submittedShortCode = pickAddressShortCode(submittedAddress);
-  if (submittedShortCode) {
-    const readbackShortCode = pickAddressShortCode(addressRow, true);
-    if (readbackShortCode !== submittedShortCode) {
-      throw new Error(`${rpcName} backend address readback did not project Saudi short national address to canonical address fields`);
-    }
-  }
-
-  const submittedLat = pickAddressCoordinate(submittedAddress, 'lat');
-  const submittedLng = pickAddressCoordinate(submittedAddress, 'lng');
-  if (submittedLat != null || submittedLng != null) {
-    const readbackLat = pickAddressCoordinate(addressRow, 'lat', true);
-    const readbackLng = pickAddressCoordinate(addressRow, 'lng', true);
-    if (
-      submittedLat == null ||
-      submittedLng == null ||
-      readbackLat == null ||
-      readbackLng == null ||
-      Math.abs(readbackLat - submittedLat) > 0.000001 ||
-      Math.abs(readbackLng - submittedLng) > 0.000001
-    ) {
-      throw new Error(`${rpcName} backend address readback did not project provided coordinates to canonical address fields`);
-    }
-  }
-}
-
-async function requireLiveShipmentCreateReadback(
-  rpcName: string,
-  args: UiCreateShipmentArgs,
-  result: UiCreateShipmentResult,
-  rec: Record<string, unknown>,
-): Promise<void> {
-  const shipmentId = asNonEmptyString(result.shipment_id);
-  if (!shipmentId) throw new Error(`${rpcName} did not return shipment_id`);
-
-  const shipmentRow = await requireLiveResourceReadback('shipments', shipmentId, rpcName);
-  await requireLiveResourceReadback('shipment_directory', shipmentId, rpcName);
-  const shipmentMetadata = objectRecord(shipmentRow.metadata);
-  const expectedBranchId = asNonEmptyString(shipmentMetadata.service_offering_branch_id);
-  if (expectedBranchId && asNonEmptyString(shipmentRow.branch_id) !== expectedBranchId) {
-    throw new Error(`${rpcName} backend readback did not project service_offering_branch_id to shipments.branch_id`);
-  }
-  const expectedZoneId = asNonEmptyString(shipmentMetadata.service_offering_zone_id);
-  if (expectedZoneId && asNonEmptyString(shipmentRow.zone_id) !== expectedZoneId) {
-    throw new Error(`${rpcName} backend readback did not project service_offering_zone_id to shipments.zone_id`);
-  }
-  const expectedServiceLevel = asNonEmptyString(shipmentMetadata.service_level_key);
-  const actualServiceLevel = asNonEmptyString(shipmentRow.service_level);
-  if (
-    expectedServiceLevel &&
-    (!actualServiceLevel || actualServiceLevel.toLowerCase() !== expectedServiceLevel.toLowerCase())
-  ) {
-    throw new Error(`${rpcName} backend readback did not project service_level_key to shipments.service_level`);
-  }
-
-  const workflowRunId = asNonEmptyString(result.workflow_run_id);
-  if (workflowRunId) {
-    await requireLiveResourceReadback('workflow_runs', workflowRunId, rpcName);
-  }
-
-  const recipientId =
-    asNonEmptyString(result.recipient_id) ??
-    asNonEmptyString(args.recipient_id) ??
-    asNonEmptyString(shipmentRow.recipient_id);
-  if (args.new_recipient && !recipientId) {
-    throw new Error(`${rpcName} did not return recipient_id for inline recipient readback`);
-  }
-  if (recipientId) {
-    await requireLiveResourceReadback('recipients', recipientId, rpcName);
-    await requireLiveResourceReadback('recipient_directory', recipientId, rpcName);
-  }
-
-  const duplicateReuse = isManualShipmentIntakeReuseResult(rec);
-  if (args.destination_address && !duplicateReuse) {
-    const addressResult = objectRecord(rec.address_result);
-    const destinationAddressId =
-      asNonEmptyString(shipmentRow.destination_address_id) ??
-      asNonEmptyString(rec.destination_address_id) ??
-      asNonEmptyString(rec.address_id) ??
-      asNonEmptyString(addressResult.destination_address_id) ??
-      asNonEmptyString(addressResult.address_id);
-    if (!destinationAddressId) {
-      throw new Error(`${rpcName} did not expose destination_address_id for address readback`);
-    }
-    const addressRow = await requireLiveResourceReadback('addresses', destinationAddressId, rpcName);
-    requireSubmittedAddressReadback(rpcName, args.destination_address, addressRow);
-  } else if (args.destination_address) {
-    const destinationAddressId = asNonEmptyString(shipmentRow.destination_address_id);
-    if (destinationAddressId) {
-      const addressRow = await requireLiveResourceReadback('addresses', destinationAddressId, rpcName);
-      requireSubmittedAddressReadback(rpcName, args.destination_address, addressRow);
-    }
-  }
-
-  const labelJobId = asNonEmptyString(result.label_job_id);
-  if (labelJobId) {
-    const labelJob = await requireLiveResourceReadback('label_jobs', labelJobId, rpcName);
-    const labelId =
-      asNonEmptyString(rec.label_id) ??
-      asNonEmptyString(labelJob.label_id);
-    if (labelId) {
-      await requireLiveResourceReadback('labels', labelId, rpcName);
-    }
-    const labelVersionId =
-      asNonEmptyString(rec.label_version_id) ??
-      asNonEmptyString(labelJob.label_version_id) ??
-      asNonEmptyString(labelJob.active_version_id);
-    if (labelVersionId) {
-      await requireLiveResourceReadback('label_versions', labelVersionId, rpcName);
-    }
-  }
-}
-
-async function requireLiveShipmentMutationReadback(
-  rpcName: string,
-  {
-    shipmentId,
-    workflowRunId,
-    labelJobId,
-    operation,
-    payload,
-    result,
-    requireWorkflowRunReadback = true,
-  }: {
-    shipmentId?: string | null;
-    workflowRunId?: string | null;
-    labelJobId?: string | null;
-    operation?: string | null;
-    payload?: Record<string, unknown> | null;
-    result?: Record<string, unknown> | null;
-    requireWorkflowRunReadback?: boolean;
-  },
-): Promise<void> {
-  const normalizedShipmentId = asNonEmptyString(shipmentId);
-  const shipmentRow = normalizedShipmentId
-    ? await requireLiveResourceReadback('shipments', normalizedShipmentId, rpcName)
-    : {};
-  if (normalizedShipmentId) {
-    await requireLiveResourceReadback('shipment_directory', normalizedShipmentId, rpcName);
-  }
-  const normalizedWorkflowRunId = asNonEmptyString(workflowRunId);
-  if (normalizedWorkflowRunId && requireWorkflowRunReadback) {
-    await requireLiveResourceReadback('workflow_runs', normalizedWorkflowRunId, rpcName);
-  }
-  const normalizedLabelJobId = asNonEmptyString(labelJobId);
-  if (normalizedLabelJobId) {
-    await requireLiveResourceReadback('label_jobs', normalizedLabelJobId, rpcName);
-  }
-
-  const normalizedPayload = objectRecord(payload);
-  const normalizedResult = objectRecord(result);
-  const operationResult = objectRecord(normalizedResult.operation_result);
-  const reserveResult = objectRecord(operationResult.reserve_result);
-  const actionId =
-    asNonEmptyString(normalizedResult.shipment_action_id) ??
-    asNonEmptyString(operationResult.shipment_action_id) ??
-    asNonEmptyString(reserveResult.action_id) ??
-    asNonEmptyString(normalizedResult.action_id);
-  if (actionId) {
-    await requireLiveResourceReadback('shipment_actions', actionId, rpcName);
-  }
-  const addressPayload = objectRecord(normalizedPayload.address);
-  const destinationAddressPayload = objectRecord(normalizedPayload.destination_address);
-  const touchesAddress =
-    operation === 'address' ||
-    Object.keys(addressPayload).length > 0 ||
-    Object.keys(destinationAddressPayload).length > 0;
-  if (touchesAddress) {
-    const addressResult = objectRecord(normalizedResult.address_result);
-    const destinationAddressId =
-      asNonEmptyString(normalizedResult.destination_address_id) ??
-      asNonEmptyString(normalizedResult.address_id) ??
-      asNonEmptyString(operationResult.destination_address_id) ??
-      asNonEmptyString(operationResult.address_id) ??
-      asNonEmptyString(addressResult.destination_address_id) ??
-      asNonEmptyString(addressResult.address_id) ??
-      asNonEmptyString(shipmentRow.destination_address_id);
-    if (!destinationAddressId) {
-      throw new Error(`${rpcName} did not expose destination_address_id for address readback`);
-    }
-    await requireLiveResourceReadback('addresses', destinationAddressId, rpcName);
-    const geocodeWorkflowRunId =
-      asNonEmptyString(operationResult.geocode_workflow_run_id) ??
-      asNonEmptyString(operationResult.address_workflow_run_id);
-    if (geocodeWorkflowRunId) {
-      await requireLiveResourceReadback('workflow_runs', geocodeWorkflowRunId, rpcName);
-    }
-  }
-
-  const changes = objectRecord(normalizedPayload.changes);
-  const boxes = objectRecord(changes.boxes);
-  const boxIds = new Set<string>();
-  for (const boxId of Object.keys(boxes)) {
-    const normalizedBoxId = asNonEmptyString(boxId);
-    if (normalizedBoxId) boxIds.add(normalizedBoxId);
-  }
-  const returnedBoxId =
-    asNonEmptyString(normalizedResult.shipment_box_id) ??
-    asNonEmptyString(normalizedResult.box_id) ??
-    asNonEmptyString(normalizedResult.target_box_id);
-  if (returnedBoxId) boxIds.add(returnedBoxId);
-  for (const boxId of boxIds) {
-    await requireLiveResourceReadback('shipment_boxes', boxId, rpcName);
-  }
-
-  const touchesCod = ['cod_amount', 'cod_currency', 'cod_method', 'payment_collection_method'].some((key) =>
-    Object.prototype.hasOwnProperty.call(changes, key) ||
-    Object.prototype.hasOwnProperty.call(normalizedPayload, key),
-  );
-  if (touchesCod) {
-    const actionId =
-      asNonEmptyString(normalizedResult.shipment_action_id) ??
-      asNonEmptyString(normalizedResult.action_id) ??
-      asNonEmptyString(normalizedResult.cod_action_id);
-    if (actionId) {
-      await requireLiveResourceReadback('shipment_actions', actionId, rpcName);
-    }
-  }
-}
-
-async function requireLiveRouteRunAssignmentReadback(
+export async function requireLiveRouteRunAssignmentReadback(
   rpcName: string,
   runId: string,
   rec: Record<string, unknown>,
@@ -9749,34 +7760,8 @@ async function requireLiveRouteRunAssignmentReadback(
 }
 
 export async function ui_execute_shipment_resort_v1(shipmentId: string): Promise<ShipmentResortResult> {
-  const live = await liveRpc<Record<string, unknown>>('ui_execute_shipment_resort_v1', {
-    p_action_key: 'shipments.resort',
-    p_resource_key: 'shipments',
-    p_selection_ids: [shipmentId],
-    p_selection_id: shipmentId,
-    p_selection_count: 1,
-    p_params: {},
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(
-      live.data,
-      'Shipment resort returned no backend outcome',
-    );
-    const error = backendOutcomeError(rec, 'Shipment resort was rejected by the backend');
-    if (error) throw error;
-    await requireLiveShipmentWorkflowReadback('ui_execute_shipment_resort_v1', {
-      shipmentId,
-      workflowRunId: asNonEmptyString(rec.workflow_run_id),
-    });
-    return {
-      ok: true,
-      basket_policy_applied: true,
-      ...rec,
-    } as ShipmentResortResult;
-  }
-
-  await sleep(80);
-  return { ok: true, basket_policy_applied: true };
+  const { ui_execute_shipment_resort_v1 } = await import('./data-source/shipments');
+  return ui_execute_shipment_resort_v1(shipmentId);
 }
 
 export interface ShipmentUpdateGeocodeResult extends Record<string, unknown> {
@@ -9793,111 +7778,8 @@ export async function ui_execute_shipment_update_geocode_v1(
   shipmentId: string,
   params: Record<string, unknown> = {},
 ): Promise<ShipmentUpdateGeocodeResult> {
-  if (!shipmentId) throw new Error('shipment_id is required to requeue geocoding');
-
-  const live = await liveRpc<Record<string, unknown>>('ui_execute_shipment_update_geocode_v1', {
-    p_action_key: 'shipments.update_geocode',
-    p_resource_key: 'shipments',
-    p_selection_ids: [shipmentId],
-    p_selection_id: shipmentId,
-    p_selection_count: 1,
-    p_params: {
-      workflow_template_name: 'shipment_update_geocode_v1',
-      ...params,
-    },
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'ui_execute_shipment_update_geocode_v1', [
-      'workflow_run_id',
-    ]);
-    const workflowRunId = requireLiveStringField(
-      rec,
-      ['workflow_run_id'],
-      'ui_execute_shipment_update_geocode_v1 did not return workflow_run_id',
-    );
-    await requireLiveShipmentWorkflowReadback('ui_execute_shipment_update_geocode_v1', {
-      shipmentId,
-      workflowRunId,
-    });
-    const itemRecords = Array.isArray(rec.items) ? (rec.items as Array<Record<string, unknown>>) : [];
-    const firstItemString = (keys: readonly string[]): string | null => {
-      for (const item of itemRecords) {
-        for (const key of keys) {
-          const value = asNonEmptyString(item[key]);
-          if (value) return value;
-        }
-      }
-      return null;
-    };
-    const geocodeWorkflowStatus = (
-      asNonEmptyString(rec.geocode_workflow_status)
-      ?? firstItemString(['geocode_workflow_status'])
-    )?.toLowerCase();
-    const geocodeWorkflowRunId =
-      asNonEmptyString(rec.geocode_workflow_run_id) ??
-      firstItemString(['geocode_workflow_run_id']);
-    if (geocodeWorkflowStatus && ['failed', 'cancelled', 'blocked'].includes(geocodeWorkflowStatus)) {
-      throw new Error(
-        `ui_execute_shipment_update_geocode_v1 nested geocode workflow ${geocodeWorkflowStatus}`
-        + (geocodeWorkflowRunId ? ` (${geocodeWorkflowRunId})` : ''),
-      );
-    }
-    if (geocodeWorkflowRunId) {
-      await requireLiveResourceReadback('workflow_runs', geocodeWorkflowRunId, 'ui_execute_shipment_update_geocode_v1');
-    }
-    const geocodingAttemptId =
-      asNonEmptyString(rec.geocoding_attempt_id) ??
-      asNonEmptyString(rec.attempt_id) ??
-      firstItemString(['geocoding_attempt_id', 'attempt_id']);
-    const geocodeId =
-      asNonEmptyString(rec.geocode_id) ??
-      firstItemString(['geocode_id']);
-    const manualReviewTaskId =
-      asNonEmptyString(rec.manual_review_task_id) ??
-      asNonEmptyString(rec.review_task_id) ??
-      asNonEmptyString(rec.task_id) ??
-      firstItemString(['manual_review_task_id', 'review_task_id', 'task_id']);
-    if (geocodingAttemptId) {
-      await requireLiveResourceReadback('geocoding_attempts', geocodingAttemptId, 'ui_execute_shipment_update_geocode_v1');
-    }
-    if (geocodeId) {
-      await requireLiveResourceReadback('geocodes', geocodeId, 'ui_execute_shipment_update_geocode_v1');
-    }
-    if (manualReviewTaskId) {
-      await requireLiveResourceReadback('manual_review_tasks', manualReviewTaskId, 'ui_execute_shipment_update_geocode_v1');
-    }
-    return {
-      ok: true,
-      status: String(rec.status ?? 'workflow_started'),
-      action_key: String(rec.action_key ?? 'shipments.update_geocode'),
-      resource_key: String(rec.resource_key ?? 'shipments'),
-      count: Number(rec.count ?? 1),
-      workflow_run_id: workflowRunId,
-      items: Array.isArray(rec.items) ? (rec.items as Array<Record<string, unknown>>) : undefined,
-      ...rec,
-    } as ShipmentUpdateGeocodeResult;
-  }
-
-  await sleep(80);
-  const workflowRunId = 'wfr_geocode_' + Date.now();
-  return {
-    ok: true,
-    status: 'completed',
-    action_key: 'shipments.update_geocode',
-    resource_key: 'shipments',
-    count: 1,
-    workflow_run_id: workflowRunId,
-    items: [
-      {
-        shipment_id: shipmentId,
-        address_id: typeof params.address_id === 'string' ? params.address_id : null,
-        destination_address_id:
-          typeof params.destination_address_id === 'string' ? params.destination_address_id : null,
-        workflow_run_id: workflowRunId,
-        status: 'completed',
-      },
-    ],
-  };
+  const { ui_execute_shipment_update_geocode_v1 } = await import('./data-source/shipments');
+  return ui_execute_shipment_update_geocode_v1(shipmentId, params);
 }
 
 // W13-5 — operator-initiated comms attempt enqueue. Closes OPERATIONS D3 §3
@@ -9967,61 +7849,8 @@ export async function ui_execute_shipment_batch_operation_v1(
   payload: Record<string, unknown>,
   opts: { dryRun?: boolean } = {},
 ): Promise<{ ok: true; count: number; op: string; dry_run: boolean }> {
-  const operation = op === 'delete' ? 'cancel' : op;
-  let actionKey: 'shipments.delete' | 'shipments.reschedule';
-  if (operation === 'cancel') {
-    actionKey = 'shipments.delete';
-  } else if (operation === 'reschedule') {
-    actionKey = 'shipments.reschedule';
-  } else {
-    throw new Error(`ui_execute_shipment_batch_operation_v1 unsupported operation ${operation}`);
-  }
-  const live = await liveRpc<Record<string, unknown>>('ui_execute_shipment_batch_operation_v1', {
-    p_action_key: actionKey,
-    p_resource_key: 'shipments',
-    p_selection_ids: ids,
-    p_selection_id: ids.length === 1 ? ids[0] : null,
-    p_selection_count: ids.length,
-    p_params: {
-      ...payload,
-      operation,
-      surface: 'console',
-      dry_run: !!opts.dryRun,
-    },
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'ui_execute_shipment_batch_operation_v1', [
-      'workflow_run_id',
-      'items',
-      'count',
-      'success_count',
-      'affected_count',
-    ]);
-    const count = requireLiveNumberField(
-      rec,
-      ['count', 'success_count', 'affected_count'],
-      'Shipment batch operation did not return an affected count',
-    );
-    if (!opts.dryRun) {
-      for (const id of ids) {
-        await requireLiveResourceReadback('shipments', id, 'ui_execute_shipment_batch_operation_v1');
-      }
-      const workflowRunId = asNonEmptyString(rec.workflow_run_id);
-      if (workflowRunId) {
-        await requireLiveResourceReadback('workflow_runs', workflowRunId, 'ui_execute_shipment_batch_operation_v1');
-      }
-    }
-    return {
-      ...rec,
-      ok: true,
-      count,
-      op: operation,
-      dry_run: !!opts.dryRun,
-    } as { ok: true; count: number; op: string; dry_run: boolean };
-  }
-
-  await sleep(120);
-  return { ok: true, count: ids.length, op, dry_run: !!opts.dryRun };
+  const { ui_execute_shipment_batch_operation_v1 } = await import('./data-source/shipments');
+  return ui_execute_shipment_batch_operation_v1(ids, op, payload, opts);
 }
 
 // ----------- Baskets -----------
@@ -10099,278 +7928,18 @@ export interface BasketUpdateMutationResult extends Record<string, unknown> {
   settings_resolution_id?: string;
 }
 
-function defaultLookupValue(category: string): string | null {
-  const rows = getLookups(category) as unknown as Array<Record<string, unknown>>;
-  const preferred = rows.find((row) => row.is_default === true) ?? rows[0];
-  return asNonEmptyString(preferred?.value);
-}
-
 export async function basket_create_v1(
   args: Record<string, unknown>,
 ): Promise<BasketCreateMutationResult> {
-  const live = await liveRpc<Record<string, unknown>>('basket_create_v1', { p_args: args });
-  if (live) {
-    return requireLiveMutationResult(live.data, 'basket_create_v1', [
-      'basket_id',
-    ]) as BasketCreateMutationResult;
-  }
-
-  await sleep(60);
-  const organizationId =
-    asNonEmptyString(args.organization_id) ??
-    asNonEmptyString(state.user.organization_id) ??
-    asNonEmptyString((state.scope?.tenant as Record<string, unknown> | undefined)?.id);
-  if (!organizationId) throw new Error('basket_create_v1 requires organization_id or tenant scope');
-
-  const basketType = asNonEmptyString(args.basket_type) ?? defaultLookupValue('basket_type');
-  const basketState = asNonEmptyString(args.state) ?? defaultLookupValue('basket_state');
-  if (!basketState) throw new Error('basket_create_v1 requires a basket_state lookup default');
-
-  const capacityRaw = args.capacity_count;
-  const capacity = capacityRaw === undefined || capacityRaw === null || capacityRaw === ''
-    ? null
-    : Number(capacityRaw);
-  if (capacity != null && (!Number.isFinite(capacity) || capacity < 1)) {
-    throw new Error('basket_create_v1 capacity_count must be positive');
-  }
-
-  const expiresAt =
-    asNonEmptyString(args.expires_at) ??
-    (() => {
-      const minutesRaw = args.expires_in_minutes;
-      if (minutesRaw === undefined || minutesRaw === null || minutesRaw === '') return null;
-      const minutes = Number(minutesRaw);
-      if (!Number.isFinite(minutes) || minutes < 1) {
-        throw new Error('basket_create_v1 expires_in_minutes must be positive');
-      }
-      return new Date(Date.now() + minutes * 60_000).toISOString();
-    })();
-
-  const basketId = nextResourceId('basket');
-  const now = new Date().toISOString();
-  const row: Record<string, unknown> = {
-    id: basketId,
-    organization_id: organizationId,
-    zone_id: asNonEmptyString(args.zone_id),
-    basket_type: basketType,
-    state: basketState,
-    current_count: 0,
-    capacity_count: capacity,
-    expires_at: expiresAt,
-    version: 1,
-    created_at: now,
-    updated_at: now,
-    sort_branch_id: asNonEmptyString(args.sort_branch_id),
-    sort_service_key: asNonEmptyString(args.sort_service_key),
-    sort_route_key: asNonEmptyString(args.sort_route_key),
-    sort_priority_key: asNonEmptyString(args.sort_priority_key),
-  };
-  const baskets = (seed as { baskets?: Array<Record<string, unknown>> }).baskets;
-  if (Array.isArray(baskets)) baskets.unshift(row);
-
-  return buildEnvelope({
-    basket_id: basketId,
-    zone_id: row.zone_id,
-    basket_type: basketType,
-    state: basketState,
-    capacity_count: capacity,
-    expires_at: expiresAt,
-  }) as BasketCreateMutationResult;
+  const { basket_create_v1 } = await import('./data-source/dispatch');
+  return basket_create_v1(args);
 }
 
 export async function basket_update_v1(
   args: Record<string, unknown>,
 ): Promise<BasketUpdateMutationResult> {
-  const live = await liveRpc<Record<string, unknown>>('basket_update_v1', { p_args: args });
-  if (live) {
-    return requireLiveMutationResult(live.data, 'basket_update_v1', [
-      'basket_id',
-    ]) as BasketUpdateMutationResult;
-  }
-
-  await sleep(60);
-  const basketId = asNonEmptyString(args.basket_id) ?? asNonEmptyString(args.id);
-  if (!basketId) throw new Error('basket_update_v1 requires basket_id');
-  const patch = objectRecord(args.patch);
-  if (!Object.keys(patch).length) throw new Error('basket_update_v1 requires a non-empty patch');
-  const allowedPatchKeys = new Set([
-    'zone_id',
-    'basket_type',
-    'capacity_count',
-    'expires_at',
-    'sort_branch_id',
-    'sort_service_key',
-    'sort_route_key',
-    'sort_priority_key',
-  ]);
-  const unsupportedPatchKeys = Object.keys(patch).filter((key) => !allowedPatchKeys.has(key)).sort();
-  if (unsupportedPatchKeys.length) {
-    throw new Error(`basket_update_v1 unsupported patch keys: ${unsupportedPatchKeys.join(', ')}`);
-  }
-
-  const baskets = (seed as { baskets?: Array<Record<string, unknown>> }).baskets ?? [];
-  const basket = baskets.find((row) => row.id === basketId);
-  if (!basket) throw new Error(`basket_not_found:${basketId}`);
-
-  const changed: Record<string, unknown> = {};
-  if (patch.zone_id !== undefined) {
-    const zoneId = asNonEmptyString(patch.zone_id) ?? null;
-    basket.zone_id = zoneId;
-    changed.zone_id = zoneId;
-  }
-  if (patch.basket_type !== undefined) {
-    const basketType = asNonEmptyString(patch.basket_type);
-    if (!basketType) throw new Error('basket_update_v1 basket_type cannot be blank');
-    basket.basket_type = basketType;
-    changed.basket_type = basketType;
-  }
-  if (patch.capacity_count !== undefined) {
-    const capacity = patch.capacity_count === null || patch.capacity_count === ''
-      ? null
-      : Number(patch.capacity_count);
-    if (capacity != null && (!Number.isFinite(capacity) || capacity < 1)) {
-      throw new Error('basket_update_v1 capacity_count must be positive');
-    }
-    if (capacity != null && capacity < Number(basket.current_count ?? 0)) {
-      throw new Error('basket_update_v1 capacity_count cannot be below current_count');
-    }
-    basket.capacity_count = capacity;
-    changed.capacity_count = capacity;
-  }
-  if (patch.expires_at !== undefined) {
-    const expiresAt = asNonEmptyString(patch.expires_at) ?? null;
-    if (expiresAt && Number.isNaN(Date.parse(expiresAt))) {
-      throw new Error('basket_update_v1 expires_at must be a valid timestamp');
-    }
-    basket.expires_at = expiresAt;
-    changed.expires_at = expiresAt;
-  }
-  for (const key of ['sort_branch_id', 'sort_service_key', 'sort_route_key', 'sort_priority_key']) {
-    if (patch[key] !== undefined) {
-      const next = asNonEmptyString(patch[key]) ?? null;
-      basket[key] = next;
-      changed[key] = next;
-    }
-  }
-
-  basket.version = Number(basket.version ?? 1) + 1;
-  basket.updated_at = new Date().toISOString();
-
-  return buildEnvelope({
-    basket_id: basketId,
-    changed,
-  }) as BasketUpdateMutationResult;
-}
-
-// ----------- Route plans / runs / stops -----------
-//
-// Stubs mirror the cloud `api.*` surface from these migrations:
-//   - 202604032350_route_plan_ui_api_contract_v1.sql        (ui_create/freeze/apply)
-//   - 202604041520_route_plan_sequence_optimizer_v1.sql     (ui_solve)
-//   - 202604061030_route_plan_publish_execution_pack_v1.sql (ui_publish)
-//   - 202604061315_route_plan_rebalance_v1.sql              (ui_rebalance)
-//   - 202604061140_route_plan_constraint_guards_v1.sql      (route_plan_validate_constraints)
-//   - 202604061430_uc076_route_run_assignment_lifecycle_foundation_v1.sql
-//   - 202604081330_uc077_route_run_execution_manifest_reassignment_v1.sql
-//   - 202604101500_uc082_route_run_scan_out_departure_gate_v1.sql
-//   - 202604101715_uc078_route_stop_mid_execution_reassignment_v1.sql
-
-async function requireLiveRoutePlanReadback(
-  routePlanId: string,
-  expectedStatus: string | null,
-  rpcName: string,
-): Promise<Record<string, unknown>> {
-  const row = await requireLiveResourceReadback('route_plans', routePlanId, rpcName);
-  const readbackPlanId =
-    asNonEmptyString(row.id) ??
-    asNonEmptyString(row.route_plan_id) ??
-    asNonEmptyString(row.plan_id);
-  if (!readbackPlanId) {
-    throw new Error(`${rpcName} backend readback missing route_plan_id`);
-  }
-  if (readbackPlanId !== routePlanId) {
-    throw new Error(`${rpcName} backend readback returned route_plan_id ${readbackPlanId}`);
-  }
-  const status = requireLiveStringField(
-    row,
-    ['status', 'route_plan_status'],
-    `${rpcName} backend readback missing route plan status`,
-  );
-  if (expectedStatus && status !== expectedStatus) {
-    throw new Error(`${rpcName} backend readback status ${status} did not match ${expectedStatus}`);
-  }
-  return row;
-}
-
-function routePlanConstraintValidationEvidence(
-  mutationRow: Record<string, unknown>,
-  readbackRow: Record<string, unknown>,
-): Record<string, unknown> {
-  const mutationValidation = objectRecord(mutationRow.constraint_validation);
-  if (Object.keys(mutationValidation).length) return mutationValidation;
-
-  const readbackValidation = objectRecord(readbackRow.constraint_validation);
-  if (Object.keys(readbackValidation).length) return readbackValidation;
-
-  const readbackMetadata = objectRecord(readbackRow.metadata);
-  const metadataValidation = objectRecord(readbackMetadata.constraint_validation);
-  if (Object.keys(metadataValidation).length) return metadataValidation;
-
-  return {};
-}
-
-function routePlanConstraintFailCount(validation: Record<string, unknown>): number {
-  const explicit = Number(validation.fail_count ?? validation.failure_count ?? validation.failed_count);
-  if (Number.isFinite(explicit)) return explicit;
-
-  const violations = validation.violations;
-  if (Array.isArray(violations)) return violations.length;
-
-  const failures = validation.failures;
-  if (Array.isArray(failures)) return failures.length;
-
-  return 0;
-}
-
-async function requireLiveRoutePlanExecutionPackReadback(
-  routePlanId: string,
-  executionPackHash: string,
-  rpcName: string,
-): Promise<void> {
-  const live = await liveRpc<Record<string, unknown> | null>('ui_route_plan_execution_pack_v1', {
-    p_route_plan_id: routePlanId,
-  });
-  if (!live) throw new Error(`${rpcName} execution-pack readback requires a live backend`);
-  const row = firstRpcRow<Record<string, unknown>>(live.data);
-  if (!row || Object.keys(row).length === 0) {
-    throw new Error(`${rpcName} backend readback missing route-plan execution pack:${routePlanId}`);
-  }
-  const readbackHash = requireLiveStringField(
-    row,
-    ['execution_pack_hash', 'published_execution_pack_hash'],
-    `${rpcName} backend readback missing execution_pack_hash`,
-  );
-  if (readbackHash !== executionPackHash) {
-    throw new Error(`${rpcName} backend readback execution_pack_hash did not match`);
-  }
-}
-
-async function requireLiveRouteRunsReadback(
-  routePlanId: string,
-  rpcName: string,
-): Promise<void> {
-  const live = await liveRpc<Record<string, unknown>>('ui_list_resource_v1', {
-    p_resource: 'route_runs',
-    p_filters: { route_plan_id: routePlanId },
-    p_limit: 25,
-    p_offset: 0,
-    p_sort: null,
-  });
-  if (!live) throw new Error(`${rpcName} route-run readback requires a live backend`);
-  const rows = normalizeLiveListResult<Record<string, unknown>>(live.data, 0, 25).rows;
-  if (rows.length === 0) {
-    throw new Error(`${rpcName} backend readback missing materialized route_runs:${routePlanId}`);
-  }
+  const { basket_update_v1 } = await import('./data-source/dispatch');
+  return basket_update_v1(args);
 }
 
 export interface RoutePlanCreateInput {
@@ -10384,145 +7953,25 @@ export interface RoutePlanCreateInput {
 export async function ui_create_route_plan_v1(
   input: RoutePlanCreateInput,
 ): Promise<{ ok: true; route_plan_id: string; status: string; plan_id: string }> {
-  const live = await liveRpc('ui_create_route_plan_v1', {
-    p_input: input,
-  });
-  if (live) {
-    const row = requireLiveMutationResult(live.data, 'ui_create_route_plan_v1', [
-      'route_plan_id',
-      'plan_id',
-      'workflow_run_id',
-    ]);
-    const routePlanId = requireLiveStringField(
-      row,
-      ['route_plan_id', 'plan_id', 'id'],
-      'Route plan create did not return route_plan_id',
-    );
-    const status = requireLiveStringField(
-      row,
-      ['status', 'route_plan_status'],
-      'Route plan create did not return status',
-    );
-    await requireLiveRoutePlanReadback(routePlanId, status, 'ui_create_route_plan_v1');
-    return {
-      ...row,
-      ok: true,
-      route_plan_id: routePlanId,
-      status,
-      plan_id: String(row.plan_id ?? routePlanId),
-    };
-  }
-
-  await sleep(180);
-  const id = 'rpl_new_' + Math.floor(Math.random() * 90000);
-  return {
-    ok: true,
-    route_plan_id: id,
-    status: 'draft',
-    plan_id: `PLN-${input.planned_date.replaceAll('-', '').slice(2)}-${input.branch_id.replace(/[^a-z0-9]/gi, '').slice(-6).toUpperCase()}`,
-  };
+  const { ui_create_route_plan_v1 } = await import('./data-source/dispatch');
+  return ui_create_route_plan_v1(input);
 }
 
 export async function ui_solve_route_plan_v1(planId: string): Promise<{ ok: true; plan_id: string; status: string }> {
-  const live = await liveRpc('ui_solve_route_plan_v1', {
-    p_input: { route_plan_id: planId },
-  });
-  if (live) {
-    const row = requireLiveMutationResult(live.data, 'ui_solve_route_plan_v1', [
-      'route_plan_id',
-      'plan_id',
-      'workflow_run_id',
-    ]);
-    const status = requireLiveStringField(
-      row,
-      ['status', 'route_plan_status'],
-      'Route plan solve did not return status',
-    );
-    const routePlanId = String(row.route_plan_id ?? row.plan_id ?? planId);
-    await requireLiveRoutePlanReadback(routePlanId, status, 'ui_solve_route_plan_v1');
-    return {
-      ...row,
-      ok: true,
-      plan_id: routePlanId,
-      status,
-    };
-  }
-
-  await sleep(180);
-  return { ok: true, plan_id: planId, status: 'solved' };
+  const { ui_solve_route_plan_v1 } = await import('./data-source/dispatch');
+  return ui_solve_route_plan_v1(planId);
 }
 export async function ui_freeze_route_plan_v1(
   planId: string,
 ): Promise<{ ok: true; plan_id: string; status: string; constraint_validation: { fail_count: number } }> {
-  const live = await liveRpc('ui_freeze_route_plan_v1', {
-    p_input: { route_plan_id: planId },
-  });
-  if (live) {
-    const row = requireLiveMutationResult(live.data, 'ui_freeze_route_plan_v1', [
-      'route_plan_id',
-      'plan_id',
-      'workflow_run_id',
-    ]);
-    const status = requireLiveStringField(
-      row,
-      ['status', 'route_plan_status'],
-      'Route plan freeze did not return status',
-    );
-    const routePlanId = String(row.route_plan_id ?? row.plan_id ?? planId);
-    const readback = await requireLiveRoutePlanReadback(routePlanId, status, 'ui_freeze_route_plan_v1');
-    const constraintValidation = routePlanConstraintValidationEvidence(row, readback);
-    if (!Object.keys(constraintValidation).length) {
-      throw new Error('Route plan freeze backend readback missing constraint validation');
-    }
-    return {
-      ...row,
-      ok: true,
-      plan_id: routePlanId,
-      status,
-      constraint_validation: {
-        ...constraintValidation,
-        fail_count: routePlanConstraintFailCount(constraintValidation),
-      },
-    };
-  }
-
-  await sleep(180);
-  return { ok: true, plan_id: planId, status: 'frozen', constraint_validation: { fail_count: 0 } };
+  const { ui_freeze_route_plan_v1 } = await import('./data-source/dispatch');
+  return ui_freeze_route_plan_v1(planId);
 }
 export async function ui_publish_route_plan_v1(
   planId: string,
 ): Promise<{ ok: true; plan_id: string; execution_pack_hash: string }> {
-  const live = await liveRpc('ui_publish_route_plan_v1', {
-    p_input: { route_plan_id: planId },
-  });
-  if (live) {
-    const row = requireLiveMutationResult(live.data, 'ui_publish_route_plan_v1', [
-      'route_plan_id',
-      'plan_id',
-      'execution_pack_hash',
-    ]);
-    const executionPackHash = requireLiveStringField(
-      row,
-      ['execution_pack_hash', 'published_execution_pack_hash'],
-      'Route plan publish did not return execution_pack_hash',
-    );
-    const routePlanId = String(row.route_plan_id ?? row.plan_id ?? planId);
-    await requireLiveRoutePlanReadback(routePlanId, 'published', 'ui_publish_route_plan_v1');
-    await requireLiveRoutePlanExecutionPackReadback(
-      routePlanId,
-      executionPackHash,
-      'ui_publish_route_plan_v1',
-    );
-    return {
-      ...row,
-      ok: true,
-      plan_id: routePlanId,
-      execution_pack_hash: executionPackHash,
-    };
-  }
-
-  await sleep(180);
-  return { ok: true, plan_id: planId, execution_pack_hash: '0x' + Math.random().toString(16).slice(2, 10) };
+  const { ui_publish_route_plan_v1 } = await import('./data-source/dispatch');
+  return ui_publish_route_plan_v1(planId);
 }
 
 export interface RoutePlanExecutionPack extends Record<string, unknown> {
@@ -10535,79 +7984,14 @@ export interface RoutePlanExecutionPack extends Record<string, unknown> {
 export async function ui_route_plan_execution_pack_v1(
   planId: string,
 ): Promise<RoutePlanExecutionPack | null> {
-  const live = await liveRpc<Record<string, unknown> | null>('ui_route_plan_execution_pack_v1', {
-    p_route_plan_id: planId,
-  });
-  if (live) {
-    const rec = firstRpcRow<Record<string, unknown>>(live.data);
-    if (!rec) return null;
-    return {
-      ...rec,
-      route_plan_id: String(rec.route_plan_id ?? planId),
-      execution_pack_hash: asNonEmptyString(rec.execution_pack_hash) ?? undefined,
-      stop_count: Number(rec.stop_count ?? 0),
-      shipment_count: Number(rec.shipment_count ?? 0),
-    };
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_route_plan_execution_pack_v1');
-  await sleep(80);
-  const plan = ((RESOURCE_DATA().route_plans ?? []) as Record<string, unknown>[])
-    .find((row) => row.id === planId || row.plan_id === planId);
-  const status = asNonEmptyString(plan?.status);
-  if (!plan || (status !== 'published' && status !== 'applied')) return null;
-  const stopCount = Number(plan.stops ?? 0);
-  return {
-    route_plan_id: String(plan.id ?? planId),
-    route_plan_status: status,
-    execution_pack_hash: asNonEmptyString(plan.execution_pack_hash ?? plan.published_execution_pack_hash) ?? `seed-${planId}`,
-    stop_count: stopCount,
-    shipment_count: stopCount,
-  };
+  const { ui_route_plan_execution_pack_v1 } = await import('./data-source/dispatch');
+  return ui_route_plan_execution_pack_v1(planId);
 }
 export async function ui_apply_route_plan_v1(
   planId: string,
 ): Promise<{ ok: true; plan_id: string; status: string; runs_materialized: number }> {
-  const live = await liveRpc('ui_apply_route_plan_v1', {
-    p_input: { route_plan_id: planId },
-  });
-  if (live) {
-    const rows = Array.isArray(live.data) ? live.data : [];
-    const row = requireLiveMutationResult(live.data, 'ui_apply_route_plan_v1', [
-      'route_plan_id',
-      'plan_id',
-      'route_run_id',
-      'route_run_ids',
-      'runs_materialized',
-    ]);
-    const routeRunIds = Array.isArray(row.route_run_ids) ? row.route_run_ids : [];
-    const singleRouteRunId = asNonEmptyString(row.route_run_id);
-    const runsMaterialized =
-      rows.length ||
-      routeRunIds.length ||
-      (singleRouteRunId ? 1 : Number(row.runs_materialized ?? row.run_count));
-    if (!Number.isFinite(runsMaterialized) || runsMaterialized <= 0) {
-      throw new Error('Route plan apply did not return materialized route-run evidence');
-    }
-    const status = requireLiveStringField(
-      row,
-      ['status', 'route_plan_status'],
-      'Route plan apply did not return status',
-    );
-    const routePlanId = String(row.route_plan_id ?? row.plan_id ?? planId);
-    await requireLiveRoutePlanReadback(routePlanId, status, 'ui_apply_route_plan_v1');
-    await requireLiveRouteRunsReadback(routePlanId, 'ui_apply_route_plan_v1');
-    return {
-      ...row,
-      ok: true,
-      plan_id: routePlanId,
-      status,
-      runs_materialized: runsMaterialized,
-    };
-  }
-
-  await sleep(180);
-  return { ok: true, plan_id: planId, status: 'applied', runs_materialized: 18 };
+  const { ui_apply_route_plan_v1 } = await import('./data-source/dispatch');
+  return ui_apply_route_plan_v1(planId);
 }
 
 export interface RoutePlanRebalanceInput {
@@ -10621,59 +8005,8 @@ export interface RoutePlanRebalanceInput {
 export async function ui_rebalance_route_plan_v1(
   input: RoutePlanRebalanceInput,
 ): Promise<{ ok: true; plan_id: string; moves_applied: number }> {
-  const shipmentIds = Array.isArray(input.shipment_ids) ? input.shipment_ids : [];
-  const live = await liveRpc('ui_rebalance_route_plan_v1', {
-    p_input: input,
-  });
-  if (live) {
-    const row = requireLiveMutationResult(live.data, 'ui_rebalance_route_plan_v1', [
-      'source_route_plan_id',
-      'target_route_plan_id',
-      'moved_stop_count',
-      'moves_applied',
-      'workflow_run_id',
-    ]);
-    const movesApplied = requireLiveNumberField(
-      row,
-      ['moved_stop_count', 'moves_applied', 'count', 'affected_count'],
-      'Route plan rebalance did not return moved stop count',
-    );
-    const sourceRoutePlanId = requireLiveStringField(
-      row,
-      ['source_route_plan_id'],
-      'Route plan rebalance did not return source_route_plan_id',
-    );
-    const targetRoutePlanId = requireLiveStringField(
-      row,
-      ['target_route_plan_id'],
-      'Route plan rebalance did not return target_route_plan_id',
-    );
-    if (sourceRoutePlanId !== input.source_route_plan_id) {
-      throw new Error('Route plan rebalance returned a different source_route_plan_id');
-    }
-    if (input.target_route_plan_id && targetRoutePlanId !== input.target_route_plan_id) {
-      throw new Error('Route plan rebalance returned a different target_route_plan_id');
-    }
-    await requireLiveRoutePlanReadback(
-      sourceRoutePlanId,
-      asNonEmptyString(row.source_status) ?? null,
-      'ui_rebalance_route_plan_v1 source',
-    );
-    await requireLiveRoutePlanReadback(
-      targetRoutePlanId,
-      asNonEmptyString(row.target_status) ?? null,
-      'ui_rebalance_route_plan_v1 target',
-    );
-    return {
-      ...row,
-      ok: true,
-      plan_id: sourceRoutePlanId,
-      moves_applied: movesApplied,
-    };
-  }
-
-  await sleep(180);
-  return { ok: true, plan_id: input.source_route_plan_id, moves_applied: shipmentIds.length };
+  const { ui_rebalance_route_plan_v1 } = await import('./data-source/dispatch');
+  return ui_rebalance_route_plan_v1(input);
 }
 
 export interface RoutePlanConstraintCheck {
@@ -10684,138 +8017,11 @@ export interface RoutePlanConstraintCheck {
   detail?: string;
 }
 
-function routePlanConstraintStatus(value: unknown, failed: number): RoutePlanConstraintCheck['status'] {
-  const status = asNonEmptyString(value);
-  if (status === 'pass' || status === 'warn' || status === 'danger') return status;
-  return failed > 0 ? 'danger' : 'pass';
-}
-
-function normalizeRoutePlanConstraintItem(value: unknown, index: number): RoutePlanConstraintCheck {
-  const rec = objectRecord(value);
-  if (!Object.keys(rec).length) {
-    throw new Error(`Route plan constraint validation check ${index + 1} missing backend evidence`);
-  }
-  const failed = requireLiveNumberField(
-    rec,
-    ['failed', 'fail_count', 'failed_count'],
-    `Route plan constraint validation check ${index + 1} missing failed count`,
-  );
-  const passed = requireLiveNumberField(
-    rec,
-    ['passed', 'pass_count', 'passed_count'],
-    `Route plan constraint validation check ${index + 1} missing passed count`,
-  );
-  return {
-    name: requireLiveStringField(
-      rec,
-      ['name', 'check_name', 'code'],
-      `Route plan constraint validation check ${index + 1} missing name`,
-    ),
-    passed,
-    failed,
-    status: routePlanConstraintStatus(rec.status, failed),
-    detail: asNonEmptyString(rec.detail) ?? asNonEmptyString(rec.message) ?? undefined,
-  };
-}
-
-function normalizeCanonicalRoutePlanConstraintItems(rec: Record<string, unknown>): RoutePlanConstraintCheck[] {
-  if (typeof rec.valid !== 'boolean') {
-    throw new Error('Route plan constraint validation did not return valid flag');
-  }
-  if (!Array.isArray(rec.violations)) {
-    throw new Error('Route plan constraint validation did not return constraint check evidence');
-  }
-  if (rec.violations.length === 0) {
-    if (rec.valid !== true) {
-      throw new Error('Route plan constraint validation did not return violation evidence');
-    }
-    return [{
-      name: rec.enabled === false ? 'route_plan_constraint_policy_disabled' : 'route_plan_constraints',
-      passed: 1,
-      failed: 0,
-      status: 'pass',
-    }];
-  }
-  return rec.violations.map((value, index) => {
-    const violation = objectRecord(value);
-    if (!Object.keys(violation).length) {
-      throw new Error(`Route plan constraint validation violation ${index + 1} missing backend evidence`);
-    }
-    return {
-      name: asNonEmptyString(violation.code) ?? `constraint_violation_${index + 1}`,
-      passed: 0,
-      failed: 1,
-      status: routePlanConstraintStatus(violation.status, 1),
-      detail: asNonEmptyString(violation.message) ?? asNonEmptyString(violation.detail) ?? undefined,
-    };
-  });
-}
-
 export async function route_plan_validate_constraints_v1(
   planId: string,
 ): Promise<{ ok: true; plan_id: string; fail_count: number; items: RoutePlanConstraintCheck[] }> {
-  const live = await liveRpc<Record<string, unknown>>('route_plan_validate_constraints_v1', {
-    p_route_plan_id: planId,
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(
-      live.data,
-      'route_plan_validate_constraints_v1 returned no backend validation outcome',
-    );
-    const outcomeError = backendOutcomeError(rec, 'route_plan_validate_constraints_v1 was rejected by the backend');
-    if (outcomeError) throw outcomeError;
-    const routePlanId = requireLiveStringField(
-      rec,
-      ['route_plan_id', 'plan_id'],
-      'Route plan constraint validation did not return route_plan_id',
-    );
-    if (routePlanId !== planId) {
-      throw new Error('Route plan constraint validation returned a different route_plan_id');
-    }
-    requireLiveEvidence(
-      rec,
-      ['items', 'checks', 'validated_at', 'settings_id', 'settings_version_id', 'policy_version'],
-      'route_plan_validate_constraints_v1 did not return backend validation evidence',
-    );
-    const directItems = Array.isArray(rec.items)
-      ? rec.items
-      : Array.isArray(rec.checks)
-        ? rec.checks
-        : [];
-    const items = directItems.length > 0
-      ? directItems.map(normalizeRoutePlanConstraintItem)
-      : normalizeCanonicalRoutePlanConstraintItems(rec);
-    if (items.length === 0) {
-      throw new Error('Route plan constraint validation did not return constraint check evidence');
-    }
-    const failCount = Number.isFinite(Number(rec.fail_count))
-      ? Number(rec.fail_count)
-      : items.reduce((acc, item) => acc + Number(item.failed ?? 0), 0);
-    return {
-      ok: true,
-      plan_id: routePlanId,
-      fail_count: failCount,
-      items,
-    };
-  }
-
-  await sleep(120);
-  const items: RoutePlanConstraintCheck[] = [
-    { name: 'Driver capabilities', passed: 5, failed: 0, status: 'pass' },
-    { name: 'Vehicle type fit', passed: 5, failed: 0, status: 'pass' },
-    {
-      name: 'Vehicle metadata (refrig / hazmat)',
-      passed: 4,
-      failed: 1,
-      status: 'warn',
-      detail: 'plan stop 18 requires refrig vehicle but assigned vehicle has no refrig metadata',
-    },
-    { name: 'Working-hours window', passed: 5, failed: 0, status: 'pass' },
-    { name: 'Stop time-windows', passed: 5, failed: 0, status: 'pass' },
-    { name: 'Hub cutoff', passed: 5, failed: 0, status: 'pass' },
-  ];
-  const fail_count = items.reduce((acc, c) => acc + c.failed, 0);
-  return { ok: true, plan_id: planId, fail_count, items };
+  const { route_plan_validate_constraints_v1 } = await import('./data-source/dispatch');
+  return route_plan_validate_constraints_v1(planId);
 }
 
 export interface RouteRunAssignTarget {
@@ -10855,51 +8061,12 @@ export interface RouteRunAssignmentResponseResult extends Record<string, unknown
   created?: boolean;
 }
 
-function responseStatusForRouteRunAssignmentAction(actionKey: string): string {
-  switch (actionKey) {
-    case 'route_runs.acknowledge_assignment':
-      return 'acknowledged';
-    case 'route_runs.accept_assignment':
-      return 'accepted';
-    case 'route_runs.refuse_assignment':
-      return 'refused';
-    default:
-      return 'assigned';
-  }
-}
-
 export async function ui_execute_route_run_assign_v1(
   runId: string,
   target: RouteRunAssignTarget | unknown,
 ): Promise<{ ok: true; run_id: string; target: RouteRunAssignTarget | unknown }> {
-  const live = await liveRpc<Record<string, unknown>>('ui_execute_route_run_assign_v1', {
-    p_action_key: 'route_runs.assign',
-    p_resource_key: 'route_runs',
-    p_selection_ids: [runId],
-    p_selection_id: runId,
-    p_selection_count: 1,
-    p_params: target && typeof target === 'object' ? target as Record<string, unknown> : { target },
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'ui_execute_route_run_assign_v1', [
-      'route_run_id',
-      'run_id',
-      'assignment_id',
-      'route_run_assignment_id',
-      'count',
-      'status',
-    ]);
-    const resolvedRunId = String(rec.route_run_id ?? rec.run_id ?? runId);
-    await requireLiveRouteRunAssignmentReadback('ui_execute_route_run_assign_v1', resolvedRunId, rec);
-    return { ...rec, ok: true, run_id: String(rec.route_run_id ?? rec.run_id ?? runId), target } as {
-      ok: true;
-      run_id: string;
-      target: RouteRunAssignTarget | unknown;
-    };
-  }
-
-  await sleep(80);
-  return { ok: true, run_id: runId, target };
+  const { ui_execute_route_run_assign_v1 } = await import('./data-source/dispatch');
+  return ui_execute_route_run_assign_v1(runId, target);
 }
 
 export async function ui_execute_route_run_assignment_response_v1(
@@ -10907,81 +8074,8 @@ export async function ui_execute_route_run_assignment_response_v1(
   actionKey: string,
   params: RouteRunAssignmentResponseParams = {},
 ): Promise<RouteRunAssignmentResponseResult> {
-  const responseStatus = responseStatusForRouteRunAssignmentAction(actionKey);
-  const live = await liveRpc<Record<string, unknown>>('ui_execute_route_run_assignment_response_v1', {
-    p_action_key: actionKey,
-    p_resource_key: 'routes',
-    p_selection_ids: [runId],
-    p_selection_id: runId,
-    p_selection_count: 1,
-    p_params: compactRecord({
-      ...params,
-      response_status: responseStatus,
-    }),
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'ui_execute_route_run_assignment_response_v1', [
-      'status',
-      'items',
-      'count',
-    ]);
-    const items = Array.isArray(rec.items) ? rec.items : [];
-    const item = objectRecord(items[0]);
-    const resolvedRunId = asNonEmptyString(item.route_run_id) ?? asNonEmptyString(rec.route_run_id) ?? runId;
-    const assignmentStatus =
-      asNonEmptyString(item.assignment_status) ??
-      asNonEmptyString(rec.assignment_status) ??
-      asNonEmptyString(rec.status) ??
-      responseStatus;
-    const assignmentId =
-      asNonEmptyString(item.route_run_assignment_id) ??
-      asNonEmptyString(rec.route_run_assignment_id) ??
-      asNonEmptyString(rec.assignment_id);
-    await requireLiveRouteRunAssignmentReadback(
-      'ui_execute_route_run_assignment_response_v1',
-      resolvedRunId,
-      { ...rec, ...item, route_run_assignment_id: assignmentId },
-    );
-    const assignment = assignmentId
-      ? await requireLiveResourceReadback(
-          'route_run_assignments',
-          assignmentId,
-          'ui_execute_route_run_assignment_response_v1',
-        )
-      : (await requireLiveResourceListReadback(
-          'route_run_assignments',
-          { route_run_id: resolvedRunId },
-          'ui_execute_route_run_assignment_response_v1',
-        ))[0];
-    if (assignment && asNonEmptyString(assignment.assignment_status) !== assignmentStatus) {
-      throw new Error('ui_execute_route_run_assignment_response_v1 backend readback assignment_status mismatch');
-    }
-    return {
-      ...rec,
-      ...item,
-      ok: true,
-      run_id: resolvedRunId,
-      route_run_id: resolvedRunId,
-      route_run_assignment_id: assignmentId ?? undefined,
-      assignment_status: assignmentStatus,
-      assignment_version: Number(item.assignment_version ?? rec.assignment_version) || undefined,
-      responded_by_user_id: asNonEmptyString(item.responded_by_user_id) ?? null,
-      acknowledged_at: asNonEmptyString(item.acknowledged_at) ?? null,
-      accepted_at: asNonEmptyString(item.accepted_at) ?? null,
-      refused_at: asNonEmptyString(item.refused_at) ?? null,
-      refusal_reason: asNonEmptyString(item.refusal_reason) ?? null,
-      response_notes: asNonEmptyString(item.response_notes) ?? null,
-      created: typeof item.created === 'boolean' ? item.created : undefined,
-    };
-  }
-
-  await sleep(80);
-  return {
-    ok: true,
-    run_id: runId,
-    route_run_id: runId,
-    assignment_status: responseStatus,
-  };
+  const { ui_execute_route_run_assignment_response_v1 } = await import('./data-source/dispatch');
+  return ui_execute_route_run_assignment_response_v1(runId, actionKey, params);
 }
 
 export interface RouteStopReassignTarget {
@@ -10998,429 +8092,39 @@ export async function ui_execute_route_stop_reassign_v1(
   stopIds: string[],
   target: RouteStopReassignTarget | unknown,
 ): Promise<{ ok: true; count: number; target: RouteStopReassignTarget | unknown; assignment_status: string }> {
-  const live = await liveRpc<Record<string, unknown>>('ui_execute_route_stop_reassign_v1', {
-    p_action_key: 'route_stops.reassign',
-    p_resource_key: 'route_stops',
-    p_selection_ids: stopIds,
-    p_selection_id: stopIds.length === 1 ? stopIds[0] : null,
-    p_selection_count: stopIds.length,
-    p_params: target && typeof target === 'object' ? target as Record<string, unknown> : { target },
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'ui_execute_route_stop_reassign_v1', [
-      'route_stop_reassignment_event_id',
-      'route_run_assignment_id',
-      'assignment_id',
-      'count',
-      'success_count',
-      'affected_count',
-      'status',
-    ]);
-    const count = requireLiveNumberField(
-      rec,
-      ['count', 'success_count', 'affected_count'],
-      'Route stop reassignment did not return affected count',
-    );
-    const targetRecord = target && typeof target === 'object' ? target as Record<string, unknown> : {};
-    const targetRouteRunId = asNonEmptyString(targetRecord.target_route_run_id);
-    for (const stopId of stopIds) {
-      const stop = await requireLiveResourceReadback('route_stops', stopId, 'ui_execute_route_stop_reassign_v1');
-      if (targetRouteRunId && asNonEmptyString(stop.route_run_id) !== targetRouteRunId) {
-        throw new Error('ui_execute_route_stop_reassign_v1 backend readback route_stop target route_run_id did not match');
-      }
-    }
-    const assignmentId = asNonEmptyString(rec.route_run_assignment_id) ?? asNonEmptyString(rec.assignment_id);
-    if (assignmentId) {
-      await requireLiveResourceReadback('route_run_assignments', assignmentId, 'ui_execute_route_stop_reassign_v1');
-    } else if (targetRouteRunId) {
-      await requireLiveResourceListReadback(
-        'route_run_assignments',
-        { route_run_id: targetRouteRunId },
-        'ui_execute_route_stop_reassign_v1',
-      );
-    }
-    const eventId =
-      asNonEmptyString(rec.route_stop_reassignment_event_id) ??
-      asNonEmptyString(rec.reassignment_event_id) ??
-      asNonEmptyString(rec.event_id);
-    if (eventId) {
-      await requireLiveResourceReadback('route_stop_reassignment_events', eventId, 'ui_execute_route_stop_reassign_v1');
-    } else {
-      for (const stopId of stopIds) {
-        await requireLiveResourceListReadback(
-          'route_stop_reassignment_events',
-          { route_stop_id: stopId },
-          'ui_execute_route_stop_reassign_v1',
-        );
-      }
-    }
-    return {
-      ...rec,
-      ok: true,
-      count,
-      target,
-      assignment_status: String(rec.assignment_status ?? rec.status),
-    } as { ok: true; count: number; target: RouteStopReassignTarget | unknown; assignment_status: string };
-  }
-
-  await sleep(80);
-  return { ok: true, count: stopIds.length, target, assignment_status: 'reassigned' };
+  const { ui_execute_route_stop_reassign_v1 } = await import('./data-source/dispatch');
+  return ui_execute_route_stop_reassign_v1(stopIds, target);
 }
 export async function ui_confirm_route_run_departure_v1(
   runId: string,
 ): Promise<{ ok: true; departure_confirmed_at: string; run_id: string }> {
-  const live = await liveRpc<Record<string, unknown>>('ui_confirm_route_run_departure_v1', {
-    p_input: { route_run_id: runId },
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(
-      live.data,
-      'Departure confirmation returned no backend outcome',
-    );
-    const outcomeError = backendOutcomeError(rec, 'Departure confirmation was rejected by the backend');
-    if (outcomeError) throw outcomeError;
-    if (String(rec.status ?? '').trim().toLowerCase() === 'route_departure_blocked') {
-      const rawError = objectRecord(rec.error);
-      const message =
-        asNonEmptyString(rawError.message) ??
-        asNonEmptyString(rec.message) ??
-        asNonEmptyString(rawError.code) ??
-        'Departure confirmation was blocked by scan-out reconciliation';
-      throw new Error(message);
-    }
-    const routeRunId = String(rec.route_run_id ?? rec.run_id ?? runId);
-    const routeRun = await requireLiveResourceReadback('route_runs', routeRunId, 'ui_confirm_route_run_departure_v1');
-    const metadata = objectRecord(routeRun.metadata);
-    const rpcDeparture = objectRecord(rec.route_departure);
-    const routeRunDeparture = objectRecord(routeRun.route_departure);
-    const metadataRouteDeparture = objectRecord(metadata.route_departure);
-    const readbackConfirmedAt =
-      asNonEmptyString(routeRunDeparture.confirmed_at) ??
-      asNonEmptyString(metadataRouteDeparture.confirmed_at);
-    if (!readbackConfirmedAt) {
-      throw new Error('ui_confirm_route_run_departure_v1 backend readback missing route_runs departure confirmation');
-    }
-    const confirmedAt =
-      asNonEmptyString(rpcDeparture.confirmed_at) ??
-      asNonEmptyString(rec.departure_confirmed_at) ??
-      asNonEmptyString(rec.confirmed_at) ??
-      readbackConfirmedAt;
-    return {
-      ...rec,
-      ok: true,
-      departure_confirmed_at: confirmedAt,
-      run_id: routeRunId,
-    } as { ok: true; departure_confirmed_at: string; run_id: string };
-  }
-
-  await sleep(120);
-  return { ok: true, departure_confirmed_at: new Date().toISOString(), run_id: runId };
+  const { ui_confirm_route_run_departure_v1 } = await import('./data-source/dispatch');
+  return ui_confirm_route_run_departure_v1(runId);
 }
 export async function route_run_scan_out_reconciliation_v1(
   runId: string,
 ): Promise<{ ok: true; expected: number; scanned: number; discrepancies: string[]; run_id: string }> {
-  const live = await liveRpc<Record<string, unknown>>('route_run_scan_out_reconciliation_v1', {
-    p_route_run_id: runId,
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(
-      live.data,
-      'Scan-out reconciliation returned no backend outcome',
-    );
-    const outcomeError = backendOutcomeError(rec, 'Scan-out reconciliation was rejected by the backend');
-    if (outcomeError) throw outcomeError;
-    const expected = requireLiveNumberField(
-      rec,
-      ['expected', 'expected_count', 'expected_stop_count', 'expected_shipment_count'],
-      'Scan-out reconciliation did not return an expected count',
-    );
-    const scanned = requireLiveNumberField(
-      rec,
-      ['scanned', 'scanned_count', 'scanned_stop_count', 'scanned_shipment_count'],
-      'Scan-out reconciliation did not return a scanned count',
-    );
-    const rawDiscrepancies = Array.isArray(rec.discrepancies) ? rec.discrepancies.map(String) : [];
-    const missingCount = Number(rec.missing_stop_count ?? rec.missing_shipment_count ?? 0);
-    const unexpectedCount = Number(rec.unexpected_scan_count ?? 0);
-    const duplicateCount = Number(rec.duplicate_scan_count ?? 0);
-    const synthesizedDiscrepancies = [
-      ...rawDiscrepancies,
-      ...(missingCount > 0 ? [`Missing ${missingCount} route load scan${missingCount === 1 ? '' : 's'}`] : []),
-      ...(unexpectedCount > 0 ? [`Unexpected ${unexpectedCount} route load scan${unexpectedCount === 1 ? '' : 's'}`] : []),
-      ...(duplicateCount > 0 ? [`Duplicate ${duplicateCount} route load scan${duplicateCount === 1 ? '' : 's'}`] : []),
-    ];
-    if (rec.ready_for_departure === false && synthesizedDiscrepancies.length === 0) {
-      synthesizedDiscrepancies.push('Route load scan-out is not ready for departure');
-    }
-    const routeRunId = String(rec.route_run_id ?? rec.run_id ?? runId);
-    await requireLiveResourceReadback('route_runs', routeRunId, 'route_run_scan_out_reconciliation_v1');
-    if (expected > 0) {
-      await requireLiveResourceListReadback(
-        'route_stops',
-        { route_run_id: routeRunId },
-        'route_run_scan_out_reconciliation_v1',
-      );
-    }
-    return {
-      ...rec,
-      ok: true,
-      expected,
-      scanned,
-      discrepancies: synthesizedDiscrepancies,
-      run_id: routeRunId,
-    } as { ok: true; expected: number; scanned: number; discrepancies: string[]; run_id: string };
-  }
-
-  await sleep(80);
-  return { ok: true, expected: 22, scanned: 22, discrepancies: [], run_id: runId };
-}
-
-// ----------- Pickups -----------
-function pickupFilter(filter?: unknown): Record<string, unknown> {
-  const rec = objectRecord(filter);
-  const nested = objectRecord(rec.filter ?? rec.filters ?? rec);
-  if (rec.filter == null && rec.filters == null) return nested;
-  return {
-    ...nested,
-    limit: rec.limit ?? nested.limit,
-    page_size: rec.page_size ?? nested.page_size,
-    pageSize: rec.pageSize ?? nested.pageSize,
-    page: rec.page ?? nested.page,
-    offset: rec.offset ?? nested.offset,
-    p_offset: rec.p_offset ?? nested.p_offset,
-  };
-}
-
-function pickupLimit(filter: Record<string, unknown>): number {
-  const raw = filter.limit ?? filter.page_size ?? filter.pageSize;
-  const n = typeof raw === 'number' ? raw : Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), 100) : 100;
-}
-
-function pickupOffset(filter: Record<string, unknown>, limit: number): number {
-  const raw = filter.offset ?? filter.p_offset;
-  const n = typeof raw === 'number' ? raw : Number(raw);
-  if (Number.isFinite(n) && n > 0) return Math.floor(n);
-  const rawPage = filter.page;
-  const page = typeof rawPage === 'number' ? rawPage : Number(rawPage);
-  return Number.isFinite(page) && page > 0 ? Math.floor(page) * limit : 0;
-}
-
-function pickupHasExplicitPagination(filter: Record<string, unknown>): boolean {
-  return (
-    filter.limit != null ||
-    filter.page_size != null ||
-    filter.pageSize != null ||
-    filter.page != null ||
-    filter.offset != null ||
-    filter.p_offset != null
-  );
-}
-
-function pickupUuidArray(value: unknown): string[] | null {
-  if (!Array.isArray(value)) return null;
-  const values = value.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean);
-  return values.length ? values : null;
-}
-
-function normalizePickupRows(data: unknown, idKey: string): Record<string, unknown>[] {
-  const rows = Array.isArray(data)
-    ? data
-    : Array.isArray(objectRecord(data).rows)
-      ? objectRecord(data).rows as unknown[]
-      : [];
-  return rows.map((row) => {
-    const rec = objectRecord(row);
-    const id = rec.id ?? rec[idKey];
-    return id == null ? rec : { id: String(id), ...rec };
-  });
-}
-
-async function requireLivePickupWaveReadback(
-  routeRunId: string,
-  rpcName: string,
-  expectedDriverUserId?: string | null,
-): Promise<Record<string, unknown>> {
-  const live = await liveRpc<Record<string, unknown>[] | { rows?: Record<string, unknown>[] }>(
-    'pickup_waves_list_v1',
-    {
-      p_route_run_ids: [routeRunId],
-      p_status: null,
-      p_limit: 1,
-      p_offset: 0,
-    },
-  );
-  if (!live) throw new Error(`${rpcName} pickup-wave readback requires a live backend`);
-  const row = normalizePickupRows(live.data, 'route_run_id')
-    .find((candidate) => {
-      const id =
-        asNonEmptyString(candidate.route_run_id) ??
-        asNonEmptyString(candidate.id);
-      return id === routeRunId;
-    });
-  if (!row) {
-    throw new Error(`${rpcName} backend readback missing pickup wave:${routeRunId}`);
-  }
-  if (expectedDriverUserId) {
-    const readbackDriverUserId = asNonEmptyString(row.driver_user_id);
-    if (readbackDriverUserId !== expectedDriverUserId) {
-      throw new Error(`${rpcName} backend readback did not persist pickup driver assignment`);
-    }
-    const assignments = await requireLiveResourceListReadback(
-      'route_run_assignments',
-      { route_run_id: routeRunId },
-      rpcName,
-    );
-    const activeAssignment = assignments.find((assignment) =>
-      !['cancelled', 'canceled', 'completed'].includes(String(assignment.assignment_status ?? '').toLowerCase()),
-    );
-    if (asNonEmptyString(activeAssignment?.driver_user_id) !== expectedDriverUserId) {
-      throw new Error(`${rpcName} backend readback did not persist Dispatch route assignment`);
-    }
-    await requireLiveResourceListReadback('route_run_assignment_events', { route_run_id: routeRunId }, rpcName);
-    const stops = await requireLiveResourceListReadback('route_stops', { route_run_id: routeRunId }, rpcName);
-    for (const stop of stops) {
-      const stopId = asNonEmptyString(stop.id);
-      if (!stopId) continue;
-      const tasks = await requireLiveResourceListReadback(
-        'tasks',
-        {
-          task_type_key: 'route_stop_execute',
-          resource_type: 'route_stop',
-          resource_id: stopId,
-        },
-        rpcName,
-      );
-      if (!tasks.some((task) =>
-        asNonEmptyString(task.task_type_key ?? task.task_type) === 'route_stop_execute'
-        && asNonEmptyString(task.assigned_to) === expectedDriverUserId,
-      )) {
-        throw new Error(`${rpcName} backend readback did not assign Dispatch route-stop task ${stopId}`);
-      }
-    }
-  }
-  return row;
-}
-
-async function livePickupRows(
-  rpcName: string,
-  args: Record<string, unknown>,
-  idKey: string,
-  params: Record<string, unknown>,
-): Promise<Record<string, unknown>[] | null> {
-  const limit = pickupLimit(params);
-  const firstOffset = pickupOffset(params, limit);
-  const explicitPagination = pickupHasExplicitPagination(params);
-  const rows: Record<string, unknown>[] = [];
-
-  for (let offset = firstOffset; ; offset += limit) {
-    const live = await liveRpc<Record<string, unknown>[] | { rows?: Record<string, unknown>[] }>(
-      rpcName,
-      {
-        ...args,
-        p_limit: limit,
-        p_offset: offset,
-      },
-    );
-    if (!live) return null;
-    const pageRows = normalizePickupRows(live.data, idKey);
-    rows.push(...pageRows);
-    if (explicitPagination || pageRows.length < limit || pageRows.length === 0) break;
-  }
-
-  return rows;
+  const { route_run_scan_out_reconciliation_v1 } = await import('./data-source/dispatch');
+  return route_run_scan_out_reconciliation_v1(runId);
 }
 
 export async function pickup_requests_list_v1(
   filter?: unknown,
 ): Promise<{ rows: Record<string, unknown>[]; total: number }> {
-  const params = pickupFilter(filter);
-  const rows = await livePickupRows(
-    'pickup_requests_list_v1',
-    {
-      p_client_id: asNonEmptyString(params.client_id) ?? null,
-      p_sender_id: asNonEmptyString(params.sender_id) ?? null,
-      p_status: asNonEmptyString(params.status) ?? null,
-    },
-    'shipment_id',
-    params,
-  );
-  if (rows) {
-    return { rows, total: rows.length };
-  }
-
-  await sleep(40);
-  return { rows: pickupRequestsSeed(), total: 14 };
+  const { pickup_requests_list_v1 } = await import('./data-source/dispatch');
+  return pickup_requests_list_v1(filter);
 }
 export async function pickup_waves_list_v1(
   filter?: unknown,
 ): Promise<{ rows: Record<string, unknown>[]; total: number }> {
-  const params = pickupFilter(filter);
-  const rows = await livePickupRows(
-    'pickup_waves_list_v1',
-    {
-      p_route_run_ids: pickupUuidArray(params.route_run_ids ?? params.routeRunIds ?? params.ids),
-      p_status: asNonEmptyString(params.status) ?? null,
-    },
-    'route_run_id',
-    params,
-  );
-  if (rows) {
-    return { rows, total: rows.length };
-  }
-
-  await sleep(40);
-  return { rows: pickupWavesSeed(), total: 6 };
+  const { pickup_waves_list_v1 } = await import('./data-source/dispatch');
+  return pickup_waves_list_v1(filter);
 }
 export async function pickup_failures_list_v1(
   filter?: unknown,
 ): Promise<{ rows: Record<string, unknown>[]; total: number }> {
-  const params = pickupFilter(filter);
-  const rows = await livePickupRows(
-    'pickup_failures_list_v1',
-    {
-      p_shipment_ids: pickupUuidArray(params.shipment_ids ?? params.shipmentIds ?? params.ids),
-      p_client_id: asNonEmptyString(params.client_id) ?? null,
-      p_sender_id: asNonEmptyString(params.sender_id) ?? null,
-      p_status: asNonEmptyString(params.status) ?? null,
-    },
-    'shipment_id',
-    params,
-  );
-  if (rows) {
-    return { rows, total: rows.length };
-  }
-
-  await sleep(40);
-  return { rows: pickupFailuresSeed(), total: 3 };
-}
-
-async function requireLivePickupRequestReadback(
-  shipmentId: string,
-  rpcName: string,
-): Promise<Record<string, unknown>> {
-  const live = await liveRpc<Record<string, unknown>[] | { rows?: Record<string, unknown>[] }>(
-    'pickup_requests_list_v1',
-    {
-      p_client_id: null,
-      p_sender_id: null,
-      p_status: null,
-      p_limit: 100,
-      p_offset: 0,
-    },
-  );
-  if (!live) throw new Error(`${rpcName} pickup-request readback requires a live backend`);
-  const row = normalizePickupRows(live.data, 'shipment_id')
-    .find((candidate) => {
-      const id =
-        asNonEmptyString(candidate.shipment_id) ??
-        asNonEmptyString(candidate.id);
-      return id === shipmentId;
-    });
-  if (!row) {
-    throw new Error(`${rpcName} backend readback missing pickup request:${shipmentId}`);
-  }
-  return row;
+  const { pickup_failures_list_v1 } = await import('./data-source/dispatch');
+  return pickup_failures_list_v1(filter);
 }
 
 export async function create_pickup_request_v1(payload: unknown): Promise<{
@@ -11431,97 +8135,20 @@ export async function create_pickup_request_v1(payload: unknown): Promise<{
   operation?: string;
   [key: string]: unknown;
 }> {
-  const live = await liveRpc<Record<string, unknown>>('create_pickup_request_v1', {
-    p_input: objectRecord(payload),
-  });
-  if (live) {
-    const rec = (live.data ?? {}) as Record<string, unknown>;
-    if (rec.ok === false) {
-      const error = objectRecord(rec.error);
-      throw new Error(String(error.message ?? error.code ?? 'create_pickup_request_v1 failed'));
-    }
-    const shipmentId = asNonEmptyString(rec.shipment_id);
-    if (!shipmentId) throw new Error('create_pickup_request_v1 response missing shipment_id');
-    await requireLivePickupRequestReadback(shipmentId, 'create_pickup_request_v1');
-    return {
-      ok: true,
-      shipment_id: shipmentId,
-      ...rec,
-    };
-  }
-
-  await sleep(120);
-  return {
-    ok: true,
-    shipment_id: 'shp_pickup_' + Date.now(),
-    tracking_number: 'PICKUP-SEED-' + Date.now(),
-    created: true,
-    operation: 'created',
-  };
+  const { create_pickup_request_v1 } = await import('./data-source/dispatch');
+  return create_pickup_request_v1(payload);
 }
 
 export async function create_pickup_wave_v1(payload: unknown): Promise<{ ok: true; wave_id: string }> {
-  const live = await liveRpc<Record<string, unknown>>('create_pickup_wave_v1', {
-    p_input: objectRecord(payload),
-  });
-  if (live) {
-    const rec = (live.data ?? {}) as Record<string, unknown>;
-    if (rec.ok === false) {
-      const error = objectRecord(rec.error);
-      throw new Error(String(error.message ?? error.code ?? 'create_pickup_wave_v1 failed'));
-    }
-    const waveId = asNonEmptyString(rec.wave_id ?? rec.route_run_id);
-    if (!waveId) throw new Error('create_pickup_wave_v1 response missing route_run_id');
-    await requireLivePickupWaveReadback(waveId, 'create_pickup_wave_v1');
-    return {
-      ok: true,
-      wave_id: waveId,
-      ...rec,
-    } as { ok: true; wave_id: string };
-  }
-
-  await sleep(120);
-  return { ok: true, wave_id: 'pwv_' + Date.now() };
+  const { create_pickup_wave_v1 } = await import('./data-source/dispatch');
+  return create_pickup_wave_v1(payload);
 }
 export async function assign_pickup_wave_v1(
   waveId: string,
   target: unknown,
 ): Promise<{ ok: true; wave_id: string; target: unknown }> {
-  const targetRecord = objectRecord(target);
-  const routeRunId = asNonEmptyString(targetRecord.route_run_id) ?? waveId;
-  const driverTargetId = asNonEmptyString(targetRecord.driver_user_id) ?? 'partner';
-  const inputRecord: Record<string, unknown> = {
-    ...targetRecord,
-    route_run_id: routeRunId,
-    idempotency_key: asNonEmptyString(targetRecord.idempotency_key)
-      ?? `console-v2:assign_pickup_wave_v1:${routeRunId}:${driverTargetId}`,
-  };
-  const live = await liveRpc<Record<string, unknown>>('assign_pickup_wave_v1', {
-    p_input: inputRecord,
-  });
-  if (live) {
-    const rec = (live.data ?? {}) as Record<string, unknown>;
-    if (rec.ok === false) {
-      const error = objectRecord(rec.error);
-      throw new Error(String(error.message ?? error.code ?? 'assign_pickup_wave_v1 failed'));
-    }
-    const waveIdOut = asNonEmptyString(rec.wave_id ?? rec.route_run_id ?? waveId);
-    if (!waveIdOut) throw new Error('assign_pickup_wave_v1 response missing route_run_id');
-    await requireLivePickupWaveReadback(
-      waveIdOut,
-      'assign_pickup_wave_v1',
-      asNonEmptyString(inputRecord.driver_user_id),
-    );
-    return {
-      ok: true,
-      wave_id: waveIdOut,
-      target,
-      ...rec,
-    } as { ok: true; wave_id: string; target: unknown };
-  }
-
-  await sleep(80);
-  return { ok: true, wave_id: waveId, target };
+  const { assign_pickup_wave_v1 } = await import('./data-source/dispatch');
+  return assign_pickup_wave_v1(waveId, target);
 }
 
 // ----------- NDR / Exceptions -----------
@@ -11553,54 +8180,7 @@ export interface DispatchExceptionResolutionOpts {
   canonical?: Partial<DispatchExceptionResolutionCanonicalArgs>;
 }
 
-function dispatchResolutionString(resolution: unknown): string {
-  if (typeof resolution === 'string' && resolution.trim()) return resolution.trim();
-  const rec = objectRecord(resolution);
-  return (
-    asNonEmptyString(rec.resolution_action) ??
-    asNonEmptyString(rec.ndr_action) ??
-    asNonEmptyString(rec.resolution) ??
-    'reschedule'
-  );
-}
-
-function materializeDispatchResolutionArgs(
-  taskId: string,
-  resolution: unknown,
-  opts: DispatchExceptionResolutionOpts,
-): { dryRun: boolean; resolutionStr: string; canonical: DispatchExceptionResolutionCanonicalArgs } {
-  const dryRun = !!opts.dryRun;
-  const resolutionStr = dispatchResolutionString(resolution);
-  const resolutionRec = objectRecord(resolution);
-  const params = {
-    ...objectRecord(opts.canonical?.params),
-  };
-  if (!asNonEmptyString(params.resolution_action ?? params.ndr_action)) {
-    params.resolution_action = resolutionStr;
-  }
-  const notes = asNonEmptyString(resolutionRec.resolution_notes ?? resolutionRec.notes);
-  if (notes && !asNonEmptyString(params.resolution_notes)) {
-    params.resolution_notes = notes;
-  }
-  if (dryRun && params.dry_run === undefined) {
-    params.dry_run = true;
-  }
-
-  return {
-    dryRun,
-    resolutionStr,
-    canonical: {
-      action_key: opts.canonical?.action_key ?? 'dispatch_exception_review.complete',
-      resource_key: opts.canonical?.resource_key ?? 'dispatch_exception_review',
-      selection_ids: opts.canonical?.selection_ids ?? [taskId],
-      selection_id: opts.canonical?.selection_id ?? taskId,
-      selection_count: opts.canonical?.selection_count ?? 1,
-      params,
-    },
-  };
-}
-
-function normalizeDispatchResolutionLiveResult(
+export function normalizeDispatchResolutionLiveResult(
   data: unknown,
   taskId: string,
   resolution: unknown,
@@ -11673,171 +8253,9 @@ function normalizeDispatchResolutionLiveResult(
   };
 }
 
-type DispatchExceptionResolutionResult = ReturnType<typeof normalizeDispatchResolutionLiveResult>;
+export type DispatchExceptionResolutionResult = ReturnType<typeof normalizeDispatchResolutionLiveResult>;
 
-async function requireLiveDispatchExceptionResolutionReadback(
-  result: DispatchExceptionResolutionResult,
-  canonical: DispatchExceptionResolutionCanonicalArgs,
-): Promise<void> {
-  const resultRows = result.results.map((row) => objectRecord(row));
-  const taskIds = new Set<string>();
-  const taskEventIds = new Set<string>();
-  const workflowRunIds = new Set<string>();
-  const shipmentActionIds = new Set<string>();
-
-  for (const id of [result.task_id, canonical.selection_id, ...canonical.selection_ids]) {
-    const normalized = asNonEmptyString(id);
-    if (normalized) taskIds.add(normalized);
-  }
-
-  for (const row of resultRows) {
-    for (const key of ['task_id', 'id', 'downstream_task_id', 'manual_review_task_id', 'resolution_task_id']) {
-      const normalized = asNonEmptyString(row[key]);
-      if (normalized) taskIds.add(normalized);
-    }
-    for (const key of ['task_event_id', 'downstream_task_event_id', 'resolution_task_event_id']) {
-      const normalized = asNonEmptyString(row[key]);
-      if (normalized) taskEventIds.add(normalized);
-    }
-    for (const key of ['workflow_run_id', 'resolution_workflow_run_id']) {
-      const normalized = asNonEmptyString(row[key]);
-      if (normalized) workflowRunIds.add(normalized);
-    }
-    for (const key of ['shipment_action_id', 'resolution_direct_shipment_action_id']) {
-      const normalized = asNonEmptyString(row[key]);
-      if (normalized) shipmentActionIds.add(normalized);
-    }
-  }
-
-  if (taskIds.size === 0) {
-    throw new Error('ui_execute_dispatch_exception_resolution_v1 did not return task readback evidence');
-  }
-
-  await Promise.all([...taskIds].map((taskId) =>
-    requireLiveResourceReadback('tasks', taskId, 'ui_execute_dispatch_exception_resolution_v1'),
-  ));
-  await Promise.all([...taskEventIds].map((taskEventId) =>
-    requireLiveResourceReadback('task_events', taskEventId, 'ui_execute_dispatch_exception_resolution_v1'),
-  ));
-  await Promise.all([...workflowRunIds].flatMap((workflowRunId) => [
-    requireLiveResourceReadback('workflow_runs', workflowRunId, 'ui_execute_dispatch_exception_resolution_v1'),
-    requireLiveResourceListReadback(
-      'workflow_run_steps',
-      { workflow_run_id: workflowRunId },
-      'ui_execute_dispatch_exception_resolution_v1',
-    ),
-  ]));
-  await Promise.all([...shipmentActionIds].map((shipmentActionId) =>
-    requireLiveResourceReadback('shipment_actions', shipmentActionId, 'ui_execute_dispatch_exception_resolution_v1'),
-  ));
-}
-
-function normalizeScanEventPayload(payload: Record<string, unknown>): Record<string, unknown> {
-  const rec = objectRecord(payload);
-  const scanType = asNonEmptyString(rec.scan_type) ?? 'scan';
-  const metadataIn = objectRecord(rec.metadata);
-  const barcode =
-    asNonEmptyString(rec.barcode) ??
-    asNonEmptyString(rec.tracking_number) ??
-    asNonEmptyString(rec.trackingNumber) ??
-    asNonEmptyString(rec.handling_unit_code) ??
-    asNonEmptyString(rec.warehouse_transfer_code) ??
-    asNonEmptyString(rec.shipment_id);
-  const link =
-    asNonEmptyString(rec.route_stop_id) ??
-    asNonEmptyString(rec.warehouse_transfer_id) ??
-    asNonEmptyString(rec.shipment_id) ??
-    asNonEmptyString(rec.handling_unit_id);
-  return {
-    ...rec,
-    scan_type: scanType,
-    ...(barcode ? { barcode } : {}),
-    metadata: {
-      ...metadataIn,
-      ...(rec.tracking_number && !metadataIn.tracking_number ? { tracking_number: rec.tracking_number } : {}),
-    },
-    idempotency_key:
-      asNonEmptyString(rec.idempotency_key) ??
-      ['console-v2', scanType, barcode ?? 'unbound', link ?? ''].filter(Boolean).join(':'),
-  };
-}
-
-const CONSOLE_DISPATCH_SCAN_DEVICE_STORAGE_KEY = 'nzxmhryhtqlzoshjkyozkpup.example.invalidnsoleV2.dispatchScanDeviceSeed';
-
-function dispatchScanNeedsConsoleDevice(input: Record<string, unknown>): boolean {
-  if (asNonEmptyString(input.device_id)) return false;
-  const metadata = objectRecord(input.metadata);
-  return (
-    String(input.scan_type ?? '').trim().toLowerCase() === 'load' &&
-    asNonEmptyString(metadata.source) === 'console_v2_dispatch'
-  );
-}
-
-function readOrCreateDispatchScanDeviceSeed(): string {
-  const existing = (() => {
-    try {
-      return globalThis.localStorage?.getItem(CONSOLE_DISPATCH_SCAN_DEVICE_STORAGE_KEY) ?? '';
-    } catch {
-      return '';
-    }
-  })();
-  if (existing.trim()) return existing.trim();
-
-  const generated =
-    typeof globalThis.crypto?.randomUUID === 'function'
-      ? globalThis.crypto.randomUUID()
-      : `console-dispatch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  try {
-    globalThis.localStorage?.setItem(CONSOLE_DISPATCH_SCAN_DEVICE_STORAGE_KEY, generated);
-  } catch {
-    // Non-browser test runtimes can still register a per-call device identifier.
-  }
-  return generated;
-}
-
-async function sha256Hex(input: string): Promise<string> {
-  const subtle = globalThis.crypto?.subtle;
-  if (!subtle || typeof globalThis.TextEncoder !== 'function') return input;
-  const bytes = new TextEncoder().encode(input);
-  const hash = await subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(hash))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-async function attachConsoleDispatchScanDevice(
-  input: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  if (!dispatchScanNeedsConsoleDevice(input)) return input;
-
-  const origin = (() => {
-    try {
-      return globalThis.location?.origin ?? 'console-v2';
-    } catch {
-      return 'console-v2';
-    }
-  })();
-  const identifier = await sha256Hex(`${origin}:${readOrCreateDispatchScanDeviceSeed()}`);
-  const live = await liveRpc<Record<string, unknown> | Record<string, unknown>[]>('register_user_device_v1', {
-    p_device: {
-      device_platform: 'web',
-      device_identifier_sha256: identifier,
-      device_label: 'Console V2 Dispatch scanner',
-      metadata: {
-        source: 'console_v2_dispatch',
-        surface: 'dispatch_scan_out',
-      },
-    },
-  });
-  if (!live) return input;
-
-  const row = firstRpcRow<Record<string, unknown>>(live.data) ?? {};
-  const deviceId = asNonEmptyString(row.device_id);
-  if (!deviceId) {
-    throw new Error('register_user_device_v1 did not return device_id for Dispatch scan');
-  }
-  return { ...input, device_id: deviceId };
-}
+export const CONSOLE_DISPATCH_SCAN_DEVICE_STORAGE_KEY = 'nzxmhryhtqlzoshjkyozkpup.example.invalidnsoleV2.dispatchScanDeviceSeed';
 
 export async function ui_execute_dispatch_exception_resolution_v1(
   taskId: string,
@@ -11855,39 +8273,8 @@ export async function ui_execute_dispatch_exception_resolution_v1(
   apply_status: 'preview' | 'completed' | 'scheduled' | 'pending_review' | 'blocked' | 'mixed';
   results: Array<{ task_id: string; outcome: string; [k: string]: unknown }>;
 }> {
-  const { dryRun, canonical } = materializeDispatchResolutionArgs(taskId, resolution, opts);
-  const live = await liveRpc<Record<string, unknown>>(
-    dryRun ? 'preview_dispatch_exception_resolution_v1' : 'ui_execute_dispatch_exception_resolution_v1',
-    {
-      p_action_key: canonical.action_key,
-      p_resource_key: canonical.resource_key,
-      p_selection_ids: canonical.selection_ids,
-      p_selection_id: canonical.selection_id,
-      p_selection_count: canonical.selection_count,
-      p_params: canonical.params,
-    },
-  );
-  if (live) {
-    const result = normalizeDispatchResolutionLiveResult(live.data, taskId, resolution, dryRun, canonical);
-    if (!dryRun) {
-      await requireLiveDispatchExceptionResolutionReadback(result, canonical);
-    }
-    return result;
-  }
-
-  await sleep(120);
-  return {
-    ok: true,
-    task_id: taskId,
-    resolution,
-    dry_run: dryRun,
-    canonical_entrypoint: 'public.ui_execute_dispatch_exception_resolution_v1',
-    canonical_args: canonical,
-    policy: 'ndr_policy',
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-    apply_status: dryRun ? 'preview' : 'completed',
-    results: [{ task_id: taskId, outcome: 'ok' }],
-  };
+  const { ui_execute_dispatch_exception_resolution_v1 } = await import('./data-source/dispatch');
+  return ui_execute_dispatch_exception_resolution_v1(taskId, resolution, opts);
 }
 
 // ----------- Returned to branch -----------
@@ -11901,121 +8288,15 @@ export interface WarehouseScanCorrectionRequestArgs {
 export async function ui_request_warehouse_scan_correction_v1(
   args: WarehouseScanCorrectionRequestArgs,
 ): Promise<Record<string, unknown>> {
-  const scanEventId = String(args.scan_event_id ?? '').trim();
-  const correctionReason = String(args.correction_reason ?? '').trim();
-  const correctedBarcode = String(args.corrected_barcode ?? '').trim();
-  if (!scanEventId) throw new Error('ui_request_warehouse_scan_correction_v1 requires scan_event_id');
-  if (!correctionReason) throw new Error('ui_request_warehouse_scan_correction_v1 requires correction_reason');
-  if (!correctedBarcode) throw new Error('ui_request_warehouse_scan_correction_v1 requires corrected_barcode');
-
-  const live = await liveRpc<Record<string, unknown> | Record<string, unknown>[]>(
-    'ui_request_warehouse_scan_correction_v1',
-    {
-      p_scan_event_id: scanEventId,
-      p_correction_reason: correctionReason,
-      p_corrected_barcode: correctedBarcode,
-      p_params: args.metadata ?? {},
-    },
-  );
-  if (live) {
-    const row = firstRpcRow<Record<string, unknown>>(live.data) ?? {};
-    const taskId = asNonEmptyString(row.task_id);
-    if (!taskId) {
-      throw new Error('ui_request_warehouse_scan_correction_v1 backend readback missing task_id');
-    }
-    await ui_get_resource_v1<Record<string, unknown>>('tasks', taskId);
-    return row;
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('ui_request_warehouse_scan_correction_v1');
-  await sleep(70);
-  const taskId = `tsk_scan_corr_${Date.now()}`;
-  const scans = seed.warehouse_checkpoint_scans as Array<Record<string, unknown>>;
-  const scan = scans.find((row) => row.id === scanEventId);
-  const tasks = seed.tasks as Array<Record<string, unknown>>;
-  tasks.push({
-    id: taskId,
-    task_id: taskId.toUpperCase(),
-    task_type: 'warehouse_scan_supervisor_approval',
-    task_type_key: 'warehouse_scan_supervisor_approval',
-    subject: `Scan correction · ${String(scan?.barcode ?? scan?.checkpoint ?? scanEventId)}`,
-    resource_type: 'scan_event',
-    resource_id: scanEventId,
-    queue: 'warehouse',
-    queue_key: 'warehouse',
-    priority: 1,
-    status: 'open',
-    metadata: {
-      subject: `Scan correction · ${String(scan?.barcode ?? scan?.checkpoint ?? scanEventId)}`,
-      source: 'console_v2.warehouse.scan_correction_request',
-      task_type_key: 'warehouse_scan_supervisor_approval',
-      scan_correction: {
-        original_scan_event_id: scanEventId,
-        warehouse_transfer_id: scan?.transfer_id ?? null,
-        corrected_barcode: correctedBarcode,
-        correction_reason: correctionReason,
-      },
-    },
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  });
-  return {
-    status: 'requested',
-    task_id: taskId,
-    scan_event_id: scanEventId,
-    warehouse_transfer_id: scan?.transfer_id ?? null,
-    corrected_barcode: correctedBarcode,
-    correction_reason: correctionReason,
-  };
+  const { ui_request_warehouse_scan_correction_v1 } = await import('./data-source/dispatch');
+  return ui_request_warehouse_scan_correction_v1(args);
 }
 
 export async function record_scan_event_v1(
   payload: Record<string, unknown>,
 ): Promise<{ ok: true; scan_event_id: string; created?: boolean }> {
-  const input = await attachConsoleDispatchScanDevice(normalizeScanEventPayload(payload));
-  const live = await liveRpc<Record<string, unknown> | Record<string, unknown>[]>(
-    'record_scan_event_v1',
-    { p_scan: input },
-  );
-  if (live) {
-    const row = firstRpcRow<Record<string, unknown>>(live.data) ?? {};
-    const liveOk = row.ok == null ? true : Boolean(row.ok);
-    if (!liveOk) {
-      throw new Error(String(row.error ?? row.message ?? 'record_scan_event_v1 failed'));
-    }
-    const scanEventId = String(row.scan_event_id ?? row.id ?? '').trim();
-    if (!scanEventId) {
-      throw new Error('record_scan_event_v1 did not return scan_event_id');
-    }
-    return {
-      ...row,
-      ok: true,
-      scan_event_id: scanEventId,
-      created: row.created == null ? true : Boolean(row.created),
-    };
-  }
-
-  await sleep(60);
-  const scanEventId = 'sce_' + Date.now();
-  if (String(input.scan_type ?? '').toLowerCase() === 'correction') {
-    const scans = seed.warehouse_checkpoint_scans as Array<Record<string, unknown>>;
-    scans.push({
-      id: scanEventId,
-      transfer_id: input.warehouse_transfer_id ?? input.transfer_id ?? null,
-      warehouse_transfer_id: input.warehouse_transfer_id ?? input.transfer_id ?? null,
-      shipment_id: input.shipment_id ?? null,
-      scan_type: 'correction',
-      barcode: input.barcode,
-      checkpoint: 'correction',
-      sequence: null,
-      occurred_at: new Date().toISOString(),
-      correction_of_scan_event_id: input.correction_of_scan_event_id ?? null,
-      correction_reason: input.correction_reason ?? null,
-      correction_approval_task_id: input.correction_approval_task_id ?? null,
-      metadata: input.metadata ?? {},
-    });
-  }
-  return { ok: true, scan_event_id: scanEventId };
+  const { record_scan_event_v1 } = await import('./data-source/dispatch');
+  return record_scan_event_v1(payload);
 }
 export const return_to_branch_shipments_v1 = {
   async list(_filter?: unknown): Promise<Record<string, unknown>[]> {
@@ -12064,43 +8345,8 @@ export interface NdrBranchNextActionArgs {
 export async function resolve_ndr_branch_next_action_v1(
   args: NdrBranchNextActionArgs = {},
 ): Promise<string> {
-  const client = getSupabaseClient();
-  if (client) {
-    // W44 cutover: use canonical (p_args jsonb) RETURNS jsonb sibling
-    // `resolve_ndr_branch_next_action_v2` (migration
-    // 202605020200_w44_rpc_v2_normalizations.sql). Envelope: { ok, action }.
-    // The exported adapter signature is unchanged.
-    const { data, error } = await client.rpc('resolve_ndr_branch_next_action_v2', {
-      p_args: {
-        organization_id: args.organization_id ?? null,
-        client_id: args.client_id ?? null,
-        sender_id: args.sender_id ?? null,
-        service_type: args.service_type ?? null,
-        dispatch_exception_reason: args.dispatch_exception_reason ?? null,
-        resolution_action: args.resolution_action ?? null,
-        task_type_key: args.task_type_key ?? null,
-        shipment_action_type: args.shipment_action_type ?? null,
-        review_status: args.review_status ?? null,
-        allowed_ndr_actions: args.allowed_ndr_actions ?? null,
-      },
-    });
-    if (error) throw new Error(error.message);
-    const envelope = (data ?? null) as { ok?: boolean; action?: string } | null;
-    return envelope?.action ?? 'hold';
-  }
-  // In-memory fallback: read ndr_policy from seed and project a
-  // recommendation. Mirrors the canonical RPC's behavior (returns 'hold' if
-  // org missing; reads ndr_policy.action_map; falls back to first
-  // allowed_ndr_actions entry; final fallback 'reschedule').
-  await sleep(40);
-  if (!args.organization_id) return 'hold';
-  const allowed = (args.allowed_ndr_actions ?? []) as string[];
-  const reason = (args.dispatch_exception_reason ?? '').toLowerCase();
-  // Heuristic mirrors the seeded `ndr_policy.action_map` shape.
-  if (reason.includes('refused') || reason.includes('damaged')) return 'customer_pickup';
-  if (reason.includes('address') || reason.includes('zone')) return 'reschedule';
-  if (allowed.length > 0) return allowed[0]!;
-  return 'reschedule';
+  const { resolve_ndr_branch_next_action_v1 } = await import('./data-source/dispatch');
+  return resolve_ndr_branch_next_action_v1(args);
 }
 
 // ----------- Phase C6 helpers -----------
@@ -12111,15 +8357,15 @@ export async function resolve_ndr_branch_next_action_v1(
 // so we share two tiny helpers that the in-memory branch uses to mirror the
 // canonical envelope exactly. Production swap is environment-only.
 let mutationCounter = 0;
-function nextCorrelationId(): string {
+export function nextCorrelationId(): string {
   mutationCounter++;
   return `cor_${Date.now().toString(36)}_${mutationCounter}`;
 }
-function nextResourceId(prefix: string): string {
+export function nextResourceId(prefix: string): string {
   mutationCounter++;
   return `${prefix}_${Date.now().toString(36)}_${mutationCounter}`;
 }
-function buildEnvelope(extras: Record<string, unknown> = {}): Record<string, unknown> {
+export function buildEnvelope(extras: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     ok: true,
     correlation_id: nextCorrelationId(),
@@ -12145,7 +8391,7 @@ function tenantSignupProvisioningSlug(requestId: string, request: Record<string,
   return normalized || requestId.replace(/[^a-z0-9]+/gi, '_').toLowerCase();
 }
 
-function buildTenantSignupReviewSeedResult(
+export function buildTenantSignupReviewSeedResult(
   requestId: string,
   decision: string,
 ): Record<string, unknown> {
@@ -12175,7 +8421,7 @@ function buildTenantSignupReviewSeedResult(
   };
 }
 
-function buildMutationFallbackEnvelope(
+export function buildMutationFallbackEnvelope(
   args: Record<string, unknown>,
   resourceKeyHint?: string,
 ): Record<string, unknown> {
@@ -12238,7 +8484,7 @@ async function phaseC6ApiRpc(
   return buildEnvelope(extras);
 }
 
-async function requireLiveUserLifecycleReadback(
+export async function requireLiveUserLifecycleReadback(
   rpcName: string,
   targetUserId: string,
 ): Promise<{
@@ -12251,7 +8497,7 @@ async function requireLiveUserLifecycleReadback(
   return { user, directory };
 }
 
-function assertLiveUserScopeReadback(
+export function assertLiveUserScopeReadback(
   rpcName: string,
   readback: { user?: Record<string, unknown> | null; directory?: Record<string, unknown> | null },
   expectedScopeType?: string | null,
@@ -12275,7 +8521,7 @@ function assertLiveUserScopeReadback(
   }
 }
 
-async function requireLiveUserDeviceRevokeReadback(
+export async function requireLiveUserDeviceRevokeReadback(
   rpcName: string,
   deviceId: string,
   revokedReason?: string | null,
@@ -12349,7 +8595,7 @@ async function requireLiveUserSessionRevocationReadback(
   return revoked;
 }
 
-async function requireLiveUserSecurityActionReadback(
+export async function requireLiveUserSecurityActionReadback(
   rpcName: string,
   targetUserId: string,
   decisionPoint: string,
@@ -12493,7 +8739,7 @@ async function requireLiveUserSecurityActionReadback(
   return match;
 }
 
-async function requireLiveUserRoleAssignmentReadback(
+export async function requireLiveUserRoleAssignmentReadback(
   rpcName: string,
   targetUserId: string,
   roleKey?: string | null,
@@ -12521,7 +8767,7 @@ async function requireLiveUserRoleAssignmentReadback(
   }
 }
 
-async function requireLiveRbacRoleReadback(
+export async function requireLiveRbacRoleReadback(
   rpcName: string,
   roleId: string,
   options: {
@@ -12576,7 +8822,7 @@ async function requireLiveRbacRoleReadback(
   return { role, summary };
 }
 
-async function requireLiveRbacAssignmentReadback(
+export async function requireLiveRbacAssignmentReadback(
   rpcName: string,
   {
     assignmentId,
@@ -12668,43 +8914,8 @@ export interface WarehouseTransferManifestCreateResult extends Record<string, un
 export async function create_warehouse_transfer_manifest_v1(
   args: Record<string, unknown>,
 ): Promise<WarehouseTransferManifestCreateResult> {
-  const live = await liveRpc<Record<string, unknown>>('create_warehouse_transfer_manifest_v1', {
-    p_input: args,
-  });
-  if (live) {
-    const envelope = firstRpcRow<Record<string, unknown>>(live.data) ?? {};
-    const transferCode = asNonEmptyString(envelope.transfer_code ?? args.transfer_code) ?? '';
-    return {
-      ...envelope,
-      ok: true,
-      warehouse_transfer_id: String(
-        envelope.warehouse_transfer_id ??
-          envelope.transfer_id ??
-          envelope.id ??
-          nextResourceId('warehouse_transfer'),
-      ),
-      transfer_code: transferCode,
-      created: envelope.created !== false,
-      item_count: Number(
-        envelope.item_count ??
-          (Array.isArray(args.shipment_ids) ? args.shipment_ids.length : 0),
-      ),
-    };
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('create_warehouse_transfer_manifest_v1');
-  await sleep(80);
-  const transferCode =
-    asNonEmptyString(args.transfer_code) ?? `WTR-${Date.now().toString(36).toUpperCase()}`;
-  return {
-    ok: true,
-    warehouse_transfer_id: nextResourceId('warehouse_transfer'),
-    transfer_code: transferCode,
-    created: true,
-    item_count: Array.isArray(args.shipment_ids) ? args.shipment_ids.length : 0,
-    correlation_id: nextCorrelationId(),
-    settings_resolution_id: 'srlv_demo',
-  };
+  const { create_warehouse_transfer_manifest_v1 } = await import('./data-source/dispatch');
+  return create_warehouse_transfer_manifest_v1(args);
 }
 export async function warehouse_transfer_execute_v1(
   payload: Record<string, unknown> = {},
@@ -12723,28 +8934,8 @@ export async function warehouse_transfer_execute_v1(
 export async function transition_warehouse_transfer_v1(
   args: { warehouse_transfer_id: string; to_status: string; [k: string]: unknown },
 ): Promise<{ ok: true; warehouse_transfer_id: string; to_status: string; [k: string]: unknown }> {
-  const live = await liveRpc<Record<string, unknown> | Record<string, unknown>[]>(
-    'transition_warehouse_transfer_v1',
-    { p_input: args },
-  );
-  if (live) {
-    const envelope = firstRpcRow<Record<string, unknown>>(live.data) ?? {};
-    return {
-      ok: true,
-      warehouse_transfer_id: String(envelope.warehouse_transfer_id ?? args.warehouse_transfer_id),
-      to_status: String(envelope.status ?? envelope.to_status ?? args.to_status),
-      updated: envelope.updated ?? false,
-      status: envelope.status ?? args.to_status,
-      dispatched_at: envelope.dispatched_at ?? null,
-      received_at: envelope.received_at ?? null,
-    };
-  }
-  await sleep(80);
-  return {
-    ok: true,
-    warehouse_transfer_id: args.warehouse_transfer_id,
-    to_status: args.to_status,
-  };
+  const { transition_warehouse_transfer_v1 } = await import('./data-source/dispatch');
+  return transition_warehouse_transfer_v1(args);
 }
 
 export interface WarehouseTransferUiActionResult extends Record<string, unknown> {
@@ -12755,57 +8946,11 @@ export interface WarehouseTransferUiActionResult extends Record<string, unknown>
   count: number;
 }
 
-function warehouseTransferUiArgs(
-  actionKey: string,
-  warehouseTransferId: string,
-  params: Record<string, unknown> = {},
-): Record<string, unknown> {
-  return {
-    p_action_key: actionKey,
-    p_resource_key: 'warehouse_transfers',
-    p_selection_ids: [warehouseTransferId],
-    p_selection_id: warehouseTransferId,
-    p_selection_count: 1,
-    p_params: params,
-  };
-}
-
-function normalizeWarehouseTransferUiResult(
-  data: unknown,
-  actionKey: string,
-  warehouseTransferId: string,
-): WarehouseTransferUiActionResult {
-  const rec = firstRpcRow<Record<string, unknown>>(data) ?? {};
-  return {
-    ...rec,
-    ok: true,
-    action_key: String(rec.action_key ?? actionKey),
-    resource_key: String(rec.resource_key ?? 'warehouse_transfers'),
-    warehouse_transfer_id: String(rec.warehouse_transfer_id ?? warehouseTransferId),
-    count: Number(rec.count ?? 1),
-  };
-}
-
 export async function ui_execute_warehouse_transfer_dispatch_v1(
   args: { warehouse_transfer_id: string; params?: Record<string, unknown> },
 ): Promise<WarehouseTransferUiActionResult> {
-  const params = args.params ?? {};
-  const actionKey = 'warehouse_transfers.dispatch';
-  const live = await liveRpc<Record<string, unknown>>(
-    'ui_execute_warehouse_transfer_dispatch_v1',
-    warehouseTransferUiArgs(actionKey, args.warehouse_transfer_id, params),
-  );
-  if (live) return normalizeWarehouseTransferUiResult(live.data, actionKey, args.warehouse_transfer_id);
-
-  await sleep(80);
-  return {
-    ok: true,
-    action_key: actionKey,
-    resource_key: 'warehouse_transfers',
-    warehouse_transfer_id: args.warehouse_transfer_id,
-    count: 1,
-    status: 'workflow_started',
-  };
+  const { ui_execute_warehouse_transfer_dispatch_v1 } = await import('./data-source/dispatch');
+  return ui_execute_warehouse_transfer_dispatch_v1(args);
 }
 
 export async function ui_execute_warehouse_transfer_checkpoint_v1(
@@ -12819,23 +8964,8 @@ export async function ui_execute_warehouse_transfer_checkpoint_v1(
     notes?: string | null;
   },
 ): Promise<WarehouseTransferUiActionResult> {
-  const { action_key, warehouse_transfer_id, ...params } = args;
-  const live = await liveRpc<Record<string, unknown>>(
-    'ui_execute_warehouse_transfer_checkpoint_v1',
-    warehouseTransferUiArgs(action_key, warehouse_transfer_id, params),
-  );
-  if (live) return normalizeWarehouseTransferUiResult(live.data, action_key, warehouse_transfer_id);
-
-  await sleep(80);
-  return {
-    ok: true,
-    action_key,
-    resource_key: 'warehouse_transfers',
-    warehouse_transfer_id,
-    count: 1,
-    scan_event_id: `sce_${Date.now()}`,
-    scan_created: true,
-  };
+  const { ui_execute_warehouse_transfer_checkpoint_v1 } = await import('./data-source/dispatch');
+  return ui_execute_warehouse_transfer_checkpoint_v1(args);
 }
 
 export async function ui_execute_warehouse_transfer_reconcile_v1(
@@ -12848,23 +8978,8 @@ export async function ui_execute_warehouse_transfer_reconcile_v1(
     reconcile_notes?: string | null;
   },
 ): Promise<WarehouseTransferUiActionResult> {
-  const { warehouse_transfer_id, ...params } = args;
-  const actionKey = 'warehouse_transfers.reconcile_destination';
-  const live = await liveRpc<Record<string, unknown>>(
-    'ui_execute_warehouse_transfer_reconcile_v1',
-    warehouseTransferUiArgs(actionKey, warehouse_transfer_id, params),
-  );
-  if (live) return normalizeWarehouseTransferUiResult(live.data, actionKey, warehouse_transfer_id);
-
-  await sleep(80);
-  return {
-    ok: true,
-    action_key: actionKey,
-    resource_key: 'warehouse_transfers',
-    warehouse_transfer_id,
-    count: 1,
-    status: 'task_completed',
-  };
+  const { ui_execute_warehouse_transfer_reconcile_v1 } = await import('./data-source/dispatch');
+  return ui_execute_warehouse_transfer_reconcile_v1(args);
 }
 
 // ----------- Phase C6 PLATFORM mutations (alerts, feature flags, access, organizations) -----------
@@ -13135,7 +9250,7 @@ export async function ui_review_capability_grant_request_v1(
 //   • import_job_cancel_v1   202604301905
 // Both RPCs accept a single jsonb envelope (`p_args`) and return the canonical
 // envelope `{ ok, import_job_id, status, correlation_id, settings_resolution_id }`.
-async function requireLiveImportJobReadback(
+export async function requireLiveImportJobReadback(
   rpcName: string,
   importJobId: string,
   expected?: { status?: string; cancelledReason?: string },
@@ -13348,156 +9463,36 @@ async function requireLiveRbacTemplateProvisionReadback(
 export async function rbac_create_role_v1(
   args: Record<string, unknown>,
 ): Promise<RbacRoleMutationResult> {
-  const live = await livePArgsMutationResult('rbac_create_role_v1', args, ['rbac_role_id', 'role_id', 'id']);
-  if (live) {
-    const result = withRequiredLiveStringField<RbacRoleMutationResult>(
-      live,
-      ['rbac_role_id', 'role_id', 'id'],
-      'rbac_role_id',
-      'rbac_create_role_v1 did not return rbac_role_id',
-    );
-    const idempotent = live.idempotent_no_op === true || asNonEmptyString(live.action) === 'noop';
-    await requireLiveRbacRoleReadback('rbac_create_role_v1', result.rbac_role_id, {
-      args,
-      assertMutableFields: !idempotent,
-    });
-    return result;
-  }
-  await sleep(60);
-  return buildEnvelope({
-    rbac_role_id: (args.role_id as string | undefined) ?? nextResourceId('rbac_role'),
-    action: 'created',
-    idempotent_no_op: false,
-  }) as RbacRoleMutationResult;
+  const { rbac_create_role_v1 } = await import('./data-source/platform');
+  return rbac_create_role_v1(args);
 }
 
 export async function rbac_update_role_v1(
   args: Record<string, unknown>,
 ): Promise<RbacRoleMutationResult> {
-  const live = await livePArgsMutationResult('rbac_update_role_v1', args, ['rbac_role_id', 'role_id', 'id']);
-  if (live) {
-    const result = withRequiredLiveStringField<RbacRoleMutationResult>(
-      live,
-      ['rbac_role_id', 'role_id', 'id'],
-      'rbac_role_id',
-      'rbac_update_role_v1 did not return rbac_role_id',
-    );
-    await requireLiveRbacRoleReadback('rbac_update_role_v1', result.rbac_role_id, {
-      args,
-      assertMutableFields: true,
-    });
-    return result;
-  }
-  await sleep(60);
-  return buildEnvelope({
-    rbac_role_id: (args.role_id as string | undefined) ?? nextResourceId('rbac_role'),
-    action: 'updated',
-  }) as RbacRoleMutationResult;
+  const { rbac_update_role_v1 } = await import('./data-source/platform');
+  return rbac_update_role_v1(args);
 }
 
 export async function rbac_delete_role_v1(
   args: Record<string, unknown>,
 ): Promise<RbacRoleMutationResult> {
-  const live = await livePArgsMutationResult('rbac_delete_role_v1', args, ['rbac_role_id', 'role_id', 'id']);
-  if (live) {
-    const result = withRequiredLiveStringField<RbacRoleMutationResult>(
-      live,
-      ['rbac_role_id', 'role_id', 'id'],
-      'rbac_role_id',
-      'rbac_delete_role_v1 did not return rbac_role_id',
-    );
-    await requireLiveRbacRoleReadback('rbac_delete_role_v1', result.rbac_role_id, {
-      args,
-      requireInactive: true,
-      requireAssignmentsRevoked: Number(live.assignments_revoked ?? 0) > 0,
-    });
-    return result;
-  }
-  await sleep(60);
-  return buildEnvelope({
-    rbac_role_id: (args.role_id as string | undefined) ?? nextResourceId('rbac_role'),
-    action: 'deleted',
-    idempotent_no_op: false,
-    assignments_revoked: 0,
-  }) as RbacRoleMutationResult;
+  const { rbac_delete_role_v1 } = await import('./data-source/platform');
+  return rbac_delete_role_v1(args);
 }
 
 export async function rbac_grant_role_v1(
   args: Record<string, unknown>,
 ): Promise<RbacUserRoleAssignmentMutationResult> {
-  const live = await livePArgsMutationResult('rbac_grant_role_v1', args, [
-    'rbac_user_role_assignment_id',
-    'assignment_id',
-    'id',
-  ]);
-  if (live) {
-    const result = withRequiredLiveStringField<RbacUserRoleAssignmentMutationResult>(
-      live,
-      ['rbac_user_role_assignment_id', 'assignment_id', 'id'],
-      'rbac_user_role_assignment_id',
-      'rbac_grant_role_v1 did not return role assignment evidence',
-    );
-    await requireLiveRbacAssignmentReadback('rbac_grant_role_v1', {
-      assignmentId: result.rbac_user_role_assignment_id,
-      targetUserId: asNonEmptyString(args.user_id) ?? asNonEmptyString(args.target_user_id),
-      roleId: asNonEmptyString(args.role_id),
-      expectedStatus: 'active',
-    });
-    return result;
-  }
-  await sleep(60);
-  return buildEnvelope({
-    rbac_user_role_assignment_id: nextResourceId('rbac_user_role_assignment'),
-    action: 'granted',
-    idempotent_no_op: false,
-  }) as RbacUserRoleAssignmentMutationResult;
+  const { rbac_grant_role_v1 } = await import('./data-source/platform');
+  return rbac_grant_role_v1(args);
 }
 
 export async function rbac_revoke_role_v1(
   args: Record<string, unknown>,
 ): Promise<RbacUserRoleAssignmentMutationResult> {
-  const live = await livePArgsMutationResult('rbac_revoke_role_v1', args, [
-    'rbac_user_role_assignment_id',
-    'assignment_id',
-    'id',
-    'target_user_id',
-    'role_id',
-    'role_key',
-    'action',
-  ]);
-  if (live) {
-    requireLiveDomainEvidence(
-      live,
-      'rbac_revoke_role_v1',
-      ['rbac_user_role_assignment_id', 'assignment_id', 'id', 'target_user_id', 'role_id', 'role_key', 'action'],
-      'role assignment',
-    );
-    const assignmentId =
-      asNonEmptyString(live.rbac_user_role_assignment_id) ??
-      asNonEmptyString(live.assignment_id) ??
-      asNonEmptyString(live.id);
-    const result = {
-      ...live,
-      rbac_user_role_assignment_id: assignmentId ?? null,
-    } as RbacUserRoleAssignmentMutationResult;
-    await requireLiveRbacAssignmentReadback('rbac_revoke_role_v1', {
-      assignmentId,
-      targetUserId:
-        asNonEmptyString(live.target_user_id) ??
-        asNonEmptyString(args.target_user_id) ??
-        asNonEmptyString(args.user_id),
-      roleId: asNonEmptyString(live.role_id) ?? asNonEmptyString(args.role_id),
-      expectedStatus: 'revoked',
-    });
-    return result;
-  }
-  await sleep(60);
-  return buildEnvelope({
-    rbac_user_role_assignment_id:
-      (args.assignment_id as string | undefined) ?? nextResourceId('rbac_user_role_assignment'),
-    action: 'revoked',
-    idempotent_no_op: false,
-  }) as RbacUserRoleAssignmentMutationResult;
+  const { rbac_revoke_role_v1 } = await import('./data-source/platform');
+  return rbac_revoke_role_v1(args);
 }
 
 export async function provision_rbac_roles_from_templates_v1(
@@ -13519,7 +9514,7 @@ export async function provision_rbac_roles_from_templates_v1(
 // creates/invites the Auth user before applying the scalar
 // tenant_signup_review_apply_v1(...) RPC. Demo mode keeps the canonical envelope
 // shape so tests and optimistic UI remain deterministic without a Supabase client.
-async function readFunctionErrorMessage(error: unknown, fallback: string): Promise<string> {
+export async function readFunctionErrorMessage(error: unknown, fallback: string): Promise<string> {
   const candidate = error as {
     message?: string;
     context?: {
@@ -13557,7 +9552,7 @@ async function readFunctionErrorMessage(error: unknown, fallback: string): Promi
   return asNonEmptyString(candidate.message) ?? fallback;
 }
 
-function requireFunctionMutationResult(
+export function requireFunctionMutationResult(
   data: unknown,
   functionName: string,
   evidenceKeys: readonly string[],
@@ -13584,242 +9579,14 @@ function requireFunctionMutationResult(
   return { envelope, result, merged };
 }
 
-async function requireLiveTenantSignupRequestReadback(
-  rpcName: string,
-  requestId: string,
-): Promise<{ request: Record<string, unknown>; summary: Record<string, unknown> }> {
-  const request = await requireLiveResourceReadback('tenant_signup_requests', requestId, rpcName);
-  const summary = await requireLiveResourceReadback('tenant_signup_request_summary', requestId, rpcName);
-  return { request, summary };
-}
-
-const TENANT_SIGNUP_REVIEW_READBACK_ATTEMPTS = 10;
-const TENANT_SIGNUP_REVIEW_READBACK_DELAY_MS = 250;
-
-function tenantSignupReviewReadbackStates(
-  request: Record<string, unknown>,
-  summary: Record<string, unknown>,
-): string[] {
-  return [
-    asNonEmptyString(request.review_decision),
-    asNonEmptyString(request.status),
-    asNonEmptyString(summary.review_decision),
-    asNonEmptyString(summary.status),
-  ].map((value) => value?.toLowerCase()).filter((value): value is string => Boolean(value));
-}
-
-async function requireLiveResourceReadbackEventually(
-  resourceKey: string,
-  id: string,
-  rpcName: string,
-): Promise<Record<string, unknown>> {
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= TENANT_SIGNUP_REVIEW_READBACK_ATTEMPTS; attempt += 1) {
-    try {
-      return await requireLiveResourceReadback(resourceKey, id, rpcName);
-    } catch (err) {
-      lastError = err;
-      if (attempt < TENANT_SIGNUP_REVIEW_READBACK_ATTEMPTS) {
-        await sleep(TENANT_SIGNUP_REVIEW_READBACK_DELAY_MS);
-      }
-    }
-  }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error(`${rpcName} backend readback missing ${resourceKey}:${id}`);
-}
-
-async function requireLiveTenantSignupReviewReadback(
-  rpcName: string,
-  requestId: string,
-  decision: string,
-  merged: Record<string, unknown>,
-): Promise<{ request: Record<string, unknown>; summary: Record<string, unknown> }> {
-  const expectedDecision = decision.toLowerCase();
-  let latest: { request: Record<string, unknown>; summary: Record<string, unknown> } | null = null;
-  let observedRequestState: string[] = [];
-  for (let attempt = 1; attempt <= TENANT_SIGNUP_REVIEW_READBACK_ATTEMPTS; attempt += 1) {
-    latest = await requireLiveTenantSignupRequestReadback(rpcName, requestId);
-    observedRequestState = tenantSignupReviewReadbackStates(latest.request, latest.summary);
-    if (observedRequestState.includes(expectedDecision)) break;
-    if (attempt < TENANT_SIGNUP_REVIEW_READBACK_ATTEMPTS) {
-      await sleep(TENANT_SIGNUP_REVIEW_READBACK_DELAY_MS);
-    }
-  }
-  if (!latest || !observedRequestState.includes(expectedDecision)) {
-    const observed = observedRequestState.length ? observedRequestState.join(', ') : 'none';
-    throw new Error(`${rpcName} backend readback did not reflect ${expectedDecision} decision (observed: ${observed})`);
-  }
-  const { request, summary } = latest;
-
-  if (expectedDecision !== 'approved') return { request, summary };
-
-  const organizationId =
-    asNonEmptyString(merged.approved_organization_id) ??
-    asNonEmptyString(merged.organization_id) ??
-    asNonEmptyString(request.approved_organization_id) ??
-    asNonEmptyString(summary.approved_organization_id);
-  const userId =
-    asNonEmptyString(merged.approved_user_id) ??
-    asNonEmptyString(merged.user_id) ??
-    asNonEmptyString(request.approved_user_id) ??
-    asNonEmptyString(summary.approved_user_id);
-  if (!organizationId) throw new Error(`${rpcName} approval readback missing approved organization`);
-  if (!userId) throw new Error(`${rpcName} approval readback missing approved user`);
-
-  await requireLiveResourceReadbackEventually('organizations', organizationId, rpcName);
-  await requireLiveResourceReadbackEventually('users', userId, rpcName);
-  await requireLiveResourceReadbackEventually('user_directory', userId, rpcName);
-  return { request, summary };
-}
+export const TENANT_SIGNUP_REVIEW_READBACK_ATTEMPTS = 10;
+export const TENANT_SIGNUP_REVIEW_READBACK_DELAY_MS = 250;
 
 export async function tenant_signup_review_apply_v1(
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const requestId =
-    asNonEmptyString(args.request_id) ??
-    asNonEmptyString(args.tenant_signup_request_id) ??
-    asNonEmptyString(args.id);
-  const decision = asNonEmptyString(args.decision)?.toLowerCase() ?? null;
-  if (!requestId) throw new Error('tenant_signup_request_id is required');
-  if (!decision) throw new Error('decision is required');
-
-  const client = getSupabaseClient();
-  if (client) {
-    const metadata =
-      args.metadata && typeof args.metadata === 'object' && !Array.isArray(args.metadata)
-        ? (args.metadata as Record<string, unknown>)
-        : args.decision_metadata && typeof args.decision_metadata === 'object' && !Array.isArray(args.decision_metadata)
-          ? (args.decision_metadata as Record<string, unknown>)
-          : undefined;
-    const body: Record<string, unknown> = {
-      request_id: requestId,
-      decision,
-    };
-    const reason = asNonEmptyString(args.reason) ?? asNonEmptyString(args.decision_reason);
-    if (reason) body.reason = reason;
-    const inviteRedirectTo = asNonEmptyString(args.invite_redirect_to) ?? hostedInviteRedirect();
-    if (inviteRedirectTo) body.invite_redirect_to = inviteRedirectTo;
-    if (metadata) body.metadata = metadata;
-
-    const invokeResult = await client.functions.invoke<Record<string, unknown>>(
-      'tenant-signup-review',
-      { body },
-    );
-    const { data, error } = invokeResult ?? {};
-    if (error) {
-      throw new Error(await readFunctionErrorMessage(error, 'tenant signup review failed'));
-    }
-
-    const { envelope, result, merged } = requireFunctionMutationResult(
-      data,
-      'tenant-signup-review',
-      [
-        'id',
-        'status',
-        'tenant_signup_request_id',
-        'request_id',
-        'reviewed_at',
-        'organization_id',
-        'approved_organization_id',
-        'user_id',
-        'approved_user_id',
-        'invite_id',
-        'invite_email_sent_at',
-      ],
-      { allowedBusinessStatuses: ['rejected'] },
-    );
-    const alreadyProcessed = Boolean(merged.already_processed ?? result.already_processed);
-    const returnedRequestId =
-      asNonEmptyString(merged.tenant_signup_request_id) ??
-      asNonEmptyString(merged.request_id) ??
-      asNonEmptyString(merged.id);
-    if (!returnedRequestId) throw new Error('tenant-signup-review did not return request evidence');
-    const returnedDecision =
-      asNonEmptyString(alreadyProcessed ? result.review_decision : null) ??
-      asNonEmptyString(alreadyProcessed ? result.status : null) ??
-      asNonEmptyString(alreadyProcessed ? merged.review_decision : null) ??
-      asNonEmptyString(alreadyProcessed ? merged.status : null) ??
-      asNonEmptyString(merged.decision) ??
-      asNonEmptyString(merged.review_decision) ??
-      asNonEmptyString(merged.status);
-    if (!returnedDecision) throw new Error('tenant-signup-review did not return decision status');
-    const reviewReadback = await requireLiveTenantSignupReviewReadback(
-      'tenant-signup-review',
-      returnedRequestId,
-      returnedDecision,
-      merged,
-    );
-    const readback = { ...reviewReadback.request, ...reviewReadback.summary };
-    if (returnedDecision.toLowerCase() === 'approved') {
-      requireLiveEvidence(
-        { ...merged, ...readback },
-        [
-          'organization_id',
-          'approved_organization_id',
-          'user_id',
-          'approved_user_id',
-          'approved_auth_user_id',
-          'invite_id',
-          'invite_email_sent_at',
-        ],
-        'tenant-signup-review approval did not return provisioning or invite evidence',
-      );
-    }
-    const status =
-      asNonEmptyString(readback.status) ??
-      asNonEmptyString(merged.status) ??
-      returnedDecision;
-    const reviewDecision =
-      asNonEmptyString(readback.review_decision) ??
-      asNonEmptyString(merged.review_decision) ??
-      returnedDecision;
-    const approvedOrganizationId =
-      asNonEmptyString(merged.approved_organization_id) ??
-      asNonEmptyString(merged.organization_id) ??
-      asNonEmptyString(merged.tenant_id) ??
-      asNonEmptyString(readback.approved_organization_id) ??
-      null;
-    const approvedUserId =
-      asNonEmptyString(merged.approved_user_id) ??
-      asNonEmptyString(merged.user_id) ??
-      asNonEmptyString(readback.approved_user_id) ??
-      null;
-    const approvedAuthUserId =
-      asNonEmptyString(merged.approved_auth_user_id) ??
-      asNonEmptyString(merged.invited_auth_user_id) ??
-      asNonEmptyString(readback.approved_auth_user_id) ??
-      null;
-    const inviteEmailSentAt =
-      asNonEmptyString(merged.invite_email_sent_at) ??
-      asNonEmptyString(readback.invite_email_sent_at) ??
-      null;
-    const readbackInviteRedirectTo =
-      asNonEmptyString(merged.invite_redirect_to) ??
-      asNonEmptyString(readback.invite_redirect_to) ??
-      null;
-    return {
-      ...readback,
-      ...result,
-      ...envelope,
-      ok: true,
-      tenant_signup_request_id: returnedRequestId,
-      request_id: returnedRequestId,
-      id: returnedRequestId,
-      decision: reviewDecision,
-      status,
-      review_decision: reviewDecision,
-      approved_organization_id: approvedOrganizationId,
-      approved_user_id: approvedUserId,
-      approved_auth_user_id: approvedAuthUserId,
-      invite_email_sent_at: inviteEmailSentAt,
-      invite_redirect_to: readbackInviteRedirectTo,
-    };
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('tenant_signup_review_apply_v1');
-  await sleep(60);
-  return buildEnvelope(buildTenantSignupReviewSeedResult(requestId, decision));
+  const { tenant_signup_review_apply_v1 } = await import('./data-source/platform');
+  return tenant_signup_review_apply_v1(args);
 }
 
 export interface DataSourceTenantSignupConsoleRequestArgs extends Record<string, unknown> {
@@ -13836,124 +9603,8 @@ export interface DataSourceTenantSignupConsoleRequestArgs extends Record<string,
 export async function tenant_signup_console_request_v1(
   args: DataSourceTenantSignupConsoleRequestArgs,
 ): Promise<Record<string, unknown>> {
-  const email = asNonEmptyString(args.email)?.toLowerCase();
-  const fullName = asNonEmptyString(args.full_name);
-  const organizationName = asNonEmptyString(args.organization_name);
-  if (!email) throw new Error('email is required');
-  if (!fullName) throw new Error('full_name is required');
-  if (!organizationName) throw new Error('organization_name is required');
-
-  const body = {
-    ...args,
-    email,
-    full_name: fullName,
-    organization_name: organizationName,
-  };
-
-  const client = getSupabaseClient();
-  if (client) {
-    const { data, error } = await client.functions.invoke<Record<string, unknown>>(
-      'tenant-signup-console-request',
-      { body },
-    );
-    if (error) {
-      throw new Error(await readFunctionErrorMessage(error, 'tenant signup console request failed'));
-    }
-    const { envelope, result, merged } = requireFunctionMutationResult(
-      data,
-      'tenant-signup-console-request',
-      ['tenant_signup_request_id', 'request_id', 'id', 'status'],
-    );
-    const requestId =
-      asNonEmptyString(merged.tenant_signup_request_id) ??
-      asNonEmptyString(merged.request_id) ??
-      asNonEmptyString(merged.id);
-    if (!requestId) throw new Error('tenant-signup-console-request did not return request id');
-    const status = requireLiveStringField(
-      merged,
-      ['status'],
-      'tenant-signup-console-request did not return status',
-    );
-    const requestReadback = await requireLiveTenantSignupRequestReadback(
-      'tenant-signup-console-request',
-      requestId,
-    );
-    const readback = { ...requestReadback.summary, ...requestReadback.request };
-    const readbackStatus = asNonEmptyString(readback.status) ?? status;
-    return {
-      ...result,
-      ...envelope,
-      ...readback,
-      ok: true,
-      tenant_signup_request_id: requestId,
-      request_id: requestId,
-      id: requestId,
-      status: readbackStatus,
-    };
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('tenant_signup_console_request_v1');
-  await sleep(60);
-  const requests = (seed as { tenant_signup_requests?: Array<Record<string, unknown>> }).tenant_signup_requests ?? [];
-  const requestId = `tsr_console_${Date.now()}`;
-  const now = new Date().toISOString();
-  const row = {
-    id: requestId,
-    email,
-    full_name: fullName,
-    organization_name: organizationName,
-    organization_slug: asNonEmptyString(args.organization_slug) ?? null,
-    website_url: asNonEmptyString(args.website_url) ?? null,
-    phone: asNonEmptyString(args.phone) ?? null,
-    notes: asNonEmptyString(args.notes) ?? null,
-    locale: asNonEmptyString(args.locale) ?? 'en',
-    status: 'pending',
-    org_name: organizationName,
-    industry: 'console',
-    size: 'pending',
-    received_at: now,
-    created_at: now,
-    updated_at: now,
-    turnstile_verified: true,
-    marketing: { source: 'console-v2' },
-    metadata: { created_via: 'tenant-signup-console-request' },
-  };
-  requests.unshift(row);
-  return buildEnvelope({
-    id: requestId,
-    tenant_signup_request_id: requestId,
-    status: 'pending',
-  });
-}
-
-function plainObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function mergePlainObjects(
-  base: Record<string, unknown>,
-  patch: Record<string, unknown>,
-): Record<string, unknown> {
-  const next: Record<string, unknown> = { ...base };
-  for (const [key, value] of Object.entries(patch)) {
-    if (value === undefined || value === null || value === '') continue;
-    const previous = next[key];
-    if (
-      previous &&
-      typeof previous === 'object' &&
-      !Array.isArray(previous) &&
-      value &&
-      typeof value === 'object' &&
-      !Array.isArray(value)
-    ) {
-      next[key] = mergePlainObjects(previous as Record<string, unknown>, value as Record<string, unknown>);
-    } else {
-      next[key] = value;
-    }
-  }
-  return next;
+  const { tenant_signup_console_request_v1 } = await import('./data-source/platform');
+  return tenant_signup_console_request_v1(args);
 }
 
 export interface DataSourceOrganizationProfileUpdateArgs extends Record<string, unknown> {
@@ -13970,7 +9621,7 @@ export interface DataSourceOrganizationProfileUpdateArgs extends Record<string, 
   default_settings_patch?: Record<string, unknown>;
 }
 
-function assertReadbackValue(
+export function assertReadbackValue(
   actual: unknown,
   expected: unknown,
   path: string,
@@ -13985,126 +9636,11 @@ function assertReadbackValue(
   }
 }
 
-function assertReadbackContainsPatch(
-  actual: Record<string, unknown>,
-  expected: Record<string, unknown>,
-  path: string,
-  rpcName: string,
-): void {
-  for (const [key, value] of Object.entries(expected)) {
-    if (value === undefined) continue;
-    const nextPath = `${path}.${key}`;
-    const actualValue = actual[key];
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      assertReadbackContainsPatch(objectRecord(actualValue), value as Record<string, unknown>, nextPath, rpcName);
-    } else {
-      assertReadbackValue(actualValue, value, nextPath, rpcName);
-    }
-  }
-}
-
-function requireOrganizationProfileReadback(
-  args: DataSourceOrganizationProfileUpdateArgs,
-  merged: Record<string, unknown>,
-  readback: Record<string, unknown>,
-  rpcName: string,
-): void {
-  for (const key of ['name', 'timezone', 'locale']) {
-    const expected = asNonEmptyString(args[key]);
-    if (expected) assertReadbackValue(readback[key], expected, key, rpcName);
-  }
-
-  const expectedBranding = compactRecord({
-    logo_url: asNonEmptyString(args.logo_url) ?? undefined,
-    logo_file_name: asNonEmptyString(args.file_name) ?? asNonEmptyString(args.logo_file_name) ?? undefined,
-    logo_content_type: asNonEmptyString(args.content_type) ?? asNonEmptyString(args.logo_content_type) ?? undefined,
-    primary_color: asNonEmptyString(args.primary_color) ?? undefined,
-    secondary_color: asNonEmptyString(args.secondary_color) ?? undefined,
-    logo_storage_bucket: asNonEmptyString(args.logo_storage_bucket) ?? undefined,
-    logo_storage_key: asNonEmptyString(args.logo_storage_key) ?? undefined,
-    logo_artifact_id: asNonEmptyString(args.logo_artifact_id) ?? undefined,
-    ...objectRecord(merged.branding),
-  });
-  const expectedSettingsPatch = plainObject(args.default_settings_patch);
-  if (Object.keys(expectedBranding).length === 0 && Object.keys(expectedSettingsPatch).length === 0) return;
-
-  const settings = objectRecord(readback.default_settings);
-  if (Object.keys(settings).length === 0) {
-    throw new Error(`${rpcName} backend readback missing organizations.default_settings`);
-  }
-  if (Object.keys(expectedBranding).length > 0) {
-    assertReadbackContainsPatch(objectRecord(settings.branding), expectedBranding, 'default_settings.branding', rpcName);
-  }
-  if (Object.keys(expectedSettingsPatch).length > 0) {
-    assertReadbackContainsPatch(settings, expectedSettingsPatch, 'default_settings', rpcName);
-  }
-}
-
 export async function ui_update_organization_profile_v1(
   args: DataSourceOrganizationProfileUpdateArgs,
 ): Promise<Record<string, unknown>> {
-  const organizationId = asNonEmptyString(args.organization_id);
-  if (!organizationId) throw new Error('organization_id is required');
-
-  const client = getSupabaseClient();
-  if (client) {
-    const { data, error } = await client.functions.invoke<Record<string, unknown>>(
-      'organization-profile',
-      { body: args },
-    );
-    if (error) {
-      throw new Error(await readFunctionErrorMessage(error, 'organization profile update failed'));
-    }
-    const { envelope, result, merged } = requireFunctionMutationResult(
-      data,
-      'organization-profile',
-      [
-        'updated_at',
-        'branding',
-        'profile',
-        'changed',
-        'changed_fields',
-        'default_settings',
-        'settings_resolution_id',
-      ],
-    );
-    const returnedOrganizationId =
-      asNonEmptyString(merged.organization_id) ??
-      asNonEmptyString(merged.id);
-    if (!returnedOrganizationId) throw new Error('organization-profile did not return organization_id');
-    const readback = await requireLiveResourceReadback('organizations', returnedOrganizationId, 'organization-profile');
-    requireOrganizationProfileReadback(args, merged, readback, 'organization-profile');
-    return { ...result, ...envelope, ok: true, organization_id: returnedOrganizationId, readback };
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('ui_update_organization_profile_v1');
-  await sleep(60);
-  const organizations = (seed as { organizations?: Array<Record<string, unknown>> }).organizations ?? [];
-  const target = organizations.find((row) => row.id === organizationId);
-  if (target) {
-    const existingSettings = plainObject(target.default_settings);
-    const existingBranding = plainObject(existingSettings.branding);
-    const brandingPatch = {
-      logo_url: asNonEmptyString(args.logo_url) ?? undefined,
-      logo_file_name: asNonEmptyString(args.file_name) ?? asNonEmptyString(args.logo_file_name),
-      logo_content_type: asNonEmptyString(args.content_type) ?? asNonEmptyString(args.logo_content_type),
-      primary_color: asNonEmptyString(args.primary_color) ?? undefined,
-      secondary_color: asNonEmptyString(args.secondary_color) ?? undefined,
-    };
-    if (asNonEmptyString(args.name)) target.name = asNonEmptyString(args.name)!;
-    if (asNonEmptyString(args.timezone)) target.timezone = asNonEmptyString(args.timezone)!;
-    if (asNonEmptyString(args.locale)) target.locale = asNonEmptyString(args.locale)!;
-    target.default_settings = mergePlainObjects(existingSettings, {
-      branding: mergePlainObjects(existingBranding, brandingPatch),
-      ...plainObject(args.default_settings_patch),
-    });
-  }
-
-  return buildEnvelope({
-    organization_id: organizationId,
-    name: target?.name ?? args.name,
-    branding: plainObject(plainObject(target?.default_settings).branding),
-  });
+  const { ui_update_organization_profile_v1 } = await import('./data-source/platform');
+  return ui_update_organization_profile_v1(args);
 }
 
 export interface DataSourceTenantUserInviteArgs extends Record<string, unknown> {
@@ -14123,192 +9659,15 @@ export interface DataSourceTenantUserInviteArgs extends Record<string, unknown> 
 export async function ui_list_tenant_invitable_roles_v1(
   args: { organization_id?: string | null } = {},
 ): Promise<ListResult<ResourceRow>> {
-  const organizationId =
-    asNonEmptyString(args.organization_id) ??
-    asNonEmptyString(state.user.organization_id) ??
-    asNonEmptyString((state.scope?.tenant as Record<string, unknown> | undefined)?.id);
-  if (!organizationId) throw new Error('organization_id is required');
-
-  const live = await liveRpc('ui_list_tenant_invitable_roles_v1', {
-    p_organization_id: organizationId,
-  });
-  if (live) return normalizeLiveListResult<ResourceRow>(live.data, 0, 200);
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_list_tenant_invitable_roles_v1');
-  await sleep(30);
-  if (!hasCapability('users.manage')) {
-    const err = new Error('Capability denied: users.manage') as Error & {
-      code?: string;
-      capability?: string;
-    };
-    err.code = 'capability_denied';
-    err.capability = 'users.manage';
-    throw err;
-  }
-  const rows = (RESOURCE_DATA().rbac_role_summary ?? [])
-    .filter((row) => {
-      const rec = row as Record<string, unknown>;
-      return rec.organization_id === organizationId && rec.is_active !== false;
-    })
-    .map((row) => {
-      const rec = row as Record<string, unknown>;
-      return {
-        id: rec.id,
-        role_id: rec.id,
-        organization_id: rec.organization_id,
-        role_key: rec.key ?? rec.role_key,
-        key: rec.key ?? rec.role_key,
-        name: rec.name ?? rec.key ?? rec.role_key,
-        description: rec.description ?? null,
-        is_active: rec.is_active !== false,
-      } as ResourceRow;
-    })
-    .sort((a, b) => String(a.role_key ?? a.key ?? '').localeCompare(String(b.role_key ?? b.key ?? '')));
-
-  return {
-    rows,
-    total: rows.length,
-    page: 0,
-    page_size: rows.length || 200,
-  };
+  const { ui_list_tenant_invitable_roles_v1 } = await import('./data-source/platform');
+  return ui_list_tenant_invitable_roles_v1(args);
 }
 
 export async function tenant_user_invite_v1(
   args: DataSourceTenantUserInviteArgs,
 ): Promise<Record<string, unknown>> {
-  const email = asNonEmptyString(args.email)?.toLowerCase();
-  const fullName = asNonEmptyString(args.full_name);
-  const roleKey = asNonEmptyString(args.role_key)?.toLowerCase();
-  if (!email) throw new Error('email is required');
-  if (!fullName) throw new Error('full_name is required');
-  if (!roleKey) throw new Error('role_key is required');
-
-  const client = getSupabaseClient();
-  if (client) {
-    const shouldSendInviteEmail = args.send_invite_email !== false;
-    const redirect = shouldSendInviteEmail
-      ? asNonEmptyString(args.invite_redirect_to) ?? hostedInviteRedirect()
-      : null;
-    const body = {
-      ...args,
-      email,
-      full_name: fullName,
-      role_key: roleKey,
-      send_invite_email: shouldSendInviteEmail,
-      invite_redirect_to: redirect,
-    };
-    const { data, error } = await client.functions.invoke<Record<string, unknown>>(
-      'tenant-user-invite',
-      { body },
-    );
-    if (error) {
-      throw new Error(await readFunctionErrorMessage(error, 'tenant user invite failed'));
-    }
-    const { envelope, result, merged } = requireFunctionMutationResult(
-      data,
-      'tenant-user-invite',
-      ['user_id', 'auth_user_id', 'id', 'invite_id', 'invite_email_sent_at'],
-    );
-    const returnedUserId =
-      asNonEmptyString(merged.user_id) ??
-      asNonEmptyString(merged.auth_user_id) ??
-      asNonEmptyString(merged.id);
-    if (!returnedUserId) throw new Error('tenant-user-invite did not return user evidence');
-    const assignmentId =
-      asNonEmptyString(merged.rbac_user_role_assignment_id) ??
-      asNonEmptyString(merged.user_role_assignment_id) ??
-      asNonEmptyString(merged.assignment_id);
-    const lifecycleReadback = await requireLiveUserLifecycleReadback('tenant-user-invite', returnedUserId);
-    assertLiveUserScopeReadback(
-      'tenant-user-invite',
-      lifecycleReadback,
-      asNonEmptyString(args.access_scope_type) ?? 'tenant',
-      asNonEmptyString(args.access_scope_id),
-    );
-    await requireLiveUserRoleAssignmentReadback(
-      'tenant-user-invite',
-      returnedUserId,
-      roleKey,
-      assignmentId,
-      lifecycleReadback.directory,
-    );
-    await requireLiveUserSecurityActionReadback(
-      'tenant-user-invite',
-      returnedUserId,
-      'tenant_user_invite_apply_v1',
-      merged,
-      null,
-      {
-        roleKey,
-        assignmentId,
-        inviteEmail: email,
-        inviteEmailSent: merged.invite_email_sent === true || merged.invite_email_sent === 'true',
-        sendInviteEmailRequested: shouldSendInviteEmail,
-        inviteRedirectTo: redirect,
-      },
-    );
-    return {
-      ...result,
-      ...envelope,
-      ok: true,
-      user_id: returnedUserId,
-      email: asNonEmptyString(merged.email) ?? email,
-      role_key: asNonEmptyString(merged.role_key) ?? roleKey,
-    };
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('tenant_user_invite_v1');
-  await sleep(60);
-  const users = (seed as { users?: Array<Record<string, unknown>> }).users ?? [];
-  const organizationId =
-    asNonEmptyString(args.organization_id) ??
-    asNonEmptyString(state.user.organization_id) ??
-    asNonEmptyString((state.scope?.tenant as Record<string, unknown> | undefined)?.id);
-  if (!organizationId) throw new Error('organization_id is required');
-  const userId = `usr_invited_${email.replace(/[^a-z0-9]+/g, '_')}`;
-  const accessScopeType = asNonEmptyString(args.access_scope_type) ?? 'tenant';
-  const userTypeRows = getLookups('user_type');
-  const requestedUserType = asNonEmptyString(args.user_type);
-  const userType =
-    requestedUserType ??
-    (userTypeRows.some((row) => row.value === roleKey)
-      ? roleKey
-      : userTypeRows.find((row) => row.is_default)?.value ?? userTypeRows[0]?.value ?? 'ops_admin');
-  const accessScopeId =
-    accessScopeType === 'client' || accessScopeType === 'sender'
-      ? asNonEmptyString(args.access_scope_id)
-      : null;
-  const existing = users.find((row) => String(row.email ?? '').toLowerCase() === email);
-  if (existing) {
-    existing.full_name = fullName;
-    existing.user_type = userType;
-    existing.status = existing.status === 'suspended' ? existing.status : 'invited';
-    existing.access_scope_type = accessScopeType;
-    existing.access_scope_id = accessScopeId;
-  } else {
-    users.push({
-      id: userId,
-      organization_id: organizationId,
-      email,
-      full_name: fullName,
-      user_type: userType,
-      access_scope_type: accessScopeType,
-      access_scope_id: accessScopeId,
-      status: 'invited',
-      last_login_at: null,
-      created_at: new Date().toISOString(),
-    });
-  }
-
-  return buildEnvelope({
-    user_id: existing?.id ?? userId,
-    organization_id: organizationId,
-    email,
-    full_name: fullName,
-    role_key: roleKey,
-    status: 'invited',
-    invite_email_sent: false,
-  });
+  const { tenant_user_invite_v1 } = await import('./data-source/platform');
+  return tenant_user_invite_v1(args);
 }
 
 // ----------- Phase C6 FLEET mutations (vehicles + drivers) -----------
@@ -14725,23 +10084,8 @@ export const add_support_tag_v1 = (args: Record<string, unknown>) =>
 export async function public_tracking_review_request_v1(
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const target = liveRpcTarget();
-  if (target) {
-    const { data, error } = await target.rpc('public_tracking_review_request_v1', { p_input: args });
-    if (error) throw new Error(error.message);
-    return requireLiveMutationResult(data, 'public_tracking_review_request_v1', [
-      'support_case_id',
-      'outcome',
-    ]);
-  }
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC public_tracking_review_request_v1');
-  await sleep(60);
-  const decision = String(args.decision ?? '').toLowerCase();
-  const outcome = decision.startsWith('reject') ? 'rejected' : 'applied';
-  return buildEnvelope({
-    support_case_id: args.support_case_id,
-    outcome,
-  });
+  const { public_tracking_review_request_v1 } = await import('./data-source/platform');
+  return public_tracking_review_request_v1(args);
 }
 
 // ----------- Phase B5/C4 FINANCE mutations -----------
@@ -14886,131 +10230,40 @@ export async function cancel_subscription_v1(args: Record<string, unknown>): Pro
   return result;
 }
 
-// FINANCE — settlements
-async function requireLiveSettlementBatchReadback(
-  rpcName: string,
-  settlementBatchId: string,
-): Promise<void> {
-  await requireLiveResourceReadback('settlement_batches', settlementBatchId, rpcName);
-  await requireLiveResourceReadback('settlement_batch_summary', settlementBatchId, rpcName);
-}
-
-async function requireLiveFinanceEventReadback(
+export async function requireLiveFinanceEventReadback(
   rpcName: string,
   financeEventId: string,
 ): Promise<void> {
   await requireLiveResourceReadback('finance_events_ledger', financeEventId, rpcName);
 }
 
-async function requireLiveFinanceMutationReadback(
-  rpcName: string,
-  rec: Record<string, unknown>,
-  args: Record<string, unknown> = {},
-  idTarget: 'settlement_batch' | 'finance_event' | null = null,
-): Promise<void> {
-  const resultId = asNonEmptyString(rec.id);
-  const settlementBatchId =
-    asNonEmptyString(rec.settlement_batch_id) ??
-    asNonEmptyString(args.settlement_batch_id) ??
-    (idTarget === 'settlement_batch' ? resultId : null);
-  if (settlementBatchId) {
-    await requireLiveSettlementBatchReadback(rpcName, settlementBatchId);
-  }
-  const financeEventIds = Array.from(new Set([
-    asNonEmptyString(rec.finance_event_id),
-    asNonEmptyString(rec.from_finance_event_id),
-    asNonEmptyString(rec.to_finance_event_id),
-    asNonEmptyString(rec.reversed_finance_event_id),
-    asNonEmptyString(rec.reversal_finance_event_id),
-    idTarget === 'finance_event' ? resultId : null,
-  ].filter((value): value is string => Boolean(value))));
-  for (const financeEventId of financeEventIds) {
-    await requireLiveFinanceEventReadback(rpcName, financeEventId);
-  }
-  const codEntryId =
-    asNonEmptyString(rec.cod_entry_id) ??
-    asNonEmptyString(args.cod_entry_id);
-  if (codEntryId) {
-    await requireLiveResourceReadback('cod_entries', codEntryId, rpcName);
-  }
-}
-
-async function liveFinanceMutationResult(
-  rpcName: string,
-  args: Record<string, unknown>,
-  evidenceKeys: string[],
-  idTarget: 'settlement_batch' | 'finance_event' | null = null,
-): Promise<Record<string, unknown> | null> {
-  const live = await liveRpc<Record<string, unknown>>(rpcName, { p_args: args });
-  if (!live) return null;
-  const rec = requireLiveMutationResult(live.data, rpcName, evidenceKeys);
-  await requireLiveFinanceMutationReadback(rpcName, rec, args, idTarget);
-  return rec;
-}
-
 export async function apply_settlement_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const live = await liveFinanceMutationResult('apply_settlement_v1', args, ['settlement_batch_id', 'id'], 'settlement_batch');
-  if (live) return live;
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC apply_settlement_v1');
-  await sleep(60);
-  return buildMutationFallbackEnvelope(args, 'settlement_batch');
+  const { apply_settlement_v1 } = await import('./data-source/finance');
+  return apply_settlement_v1(args);
 }
 export async function reject_settlement_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const live = await liveFinanceMutationResult('reject_settlement_v1', args, ['settlement_batch_id', 'id'], 'settlement_batch');
-  if (live) return live;
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC reject_settlement_v1');
-  await sleep(60);
-  return buildMutationFallbackEnvelope(args, 'settlement_batch');
+  const { reject_settlement_v1 } = await import('./data-source/finance');
+  return reject_settlement_v1(args);
 }
 export async function ui_create_settlement_batch_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const live = await liveFinanceMutationResult('ui_create_settlement_batch_v1', args, ['settlement_batch_id', 'id'], 'settlement_batch');
-  if (live) return live;
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_create_settlement_batch_v1');
-  await sleep(60);
-  return buildMutationFallbackEnvelope(args, 'settlement_batch');
+  const { ui_create_settlement_batch_v1 } = await import('./data-source/finance');
+  return ui_create_settlement_batch_v1(args);
 }
 export async function ui_transition_settlement_batch_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const live = await liveFinanceMutationResult('ui_transition_settlement_batch_v1', args, ['settlement_batch_id', 'id'], 'settlement_batch');
-  if (live) return live;
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_transition_settlement_batch_v1');
-  await sleep(60);
-  return buildMutationFallbackEnvelope(args, 'settlement_batch');
+  const { ui_transition_settlement_batch_v1 } = await import('./data-source/finance');
+  return ui_transition_settlement_batch_v1(args);
 }
 export async function ui_record_cod_remittance_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const live = await liveFinanceMutationResult('ui_record_cod_remittance_v1', args, [
-    'finance_event_id',
-    'from_finance_event_id',
-    'to_finance_event_id',
-    'settlement_batch_id',
-    'settlement_event_id',
-  ]);
-  if (live) return live;
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_record_cod_remittance_v1');
-  await sleep(60);
-  return buildMutationFallbackEnvelope(args, 'finance_event');
+  const { ui_record_cod_remittance_v1 } = await import('./data-source/finance');
+  return ui_record_cod_remittance_v1(args);
 }
 export async function ui_adjust_cod_collection_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const live = await liveFinanceMutationResult('ui_adjust_cod_collection_v1', args, [
-    'finance_event_id',
-    'settlement_batch_id',
-    'settlement_event_id',
-  ]);
-  if (live) return live;
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_adjust_cod_collection_v1');
-  await sleep(60);
-  return buildMutationFallbackEnvelope(args, 'finance_event');
+  const { ui_adjust_cod_collection_v1 } = await import('./data-source/finance');
+  return ui_adjust_cod_collection_v1(args);
 }
 export async function ui_reverse_finance_event_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const live = await liveFinanceMutationResult('ui_reverse_finance_event_v1', args, [
-    'finance_event_id',
-    'reversed_finance_event_id',
-    'reversal_finance_event_id',
-    'id',
-  ], 'finance_event');
-  if (live) return live;
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_reverse_finance_event_v1');
-  await sleep(60);
-  return buildMutationFallbackEnvelope(args, 'finance_event');
+  const { ui_reverse_finance_event_v1 } = await import('./data-source/finance');
+  return ui_reverse_finance_event_v1(args);
 }
 
 // FINANCE — bank reconciliation
@@ -15193,20 +10446,8 @@ export interface ZoneCreateResult extends Record<string, unknown> {
 export async function zone_create_v1(
   args: Record<string, unknown>,
 ): Promise<ZoneCreateResult> {
-  const live = await liveRpc<Record<string, unknown>>('zone_create_v1', { p_args: args });
-  if (live) {
-    return requireLiveMutationResult(live.data, 'zone_create_v1', [
-      'zone_id',
-    ]) as ZoneCreateResult;
-  }
-
-  await sleep(60);
-  return buildEnvelope({
-    zone_id: (args.zone_id as string | undefined) ?? nextResourceId('zone'),
-    initial_district_count: Array.isArray(args.initial_district_ids)
-      ? (args.initial_district_ids as unknown[]).length
-      : 0,
-  }) as ZoneCreateResult;
+  const { zone_create_v1 } = await import('./data-source/network');
+  return zone_create_v1(args);
 }
 
 export interface ZoneProfileMutationResult extends Record<string, unknown> {
@@ -15224,105 +10465,15 @@ export interface ZoneProfileMutationResult extends Record<string, unknown> {
 export async function zone_update_v1(
   args: Record<string, unknown>,
 ): Promise<ZoneProfileMutationResult> {
-  const live = await liveRpc<Record<string, unknown>>('zone_update_v1', { p_args: args });
-  if (live) {
-    return requireLiveMutationResult(live.data, 'zone_update_v1', [
-      'zone_id',
-    ]) as ZoneProfileMutationResult;
-  }
-
-  await sleep(60);
-  const zoneId = asNonEmptyString(args.zone_id) ?? asNonEmptyString(args.id);
-  if (!zoneId) throw new Error('zone_update_v1 requires zone_id');
-  const patch = objectRecord(args.patch);
-  const zones = (seed as { zones?: Array<Record<string, unknown>> }).zones ?? [];
-  const zone = zones.find((row) => row.id === zoneId);
-  if (!zone) throw new Error(`zone_not_found:${zoneId}`);
-
-  const changed: Record<string, unknown> = {};
-  const nextMetadata = objectRecord(zone.metadata);
-  if (patch.name !== undefined) {
-    const next = asNonEmptyString(patch.name);
-    if (!next) throw new Error('zone_update_v1 name cannot be blank');
-    zone.name = next;
-    changed.name = next;
-  }
-  if (patch.slug !== undefined) {
-    const next = asNonEmptyString(patch.slug)?.toLowerCase();
-    if (!next) throw new Error('zone_update_v1 slug cannot be blank');
-    zone.slug = next;
-    changed.slug = next;
-  }
-  if (patch.description !== undefined) {
-    const next = asNonEmptyString(patch.description);
-    zone.description = next;
-    zone.notes = next ?? '';
-    changed.description = next;
-  }
-  if (patch.sort_order !== undefined) {
-    const next = Number(patch.sort_order);
-    if (!Number.isFinite(next)) throw new Error('zone_update_v1 sort_order must be numeric');
-    zone.sort_order = next;
-    changed.sort_order = next;
-  }
-  const metadataPatch = objectRecord(patch.metadata);
-  for (const [key, value] of Object.entries(metadataPatch)) {
-    nextMetadata[key] = value;
-  }
-  if (patch.color_token !== undefined) {
-    const next = asNonEmptyString(patch.color_token)?.toLowerCase() ?? null;
-    nextMetadata.color_token = next;
-    zone.color_token = next ?? undefined;
-    changed.color_token = next;
-  }
-  zone.metadata = nextMetadata;
-  zone.updated_at = new Date().toISOString();
-
-  return buildEnvelope({
-    zone_id: zoneId,
-    changed,
-  }) as ZoneProfileMutationResult;
+  const { zone_update_v1 } = await import('./data-source/network');
+  return zone_update_v1(args);
 }
 
 export async function zone_delete_v1(
   args: Record<string, unknown>,
 ): Promise<ZoneProfileMutationResult> {
-  const live = await liveRpc<Record<string, unknown>>('zone_delete_v1', { p_args: args });
-  if (live) {
-    return requireLiveMutationResult(live.data, 'zone_delete_v1', [
-      'zone_id',
-    ]) as ZoneProfileMutationResult;
-  }
-
-  await sleep(60);
-  const zoneId = asNonEmptyString(args.zone_id) ?? asNonEmptyString(args.id);
-  if (!zoneId) throw new Error('zone_delete_v1 requires zone_id');
-  const zones = (seed as { zones?: Array<Record<string, unknown>> }).zones ?? [];
-  const zone = zones.find((row) => row.id === zoneId);
-  if (!zone) throw new Error(`zone_not_found:${zoneId}`);
-  const metadata = objectRecord(zone.metadata);
-  const alreadyProcessed = zone.is_active === false && metadata.lifecycle === 'retired';
-  if (!alreadyProcessed) {
-    const now = new Date().toISOString();
-    zone.is_active = false;
-    zone.status = 'retired';
-    zone.metadata = {
-      ...metadata,
-      lifecycle: 'retired',
-      retired_at: now,
-      retired_by_user_id: state.user.id ?? null,
-      retired_reason: asNonEmptyString(args.reason),
-      retired_metadata: objectRecord(args.metadata),
-    };
-    zone.updated_at = now;
-  }
-
-  return buildEnvelope({
-    zone_id: zoneId,
-    is_active: false,
-    lifecycle: 'retired',
-    already_processed: alreadyProcessed,
-  }) as ZoneProfileMutationResult;
+  const { zone_delete_v1 } = await import('./data-source/network');
+  return zone_delete_v1(args);
 }
 
 export interface ZoneDistrictMutationResult extends Record<string, unknown> {
@@ -15336,35 +10487,15 @@ export interface ZoneDistrictMutationResult extends Record<string, unknown> {
 export async function zone_district_add_v1(
   args: Record<string, unknown>,
 ): Promise<ZoneDistrictMutationResult> {
-  const live = await liveRpc<Record<string, unknown>>('zone_district_add_v1', { p_args: args });
-  if (live) {
-    return requireLiveMutationResult(live.data, 'zone_district_add_v1', [
-      'zone_district_id',
-    ]) as ZoneDistrictMutationResult;
-  }
-  await sleep(60);
-  return buildEnvelope({
-    zone_district_id:
-      (args.zone_district_id as string | undefined) ?? nextResourceId('zone_district'),
-    already_processed: false,
-  }) as ZoneDistrictMutationResult;
+  const { zone_district_add_v1 } = await import('./data-source/network');
+  return zone_district_add_v1(args);
 }
 
 export async function zone_district_remove_v1(
   args: Record<string, unknown>,
 ): Promise<ZoneDistrictMutationResult> {
-  const live = await liveRpc<Record<string, unknown>>('zone_district_remove_v1', { p_args: args });
-  if (live) {
-    return requireLiveMutationResult(live.data, 'zone_district_remove_v1', [
-      'zone_district_id',
-    ]) as ZoneDistrictMutationResult;
-  }
-  await sleep(60);
-  return buildEnvelope({
-    zone_district_id:
-      (args.zone_district_id as string | undefined) ?? nextResourceId('zone_district'),
-    already_processed: false,
-  }) as ZoneDistrictMutationResult;
+  const { zone_district_remove_v1 } = await import('./data-source/network');
+  return zone_district_remove_v1(args);
 }
 
 // NETWORK/marketplace
@@ -15568,251 +10699,14 @@ export const marketplace_work_package_materialize_v1 = (args: Record<string, unk
     'marketplace_work_package',
   );
 
-function normalizeParticipantReviewDecision(value: string | null | undefined): string | null {
-  const normalized = asNonEmptyString(value)?.toLowerCase();
-  if (!normalized) return null;
-  if (normalized === 'approve') return 'approved';
-  if (normalized === 'reject') return 'rejected';
-  return normalized;
-}
-
-function assertParticipantReviewReadbackState(
-  row: Record<string, unknown>,
-  expectedDecision: string,
-  resourceKey: string,
-  requestId: string,
-): void {
-  const expected = normalizeParticipantReviewDecision(expectedDecision);
-  if (!expected) return;
-  const status = asNonEmptyString(row.status)?.toLowerCase() ?? null;
-  const reviewDecision = asNonEmptyString(row.review_decision)?.toLowerCase() ?? null;
-  const reviewedAt = asNonEmptyString(row.reviewed_at);
-  if (expected === 'approved' || expected === 'rejected') {
-    if (status !== expected && reviewDecision !== expected) {
-      throw new Error(
-        `marketplace-participant-review backend readback ${resourceKey}:${requestId} is not ${expected}`,
-      );
-    }
-    if (!reviewedAt) {
-      throw new Error(
-        `marketplace-participant-review backend readback ${resourceKey}:${requestId} missing reviewed_at`,
-      );
-    }
-    return;
-  }
-  if (expected === 'request_additional_docs') {
-    const decisionMetadata = row.decision_metadata && typeof row.decision_metadata === 'object' && !Array.isArray(row.decision_metadata)
-      ? row.decision_metadata as Record<string, unknown>
-      : {};
-    const metadata = row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
-      ? row.metadata as Record<string, unknown>
-      : {};
-    if (decisionMetadata.request_additional_docs !== true && metadata.request_additional_docs !== true) {
-      throw new Error(
-        `marketplace-participant-review backend readback ${resourceKey}:${requestId} missing request_additional_docs evidence`,
-      );
-    }
-  }
-}
-
-const PARTICIPANT_REVIEW_READBACK_ATTEMPTS = 10;
-const PARTICIPANT_REVIEW_READBACK_DELAY_MS = 250;
-
-async function requireParticipantReviewStateReadback(
-  resourceKey: string,
-  requestId: string,
-  rpcName: string,
-  decision: string,
-): Promise<Record<string, unknown>> {
-  const readRow = async () => {
-    if (resourceKey === 'marketplace_participant_requests') {
-      const rows = await readLiveResourceListReadback(
-        resourceKey,
-        { id: requestId },
-        rpcName,
-      );
-      const row = rows[0];
-      if (!row || Object.keys(row).length === 0) {
-        throw new Error(`${rpcName} backend readback missing ${resourceKey}:${requestId}`);
-      }
-      return row;
-    }
-    return requireLiveResourceReadback(resourceKey, requestId, rpcName);
-  };
-  let row = await readRow();
-  let lastStateError: unknown;
-  for (let attempt = 1; attempt <= PARTICIPANT_REVIEW_READBACK_ATTEMPTS; attempt += 1) {
-    try {
-      assertParticipantReviewReadbackState(row, decision, resourceKey, requestId);
-      return row;
-    } catch (err) {
-      lastStateError = err;
-      if (attempt >= PARTICIPANT_REVIEW_READBACK_ATTEMPTS) break;
-      await sleep(PARTICIPANT_REVIEW_READBACK_DELAY_MS);
-      row = await readRow();
-    }
-  }
-  throw lastStateError instanceof Error
-    ? lastStateError
-    : new Error(`${rpcName} backend readback ${resourceKey}:${requestId} did not reflect review state`);
-}
-
-async function participantReviewSuccessFromReadback({
-  requestId,
-  decision,
-  metadata,
-  merged = {},
-  result = {},
-  envelope = {},
-  recoveredFromFunctionError,
-  functionErrorMessage,
-}: {
-  requestId: string;
-  decision: string;
-  metadata: Record<string, unknown>;
-  merged?: Record<string, unknown>;
-  result?: Record<string, unknown>;
-  envelope?: Record<string, unknown>;
-  recoveredFromFunctionError?: boolean;
-  functionErrorMessage?: string;
-}): Promise<Record<string, unknown>> {
-  const normalizedDecision = normalizeParticipantReviewDecision(decision);
-  const requestReadback = await requireParticipantReviewStateReadback(
-    'marketplace_participant_requests',
-    requestId,
-    'marketplace-participant-review',
-    decision,
-  );
-  const returnedDecision =
-    asNonEmptyString(merged.decision) ??
-    asNonEmptyString(merged.status) ??
-    asNonEmptyString(requestReadback.review_decision) ??
-    asNonEmptyString(requestReadback.status) ??
-    normalizedDecision;
-  if (!returnedDecision) throw new Error('marketplace-participant-review did not return decision status');
-  const participantType =
-    asNonEmptyString(requestReadback.requested_participant_type_key) ??
-    asNonEmptyString(merged.requested_participant_type_key) ??
-    asNonEmptyString(metadata.participant_type);
-  const driverApplicationReadback = participantType === 'freelancer_driver'
-    ? await requireParticipantReviewStateReadback(
-        'driver_application_directory',
-        requestId,
-        'marketplace-participant-review',
-        decision,
-      )
-    : null;
-  return {
-    ...result,
-    ...envelope,
-    ok: true,
-    marketplace_participant_request_id: requestId,
-    participant_request_readback: requestReadback,
-    ...(driverApplicationReadback ? { driver_application_readback: driverApplicationReadback } : {}),
-    decision: returnedDecision,
-    ...(recoveredFromFunctionError
-      ? {
-          recovered_from_function_error: true,
-          function_error_message: functionErrorMessage,
-        }
-      : {}),
-  };
-}
+export const PARTICIPANT_REVIEW_READBACK_ATTEMPTS = 10;
+export const PARTICIPANT_REVIEW_READBACK_DELAY_MS = 250;
 
 export async function marketplace_participant_request_review_apply_v1(
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const requestId =
-    asNonEmptyString(args.participant_request_id) ??
-    asNonEmptyString(args.request_id) ??
-    asNonEmptyString(args.id);
-  const decision = asNonEmptyString(args.decision)?.toLowerCase() ?? null;
-  if (!requestId) throw new Error('participant_request_id is required');
-  if (!decision) throw new Error('decision is required');
-
-  const client = getSupabaseClient();
-  if (client) {
-    const metadata = args.metadata && typeof args.metadata === 'object' && !Array.isArray(args.metadata)
-      ? (args.metadata as Record<string, unknown>)
-      : {};
-    const requestedDocuments = Array.isArray(args.requested_documents)
-      ? args.requested_documents.filter((doc): doc is string => typeof doc === 'string' && doc.trim().length > 0)
-      : [];
-    const note = asNonEmptyString(args.note);
-    const decisionMetadata = {
-      ...metadata,
-      ...(requestedDocuments.length ? { requested_documents: requestedDocuments } : {}),
-      ...(note ? { note } : {}),
-    };
-    const body: Record<string, unknown> = {
-      request_id: requestId,
-      decision,
-      metadata: decisionMetadata,
-    };
-    const reason = asNonEmptyString(args.reason) ?? note ?? asNonEmptyString(metadata.reason);
-    if (reason) body.reason = reason;
-    const normalizedDecision = normalizeParticipantReviewDecision(decision);
-    const inviteRedirectTo =
-      asNonEmptyString(args.invite_redirect_to) ??
-      (normalizedDecision === 'approved' ? hostedInviteRedirect() : null);
-    if (inviteRedirectTo) body.invite_redirect_to = inviteRedirectTo;
-
-    const { data, error } = await client.functions.invoke<Record<string, unknown>>(
-      'marketplace-participant-review',
-      { body },
-    );
-    if (error) {
-      const errorMessage = await readFunctionErrorMessage(error, 'marketplace participant review failed');
-      try {
-        return await participantReviewSuccessFromReadback({
-          requestId,
-          decision,
-          metadata,
-          recoveredFromFunctionError: true,
-          functionErrorMessage: errorMessage,
-        });
-      } catch {
-        throw new Error(errorMessage);
-      }
-    }
-    const { envelope, result, merged } = requireFunctionMutationResult(
-      data,
-      'marketplace-participant-review',
-      [
-        'marketplace_participant_request_id',
-        'participant_request_id',
-        'request_id',
-        'id',
-        'reviewed_at',
-        'decision_log_id',
-        'domain_event_id',
-        'participant_profile_id',
-      ],
-    );
-    const returnedRequestId =
-      asNonEmptyString(merged.marketplace_participant_request_id) ??
-      asNonEmptyString(merged.participant_request_id) ??
-      asNonEmptyString(merged.request_id) ??
-      asNonEmptyString(merged.id);
-    if (!returnedRequestId) {
-      throw new Error('marketplace-participant-review did not return participant request evidence');
-    }
-    return participantReviewSuccessFromReadback({
-      requestId: returnedRequestId,
-      decision,
-      metadata,
-      merged,
-      result,
-      envelope,
-    });
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('marketplace_participant_request_review_apply_v1');
-  await sleep(60);
-  return buildEnvelope({
-    marketplace_participant_request_id: requestId,
-    decision,
-  });
+  const { marketplace_participant_request_review_apply_v1 } = await import('./data-source/network');
+  return marketplace_participant_request_review_apply_v1(args);
 }
 
 export const marketplace_refresh_reputation_snapshot_v1 = (args: Record<string, unknown>) =>
@@ -15852,37 +10746,15 @@ export interface BranchMutationResult extends Record<string, unknown> {
 export async function branch_create_v1(
   args: Record<string, unknown>,
 ): Promise<BranchMutationResult> {
-  const live = await livePArgsMutationResult('branch_create_v1', args, ['branch_id', 'id']);
-  if (live) {
-    return withRequiredLiveStringField<BranchMutationResult>(
-      live,
-      ['branch_id', 'id'],
-      'branch_id',
-      'branch_create_v1 did not return branch_id',
-    );
-  }
-  await sleep(60);
-  return buildEnvelope({
-    branch_id: (args.branch_id as string | undefined) ?? nextResourceId('branch'),
-  }) as BranchMutationResult;
+  const { branch_create_v1 } = await import('./data-source/network');
+  return branch_create_v1(args);
 }
 
 export async function branch_update_v1(
   args: Record<string, unknown>,
 ): Promise<BranchMutationResult> {
-  const live = await livePArgsMutationResult('branch_update_v1', args, ['branch_id', 'id']);
-  if (live) {
-    return withRequiredLiveStringField<BranchMutationResult>(
-      live,
-      ['branch_id', 'id'],
-      'branch_id',
-      'branch_update_v1 did not return branch_id',
-    );
-  }
-  await sleep(60);
-  return buildEnvelope({
-    branch_id: (args.branch_id as string | undefined) ?? nextResourceId('branch'),
-  }) as BranchMutationResult;
+  const { branch_update_v1 } = await import('./data-source/network');
+  return branch_update_v1(args);
 }
 
 export interface BranchMarkOosResult extends Record<string, unknown> {
@@ -15898,52 +10770,8 @@ export interface BranchMarkOosResult extends Record<string, unknown> {
 export async function branch_mark_oos_v1(
   args: Record<string, unknown>,
 ): Promise<BranchMarkOosResult> {
-  // Backend RPC name is `mark_branch_oos_v1`; FE facade keeps the
-  // `branch_mark_oos_v1` name to avoid breaking existing call sites.
-  const live = await livePArgsMutationResult('mark_branch_oos_v1', args, [
-    'branch_ids',
-    'branch_id',
-    'already_oos',
-    'updated_count',
-  ]);
-  if (live) {
-    requireLiveDomainEvidence(
-      live,
-      'mark_branch_oos_v1',
-      ['branch_ids', 'branch_id', 'already_oos'],
-      'branch selection',
-    );
-    const updatedCount = requireLiveNumberField(
-      live,
-      ['updated_count', 'count', 'affected_count'],
-      'mark_branch_oos_v1 did not return updated_count',
-    );
-    const branchIds = Array.isArray(live.branch_ids)
-      ? live.branch_ids.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
-      : asNonEmptyString(live.branch_id)
-        ? [asNonEmptyString(live.branch_id)!]
-        : [];
-    const alreadyOos = Array.isArray(live.already_oos)
-      ? live.already_oos.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
-      : [];
-    return {
-      ...live,
-      branch_ids: branchIds.length ? branchIds : alreadyOos,
-      already_oos: alreadyOos,
-      updated_count: updatedCount,
-    } as BranchMarkOosResult;
-  }
-  await sleep(60);
-  const ids = Array.isArray(args.branch_ids)
-    ? (args.branch_ids as string[])
-    : args.branch_id
-      ? [args.branch_id as string]
-      : [];
-  return buildEnvelope({
-    branch_ids: ids,
-    already_oos: [],
-    updated_count: ids.length,
-  }) as BranchMarkOosResult;
+  const { branch_mark_oos_v1 } = await import('./data-source/network');
+  return branch_mark_oos_v1(args);
 }
 
 export interface BranchZoneMutationResult extends Record<string, unknown> {
@@ -15957,40 +10785,15 @@ export interface BranchZoneMutationResult extends Record<string, unknown> {
 export async function branch_zone_assign_v1(
   args: Record<string, unknown>,
 ): Promise<BranchZoneMutationResult> {
-  const live = await livePArgsMutationResult('branch_zone_assign_v1', args, ['branch_zone_id', 'id']);
-  if (live) {
-    return withRequiredLiveStringField<BranchZoneMutationResult>(
-      live,
-      ['branch_zone_id', 'id'],
-      'branch_zone_id',
-      'branch_zone_assign_v1 did not return branch_zone_id',
-    );
-  }
-  await sleep(60);
-  return buildEnvelope({
-    branch_zone_id: nextResourceId('branch_zone'),
-    already_processed: false,
-  }) as BranchZoneMutationResult;
+  const { branch_zone_assign_v1 } = await import('./data-source/network');
+  return branch_zone_assign_v1(args);
 }
 
 export async function branch_zone_unassign_v1(
   args: Record<string, unknown>,
 ): Promise<BranchZoneMutationResult> {
-  const live = await livePArgsMutationResult('branch_zone_unassign_v1', args, ['branch_zone_id', 'id']);
-  if (live) {
-    return withRequiredLiveStringField<BranchZoneMutationResult>(
-      live,
-      ['branch_zone_id', 'id'],
-      'branch_zone_id',
-      'branch_zone_unassign_v1 did not return branch_zone_id',
-    );
-  }
-  await sleep(60);
-  return buildEnvelope({
-    branch_zone_id:
-      (args.branch_zone_id as string | undefined) ?? nextResourceId('branch_zone'),
-    already_processed: false,
-  }) as BranchZoneMutationResult;
+  const { branch_zone_unassign_v1 } = await import('./data-source/network');
+  return branch_zone_unassign_v1(args);
 }
 
 export interface BranchMembershipMutationResult extends Record<string, unknown> {
@@ -16004,48 +10807,15 @@ export interface BranchMembershipMutationResult extends Record<string, unknown> 
 export async function add_branch_member_v1(
   args: Record<string, unknown>,
 ): Promise<BranchMembershipMutationResult> {
-  const live = await livePArgsMutationResult('add_branch_member_v1', args, [
-    'branch_membership_id',
-    'membership_id',
-    'id',
-  ]);
-  if (live) {
-    return withRequiredLiveStringField<BranchMembershipMutationResult>(
-      live,
-      ['branch_membership_id', 'membership_id', 'id'],
-      'branch_membership_id',
-      'add_branch_member_v1 did not return branch_membership_id',
-    );
-  }
-  await sleep(60);
-  return buildEnvelope({
-    branch_membership_id: nextResourceId('branch_membership'),
-    already_processed: false,
-  }) as BranchMembershipMutationResult;
+  const { add_branch_member_v1 } = await import('./data-source/network');
+  return add_branch_member_v1(args);
 }
 
 export async function remove_branch_member_v1(
   args: Record<string, unknown>,
 ): Promise<BranchMembershipMutationResult> {
-  const live = await livePArgsMutationResult('remove_branch_member_v1', args, [
-    'branch_membership_id',
-    'membership_id',
-    'id',
-  ]);
-  if (live) {
-    return withRequiredLiveStringField<BranchMembershipMutationResult>(
-      live,
-      ['branch_membership_id', 'membership_id', 'id'],
-      'branch_membership_id',
-      'remove_branch_member_v1 did not return branch_membership_id',
-    );
-  }
-  await sleep(60);
-  return buildEnvelope({
-    branch_membership_id:
-      (args.membership_id as string | undefined) ?? nextResourceId('branch_membership'),
-    already_processed: false,
-  }) as BranchMembershipMutationResult;
+  const { remove_branch_member_v1 } = await import('./data-source/network');
+  return remove_branch_member_v1(args);
 }
 
 export interface BranchCapacityWindowMutationResult extends Record<string, unknown> {
@@ -16059,25 +10829,8 @@ export interface BranchCapacityWindowMutationResult extends Record<string, unkno
 export async function branch_capacity_window_set_v1(
   args: Record<string, unknown>,
 ): Promise<BranchCapacityWindowMutationResult> {
-  const live = await livePArgsMutationResult('branch_capacity_window_set_v1', args, [
-    'branch_capacity_window_id',
-    'capacity_window_id',
-    'id',
-  ]);
-  if (live) {
-    return withRequiredLiveStringField<BranchCapacityWindowMutationResult>(
-      live,
-      ['branch_capacity_window_id', 'capacity_window_id', 'id'],
-      'branch_capacity_window_id',
-      'branch_capacity_window_set_v1 did not return branch_capacity_window_id',
-    );
-  }
-  await sleep(60);
-  return buildEnvelope({
-    branch_capacity_window_id:
-      (args.capacity_window_id as string | undefined) ?? nextResourceId('branch_capacity_window'),
-    already_processed: false,
-  }) as BranchCapacityWindowMutationResult;
+  const { branch_capacity_window_set_v1 } = await import('./data-source/network');
+  return branch_capacity_window_set_v1(args);
 }
 
 export interface BranchCoverageWindowMutationResult extends Record<string, unknown> {
@@ -16092,27 +10845,8 @@ export interface BranchCoverageWindowMutationResult extends Record<string, unkno
 export async function branch_coverage_window_upsert_v1(
   args: Record<string, unknown>,
 ): Promise<BranchCoverageWindowMutationResult> {
-  const live = await livePArgsMutationResult('branch_coverage_window_upsert_v1', args, [
-    'branch_coverage_window_id',
-    'coverage_window_id',
-    'id',
-  ]);
-  if (live) {
-    return withRequiredLiveStringField<BranchCoverageWindowMutationResult>(
-      live,
-      ['branch_coverage_window_id', 'coverage_window_id', 'id'],
-      'branch_coverage_window_id',
-      'branch_coverage_window_upsert_v1 did not return branch_coverage_window_id',
-    );
-  }
-  await sleep(60);
-  const isUpdate = typeof args.coverage_window_id === 'string' && args.coverage_window_id;
-  return buildEnvelope({
-    branch_coverage_window_id:
-      (args.coverage_window_id as string | undefined) ?? nextResourceId('branch_coverage_window'),
-    action: isUpdate ? 'updated' : 'created',
-    already_processed: false,
-  }) as BranchCoverageWindowMutationResult;
+  const { branch_coverage_window_upsert_v1 } = await import('./data-source/network');
+  return branch_coverage_window_upsert_v1(args);
 }
 
 // ----------- INSIGHTS / API gateway operational write RPCs -----------
@@ -16542,71 +11276,14 @@ export async function ui_upsert_mapping_artifact_v1(
 export async function ui_delete_mapping_config_v1(
   args: { mapping_config_id: string },
 ): Promise<Record<string, unknown>> {
-  const mappingConfigId = asNonEmptyString(args.mapping_config_id);
-  if (!mappingConfigId) throw new Error('ui_delete_mapping_config_v1 requires mapping_config_id');
-
-  const live = await liveRpc<Record<string, unknown>>('ui_delete_resource_v1', {
-    p_resource: 'mapping_configs',
-    p_id: mappingConfigId,
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(live.data, 'ui_delete_mapping_config_v1 returned no backend outcome');
-    const outcomeError = backendOutcomeError(rec, 'ui_delete_mapping_config_v1 was rejected by the backend');
-    if (outcomeError) throw outcomeError;
-    const deletedId =
-      asNonEmptyString(rec.mapping_config_id) ??
-      asNonEmptyString(rec.id);
-    if (deletedId !== mappingConfigId) {
-      throw new Error('ui_delete_mapping_config_v1 backend outcome did not match the requested mapping');
-    }
-    const mappingReadback = await ui_list_resource_v1<Record<string, unknown>>('mapping_configs', {
-      filter: { id: mappingConfigId },
-      page_size: 1,
-    });
-    if (mappingReadback.rows.some((row) => asNonEmptyString(row.id) === mappingConfigId)) {
-      throw new Error('ui_delete_mapping_config_v1 confirmation still shows the mapping in Intake mappings');
-    }
-    const directoryReadback = await ui_list_resource_v1<Record<string, unknown>>('mapping_config_directory', {
-      filter: { id: mappingConfigId },
-      page_size: 1,
-    });
-    if (directoryReadback.rows.some((row) => asNonEmptyString(row.id) === mappingConfigId)) {
-      throw new Error('ui_delete_mapping_config_v1 confirmation still shows the mapping in External Intake usage');
-    }
-    return {
-      ...rec,
-      mapping_config_id: mappingConfigId,
-    };
-  }
-
-  await sleep(60);
-  return buildMutationFallbackEnvelope({ mapping_config_id: mappingConfigId }, 'mapping_config');
+  const { ui_delete_mapping_config_v1 } = await import('./data-source/integrations');
+  return ui_delete_mapping_config_v1(args);
 }
 export async function ui_upsert_api_gateway_route_mapping_v1(
   args: UpsertApiGatewayRouteMappingArgs,
 ): Promise<Record<string, unknown>> {
-  const live = await liveRpc<Record<string, unknown>>('ui_upsert_api_gateway_route_mapping_v1', {
-    p_args: args,
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(live.data, 'ui_upsert_api_gateway_route_mapping_v1 returned no backend outcome');
-    const outcomeError = backendOutcomeError(rec, 'ui_upsert_api_gateway_route_mapping_v1 was rejected by the backend');
-    if (outcomeError) throw outcomeError;
-    const routeId =
-      asNonEmptyString(rec.api_route_id) ??
-      asNonEmptyString(args.api_route_id);
-    const mappingConfigId =
-      asNonEmptyString(rec.mapping_config_id) ??
-      asNonEmptyString(args.mapping_config_id);
-    if (!routeId) throw new Error('ui_upsert_api_gateway_route_mapping_v1 did not return api_route_id');
-    if (!mappingConfigId) throw new Error('ui_upsert_api_gateway_route_mapping_v1 did not return mapping_config_id');
-    await requireLiveResourceReadback('api_routes', routeId, 'ui_upsert_api_gateway_route_mapping_v1');
-    await requireLiveResourceReadback('mapping_config_directory', mappingConfigId, 'ui_upsert_api_gateway_route_mapping_v1');
-    return rec;
-  }
-
-  await sleep(60);
-  return buildMutationFallbackEnvelope(args, 'api_route');
+  const { ui_upsert_api_gateway_route_mapping_v1 } = await import('./data-source/integrations');
+  return ui_upsert_api_gateway_route_mapping_v1(args);
 }
 export async function ui_create_mapping_operation_report_v1(
   args: Record<string, unknown>,
@@ -16656,38 +11333,8 @@ export async function ui_test_mapping_config_v1(
   mappingConfigId: string,
   payload: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const mappingId = asNonEmptyString(mappingConfigId);
-  const live = await liveRpc<Record<string, unknown>>('ui_test_mapping_config_v1', {
-    p_mapping_config_id: mappingId,
-    p_payload: payload ?? {},
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(live.data, 'ui_test_mapping_config_v1 returned no result');
-    const outcomeError = backendOutcomeError(rec, 'ui_test_mapping_config_v1 was rejected by the backend');
-    if (outcomeError) throw outcomeError;
-    requireLiveEvidence(rec, [
-      'mapping_operation_report_id',
-      'operation_report_id',
-      'report_id',
-      'report',
-    ], 'ui_test_mapping_config_v1 did not return backend mapping operation report evidence');
-    const reportId =
-      asNonEmptyString(rec.mapping_operation_report_id) ??
-      asNonEmptyString(rec.operation_report_id) ??
-      asNonEmptyString(rec.report_id);
-    if (reportId) {
-      await requireLiveResourceReadback('mapping_operation_reports', reportId, 'ui_test_mapping_config_v1');
-    }
-    return rec;
-  }
-  await sleep(60);
-  return {
-    ok: true,
-    status: 'succeeded',
-    mapping_config_id: mappingId,
-    transformed_payload: payload ?? {},
-    report_id: `mor_${Date.now()}`,
-  };
+  const { ui_test_mapping_config_v1 } = await import('./data-source/integrations');
+  return ui_test_mapping_config_v1(mappingConfigId, payload);
 }
 
 // INTEGRATIONS — provider_auth_configs (Create/Update/Rotate/Revoke)
@@ -16735,7 +11382,7 @@ export type UnbindProviderAccountCredentialArgs = Pick<
   | 'reason'
   | 'notes'
 >;
-function resolveProviderAuthConfigId(
+export function resolveProviderAuthConfigId(
   rec: Record<string, unknown>,
   args: Record<string, unknown>,
 ): string | null {
@@ -16748,7 +11395,7 @@ function resolveProviderAuthConfigId(
     ?? asNonEmptyString(args.config_id);
 }
 
-function requireProviderAuthConfigDirectoryReadback(
+export function requireProviderAuthConfigDirectoryReadback(
   row: Record<string, unknown>,
   args: Record<string, unknown>,
   rpcName: string,
@@ -16805,72 +11452,14 @@ export const ui_upsert_provider_auth_config_v1 = (args: UpsertProviderAuthConfig
 export async function ui_bind_provider_account_credential_v1(
   args: BindProviderAccountCredentialArgs,
 ): Promise<Record<string, unknown>> {
-  const live = await livePArgsMutationResult('ui_bind_provider_account_credential_v1', args, [
-    'provider_auth_config_id',
-    'auth_config_id',
-    'settings_version_id',
-    'settings_id',
-  ]);
-  if (live) {
-    const configId = resolveProviderAuthConfigId(live, args);
-    if (!configId) throw new Error('ui_bind_provider_account_credential_v1 did not return provider_auth_config_id');
-    // Provider-account bindings can attach tenant settings to a global route
-    // provider. The direct secret table may stay outside tenant RLS; the
-    // redacted credential directory is the browser-safe readback contract.
-    const readback = await requireLiveResourceReadback(
-      'integration_credential_directory',
-      configId,
-      'ui_bind_provider_account_credential_v1',
-    );
-    requireProviderAuthConfigDirectoryReadback(readback, args, 'ui_bind_provider_account_credential_v1', configId);
-    return { ...live, provider_auth_config_id: configId };
-  }
-  await sleep(60);
-  return buildMutationFallbackEnvelope(args, 'provider_account_credential');
+  const { ui_bind_provider_account_credential_v1 } = await import('./data-source/integrations');
+  return ui_bind_provider_account_credential_v1(args);
 }
 export async function ui_unbind_provider_account_credential_v1(
   args: UnbindProviderAccountCredentialArgs,
 ): Promise<Record<string, unknown>> {
-  const live = await livePArgsMutationResult('ui_unbind_provider_account_credential_v1', args, [
-    'settings_version_id',
-    'settings_id',
-    'provider_account_category',
-    'auth_config_id',
-  ]);
-  if (live) {
-    const providerAccountCategory = asNonEmptyString(live.provider_account_category)
-      ?? asNonEmptyString(args.provider_account_category)
-      ?? 'logestechs_v2_account';
-    const scopeType = asNonEmptyString(live.scope_type)
-      ?? asNonEmptyString(args.scope_type)
-      ?? 'tenant';
-    const orgId =
-      asNonEmptyString(live.organization_id)
-      ?? asNonEmptyString(args.organization_id)
-      ?? asNonEmptyString(args.tenant_id);
-    const scopeId =
-      asNonEmptyString(live.scope_id)
-      ?? asNonEmptyString(args.scope_id)
-      ?? (scopeType === 'tenant' ? orgId : asNonEmptyString(args.source_id));
-    const scopeContext =
-      scopeType === 'source'
-        ? { webhook_source_id: scopeId, organization_id: orgId }
-        : { tenant: { id: scopeId ?? orgId } };
-    const readback = await resolveSettings(providerAccountCategory, scopeContext);
-    const readbackValue =
-      readback.value && typeof readback.value === 'object' && !Array.isArray(readback.value)
-        ? readback.value as Record<string, unknown>
-        : {};
-    if (asNonEmptyString(readbackValue.auth_config_id)) {
-      throw new Error('ui_unbind_provider_account_credential_v1 backend readback still exposes auth_config_id');
-    }
-    if (readbackValue.enabled !== false) {
-      throw new Error('ui_unbind_provider_account_credential_v1 backend readback did not disable provider account');
-    }
-    return { ...live, bound: false, auth_config_id: null };
-  }
-  await sleep(60);
-  return { ...buildMutationFallbackEnvelope(args, 'provider_account_credential_unbound'), bound: false };
+  const { ui_unbind_provider_account_credential_v1 } = await import('./data-source/integrations');
+  return ui_unbind_provider_account_credential_v1(args);
 }
 export const ui_revoke_provider_auth_config_v1 = (args: { config_id: string; reason?: string | null }) =>
   providerAuthConfigMutation('ui_revoke_provider_auth_config_v1', args);
@@ -16880,103 +11469,15 @@ export const integration_plugin_rotate_credentials_v1 = (args: Record<string, un
 export async function ui_execute_provider_circuit_reset_v1(
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const live = await livePArgsMutationResult('ui_execute_provider_circuit_reset_v1', args, [
-    'provider_id',
-    'operation_name',
-    'circuit_breaker_id',
-    'decision_log_id',
-  ]);
-  if (live) {
-    const providerId = asNonEmptyString(live.provider_id) ?? asNonEmptyString(args.provider_id);
-    const operationName = asNonEmptyString(live.operation_name) ?? asNonEmptyString(args.operation_name);
-    if (!providerId || !operationName) {
-      throw new Error('ui_execute_provider_circuit_reset_v1 did not return provider circuit identity');
-    }
-
-    const breakerRows = await readLiveResourceListReadback(
-      'circuit_breaker_dashboard',
-      { provider_id: providerId, operation_name: operationName },
-      'ui_execute_provider_circuit_reset_v1',
-    );
-    const breaker = breakerRows.find(
-      (row) => asNonEmptyString(row.provider_id) === providerId && asNonEmptyString(row.operation_name) === operationName,
-    );
-    if (!breaker || asNonEmptyString(breaker.state) !== 'closed') {
-      throw new Error('ui_execute_provider_circuit_reset_v1 backend readback did not close the circuit breaker');
-    }
-
-    const healthRows = await readLiveResourceListReadback(
-      'provider_health_latest',
-      { provider_id: providerId },
-      'ui_execute_provider_circuit_reset_v1',
-    );
-    const health = healthRows.find((row) => asNonEmptyString(row.provider_id) === providerId);
-    if (!health || asNonEmptyString(health.status) !== 'healthy') {
-      throw new Error('ui_execute_provider_circuit_reset_v1 backend readback did not mark provider healthy');
-    }
-
-    return live;
-  }
-
-  await sleep(60);
-  return {
-    ...buildMutationFallbackEnvelope(args, 'provider_circuit_reset'),
-    provider_id: args.provider_id,
-    operation_name: args.operation_name,
-    state: 'closed',
-    health_status: 'healthy',
-  };
+  const { ui_execute_provider_circuit_reset_v1 } = await import('./data-source/integrations');
+  return ui_execute_provider_circuit_reset_v1(args);
 }
 
 export async function ui_execute_provider_circuit_probe_v1(
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const live = await livePArgsMutationResult('ui_execute_provider_circuit_probe_v1', args, [
-    'provider_id',
-    'operation_name',
-    'circuit_breaker_id',
-    'decision_log_id',
-  ]);
-  if (live) {
-    const providerId = asNonEmptyString(live.provider_id) ?? asNonEmptyString(args.provider_id);
-    const operationName = asNonEmptyString(live.operation_name) ?? asNonEmptyString(args.operation_name);
-    if (!providerId || !operationName) {
-      throw new Error('ui_execute_provider_circuit_probe_v1 did not return provider circuit identity');
-    }
-
-    const breakerRows = await readLiveResourceListReadback(
-      'circuit_breaker_dashboard',
-      { provider_id: providerId, operation_name: operationName },
-      'ui_execute_provider_circuit_probe_v1',
-    );
-    const breaker = breakerRows.find(
-      (row) => asNonEmptyString(row.provider_id) === providerId && asNonEmptyString(row.operation_name) === operationName,
-    );
-    if (!breaker || asNonEmptyString(breaker.state) !== 'closed') {
-      throw new Error('ui_execute_provider_circuit_probe_v1 backend readback did not close the circuit breaker');
-    }
-
-    const healthRows = await readLiveResourceListReadback(
-      'provider_health_latest',
-      { provider_id: providerId },
-      'ui_execute_provider_circuit_probe_v1',
-    );
-    const health = healthRows.find((row) => asNonEmptyString(row.provider_id) === providerId);
-    if (!health || asNonEmptyString(health.status) !== 'healthy') {
-      throw new Error('ui_execute_provider_circuit_probe_v1 backend readback did not mark provider healthy');
-    }
-
-    return live;
-  }
-
-  await sleep(60);
-  return {
-    ...buildMutationFallbackEnvelope(args, 'provider_circuit_probe'),
-    provider_id: args.provider_id,
-    operation_name: args.operation_name,
-    state: 'closed',
-    health_status: 'healthy',
-  };
+  const { ui_execute_provider_circuit_probe_v1 } = await import('./data-source/integrations');
+  return ui_execute_provider_circuit_probe_v1(args);
 }
 
 // INTEGRATIONS — integration_plugins catalog (Install/Rollback)
@@ -17142,81 +11643,15 @@ export const integration_plugin_generate_draft_v1 = (args: IntegrationPluginGene
 export async function ui_upsert_logistics_customer_migration_config_v1(
   args: LogisticsCustomerMigrationConfigArgs,
 ): Promise<LogisticsCustomerMigrationConfigResult> {
-  const rpcName = 'ui_upsert_logistics_customer_migration_config_v1';
-  const live = await liveRpc<LogisticsCustomerMigrationConfigResult>(rpcName, { p_args: args });
-  if (!live) throw new Error(`${rpcName} requires a live backend`);
-
-  const result = requireLiveRpcRecord(
-    live.data,
-    `${rpcName} returned no backend outcome`,
-  ) as LogisticsCustomerMigrationConfigResult;
-  const outcomeError = backendOutcomeError(result, 'Customer migration config was rejected by the backend');
-  if (outcomeError) throw outcomeError;
-  assertLogisticsCustomerMigrationConfigEvidence(result);
-  await Promise.all([
-    requireLiveResourceReadback('logistics_migration_sources', result.source_id, rpcName),
-    requireLiveResourceReadback('logistics_migration_profiles', result.profile_id, rpcName),
-    requireLiveResourceReadback('integration_plugin_directory', result.plugin_id, rpcName),
-    requireLiveResourceReadback('integration_plugin_versions', result.plugin_version_id, rpcName),
-    requireLiveResourceReadback('integration_plugin_bindings', result.plugin_binding_id, rpcName),
-    requireLiveResourceReadback('decision_log', result.decision_log_id, rpcName),
-  ]);
-  return result;
+  const { ui_upsert_logistics_customer_migration_config_v1 } = await import('./data-source/integrations');
+  return ui_upsert_logistics_customer_migration_config_v1(args);
 }
 
 export async function ui_execute_logistics_customer_migration_v1(
   args: LogisticsCustomerMigrationArgs,
 ): Promise<LogisticsCustomerMigrationResult> {
-  const rpcName = 'ui_execute_logistics_customer_migration_v1';
-  const live = await liveRpc<LogisticsCustomerMigrationResult>(rpcName, { p_args: args });
-  if (!live) throw new Error(`${rpcName} requires a live backend`);
-
-  const result = requireLiveRpcRecord(
-    live.data,
-    `${rpcName} returned no backend outcome`,
-  ) as LogisticsCustomerMigrationResult;
-  if (
-    !isPersistedLogisticsCustomerMigrationValidationFailure(result)
-    && !isPersistedLogisticsCustomerMigrationOutcome(result)
-  ) {
-    const outcomeError = backendOutcomeError(result, 'Customer migration was rejected by the backend');
-    if (outcomeError) throw outcomeError;
-  }
-  assertLogisticsCustomerMigrationResultEvidence(result);
-
-  const readbacks: Array<Promise<ResourceRow>> = [
-    requireLiveResourceReadback('logistics_migration_requests', result.request_id, rpcName),
-    requireLiveResourceReadback('import_jobs', result.import_job_id, rpcName),
-    requireLiveResourceReadback('integration_plugin_directory', result.plugin_id, rpcName),
-    requireLiveResourceReadback('integration_plugin_versions', result.plugin_version_id, rpcName),
-    requireLiveResourceReadback('integration_plugin_bindings', result.plugin_binding_id, rpcName),
-  ];
-  if (result.workflow_run_id) {
-    readbacks.push(requireLiveResourceReadback('workflow_run_directory', result.workflow_run_id, rpcName));
-  }
-  if (result.decision_log_id) {
-    readbacks.push(requireLiveResourceReadback('decision_log', result.decision_log_id, rpcName));
-  }
-  if (result.imported_client_id) {
-    readbacks.push(requireLiveResourceReadback('clients', result.imported_client_id, rpcName));
-  }
-  for (const recipientId of result.imported_recipient_ids ?? []) {
-    if (recipientId) {
-      readbacks.push(requireLiveResourceReadback('recipients', String(recipientId), rpcName));
-    }
-  }
-  for (const itemId of result.migration_item_ids ?? []) {
-    if (itemId) {
-      readbacks.push(requireLiveResourceReadback('logistics_migration_items', String(itemId), rpcName));
-    }
-  }
-  for (const eventId of result.domain_event_ids ?? []) {
-    if (eventId) {
-      readbacks.push(requireLiveResourceReadback('recent_workflow_events', String(eventId), rpcName));
-    }
-  }
-  await Promise.all(readbacks);
-  return result;
+  const { ui_execute_logistics_customer_migration_v1 } = await import('./data-source/integrations');
+  return ui_execute_logistics_customer_migration_v1(args);
 }
 export const integration_plugin_rollback_v1 = (args: {
   plugin_id: string;
@@ -17251,60 +11686,8 @@ export interface IntegrationPluginExportHandoffArgs extends Record<string, unkno
 export async function integration_plugin_export_handoff_v1(
   args: IntegrationPluginExportHandoffArgs,
 ): Promise<Record<string, unknown>> {
-  const live = await liveRpc<Record<string, unknown>>('integration_plugin_export_handoff_v1', {
-    p_plugin_version_id: args.plugin_version_id,
-    p_base_url: args.base_url ?? null,
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(live.data, 'integration_plugin_export_handoff_v1 returned no backend outcome');
-    const outcomeError = backendOutcomeError(rec, 'integration_plugin_export_handoff_v1 was rejected by the backend');
-    if (outcomeError) throw outcomeError;
-    requireLiveEvidence(
-      rec,
-      ['plugin_id', 'plugin_version_id', 'kind', 'endpoint', 'token', 'sample_curl'],
-      'integration_plugin_export_handoff_v1 did not return backend handoff evidence',
-    );
-    const issuedToken = asNonEmptyString(rec.token);
-    if (!issuedToken || issuedToken.includes('{{') || issuedToken.includes('}}')) {
-      throw new Error('integration_plugin_export_handoff_v1 did not return an issued source token');
-    }
-    const endpoint = asNonEmptyString(rec.endpoint);
-    const sampleCurl = asNonEmptyString(rec.sample_curl);
-    if (!endpoint || endpoint.includes('{{') || endpoint.includes('}}') || !sampleCurl || sampleCurl.includes('{{') || sampleCurl.includes('}}')) {
-      throw new Error('integration_plugin_export_handoff_v1 did not return a concrete endpoint handoff');
-    }
-    const pluginVersionId = asNonEmptyString(rec.plugin_version_id) ?? args.plugin_version_id;
-    const versionRow = await requireLiveResourceReadback(
-      'integration_plugin_versions',
-      pluginVersionId,
-      'integration_plugin_export_handoff_v1',
-    );
-    const versionPluginId = asNonEmptyString(versionRow.plugin_id);
-    const pluginId = asNonEmptyString(rec.plugin_id) ?? versionPluginId;
-    if (!pluginId) throw new Error('integration_plugin_export_handoff_v1 did not return integration_plugin_id');
-    if (versionPluginId && pluginId !== versionPluginId) {
-      throw new Error('integration_plugin_export_handoff_v1 plugin readback did not match version lineage');
-    }
-    await requireLiveResourceReadback('integration_plugins', pluginId, 'integration_plugin_export_handoff_v1');
-    await requireLiveResourceReadback('integration_plugin_directory', pluginId, 'integration_plugin_export_handoff_v1');
-    return rec;
-  }
-  await sleep(40);
-  return {
-    ok: true,
-    plugin_id: nextResourceId('plg'),
-    plugin_version_id: args.plugin_version_id,
-    kind: 'webhook',
-    endpoint: `${args.base_url ?? '{{BASE_URL}}'}/functions/v1/webhook-receiver`,
-    token: '{{TOKEN}}',
-    headers: { authorization: 'Bearer {{TOKEN}}' },
-    instructions: [
-      'Point webhook destination to endpoint.',
-      'Send Authorization: Bearer {token}.',
-      'Keep payload shape per plugin mapping configuration.',
-    ],
-    sample_curl: `curl -X POST "${args.base_url ?? '{{BASE_URL}}'}/functions/v1/webhook-receiver" -H "authorization: Bearer {{TOKEN}}" -H "content-type: application/json" -d '{}'`,
-  };
+  const { integration_plugin_export_handoff_v1 } = await import('./data-source/integrations');
+  return integration_plugin_export_handoff_v1(args);
 }
 
 // INTEGRATIONS — plugin lifecycle Submit/Approve/Activate/Set-binding (W9-2)
@@ -17786,7 +12169,7 @@ export interface DeliverySlotWindow {
   remaining: number | null;
 }
 
-const DELIVERY_SLOT_CATALOG: DeliverySlotWindow[] = [
+export const DELIVERY_SLOT_CATALOG: DeliverySlotWindow[] = [
   { window_id: 'win_2026_04_26_am', slot_date: '2026-04-26', window_start_local: '10:00', window_end_local: '12:00', remaining: 12 },
   { window_id: 'win_2026_04_26_mid', slot_date: '2026-04-26', window_start_local: '13:00', window_end_local: '15:00', remaining: 8 },
   { window_id: 'win_2026_04_26_pm', slot_date: '2026-04-26', window_start_local: '16:00', window_end_local: '18:00', remaining: 4 },
@@ -17801,38 +12184,8 @@ const DELIVERY_SLOT_CATALOG: DeliverySlotWindow[] = [
 export async function list_delivery_slots_v1(
   args?: { shipment_id?: string; slot_date?: string } | unknown,
 ): Promise<DeliverySlotWindow[]> {
-  const input = ((args ?? {}) as Record<string, unknown>);
-  const shipmentId = input.shipment_id as string | undefined;
-  const clientId = (input.client_id as string | undefined) ?? await getLiveShipmentClientId(shipmentId);
-  const live = await liveRpc('list_delivery_slots_v1', {
-    p_input: {
-      ...input,
-      client_id: clientId,
-      start_date: input.start_date ?? input.slot_date,
-      days: input.days ?? 1,
-      include_unavailable: input.include_unavailable ?? false,
-    },
-  });
-  if (live) {
-    const rows = Array.isArray(live.data) ? live.data : [];
-    return rows.map((row) => normalizeDeliverySlotWindow(row as Record<string, unknown>));
-  }
-
-  await sleep(40);
-  const slotDate = (args as { slot_date?: string } | undefined)?.slot_date;
-  if (slotDate) {
-    const scoped = DELIVERY_SLOT_CATALOG.filter((w) => w.slot_date === slotDate);
-    if (scoped.length) return scoped;
-    // Synthesize 3 windows for any date the operator picks so the picker
-    // always has something to render — matches the RPC's "always returns
-    // policy-resolved windows" contract.
-    return [
-      { window_id: `win_${slotDate}_am`, slot_date: slotDate, window_start_local: '10:00', window_end_local: '12:00', remaining: 10 },
-      { window_id: `win_${slotDate}_mid`, slot_date: slotDate, window_start_local: '13:00', window_end_local: '15:00', remaining: 6 },
-      { window_id: `win_${slotDate}_pm`, slot_date: slotDate, window_start_local: '16:00', window_end_local: '18:00', remaining: 3 },
-    ];
-  }
-  return DELIVERY_SLOT_CATALOG;
+  const { list_delivery_slots_v1 } = await import('./data-source/shipments');
+  return list_delivery_slots_v1(args);
 }
 export async function reserve_delivery_slot_v1({
   slot_date,
@@ -17897,39 +12250,8 @@ export async function compute_cod_payment_collection_summary_v1(scope?: unknown)
   remitted: number;
   variance: number;
 }> {
-  const scopeRec = (scope && typeof scope === 'object' ? scope : {}) as Record<string, unknown>;
-  const organizationId =
-    scopeRec.organization_id ??
-    scopeRec.tenant_id ??
-    nestedScopeId(scopeRec, 'tenant') ??
-    (typeof scopeRec.tenant === 'string' ? scopeRec.tenant : null) ??
-    state.user.organization_id ??
-    null;
-  const live = await liveRpc<Record<string, unknown>>('compute_cod_payment_collection_summary_v1', {
-    p_organization_id: organizationId,
-    p_branch_id: scopeRec.branch_id ?? nestedScopeId(scopeRec, 'branch') ?? null,
-    p_subject_type: scopeRec.subject_type ?? null,
-    p_subject_id: scopeRec.subject_id ?? null,
-    p_window_start_at: scopeRec.window_start_at ?? scopeRec.from ?? null,
-    p_window_end_at: scopeRec.window_end_at ?? scopeRec.to ?? null,
-  });
-  if (live) {
-    if (!organizationId) throw new Error('compute_cod_payment_collection_summary_v1 requires organization_id');
-    const rec = (live.data ?? {}) as Record<string, unknown>;
-    const expected = Number(rec.expected_amount ?? rec.expected ?? 0);
-    const collected = Number(rec.collected_amount ?? rec.collected ?? 0);
-    const remitted = Number(rec.remitted_amount ?? rec.remitted ?? 0);
-    return {
-      scope,
-      expected,
-      collected,
-      remitted,
-      variance: Number(rec.variance_amount ?? rec.variance ?? collected - expected),
-    };
-  }
-
-  await sleep(60);
-  return { scope, expected: 7150, collected: 6970, remitted: 0, variance: -180 };
+  const { compute_cod_payment_collection_summary_v1 } = await import('./data-source/finance');
+  return compute_cod_payment_collection_summary_v1(scope);
 }
 
 // ----------- Labels -----------
@@ -18086,10 +12408,10 @@ export interface LabelDesignerPreviewResult extends Record<string, unknown> {
   error?: Record<string, unknown>;
 }
 
-const localLabelDesignDrafts: LabelDesignDraft[] = [];
-const localLabelDesignerAssets: LabelDesignerAsset[] = [];
+export const localLabelDesignDrafts: LabelDesignDraft[] = [];
+export const localLabelDesignerAssets: LabelDesignerAsset[] = [];
 
-function assertLabelDesignScope(scopeType: string, scopeId: string): asserts scopeType is LabelDesignScopeType {
+export function assertLabelDesignScope(scopeType: string, scopeId: string): asserts scopeType is LabelDesignScopeType {
   if (!['tenant', 'client', 'sender'].includes(scopeType)) {
     throw new Error('label designer scope must be tenant, client, or sender');
   }
@@ -18098,98 +12420,20 @@ function assertLabelDesignScope(scopeType: string, scopeId: string): asserts sco
   }
 }
 
-function localValidateLabelDesign(value: unknown): Array<Record<string, unknown>> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return [{ code: 'label_design_invalid', message: 'label_design must be an object' }];
-  }
-  const rec = value as Record<string, unknown>;
-  const templates = rec.templates;
-  if (!templates || typeof templates !== 'object' || Array.isArray(templates)) {
-    return [{ code: 'templates_missing', message: 'label_design.templates missing' }];
-  }
-  const errors: Array<Record<string, unknown>> = [];
-  for (const [templateKey, template] of Object.entries(templates as Record<string, unknown>)) {
-    if (!template || typeof template !== 'object' || Array.isArray(template)) {
-      errors.push({ code: 'template_invalid', message: 'template must be an object', template_key: templateKey });
-      continue;
-    }
-    const t = template as Record<string, unknown>;
-    if (!t.page || typeof t.page !== 'object' || Array.isArray(t.page)) {
-      errors.push({ code: 'page_missing', message: 'renderer_config.page missing', template_key: templateKey });
-    }
-    if (!Array.isArray(t.blocks)) {
-      errors.push({ code: 'blocks_missing', message: 'renderer_config.blocks missing', template_key: templateKey });
-    }
-  }
-  return errors;
-}
-
 export async function label_designer_list_drafts(
   scopeType: LabelDesignScopeType,
   scopeId: string,
 ): Promise<LabelDesignerDraftListResult> {
-  assertLabelDesignScope(scopeType, scopeId);
-  const live = await liveRpc<LabelDesignerDraftListResult>('label_designer_list_drafts', {
-    p_scope_type: scopeType,
-    p_scope_id: scopeId,
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(
-      live.data,
-      'label_designer_list_drafts returned no backend draft list',
-    );
-    if (!Array.isArray(rec.drafts)) {
-      throw new Error('label_designer_list_drafts did not return backend draft list evidence');
-    }
-    return {
-      ...rec,
-      ok: rec.ok !== false,
-      drafts: rec.drafts as LabelDesignDraft[],
-    };
-  }
-
-  await sleep(30);
-  return {
-    ok: true,
-    drafts: localLabelDesignDrafts
-      .filter((draft) => draft.scope_type === scopeType && draft.scope_id === scopeId)
-      .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1)),
-  };
+  const { label_designer_list_drafts } = await import('./data-source/labels');
+  return label_designer_list_drafts(scopeType, scopeId);
 }
 
 export async function label_designer_get_field_catalog(
   scopeType: LabelDesignScopeType,
   scopeId: string,
 ): Promise<LabelDesignerFieldCatalogResult> {
-  assertLabelDesignScope(scopeType, scopeId);
-  const live = await liveRpc<LabelDesignerFieldCatalogResult>('label_designer_get_field_catalog', {
-    p_scope_type: scopeType,
-    p_scope_id: scopeId,
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(
-      live.data,
-      'label_designer_get_field_catalog returned no backend field catalog',
-    );
-    const value = rec.value && typeof rec.value === 'object' && !Array.isArray(rec.value)
-      ? rec.value as Record<string, unknown>
-      : {};
-    const fields = Array.isArray(value.fields) ? value.fields as LabelDesignerFieldCatalogField[] : [];
-    if (rec.ok !== false && fields.length === 0) {
-      throw new Error('label_designer_get_field_catalog did not return backend field catalog evidence');
-    }
-    return {
-      ...rec,
-      ok: rec.ok !== false,
-      value: {
-        ...value,
-        fields,
-      },
-    };
-  }
-
-  await sleep(30);
-  return { ok: true, value: { version: 1, fields: [] } };
+  const { label_designer_get_field_catalog } = await import('./data-source/labels');
+  return label_designer_get_field_catalog(scopeType, scopeId);
 }
 
 async function labelDesignerEffectiveConfigRpc(
@@ -18245,190 +12489,23 @@ export async function ui_label_renderer_readiness_v1(
   scopeType: LabelDesignScopeType,
   scopeId: string,
 ): Promise<LabelRendererReadinessResult> {
-  assertLabelDesignScope(scopeType, scopeId);
-  const live = await liveRpc<LabelRendererReadinessResult>('ui_label_renderer_readiness_v1', {
-    p_scope_type: scopeType,
-    p_scope_id: scopeId,
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(
-      live.data,
-      'ui_label_renderer_readiness_v1 returned no backend readiness readback',
-    );
-    return { ...rec, ok: rec.ok !== false };
-  }
-
-  await sleep(30);
-  return {
-    ok: true,
-    scope: { scope_type: scopeType, scope_id: scopeId },
-    renderer_provider: {
-      status: 'ready',
-      provider_name: 'seed_renderer',
-      invoke_url: 'http://127.0.0.1:54321/functions/v1/label-renderer',
-      invoke_secret: 'redacted',
-      timeout_ms: '15000',
-    },
-    render_policy: {
-      status: 'ready',
-      missing: [],
-      value: { header_brand_mode: 'logo', arabic: { enabled: true }, barcode: { gate_mode: 'warn_only' } },
-    },
-    print_profile: {
-      status: 'ready',
-      missing: [],
-      value: {
-        profile_key: 'default_203dpi',
-        dpi: 203,
-        media: { kind: 'thermal', width_inch: 4, height_inch: 6 },
-      },
-    },
-    printer_certification: {
-      status: 'missing',
-      missing: ['printer_certification'],
-      evidence: {},
-    },
-  };
+  const { ui_label_renderer_readiness_v1 } = await import('./data-source/labels');
+  return ui_label_renderer_readiness_v1(scopeType, scopeId);
 }
 
 export async function ui_record_label_printer_certification_v1(
   args: LabelPrinterCertificationArgs,
 ): Promise<LabelPrinterCertificationResult> {
-  assertLabelDesignScope(args.scope_type, args.scope_id);
-  const evidenceReference = asNonEmptyString(args.evidence_reference);
-  const printerModel = asNonEmptyString(args.printer_model);
-  if (!evidenceReference) throw new Error('evidence_reference is required');
-  if (!printerModel) throw new Error('printer_model is required');
-  const certification = {
-    evidence_reference: evidenceReference,
-    printer_model: printerModel,
-    printer_serial: asNonEmptyString(args.printer_serial) ?? null,
-    test_artifact_ref: asNonEmptyString(args.test_artifact_ref) ?? null,
-    result: args.result ?? 'passed',
-  };
-  const live = await liveRpc<LabelPrinterCertificationResult>('ui_record_label_printer_certification_v1', {
-    p_scope_type: args.scope_type,
-    p_scope_id: args.scope_id,
-    p_certification: certification,
-    p_change_reason: asNonEmptyString(args.change_reason) ?? 'Recorded label printer certification from Console V2',
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(
-      live.data,
-      'ui_record_label_printer_certification_v1 returned no backend certification readback',
-    );
-    if (rec.ok !== false && objectRecord(rec.readiness).printer_certification === undefined) {
-      throw new Error('ui_record_label_printer_certification_v1 returned no backend readiness readback');
-    }
-    return {
-      ...rec,
-      ok: rec.ok !== false,
-      readiness: objectRecord(rec.readiness) as LabelRendererReadinessResult,
-      certification: objectRecord(rec.certification),
-    };
-  }
-
-  await sleep(30);
-  const seedCertificationId = `cert_${Date.now()}`;
-  const readiness: LabelRendererReadinessResult = {
-    ok: true,
-    scope: { scope_type: args.scope_type, scope_id: args.scope_id },
-    renderer_provider: {
-      status: 'ready',
-      provider_name: 'seed_renderer',
-      invoke_url: 'http://127.0.0.1:54321/functions/v1/label-renderer',
-      invoke_secret: 'redacted',
-      timeout_ms: '15000',
-    },
-    render_policy: {
-      status: 'ready',
-      missing: [],
-      value: { header_brand_mode: 'logo', arabic: { enabled: true }, barcode: { gate_mode: 'warn_only' } },
-    },
-    print_profile: {
-      status: 'ready',
-      missing: [],
-      value: {
-        profile_key: 'default_203dpi',
-        dpi: 203,
-        media: { kind: 'thermal', width_inch: 4, height_inch: 6 },
-        printer_certification: {
-          certification_id: seedCertificationId,
-          evidence_reference: evidenceReference,
-          printer_model: printerModel,
-          printer_serial: asNonEmptyString(args.printer_serial) ?? undefined,
-          test_artifact_ref: asNonEmptyString(args.test_artifact_ref) ?? undefined,
-          printer_dpi: 203,
-          media: { kind: 'thermal', width_inch: 4, height_inch: 6 },
-          result: args.result ?? 'passed',
-          source: 'console_v2_platform_labels',
-        },
-      },
-    },
-    printer_certification: {
-      status: 'ready',
-      missing: [],
-      evidence: {
-        certification_id: seedCertificationId,
-        evidence_reference: evidenceReference,
-        printer_model: printerModel,
-        printer_serial: asNonEmptyString(args.printer_serial) ?? undefined,
-        test_artifact_ref: asNonEmptyString(args.test_artifact_ref) ?? undefined,
-        printer_dpi: 203,
-        media: { kind: 'thermal', width_inch: 4, height_inch: 6 },
-        result: args.result ?? 'passed',
-        source: 'console_v2_platform_labels',
-      },
-    },
-  };
-  return {
-    ok: true,
-    scope_type: args.scope_type,
-    scope_id: args.scope_id,
-    settings_version_id: nextResourceId('settings_version'),
-    settings_version_number: 1,
-    certification: objectRecord(readiness.printer_certification?.evidence) as Record<string, unknown>,
-    readiness,
-  };
+  const { ui_record_label_printer_certification_v1 } = await import('./data-source/labels');
+  return ui_record_label_printer_certification_v1(args);
 }
 
 export async function label_designer_get_sample_payload(args: {
   shipment_id: string;
   shipment_box_id?: string | null;
 }): Promise<LabelDesignerSamplePayloadResult> {
-  const shipmentId = asNonEmptyString(args.shipment_id);
-  if (!shipmentId) throw new Error('shipment_id is required');
-  const live = await liveRpc<LabelDesignerSamplePayloadResult>('label_designer_get_sample_payload', {
-    p_shipment_id: shipmentId,
-    p_shipment_box_id: asNonEmptyString(args.shipment_box_id) ?? null,
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(
-      live.data,
-      'label_designer_get_sample_payload returned no backend payload',
-    );
-    if (rec.ok !== false && (!rec.payload || typeof rec.payload !== 'object')) {
-      throw new Error('label_designer_get_sample_payload did not return backend payload evidence');
-    }
-    return {
-      ...rec,
-      ok: rec.ok !== false,
-      payload: rec.payload && typeof rec.payload === 'object'
-        ? rec.payload as Record<string, unknown>
-        : undefined,
-    };
-  }
-
-  await sleep(30);
-  return {
-    ok: true,
-    payload: {
-      shipment_id: shipmentId,
-      shipment_box_id: asNonEmptyString(args.shipment_box_id) ?? null,
-      tracking_number: 'SEED-LABEL-PREVIEW',
-      recipient: { name: 'Seed Recipient' },
-    },
-  };
+  const { label_designer_get_sample_payload } = await import('./data-source/labels');
+  return label_designer_get_sample_payload(args);
 }
 
 export async function label_designer_create_draft(args: {
@@ -18438,40 +12515,8 @@ export async function label_designer_create_draft(args: {
   draft_name?: string | null;
   draft_value: Record<string, unknown>;
 }): Promise<LabelDesignerDraftMutationResult> {
-  assertLabelDesignScope(args.scope_type, args.scope_id);
-  const live = await liveRpc<LabelDesignerDraftMutationResult>('label_designer_create_draft', {
-    p_scope_type: args.scope_type,
-    p_scope_id: args.scope_id,
-    p_label_type: args.label_type ?? 'shipping',
-    p_draft_name: args.draft_name ?? null,
-    p_draft_value: args.draft_value,
-  });
-  if (live) {
-    return requireLiveLabelDraftMutationReadback(
-      requireLiveLabelDraftResult(live.data, 'label_designer_create_draft'),
-      'label_designer_create_draft',
-    );
-  }
-
-  await sleep(40);
-  const now = new Date().toISOString();
-  const draft: LabelDesignDraft = {
-    id: nextResourceId('label_design_draft'),
-    organization_id: args.scope_type === 'tenant' ? args.scope_id : (asNonEmptyString(state.user.organization_id) ?? null),
-    scope_type: args.scope_type,
-    scope_id: args.scope_id,
-    label_type: args.label_type ?? 'shipping',
-    draft_name: asNonEmptyString(args.draft_name) ?? null,
-    draft_value: args.draft_value,
-    status: 'draft',
-    created_by: asNonEmptyString(state.user.id) ?? null,
-    created_at: now,
-    updated_at: now,
-    published_settings_version_id: null,
-    published_at: null,
-  };
-  localLabelDesignDrafts.unshift(draft);
-  return { ok: true, draft };
+  const { label_designer_create_draft } = await import('./data-source/labels');
+  return label_designer_create_draft(args);
 }
 
 export async function label_designer_update_draft(args: {
@@ -18480,83 +12525,23 @@ export async function label_designer_update_draft(args: {
   draft_name?: string | null;
   draft_value?: Record<string, unknown> | null;
 }): Promise<LabelDesignerDraftMutationResult> {
-  const live = await liveRpc<LabelDesignerDraftMutationResult>('label_designer_update_draft', {
-    p_draft_id: args.draft_id,
-    p_label_type: args.label_type ?? null,
-    p_draft_name: args.draft_name ?? null,
-    p_draft_value: args.draft_value ?? null,
-  });
-  if (live) {
-    return requireLiveLabelDraftMutationReadback(
-      requireLiveLabelDraftResult(live.data, 'label_designer_update_draft'),
-      'label_designer_update_draft',
-    );
-  }
-
-  await sleep(40);
-  const draft = localLabelDesignDrafts.find((row) => row.id === args.draft_id);
-  if (!draft) return { ok: false, error: { code: 'draft_not_found', message: 'Draft not found' } };
-  if (draft.status !== 'draft') return { ok: false, error: { code: 'draft_not_editable', message: 'Only draft rows are editable' } };
-  draft.label_type = args.label_type ?? draft.label_type;
-  draft.draft_name = args.draft_name ?? draft.draft_name;
-  draft.draft_value = args.draft_value ?? draft.draft_value;
-  draft.updated_at = new Date().toISOString();
-  return { ok: true, draft };
+  const { label_designer_update_draft } = await import('./data-source/labels');
+  return label_designer_update_draft(args);
 }
 
 export async function label_designer_archive_draft(args: {
   draft_id: string;
   archive_reason?: string | null;
 }): Promise<LabelDesignerDraftMutationResult> {
-  const live = await liveRpc<LabelDesignerDraftMutationResult>('label_designer_archive_draft', {
-    p_draft_id: args.draft_id,
-    p_archive_reason: args.archive_reason ?? null,
-  });
-  if (live) {
-    const result = await requireLiveLabelDraftMutationReadback(
-      requireLiveLabelDraftResult(live.data, 'label_designer_archive_draft'),
-      'label_designer_archive_draft',
-    );
-    if (result.ok !== false && result.draft?.status !== 'archived') {
-      throw new Error('label_designer_archive_draft backend draft list readback is not archived');
-    }
-    return result;
-  }
-
-  await sleep(40);
-  const draft = localLabelDesignDrafts.find((row) => row.id === args.draft_id);
-  if (!draft) return { ok: false, error: { code: 'draft_not_found', message: 'Draft not found' } };
-  if (draft.status !== 'draft') {
-    return { ok: false, error: { code: 'draft_not_archivable', message: 'Only draft rows can be archived' } };
-  }
-  const now = new Date().toISOString();
-  draft.status = 'archived';
-  draft.archived_at = now;
-  draft.archived_by = asNonEmptyString(state.user.id) ?? null;
-  draft.archive_reason = asNonEmptyString(args.archive_reason) ?? 'Archived from Console V2 Labels';
-  draft.updated_at = now;
-  return { ok: true, draft };
+  const { label_designer_archive_draft } = await import('./data-source/labels');
+  return label_designer_archive_draft(args);
 }
 
 export async function label_designer_validate_label_design_draft(
   draftId: string,
 ): Promise<LabelDesignerDraftValidationResult> {
-  const live = await liveRpc<LabelDesignerDraftValidationResult>('label_designer_validate_label_design_draft', {
-    p_draft_id: draftId,
-  });
-  if (live) return requireLiveLabelValidationResult(live.data);
-
-  await sleep(30);
-  const draft = localLabelDesignDrafts.find((row) => row.id === draftId);
-  if (!draft) {
-    return {
-      ok: false,
-      errors: [],
-      error: { code: 'draft_not_found', message: 'Draft not found' },
-    };
-  }
-  const errors = localValidateLabelDesign(draft.draft_value);
-  return { ok: errors.length === 0, errors };
+  const { label_designer_validate_label_design_draft } = await import('./data-source/labels');
+  return label_designer_validate_label_design_draft(draftId);
 }
 
 export async function label_designer_publish_label_design_draft(
@@ -18564,226 +12549,34 @@ export async function label_designer_publish_label_design_draft(
   changeReason?: string | null,
   readbackScope?: { scopeType?: string | null; scopeId?: string | null },
 ): Promise<LabelDesignerDraftPublishResult> {
-  const live = await liveRpc<LabelDesignerDraftPublishResult>('label_designer_publish_label_design_draft', {
-    p_draft_id: draftId,
-    p_change_reason: changeReason ?? null,
-  });
-  if (live) {
-    const result = requireLiveLabelPublishResult(live.data);
-    if (result.ok !== false) {
-      await requirePublishedLabelDraftReadback(draftId, result, readbackScope);
-    }
-    return result;
-  }
-
-  await sleep(50);
-  const draft = localLabelDesignDrafts.find((row) => row.id === draftId);
-  if (!draft) return { ok: false, error: { code: 'draft_not_found', message: 'Draft not found' } };
-  const errors = localValidateLabelDesign(draft.draft_value);
-  if (errors.length > 0) {
-    return {
-      ok: false,
-      error: { code: 'validation_failed', message: 'Draft validation failed' },
-      validation_errors: errors,
-    };
-  }
-  const now = new Date().toISOString();
-  draft.status = 'published';
-  draft.published_at = now;
-  draft.updated_at = now;
-  draft.published_settings_version_id = nextResourceId('settings_version');
-  return {
-    ok: true,
-    settings_version_id: draft.published_settings_version_id,
-    scope_type: draft.scope_type,
-    scope_id: draft.scope_id,
-    schema_version: 1,
-    version: localLabelDesignDrafts.filter((row) => row.scope_type === draft.scope_type && row.scope_id === draft.scope_id && row.status === 'published').length,
-  };
-}
-
-async function requirePublishedLabelDraftReadback(
-  draftId: string,
-  result: LabelDesignerDraftPublishResult,
-  readbackScope?: { scopeType?: string | null; scopeId?: string | null },
-): Promise<void> {
-  const scopeType = asNonEmptyString(readbackScope?.scopeType) ?? asNonEmptyString(result.scope_type);
-  const scopeId = asNonEmptyString(readbackScope?.scopeId) ?? asNonEmptyString(result.scope_id);
-  if (!scopeType || !scopeId) {
-    throw new Error('label_designer_publish_label_design_draft did not return scope for published draft readback');
-  }
-
-  const live = await liveRpc<LabelDesignerDraftListResult>('label_designer_list_drafts', {
-    p_scope_type: scopeType,
-    p_scope_id: scopeId,
-  });
-  if (!live) return;
-
-  const list = requireLiveRpcRecord(
-    live.data,
-    'label_designer_publish_label_design_draft published draft readback returned no backend draft list',
-  );
-  const drafts = Array.isArray(list.drafts) ? list.drafts as LabelDesignDraft[] : [];
-  const draft = drafts.find((row) => row.id === draftId);
-  if (!draft) {
-    throw new Error('label_designer_publish_label_design_draft published draft readback missing draft');
-  }
-  if (draft.status !== 'published') {
-    throw new Error('label_designer_publish_label_design_draft published draft readback is not published');
-  }
-  const expectedVersion =
-    asNonEmptyString(result.settings_version_id) ??
-    asNonEmptyString(result.settings_resolution_id) ??
-    asNonEmptyString(result.published_settings_version_id);
-  const actualVersion = asNonEmptyString(draft.published_settings_version_id);
-  if (expectedVersion && actualVersion && expectedVersion !== actualVersion) {
-    throw new Error('label_designer_publish_label_design_draft published draft readback version mismatch');
-  }
-}
-
-async function currentSupabaseAccessToken(client: NonNullable<ReturnType<typeof getSupabaseClient>>): Promise<string> {
-  const auth = (client as unknown as {
-    auth?: { getSession?: () => Promise<{ data?: { session?: { access_token?: string | null } | null } | null }> };
-  }).auth;
-  if (typeof auth?.getSession !== 'function') throw new Error('Supabase auth session is required');
-  const { data } = await auth.getSession();
-  const token = asNonEmptyString(data?.session?.access_token);
-  if (!token) throw new Error('Sign in again to manage label designer assets');
-  return token;
-}
-
-async function invokeLabelDesignerAssets<T extends Record<string, unknown>>(
-  body: Record<string, unknown>,
-): Promise<T | null> {
-  const client = getSupabaseClient();
-  if (!client) return null;
-  const userJwt = await currentSupabaseAccessToken(client);
-  const { data, error } = await client.functions.invoke<T>('label-designer-assets', {
-    body: {
-      ...body,
-      user_jwt: userJwt,
-    },
-  });
-  if (error) throw new Error(await readFunctionErrorMessage(error, 'label designer asset request failed'));
-  const rec = data && typeof data === 'object' ? data as T : null;
-  if (!rec) throw new Error('label-designer-assets returned no backend response');
-  const outcomeError = backendOutcomeError(rec, 'label designer asset request was rejected by the backend');
-  if (outcomeError) throw outcomeError;
-  return rec;
+  const { label_designer_publish_label_design_draft } = await import('./data-source/labels');
+  return label_designer_publish_label_design_draft(draftId, changeReason, readbackScope);
 }
 
 export async function label_designer_list_assets(): Promise<LabelDesignerAssetListResult> {
-  const live = await invokeLabelDesignerAssets<LabelDesignerAssetListResult>({ mode: 'list' });
-  if (live) {
-    const assets = Array.isArray(live.assets)
-      ? live.assets.filter((asset): asset is LabelDesignerAsset =>
-        !!asset && typeof asset === 'object' && !!asNonEmptyString((asset as Record<string, unknown>).path),
-      )
-      : [];
-    return { ...live, ok: live.ok !== false, assets };
-  }
-
-  await sleep(30);
-  return { ok: true, assets: [...localLabelDesignerAssets] };
+  const { label_designer_list_assets } = await import('./data-source/labels');
+  return label_designer_list_assets();
 }
 
 export async function label_designer_upload_asset(
   args: LabelDesignerAssetUploadArgs,
 ): Promise<LabelDesignerAssetUploadResult> {
-  const fileName = asNonEmptyString(args.file_name);
-  const fileBase64 = asNonEmptyString(args.file_base64);
-  if (!fileName) throw new Error('Asset file name is required');
-  if (!fileBase64) throw new Error('Asset file data is required');
-  const live = await invokeLabelDesignerAssets<LabelDesignerAssetUploadResult>({
-    mode: 'upload',
-    file_name: fileName,
-    file_base64: fileBase64,
-    content_type: asNonEmptyString(args.content_type) ?? 'application/octet-stream',
-  });
-  if (live) {
-    const path = asNonEmptyString(live.path);
-    if (!path) throw new Error('label-designer-assets upload returned no storage path');
-    const list = await label_designer_list_assets();
-    if (!list.assets.some((asset) => asset.path === path)) {
-      throw new Error('label-designer-assets upload readback missing uploaded asset');
-    }
-    return { ...live, ok: live.ok !== false, path };
-  }
-
-  await sleep(40);
-  const safeName = fileName.replace(/[^\w.\- ]+/g, '_').replace(/\s+/g, '_').slice(0, 120);
-  const path = `local/designer/${safeName || nextResourceId('label_asset')}`;
-  const existing = localLabelDesignerAssets.findIndex((asset) => asset.path === path);
-  const asset = { name: safeName, path };
-  if (existing >= 0) localLabelDesignerAssets[existing] = asset;
-  else localLabelDesignerAssets.unshift(asset);
-  return { ok: true, path };
+  const { label_designer_upload_asset } = await import('./data-source/labels');
+  return label_designer_upload_asset(args);
 }
 
 export async function label_designer_delete_asset(
   path: string,
 ): Promise<{ ok: boolean; path?: string; error?: Record<string, unknown> }> {
-  const assetPath = asNonEmptyString(path);
-  if (!assetPath) throw new Error('Asset path is required');
-  const live = await invokeLabelDesignerAssets<{ ok: boolean; path?: string; error?: Record<string, unknown> }>({
-    mode: 'delete',
-    path: assetPath,
-  });
-  if (live) {
-    const list = await label_designer_list_assets();
-    if (list.assets.some((asset) => asset.path === assetPath)) {
-      throw new Error('label-designer-assets delete readback still contains deleted asset');
-    }
-    return { ...live, ok: live.ok !== false, path: assetPath };
-  }
-
-  await sleep(30);
-  const idx = localLabelDesignerAssets.findIndex((asset) => asset.path === assetPath);
-  if (idx >= 0) localLabelDesignerAssets.splice(idx, 1);
-  return { ok: true, path: assetPath };
+  const { label_designer_delete_asset } = await import('./data-source/labels');
+  return label_designer_delete_asset(path);
 }
 
 export async function label_designer_preview_label_design_draft(
   args: LabelDesignerPreviewArgs,
 ): Promise<LabelDesignerPreviewResult> {
-  const draftId = asNonEmptyString(args.draft_id);
-  const shipmentId = asNonEmptyString(args.shipment_id);
-  if (!draftId) throw new Error('draft_id is required');
-  if (!shipmentId) throw new Error('shipment_id is required');
-
-  const client = getSupabaseClient();
-  if (client) {
-    const userJwt = await currentSupabaseAccessToken(client);
-    const { data, error } = await client.functions.invoke<LabelDesignerPreviewResult>('label-renderer', {
-      body: {
-        mode: 'designer_preview',
-        user_jwt: userJwt,
-        draft_id: draftId,
-        label_type: asNonEmptyString(args.label_type) ?? 'shipping',
-        shipment_id: shipmentId,
-        shipment_box_id: asNonEmptyString(args.shipment_box_id) ?? null,
-      },
-    });
-    if (error) throw new Error(await readFunctionErrorMessage(error, 'label designer preview failed'));
-    const rec = data && typeof data === 'object' ? data as LabelDesignerPreviewResult : null;
-    if (!rec) throw new Error('label-renderer designer preview returned no backend response');
-    if (rec.ok !== false && !asNonEmptyString(rec.pdf_base64)) {
-      throw new Error('label-renderer designer preview returned no PDF readback');
-    }
-    return { ...rec, ok: rec.ok !== false };
-  }
-
-  await sleep(40);
-  return {
-    ok: true,
-    pdf_base64: 'JVBERi0xLjQKJcTl8uXrp/Og0MTGCjEgMCBvYmoKPDwvVHlwZSAvQ2F0YWxvZy9QYWdlcyAyIDAgUj4+CmVuZG9iago=',
-    renderer_metadata: {
-      preview: true,
-      draft_id: draftId,
-      shipment_id: shipmentId,
-    },
-    validation: { ok: true, errors: [] },
-  };
+  const { label_designer_preview_label_design_draft } = await import('./data-source/labels');
+  return label_designer_preview_label_design_draft(args);
 }
 
 export async function request_label_reprint(
@@ -19033,94 +12826,13 @@ export interface UiLogEventResult extends Record<string, unknown> {
 export interface UiLogEventOptions {
   requireReadback?: boolean;
 }
-function normalizeUiLogEventPayload(eventJson: unknown): Record<string, unknown> {
-  const source: Record<string, unknown> = eventJson && typeof eventJson === 'object' && !Array.isArray(eventJson)
-    ? { ...(eventJson as Record<string, unknown>) }
-    : { type: 'ui.event', meta: { value: eventJson } };
-  const type = asNonEmptyString(source.type)
-    ?? asNonEmptyString(source.kind)
-    ?? asNonEmptyString(source.event)
-    ?? asNonEmptyString(source.name)
-    ?? 'ui.event';
-  const payload = source.payload && typeof source.payload === 'object' && !Array.isArray(source.payload)
-    ? source.payload as Record<string, unknown>
-    : {};
-  const meta = source.meta && typeof source.meta === 'object' && !Array.isArray(source.meta)
-    ? { ...(source.meta as Record<string, unknown>) }
-    : {};
-
-  Object.entries(payload).forEach(([key, value]) => {
-    if (meta[key] === undefined) meta[key] = value;
-  });
-  if (source.correlation_id !== undefined && meta.correlation_id === undefined) {
-    meta.correlation_id = source.correlation_id;
-  }
-
-  return {
-    ...source,
-    type,
-    name: asNonEmptyString(source.name) ?? type,
-    meta,
-  };
-}
 export async function ui_log_event_v1(
   eventJson: unknown,
   app: string = 'console',
   options: UiLogEventOptions = {},
 ): Promise<UiLogEventResult> {
-  const client = getSupabaseClient();
-  const loggedAt = new Date().toISOString();
-  if (client) {
-    try {
-      const auth = (client as unknown as {
-        auth?: { getSession?: () => Promise<{ data?: { session?: unknown | null } | null }> };
-      }).auth;
-      if (typeof auth?.getSession === 'function') {
-        const { data } = await auth.getSession();
-        if (!data?.session) {
-          if (options.requireReadback) {
-            throw new Error('ui_log_event_v1 backend readback requires an authenticated session');
-          }
-          return { ok: true, app, logged_at: loggedAt };
-        }
-      }
-      const result = await client.rpc('ui_log_event_v1', {
-        p_event: normalizeUiLogEventPayload(eventJson),
-        p_app: app,
-      } as never);
-      if (result.error) {
-        throw new Error(result.error.message ?? 'ui_log_event_v1 failed');
-      }
-      const row = firstRpcRow<Record<string, unknown>>(result.data);
-      const eventId =
-        asNonEmptyString(result.data) ??
-        asNonEmptyString(row?.id) ??
-        asNonEmptyString(row?.event_id);
-      if (options.requireReadback) {
-        if (!eventId) {
-          throw new Error('ui_log_event_v1 did not return ui_event_log id for backend readback');
-        }
-        const readback = await requireLiveResourceReadback(
-          'ui_event_log_directory',
-          eventId,
-          'ui_log_event_v1',
-        );
-        return { ok: true, app, logged_at: loggedAt, event_id: eventId, readback };
-      }
-      return { ok: true, app, logged_at: loggedAt, event_id: eventId ?? null };
-    } catch (err) {
-      if (options.requireReadback) {
-        throw err instanceof Error
-          ? err
-          : new Error('ui_log_event_v1 backend readback failed');
-      }
-      // Swallow telemetry errors; envelope still returned.
-    }
-  }
-  if (options.requireReadback) {
-    throw new Error('ui_log_event_v1 backend readback requires a live backend');
-  }
-  return { ok: true, app, logged_at: loggedAt };
+  const { ui_log_event_v1 } = await import('./data-source/workflows');
+  return ui_log_event_v1(eventJson, app, options);
 }
 
 export interface WorkflowScheduleRunNowResult extends Record<string, unknown> {
@@ -19204,74 +12916,8 @@ export async function ui_create_workflow_schedule_trigger_v1(args: {
   enabled?: boolean;
   notes?: string | null;
 }): Promise<WorkflowScheduleCreateResult> {
-  const workflowTemplateId = asNonEmptyString(args.workflow_template_id);
-  if (!workflowTemplateId) throw new Error('workflow_template_id is required');
-  const schedule = args.schedule && typeof args.schedule === 'object' ? args.schedule : {};
-  const contextPatch = args.context_patch && typeof args.context_patch === 'object' ? args.context_patch : {};
-  const enabled = args.enabled !== false;
-  const notes = asNonEmptyString(args.notes);
-
-  const live = await liveRpc<Record<string, unknown>>('ui_create_workflow_schedule_trigger_v1', {
-    p_workflow_template_id: workflowTemplateId,
-    p_schedule: schedule,
-    p_context_patch: contextPatch,
-    p_enabled: enabled,
-    p_notes: notes ?? null,
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'ui_create_workflow_schedule_trigger_v1', [
-      'workflow_schedule_trigger_id',
-    ]);
-    const triggerId = asNonEmptyString(rec.workflow_schedule_trigger_id);
-    if (!triggerId) {
-      throw new Error('ui_create_workflow_schedule_trigger_v1 did not return workflow_schedule_trigger_id');
-    }
-    const triggerReadback = await requireLiveResourceReadback(
-      'workflow_schedule_triggers',
-      triggerId,
-      'ui_create_workflow_schedule_trigger_v1',
-    );
-    if (asNonEmptyString(triggerReadback.workflow_template_id) !== workflowTemplateId) {
-      throw new Error('ui_create_workflow_schedule_trigger_v1 backend readback did not match workflow_template_id');
-    }
-    if (!asNonEmptyString(triggerReadback.next_run_at)) {
-      throw new Error('ui_create_workflow_schedule_trigger_v1 backend readback missing workflow_schedule_triggers.next_run_at');
-    }
-    return {
-      ...rec,
-      ok: true,
-      status: String(rec.status ?? 'created'),
-      workflow_schedule_trigger_id: triggerId,
-      workflow_template_id: asNonEmptyString(triggerReadback.workflow_template_id) ?? workflowTemplateId,
-      schedule: (triggerReadback.schedule ?? schedule) as Record<string, unknown>,
-      context_patch: (triggerReadback.context_patch ?? contextPatch) as Record<string, unknown>,
-      scope_type: asNonEmptyString(triggerReadback.scope_type) ?? null,
-      scope_id: asNonEmptyString(triggerReadback.scope_id) ?? null,
-      enabled: Boolean(triggerReadback.enabled),
-      next_run_at: asNonEmptyString(triggerReadback.next_run_at) ?? null,
-      notes: asNonEmptyString(triggerReadback.notes) ?? notes ?? null,
-    };
-  }
-
-  await ui_log_event_v1({
-    event: 'workflow_schedule_trigger.create',
-    workflow_template_id: workflowTemplateId,
-    schedule,
-    enabled,
-  });
-  return {
-    ok: true,
-    status: 'seed_preview',
-    workflow_schedule_trigger_id: `wst_schedule_${Date.now()}`,
-    workflow_template_id: workflowTemplateId,
-    schedule,
-    context_patch: contextPatch,
-    scope_type: null,
-    scope_id: null,
-    enabled,
-    next_run_at: null,
-    notes: notes ?? null,
-  };
+  const { ui_create_workflow_schedule_trigger_v1 } = await import('./data-source/workflows');
+  return ui_create_workflow_schedule_trigger_v1(args);
 }
 
 export async function ui_create_workflow_run_trigger_v1(args: {
@@ -19283,94 +12929,8 @@ export async function ui_create_workflow_run_trigger_v1(args: {
   notes?: string | null;
   scope_id?: string | null;
 }): Promise<WorkflowRunTriggerCreateResult> {
-  const sourceTemplateId = asNonEmptyString(args.source_workflow_template_id);
-  const targetTemplateId = asNonEmptyString(args.target_workflow_template_id);
-  if (!sourceTemplateId) throw new Error('source_workflow_template_id is required');
-  if (!targetTemplateId) throw new Error('target_workflow_template_id is required');
-  if (sourceTemplateId === targetTemplateId) {
-    throw new Error('source and target workflow templates must differ');
-  }
-  const sourceStatuses = Array.isArray(args.source_statuses)
-    ? args.source_statuses.map((status) => asNonEmptyString(status)).filter(Boolean) as string[]
-    : [];
-  const contextPatch = args.context_patch && typeof args.context_patch === 'object' ? args.context_patch : {};
-  const enabled = args.enabled !== false;
-  const notes = asNonEmptyString(args.notes);
-  const scopeId = asNonEmptyString(args.scope_id);
-
-  const live = await liveRpc<Record<string, unknown>>('ui_create_workflow_run_trigger_v1', {
-    p_source_workflow_template_id: sourceTemplateId,
-    p_target_workflow_template_id: targetTemplateId,
-    p_source_statuses: sourceStatuses.length ? sourceStatuses : null,
-    p_context_patch: contextPatch,
-    p_enabled: enabled,
-    p_notes: notes ?? null,
-    p_scope_id: scopeId ?? null,
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'ui_create_workflow_run_trigger_v1', [
-      'workflow_run_trigger_id',
-    ]);
-    const triggerId = asNonEmptyString(rec.workflow_run_trigger_id);
-    if (!triggerId) {
-      throw new Error('ui_create_workflow_run_trigger_v1 did not return workflow_run_trigger_id');
-    }
-    const triggerReadback = await requireLiveResourceReadback(
-      'workflow_run_triggers',
-      triggerId,
-      'ui_create_workflow_run_trigger_v1',
-    );
-    if (asNonEmptyString(triggerReadback.source_workflow_template_id) !== sourceTemplateId) {
-      throw new Error('ui_create_workflow_run_trigger_v1 backend readback did not match source_workflow_template_id');
-    }
-    if (asNonEmptyString(triggerReadback.target_workflow_template_id) !== targetTemplateId) {
-      throw new Error('ui_create_workflow_run_trigger_v1 backend readback did not match target_workflow_template_id');
-    }
-    const readbackStatuses = Array.isArray(triggerReadback.source_statuses)
-      ? triggerReadback.source_statuses.map((status) => String(status))
-      : sourceStatuses;
-    if (readbackStatuses.length === 0) {
-      throw new Error('ui_create_workflow_run_trigger_v1 backend readback missing workflow_run_triggers.source_statuses');
-    }
-    if (scopeId && asNonEmptyString(triggerReadback.scope_id) !== scopeId) {
-      throw new Error('ui_create_workflow_run_trigger_v1 backend readback did not match active tenant scope_id');
-    }
-    return {
-      ...rec,
-      ok: true,
-      status: String(rec.status ?? 'created'),
-      workflow_run_trigger_id: triggerId,
-      source_workflow_template_id: asNonEmptyString(triggerReadback.source_workflow_template_id) ?? sourceTemplateId,
-      target_workflow_template_id: asNonEmptyString(triggerReadback.target_workflow_template_id) ?? targetTemplateId,
-      source_statuses: readbackStatuses,
-      context_patch: (triggerReadback.context_patch ?? contextPatch) as Record<string, unknown>,
-      scope_type: asNonEmptyString(triggerReadback.scope_type) ?? null,
-      scope_id: asNonEmptyString(triggerReadback.scope_id) ?? null,
-      enabled: Boolean(triggerReadback.enabled),
-      notes: asNonEmptyString(triggerReadback.notes) ?? notes ?? null,
-    };
-  }
-
-  await ui_log_event_v1({
-    event: 'workflow_run_trigger.create',
-    source_workflow_template_id: sourceTemplateId,
-    target_workflow_template_id: targetTemplateId,
-    source_statuses: sourceStatuses,
-    enabled,
-  });
-  return {
-    ok: true,
-    status: 'seed_preview',
-    workflow_run_trigger_id: `wrt_trigger_${Date.now()}`,
-    source_workflow_template_id: sourceTemplateId,
-    target_workflow_template_id: targetTemplateId,
-    source_statuses: sourceStatuses.length ? sourceStatuses : ['succeeded'],
-    context_patch: contextPatch,
-    scope_type: null,
-    scope_id: null,
-    enabled,
-    notes: notes ?? null,
-  };
+  const { ui_create_workflow_run_trigger_v1 } = await import('./data-source/workflows');
+  return ui_create_workflow_run_trigger_v1(args);
 }
 
 export async function ui_update_workflow_run_trigger_v1(args: {
@@ -19383,326 +12943,31 @@ export async function ui_update_workflow_run_trigger_v1(args: {
   notes?: string | null;
   scope_id?: string | null;
 }): Promise<WorkflowRunTriggerUpdateResult> {
-  const triggerId = asNonEmptyString(args.workflow_run_trigger_id);
-  if (!triggerId) throw new Error('workflow_run_trigger_id is required');
-  const sourceTemplateId = asNonEmptyString(args.source_workflow_template_id);
-  const targetTemplateId = asNonEmptyString(args.target_workflow_template_id);
-  if (sourceTemplateId && targetTemplateId && sourceTemplateId === targetTemplateId) {
-    throw new Error('source and target workflow templates must differ');
-  }
-  const sourceStatuses = Array.isArray(args.source_statuses)
-    ? args.source_statuses.map((status) => asNonEmptyString(status)).filter(Boolean) as string[]
-    : null;
-  const contextPatch = args.context_patch && typeof args.context_patch === 'object' ? args.context_patch : undefined;
-  const notes = args.notes === undefined ? undefined : asNonEmptyString(args.notes) ?? '';
-  const scopeId = asNonEmptyString(args.scope_id);
-
-  const live = await liveRpc<Record<string, unknown>>('ui_update_workflow_run_trigger_v1', {
-    p_workflow_run_trigger_id: triggerId,
-    p_source_workflow_template_id: sourceTemplateId ?? null,
-    p_target_workflow_template_id: targetTemplateId ?? null,
-    p_source_statuses: sourceStatuses && sourceStatuses.length ? sourceStatuses : null,
-    p_context_patch: contextPatch ?? null,
-    p_enabled: typeof args.enabled === 'boolean' ? args.enabled : null,
-    p_notes: notes === undefined ? null : notes,
-    p_scope_id: scopeId ?? null,
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'ui_update_workflow_run_trigger_v1', [
-      'workflow_run_trigger_id',
-    ]);
-    const resultTriggerId = asNonEmptyString(rec.workflow_run_trigger_id);
-    if (resultTriggerId !== triggerId) {
-      throw new Error('ui_update_workflow_run_trigger_v1 backend readback returned a different trigger id');
-    }
-    const triggerReadback = await requireLiveResourceReadback(
-      'workflow_run_triggers',
-      triggerId,
-      'ui_update_workflow_run_trigger_v1',
-    );
-    if (asNonEmptyString(triggerReadback.deleted_at)) {
-      throw new Error('ui_update_workflow_run_trigger_v1 backend readback returned a deleted workflow trigger');
-    }
-    if (sourceTemplateId && asNonEmptyString(triggerReadback.source_workflow_template_id) !== sourceTemplateId) {
-      throw new Error('ui_update_workflow_run_trigger_v1 backend readback did not match source_workflow_template_id');
-    }
-    if (targetTemplateId && asNonEmptyString(triggerReadback.target_workflow_template_id) !== targetTemplateId) {
-      throw new Error('ui_update_workflow_run_trigger_v1 backend readback did not match target_workflow_template_id');
-    }
-    const readbackStatuses = Array.isArray(triggerReadback.source_statuses)
-      ? triggerReadback.source_statuses.map((status) => String(status))
-      : [];
-    if (sourceStatuses && sourceStatuses.length && readbackStatuses.length === 0) {
-      throw new Error('ui_update_workflow_run_trigger_v1 backend readback missing workflow_run_triggers.source_statuses');
-    }
-    if (typeof args.enabled === 'boolean' && Boolean(triggerReadback.enabled) !== args.enabled) {
-      throw new Error('ui_update_workflow_run_trigger_v1 backend readback did not match enabled');
-    }
-    if (scopeId && asNonEmptyString(triggerReadback.scope_id) !== scopeId) {
-      throw new Error('ui_update_workflow_run_trigger_v1 backend readback did not match active tenant scope_id');
-    }
-    return {
-      ...rec,
-      ok: true,
-      status: String(rec.status ?? 'updated'),
-      workflow_run_trigger_id: triggerId,
-      source_workflow_template_id: asNonEmptyString(triggerReadback.source_workflow_template_id) ?? sourceTemplateId ?? null,
-      target_workflow_template_id: asNonEmptyString(triggerReadback.target_workflow_template_id) ?? targetTemplateId ?? null,
-      source_statuses: readbackStatuses,
-      context_patch: (triggerReadback.context_patch ?? contextPatch ?? {}) as Record<string, unknown>,
-      scope_type: asNonEmptyString(triggerReadback.scope_type) ?? null,
-      scope_id: asNonEmptyString(triggerReadback.scope_id) ?? null,
-      enabled: Boolean(triggerReadback.enabled),
-      notes: asNonEmptyString(triggerReadback.notes) ?? null,
-      updated_at: asNonEmptyString(triggerReadback.updated_at) ?? null,
-    };
-  }
-
-  await ui_log_event_v1({
-    event: 'workflow_run_trigger.update',
-    workflow_run_trigger_id: triggerId,
-    enabled: args.enabled,
-  });
-  return {
-    ok: true,
-    status: 'seed_preview',
-    workflow_run_trigger_id: triggerId,
-    source_workflow_template_id: sourceTemplateId ?? null,
-    target_workflow_template_id: targetTemplateId ?? null,
-    source_statuses: sourceStatuses?.length ? sourceStatuses : ['succeeded'],
-    context_patch: contextPatch ?? {},
-    scope_type: null,
-    scope_id: null,
-    enabled: args.enabled ?? true,
-    notes: notes ?? null,
-    updated_at: new Date().toISOString(),
-  };
+  const { ui_update_workflow_run_trigger_v1 } = await import('./data-source/workflows');
+  return ui_update_workflow_run_trigger_v1(args);
 }
 
 export async function ui_delete_workflow_run_trigger_v1(
   workflowRunTriggerId: string,
   scopeIdArg?: string | null,
 ): Promise<WorkflowRunTriggerDeleteResult> {
-  const triggerId = asNonEmptyString(workflowRunTriggerId);
-  if (!triggerId) throw new Error('workflow_run_trigger_id is required');
-  const scopeId = asNonEmptyString(scopeIdArg);
-
-  const live = await liveRpc<Record<string, unknown>>('ui_delete_workflow_run_trigger_v1', {
-    p_workflow_run_trigger_id: triggerId,
-    p_scope_id: scopeId ?? null,
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'ui_delete_workflow_run_trigger_v1', [
-      'workflow_run_trigger_id',
-    ]);
-    const resultTriggerId = asNonEmptyString(rec.workflow_run_trigger_id);
-    if (resultTriggerId !== triggerId) {
-      throw new Error('ui_delete_workflow_run_trigger_v1 backend readback returned a different trigger id');
-    }
-    const triggerReadback = await requireLiveResourceReadback(
-      'workflow_run_triggers',
-      triggerId,
-      'ui_delete_workflow_run_trigger_v1',
-    );
-    if (triggerReadback.enabled) {
-      throw new Error('ui_delete_workflow_run_trigger_v1 backend readback did not disable the workflow trigger');
-    }
-    if (!asNonEmptyString(triggerReadback.deleted_at)) {
-      throw new Error('ui_delete_workflow_run_trigger_v1 backend readback missing workflow_run_triggers.deleted_at');
-    }
-    if (scopeId && asNonEmptyString(triggerReadback.scope_id) !== scopeId) {
-      throw new Error('ui_delete_workflow_run_trigger_v1 backend readback did not match active tenant scope_id');
-    }
-    return {
-      ...rec,
-      ok: true,
-      status: String(rec.status ?? 'deleted'),
-      workflow_run_trigger_id: triggerId,
-      source_workflow_template_id: asNonEmptyString(rec.source_workflow_template_id) ?? null,
-      target_workflow_template_id: asNonEmptyString(rec.target_workflow_template_id) ?? null,
-      scope_type: asNonEmptyString(rec.scope_type) ?? null,
-      scope_id: asNonEmptyString(rec.scope_id) ?? null,
-      enabled: Boolean(triggerReadback.enabled),
-      deleted_at: asNonEmptyString(triggerReadback.deleted_at) ?? asNonEmptyString(rec.deleted_at) ?? null,
-      workflow_trigger_fires_count: Number(rec.workflow_trigger_fires_count ?? 0),
-    };
-  }
-
-  await ui_log_event_v1({
-    event: 'workflow_run_trigger.delete',
-    workflow_run_trigger_id: triggerId,
-  });
-  return {
-    ok: true,
-    status: 'seed_preview',
-    workflow_run_trigger_id: triggerId,
-    source_workflow_template_id: null,
-    target_workflow_template_id: null,
-    scope_type: null,
-    scope_id: null,
-    enabled: false,
-    workflow_trigger_fires_count: 0,
-  };
+  const { ui_delete_workflow_run_trigger_v1 } = await import('./data-source/workflows');
+  return ui_delete_workflow_run_trigger_v1(workflowRunTriggerId, scopeIdArg);
 }
 
 export async function ui_run_workflow_schedule_trigger_v1(
   workflowScheduleTriggerId: string,
 ): Promise<WorkflowScheduleRunNowResult> {
-  const triggerId = asNonEmptyString(workflowScheduleTriggerId);
-  if (!triggerId) throw new Error('workflow_schedule_trigger_id is required');
-
-  const live = await liveRpc<Record<string, unknown>>('ui_run_workflow_schedule_trigger_v1', {
-    p_workflow_schedule_trigger_id: triggerId,
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'ui_run_workflow_schedule_trigger_v1', [
-      'workflow_schedule_trigger_id',
-      'workflow_template_id',
-    ]);
-    const workflowRunId = asNonEmptyString(rec.workflow_run_id);
-    const status = String(rec.status ?? 'workflow_started');
-    const triggerReadback = await requireLiveResourceReadback(
-      'workflow_schedule_triggers',
-      triggerId,
-      'ui_run_workflow_schedule_trigger_v1',
-    );
-    if (status === 'preflight_failed') {
-      const lastError = asNonEmptyString(triggerReadback.last_error) ?? asNonEmptyString(rec.last_error);
-      if (!lastError) {
-        throw new Error('ui_run_workflow_schedule_trigger_v1 preflight readback missing workflow_schedule_triggers.last_error');
-      }
-      return {
-        ...rec,
-        ok: true,
-        status,
-        workflow_schedule_trigger_id: String(rec.workflow_schedule_trigger_id ?? triggerId),
-        workflow_template_id: asNonEmptyString(rec.workflow_template_id) ?? null,
-        workflow_run_id: null,
-        last_run_at: null,
-        last_error: lastError,
-        last_error_at: asNonEmptyString(triggerReadback.last_error_at) ?? asNonEmptyString(rec.last_error_at) ?? null,
-      };
-    }
-    if (!workflowRunId) {
-      throw new Error('ui_run_workflow_schedule_trigger_v1 did not return workflow_run_id');
-    }
-    const lastRunId = asNonEmptyString(triggerReadback.last_run_id);
-    if (lastRunId !== workflowRunId) {
-      throw new Error('ui_run_workflow_schedule_trigger_v1 backend readback did not update workflow_schedule_triggers.last_run_id');
-    }
-    if (!asNonEmptyString(triggerReadback.last_run_at)) {
-      throw new Error('ui_run_workflow_schedule_trigger_v1 backend readback did not update workflow_schedule_triggers.last_run_at');
-    }
-    const runReadback = await requireLiveResourceReadback(
-      'workflow_runs',
-      workflowRunId,
-      'ui_run_workflow_schedule_trigger_v1',
-    );
-    if (asNonEmptyString(runReadback.id) !== workflowRunId) {
-      throw new Error('ui_run_workflow_schedule_trigger_v1 backend readback did not return the created workflow_runs row');
-    }
-    const directoryRows = await requireLiveResourceListReadback(
-      'workflow_run_directory',
-      { id: workflowRunId },
-      'ui_run_workflow_schedule_trigger_v1',
-    );
-    const directoryRow = directoryRows.find((row) => asNonEmptyString(row.id) === workflowRunId) ?? directoryRows[0]!;
-    if (asNonEmptyString(directoryRow.id) !== workflowRunId) {
-      throw new Error('ui_run_workflow_schedule_trigger_v1 backend readback did not return the created workflow_run_directory row');
-    }
-    return {
-      ok: true,
-      status,
-      workflow_schedule_trigger_id: String(rec.workflow_schedule_trigger_id ?? triggerId),
-      workflow_template_id: asNonEmptyString(rec.workflow_template_id) ?? null,
-      workflow_run_id: workflowRunId,
-      last_run_at: asNonEmptyString(triggerReadback.last_run_at) ?? asNonEmptyString(rec.last_run_at) ?? null,
-      ...rec,
-    };
-  }
-
-  await ui_log_event_v1({
-    event: 'workflow_schedule_trigger.run_now',
-    workflow_schedule_trigger_id: triggerId,
-  });
-  return {
-    ok: true,
-    status: 'workflow_started',
-    workflow_schedule_trigger_id: triggerId,
-    workflow_template_id: null,
-    workflow_run_id: `wfr_schedule_${Date.now()}`,
-  };
+  const { ui_run_workflow_schedule_trigger_v1 } = await import('./data-source/workflows');
+  return ui_run_workflow_schedule_trigger_v1(workflowScheduleTriggerId);
 }
 
 export async function ui_repair_workflow_schedule_task_payload_v1(
   workflowScheduleTriggerId: string,
   taskPayload: Record<string, unknown> = {},
 ): Promise<WorkflowScheduleTaskPayloadRepairResult> {
-  const triggerId = asNonEmptyString(workflowScheduleTriggerId);
-  if (!triggerId) throw new Error('workflow_schedule_trigger_id is required');
-
-  const live = await liveRpc<Record<string, unknown>>('ui_repair_workflow_schedule_task_payload_v1', {
-    p_workflow_schedule_trigger_id: triggerId,
-    p_task_payload: taskPayload,
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'ui_repair_workflow_schedule_task_payload_v1', [
-      'workflow_schedule_trigger_id',
-      'workflow_template_id',
-      'task_type_key',
-    ]);
-    const triggerReadback = await requireLiveResourceReadback(
-      'workflow_schedule_triggers',
-      triggerId,
-      'ui_repair_workflow_schedule_task_payload_v1',
-    );
-    const contextPatch = (triggerReadback.context_patch ?? rec.context_patch) as Record<string, unknown> | undefined;
-    const taskPayloadReadback = (contextPatch?.binding_payload as Record<string, unknown> | undefined)?.task;
-    if (!taskPayloadReadback || typeof taskPayloadReadback !== 'object') {
-      throw new Error('ui_repair_workflow_schedule_task_payload_v1 backend readback missing binding_payload.task');
-    }
-    if (asNonEmptyString(triggerReadback.last_error)) {
-      throw new Error('ui_repair_workflow_schedule_task_payload_v1 backend readback did not clear workflow_schedule_triggers.last_error');
-    }
-    return {
-      ...rec,
-      ok: true,
-      status: String(rec.status ?? 'payload_repaired'),
-      workflow_schedule_trigger_id: String(rec.workflow_schedule_trigger_id ?? triggerId),
-      workflow_template_id: asNonEmptyString(rec.workflow_template_id) ?? null,
-      workflow_template_step_id: asNonEmptyString(rec.workflow_template_step_id) ?? null,
-      operation_name: asNonEmptyString(rec.operation_name) ?? null,
-      task_type_key: asNonEmptyString(rec.task_type_key) ?? null,
-      queue_key: asNonEmptyString(rec.queue_key) ?? null,
-      priority: typeof rec.priority === 'number' ? rec.priority : null,
-      sla_minutes: typeof rec.sla_minutes === 'number' ? rec.sla_minutes : null,
-      resource_type: asNonEmptyString(rec.resource_type) ?? null,
-      resource_id: asNonEmptyString(rec.resource_id) ?? null,
-      updated_at: asNonEmptyString(triggerReadback.updated_at) ?? asNonEmptyString(rec.updated_at) ?? null,
-      context_patch: contextPatch ?? null,
-    };
-  }
-
-  await ui_log_event_v1({
-    event: 'workflow_schedule_trigger.task_payload_repair',
-    workflow_schedule_trigger_id: triggerId,
-  });
-  return {
-    ok: true,
-    status: 'payload_repaired',
-    workflow_schedule_trigger_id: triggerId,
-    workflow_template_id: null,
-    workflow_template_step_id: null,
-    operation_name: null,
-    task_type_key: asNonEmptyString(taskPayload.task_type_key) ?? null,
-    queue_key: asNonEmptyString(taskPayload.queue_key) ?? null,
-    priority: typeof taskPayload.priority === 'number' ? taskPayload.priority : null,
-    sla_minutes: typeof taskPayload.sla_minutes === 'number' ? taskPayload.sla_minutes : null,
-    resource_type: asNonEmptyString(taskPayload.resource_type) ?? null,
-    resource_id: asNonEmptyString(taskPayload.resource_id) ?? null,
-    updated_at: new Date().toISOString(),
-    context_patch: { binding_payload: { task: taskPayload } },
-  };
+  const { ui_repair_workflow_schedule_task_payload_v1 } = await import('./data-source/workflows');
+  return ui_repair_workflow_schedule_task_payload_v1(workflowScheduleTriggerId, taskPayload);
 }
 
 // ----------- Mobile -----------
@@ -19721,72 +12986,8 @@ export async function ui_execute_user_device_revoke_v1(
   deviceId: string,
   revokedReason: string,
 ): Promise<UserDeviceRevokeResult> {
-  const id = asNonEmptyString(deviceId);
-  const reason = asNonEmptyString(revokedReason);
-  if (!id) throw new Error('ui_execute_user_device_revoke_v1 requires device_id');
-  if (!reason) throw new Error('ui_execute_user_device_revoke_v1 requires revoked_reason');
-
-  const live = await liveRpc<Record<string, unknown>>('ui_execute_user_device_revoke_v1', {
-    p_action_key: 'user_devices.revoke',
-    p_resource_key: 'user_devices',
-    p_selection_ids: [id],
-    p_selection_id: id,
-    p_selection_count: 1,
-    p_params: { revoked_reason: reason },
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'ui_execute_user_device_revoke_v1', [
-      'device_id',
-      'revoked_at',
-      'items',
-      'count',
-    ]);
-    const items = Array.isArray(rec.items) ? (rec.items as Array<Record<string, unknown>>) : [];
-    const first = items[0] ?? {};
-    const readback = await requireLiveUserDeviceRevokeReadback(
-      'ui_execute_user_device_revoke_v1',
-      id,
-      reason,
-    );
-    const revokedAt = requireLiveStringField(
-      {
-        ...readback.device,
-        ...readback.summary,
-        ...rec,
-        revoked_at:
-          first.revoked_at ??
-          rec.revoked_at ??
-          readback.summary.revoked_at ??
-          readback.device.revoked_at,
-      },
-      ['revoked_at'],
-      'ui_execute_user_device_revoke_v1 did not return backend revocation evidence',
-    );
-    return {
-      ok: true,
-      status: String(rec.status ?? first.status ?? 'revoked'),
-      device_id: String(first.id ?? rec.device_id ?? id),
-      revoked_at: revokedAt,
-      action_key: String(rec.action_key ?? 'user_devices.revoke'),
-      resource_key: String(rec.resource_key ?? 'user_devices'),
-      count: Number(rec.count ?? items.length ?? 1),
-      items,
-      ...rec,
-    };
-  }
-
-  await sleep(80);
-  const revokedAt = new Date().toISOString();
-  return {
-    ok: true,
-    status: 'revoked',
-    device_id: id,
-    revoked_at: revokedAt,
-    action_key: 'user_devices.revoke',
-    resource_key: 'user_devices',
-    count: 1,
-    items: [{ id, status: 'revoked', revoked_at: revokedAt }],
-  };
+  const { ui_execute_user_device_revoke_v1 } = await import('./data-source/platform');
+  return ui_execute_user_device_revoke_v1(deviceId, revokedReason);
 }
 
 // ----------- Identity / sessions (Phase E2) -----------
@@ -19889,23 +13090,8 @@ export async function ui_list_user_sessions_v1(
   targetUserId?: string | null,
   limit = 50,
 ): Promise<ListResult<UserSessionRow>> {
-  const pageSize = Math.max(1, Math.min(limit, 100));
-  const live = await liveRpc<Record<string, unknown>>('ui_list_user_sessions_v1', {
-    p_target_user_id: targetUserId ?? null,
-    p_limit: pageSize,
-  });
-  if (live) return normalizeLiveListResult<UserSessionRow>(live.data, 0, pageSize);
-
-  const rows = ((seed as { user_sessions?: Array<UserSessionRow> }).user_sessions ?? [])
-    .filter((row) => !targetUserId || row.user_id === targetUserId)
-    .slice()
-    .sort((a, b) => {
-      const aTime = Date.parse(String(a.updated_at ?? a.last_seen_at ?? a.created_at ?? ''));
-      const bTime = Date.parse(String(b.updated_at ?? b.last_seen_at ?? b.created_at ?? ''));
-      return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
-    })
-    .slice(0, pageSize);
-  return { rows, total: rows.length, page: 0, page_size: pageSize };
+  const { ui_list_user_sessions_v1 } = await import('./data-source/platform');
+  return ui_list_user_sessions_v1(targetUserId, limit);
 }
 
 // ----------- Identity / user lifecycle (W37) -----------
@@ -20142,32 +13328,8 @@ export async function ui_list_user_security_actions_v1(
   targetUserId: string,
   limit = 10,
 ): Promise<ListResult<UserSecurityActionRow>> {
-  if (!targetUserId) {
-    return { rows: [], total: 0, page: 0, page_size: limit };
-  }
-  const live = await liveRpc<Record<string, unknown>>('ui_list_user_security_actions_v1', {
-    p_target_user_id: targetUserId,
-    p_limit: limit,
-  });
-  if (live) return normalizeLiveListResult<UserSecurityActionRow>(live.data, 0, limit);
-
-  const rows = ((seed.decision_log ?? []) as UserSecurityActionRow[])
-    .filter((row) => row.resource_type === 'user' && String(row.resource_id ?? '') === targetUserId)
-    .filter((row) =>
-      [
-        'grant_user_role_v1',
-        'revoke_user_role_v1',
-        'revoke_session_v1',
-        'suspend_user_v1',
-        'reactivate_user_v1',
-        'force_password_reset_v1',
-        'tenant_user_invite_apply_v1',
-      ].includes(String(row.decision_point ?? '')),
-    )
-    .slice()
-    .sort((a, b) => String(b.timestamp ?? '').localeCompare(String(a.timestamp ?? '')))
-    .slice(0, limit);
-  return { rows, total: rows.length, page: 0, page_size: limit };
+  const { ui_list_user_security_actions_v1 } = await import('./data-source/platform');
+  return ui_list_user_security_actions_v1(targetUserId, limit);
 }
 
 // ----------- Plugin tester -----------
@@ -20198,919 +13360,22 @@ export async function runPluginTest(
   payload: unknown,
   pluginVersionId?: string | null,
 ): Promise<RunPluginTestResult> {
-  const args: Record<string, unknown> = {
-    plugin_id: pluginId,
-    payload: payload ?? {},
-  };
-  if (typeof pluginVersionId === 'string' && pluginVersionId.trim()) {
-    args.plugin_version_id = pluginVersionId.trim();
-  }
-  const live = await liveRpc<RunPluginTestResult>('test_integration_plugin_v1', { p_args: args });
-  if (live) {
-    const result = requireLiveRpcRecord(
-      live.data,
-      'test_integration_plugin_v1 returned no backend outcome',
-    ) as RunPluginTestResult;
-    const outcomeError = backendOutcomeError(result, 'test_integration_plugin_v1 was rejected by the backend');
-    if (outcomeError) throw outcomeError;
-    requireLiveEvidence(result, [
-      'validation_run_id',
-      'integration_plugin_validation_run_id',
-      'plugin_validation_run_id',
-    ], 'test_integration_plugin_v1 did not return backend validation evidence');
-    const validationRunId = asNonEmptyString(result.validation_run_id)
-      ?? asNonEmptyString(result.integration_plugin_validation_run_id)
-      ?? asNonEmptyString(result.plugin_validation_run_id);
-    if (!validationRunId) {
-      throw new Error('test_integration_plugin_v1 did not return validation_run_id');
-    }
-    await requireLiveResourceReadback(
-      'integration_plugin_validation_runs',
-      validationRunId,
-      'test_integration_plugin_v1',
-    );
-    if (!Array.isArray(result.steps) || result.steps.length === 0) {
-      throw new Error('test_integration_plugin_v1 did not return backend trace steps');
-    }
-    return {
-      ok: true,
-      plugin_id: result.plugin_id ?? pluginId,
-      plugin_version_id: result.plugin_version_id,
-      validation_run_id: validationRunId,
-      duration_ms: result.duration_ms ?? 0,
-      steps: result.steps ?? [],
-      correlation_id: result.correlation_id,
-      settings_resolution_id: result.settings_resolution_id,
-    };
-  }
-  // In-memory branch: deterministic trace mirroring the canonical RPC shape.
-  await sleep(420);
-  const duration = 420 + Math.floor(Math.random() * 80);
-  return {
-    ok: true,
-    plugin_id: pluginId,
-    plugin_version_id: `pv_${pluginId}_demo`,
-    validation_run_id: nextResourceId('vr'),
-    duration_ms: duration,
-    steps: [
-      { name: 'verify_signature', ok: true, ms: 12, signature_required: true },
-      { name: 'parse_payload', ok: true, ms: 24, payload_size: JSON.stringify(payload ?? {}).length },
-      { name: 'apply_mapping', ok: true, ms: 88, mapping_present: true },
-      { name: 'validate_schema', ok: true, ms: 31, plugin_kind: 'webhook' },
-      { name: 'bind_workflow', ok: true, ms: 56, workflow_template_active: true },
-      { name: 'respond', ok: true, ms: 14, plugin_status: 'active' },
-    ],
-    correlation_id: nextCorrelationId(),
-    settings_resolution_id: 'srlv_demo',
-  };
-}
-
-async function readApiGatewayRequestTestReadback(
-  filters: Array<Record<string, unknown>>,
-): Promise<ResourceRow | null> {
-  for (const filter of filters) {
-    const rows = await readLiveResourceListReadback('api_gateway_requests', filter, 'api-gateway');
-    const row = rows[0];
-    if (row) return row;
-  }
-  return null;
-}
-
-async function readApiGatewayAuthRejectionReadback(
-  args: {
-    correlationId: string;
-    method: string;
-    path: string;
-    startedAtMs: number;
-    allowRecentFallback?: boolean;
-  },
-): Promise<ResourceRow | null> {
-  const correlationRows = await readLiveResourceListReadback(
-    'api_gateway_auth_rejections',
-    { correlation_id: args.correlationId },
-    'api-gateway',
-  );
-  const correlationRow = correlationRows.find((row) => apiGatewayReadbackOccurredAfter(row, args.startedAtMs));
-  if (correlationRow) return correlationRow;
-
-  if (!args.allowRecentFallback) return null;
-
-  const invalidTokenRows = await readLiveResourceListReadback(
-    'api_gateway_auth_rejections',
-    { failure_code: 'invalid_token' },
-    'api-gateway',
-  );
-  const normalizedMethod = args.method.toUpperCase();
-  return invalidTokenRows.find((row) => {
-    const rowMethod = asNonEmptyString(row.method)?.toUpperCase();
-    const rowPath = asNonEmptyString(row.path);
-    return (
-      apiGatewayReadbackOccurredAfter(row, args.startedAtMs) &&
-      (!rowMethod || rowMethod === normalizedMethod) &&
-      (!rowPath || rowPath === args.path)
-    );
-  }) ?? null;
-}
-
-async function readWebhookReceiverAuthRejectionReadback(
-  args: {
-    correlationId: string;
-    idempotencyKey: string;
-    startedAtMs: number;
-  },
-): Promise<ResourceRow | null> {
-  const filters: Array<Record<string, unknown>> = [
-    { correlation_id: args.correlationId },
-    args.correlationId !== args.idempotencyKey ? { correlation_id: args.idempotencyKey } : null,
-    { request_id: args.idempotencyKey },
-  ].filter(Boolean) as Array<Record<string, unknown>>;
-  for (const filter of filters) {
-    const rows = await readLiveResourceListReadback('webhook_auth_rejections', filter, 'webhook-receiver');
-    const row = rows.find((candidate) => apiGatewayReadbackOccurredAfter(candidate, args.startedAtMs));
-    if (row) return row;
-  }
-  return null;
-}
-
-async function readWebhookReceiverAuthRejectionUntil(
-  args: {
-    correlationId: string;
-    idempotencyKey: string;
-    startedAtMs: number;
-  },
-): Promise<ResourceRow | null> {
-  const deadline = performance.now() + WEBHOOK_RECEIVER_AUTH_REJECTION_READBACK_TIMEOUT_MS;
-  while (performance.now() <= deadline) {
-    try {
-      const row = await readWebhookReceiverAuthRejectionReadback(args);
-      if (row) return row;
-    } catch {
-      // Older deployments may not expose webhook_auth_rejections yet. Keep the
-      // canonical inbox readback path authoritative for non-auth failures.
-      return null;
-    }
-    if (performance.now() >= deadline) break;
-    await sleep(WEBHOOK_RECEIVER_AUTH_REJECTION_READBACK_INTERVAL_MS);
-  }
-  return null;
-}
-
-function apiGatewayDirectFetchConfig(): { baseUrl: string; anonKey: string } | null {
-  if (import.meta.env.MODE === 'test' && import.meta.env.VITE_API_GATEWAY_DIRECT_FETCH_TEST !== '1') {
-    return null;
-  }
-  const baseUrl = asNonEmptyString(import.meta.env.VITE_SUPABASE_URL)?.replace(/\/+$/, '');
-  const anonKey = asNonEmptyString(import.meta.env.VITE_SUPABASE_ANON_KEY);
-  if (!baseUrl || !anonKey || typeof fetch !== 'function') return null;
-  return { baseUrl, anonKey };
-}
-
-function webhookReceiverDirectFetchConfig(): { baseUrl: string; anonKey: string } | null {
-  if (import.meta.env.MODE === 'test' && import.meta.env.VITE_WEBHOOK_RECEIVER_DIRECT_FETCH_TEST !== '1') {
-    return null;
-  }
-  const baseUrl = asNonEmptyString(import.meta.env.VITE_SUPABASE_URL)?.replace(/\/+$/, '');
-  const anonKey = asNonEmptyString(import.meta.env.VITE_SUPABASE_ANON_KEY);
-  if (!baseUrl || !anonKey || typeof fetch !== 'function') return null;
-  return { baseUrl, anonKey };
-}
-
-async function invokeApiGatewayEdge(
-  client: NonNullable<ReturnType<typeof getSupabaseClient>>,
-  invokeName: string,
-  args: {
-    method: ApiGatewayInvokeMethod;
-    payload: Record<string, unknown>;
-    headers: Record<string, string>;
-  },
-): Promise<{ data: Record<string, unknown>; error: { message?: string } | null }> {
-  const directConfig = apiGatewayDirectFetchConfig();
-  if (!directConfig) {
-    const { data, error } = await withApiGatewayInvokeTimeout(
-      client.functions.invoke<Record<string, unknown>>(invokeName, {
-        method: args.method,
-        body: args.method === 'GET' ? undefined : args.payload,
-        headers: args.headers,
-      }),
-    );
-    return { data: objectRecord(data), error };
-  }
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), API_GATEWAY_EDGE_INVOKE_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${directConfig.baseUrl}/functions/v1/${invokeName}`, {
-      method: args.method,
-      headers: {
-        ...args.headers,
-        apikey: directConfig.anonKey,
-        authorization: `Bearer ${directConfig.anonKey}`,
-        'content-type': 'application/json',
-        'x-client-info': 'console-v2',
-      },
-      body: args.method === 'GET' ? undefined : JSON.stringify(args.payload),
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    let data: Record<string, unknown> = {};
-    if (text.trim()) {
-      try {
-        data = objectRecord(JSON.parse(text));
-      } catch {
-        data = { message: text };
-      }
-    }
-    if (!response.ok) {
-      const message =
-        findNestedString(data, ['message', 'error', 'code', 'failure_code']) ??
-        `api-gateway failed with HTTP ${response.status}`;
-      return {
-        data: {
-          ...data,
-          status: response.status,
-          status_code: response.status,
-        },
-        error: { message },
-      };
-    }
-    return { data, error: null };
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error(API_GATEWAY_EDGE_INVOKE_TIMEOUT_MESSAGE);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-async function invokeWebhookReceiverEdge(
-  client: NonNullable<ReturnType<typeof getSupabaseClient>>,
-  args: {
-    payload: Record<string, unknown>;
-    headers: Record<string, string>;
-  },
-): Promise<{ data: Record<string, unknown> | null; error: { message?: string } | null }> {
-  const directConfig = webhookReceiverDirectFetchConfig();
-  if (!directConfig) {
-    const { data, error } = await client.functions.invoke<Record<string, unknown>>('webhook-receiver', {
-      body: args.payload,
-      headers: args.headers,
-    });
-    return { data: objectRecord(data), error };
-  }
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), WEBHOOK_RECEIVER_EDGE_INVOKE_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${directConfig.baseUrl}/functions/v1/webhook-receiver`, {
-      method: 'POST',
-      headers: {
-        ...args.headers,
-        apikey: directConfig.anonKey,
-        authorization: `Bearer ${directConfig.anonKey}`,
-        'content-type': 'application/json',
-        'x-client-info': 'console-v2',
-      },
-      body: JSON.stringify(args.payload),
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    let data: Record<string, unknown> = {};
-    if (text.trim()) {
-      try {
-        data = objectRecord(JSON.parse(text));
-      } catch {
-        data = { message: text };
-      }
-    }
-    if (!response.ok) {
-      const message =
-        findNestedString(data, ['response_reason', 'ack_reason', 'reason', 'message', 'error', 'code', 'failure_code']) ??
-        `webhook-receiver failed with HTTP ${response.status}`;
-      return {
-        data: {
-          ...data,
-          status: response.status,
-          status_code: response.status,
-          http_status: response.status,
-        },
-        error: { message },
-      };
-    }
-    return { data, error: null };
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      return { data: null, error: null };
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-async function waitForApiGatewayInvokeOrAuthRejection(
-  invokePromise: Promise<{ data: Record<string, unknown>; error: { message?: string } | null }>,
-  args: {
-    correlationId: string;
-    method: ApiGatewayInvokeMethod;
-    path: string;
-    startedAtMs: number;
-  },
-): Promise<
-  | { type: 'invoke'; result: { data: Record<string, unknown>; error: { message?: string } | null } }
-  | { type: 'auth_rejection'; row: ResourceRow }
-> {
-  const wrapped = invokePromise.then(
-    (result) => ({ status: 'fulfilled' as const, result }),
-    (error) => ({ status: 'rejected' as const, error }),
-  );
-  const deadline = performance.now() + API_GATEWAY_AUTH_REJECTION_QUICK_READBACK_TIMEOUT_MS;
-  while (performance.now() <= deadline) {
-    const settled = await Promise.race([
-      wrapped,
-      sleep(API_GATEWAY_AUTH_REJECTION_QUICK_READBACK_INTERVAL_MS).then(() => null),
-    ]);
-    if (settled) {
-      if (settled.status === 'fulfilled') {
-        return { type: 'invoke', result: settled.result };
-      }
-      throw settled.error;
-    }
-    try {
-      const authRejection = await readApiGatewayAuthRejectionReadback({
-        correlationId: args.correlationId,
-        method: args.method,
-        path: args.path,
-        startedAtMs: args.startedAtMs,
-      });
-      if (authRejection) return { type: 'auth_rejection', row: authRejection };
-    } catch {
-      // Some older API lanes may not expose the rejection projection yet. Keep
-      // the main invoke/request readback path authoritative in that case.
-    }
-  }
-  throw new Error(API_GATEWAY_EDGE_INVOKE_TIMEOUT_MESSAGE);
+  const { runPluginTest } = await import('./data-source/external-intake');
+  return runPluginTest(pluginId, payload, pluginVersionId);
 }
 
 export async function runApiGatewayRequestTest(
   args: RunApiGatewayRequestTestArgs,
 ): Promise<RunApiGatewayRequestTestResult> {
-  const token = asNonEmptyString(args.auth_token);
-  if (!token) throw new Error('API Gateway source token is required');
-  const { path, query } = splitApiGatewayPath(args.path, args.query_string);
-  const method = normalizeApiGatewayMethod(args.method);
-  const correlationId =
-    asNonEmptyString(args.correlation_id) ??
-    asNonEmptyString(args.idempotency_key) ??
-    `console-api-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const idempotencyKey = asNonEmptyString(args.idempotency_key) ?? correlationId;
-  const client = getSupabaseClient();
-  if (!client) {
-    if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('edge api-gateway');
-    return buildApiGatewaySyntheticResult(
-      {
-        ...args,
-        method,
-        path,
-        query_string: query,
-        correlation_id: correlationId,
-        idempotency_key: idempotencyKey,
-      },
-      nextCorrelationId,
-    );
-  }
-
-  const operatorHeaders = objectRecord(args.headers);
-  const headers: Record<string, string> = {};
-  for (const [key, value] of Object.entries(operatorHeaders)) {
-    const normalizedKey = key.trim();
-    if (!normalizedKey || value == null) continue;
-    if (normalizedKey.toLowerCase() === 'content-type') continue;
-    headers[normalizedKey] = String(value);
-  }
-  headers['x-webhook-token'] = token;
-  headers['x-correlation-id'] = correlationId;
-  headers['idempotency-key'] = idempotencyKey;
-  const replayOf = asNonEmptyString(args.replay_of);
-  if (replayOf) {
-    headers['x-masarx-replay-of'] = replayOf;
-  }
-
-  const invokeName = `api-gateway${path}${query ? `?${query}` : ''}`;
-  const payload = args.payload ?? {};
-  const startedAtMs = Date.now();
-  let response: Record<string, unknown> = {};
-  let invokeErrorMessage: string | null = null;
-  try {
-    const invokePromise = withApiGatewayInvokeTimeout(
-      invokeApiGatewayEdge(client, invokeName, { method, payload, headers }),
-    );
-    const invokeOutcome = await waitForApiGatewayInvokeOrAuthRejection(invokePromise, {
-      correlationId,
-      method,
-      path,
-      startedAtMs,
-    });
-    if (invokeOutcome.type === 'auth_rejection') {
-      assertApiGatewaySelectedSourceMatchesReadback(args, invokeOutcome.row);
-      throw new Error(apiGatewayAuthRejectionMessage(invokeOutcome.row));
-    }
-    const { data, error } = invokeOutcome.result;
-    if (error) {
-      invokeErrorMessage = await readFunctionErrorMessage(error, 'api-gateway failed');
-      response = { ...objectRecord(data), error: invokeErrorMessage };
-    } else {
-      response = objectRecord(data);
-    }
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith('API Gateway auth rejected by backend readback')) {
-      throw err;
-    }
-    invokeErrorMessage = err instanceof Error ? err.message : API_GATEWAY_EDGE_INVOKE_TIMEOUT_MESSAGE;
-    response = { error: invokeErrorMessage };
-  }
-
-  const responseRequestId = findNestedString(response, ['api_gateway_request_id', 'request_id']);
-  const responseCorrelationId = findNestedString(response, ['correlation_id']) ?? correlationId;
-  const filters = [
-    responseRequestId ? { request_id: responseRequestId } : null,
-    { correlation_id: responseCorrelationId },
-    responseCorrelationId !== correlationId ? { correlation_id: correlationId } : null,
-  ].filter(Boolean) as Array<Record<string, unknown>>;
-
-  const expectShipment = args.expect_shipment !== false;
-  const responseIsEmpty = Object.keys(response).length === 0;
-  const responseStatus = findNestedNumber(response, ['status', 'status_code', 'http_status']);
-  const responseHasErrorSignal =
-    Boolean(findNestedString(response, ['error', 'code', 'message', 'failure_code'])) ||
-    (responseStatus != null && responseStatus >= 400);
-  if (invokeErrorMessage || responseIsEmpty || (!responseRequestId && responseHasErrorSignal)) {
-    try {
-      const exactAuthRejection = await readApiGatewayAuthRejectionReadback({
-        correlationId: responseCorrelationId,
-        method,
-        path,
-        startedAtMs,
-      });
-      if (exactAuthRejection) {
-        assertApiGatewaySelectedSourceMatchesReadback(args, exactAuthRejection);
-        throw new Error(apiGatewayAuthRejectionMessage(exactAuthRejection));
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('API Gateway auth rejected by backend readback')) {
-        throw err;
-      }
-      // Older deployments may not expose api_gateway_auth_rejections yet.
-      // Continue to the canonical request readback path when that projection
-      // is unavailable instead of failing unrelated successful tests.
-    }
-    const edgeAuthMessage = apiGatewayEdgeAuthErrorMessage(response, invokeErrorMessage);
-    if (edgeAuthMessage) {
-      throw new Error(edgeAuthMessage);
-    }
-  }
-  if (invokeErrorMessage) {
-    try {
-      const authRejection = await readApiGatewayAuthRejectionReadback({
-        correlationId: responseCorrelationId,
-        method,
-        path,
-        startedAtMs,
-        allowRecentFallback: true,
-      });
-      if (authRejection) {
-        assertApiGatewaySelectedSourceMatchesReadback(args, authRejection);
-        throw new Error(apiGatewayAuthRejectionMessage(authRejection));
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('API Gateway auth rejected by backend readback')) {
-        throw err;
-      }
-      // If the auth-rejection projection is temporarily unavailable, keep the
-      // canonical request-readback wait below so non-auth failures still settle.
-    }
-  }
-  const readbackTimeoutMs = invokeErrorMessage === API_GATEWAY_EDGE_INVOKE_TIMEOUT_MESSAGE
-    ? API_GATEWAY_REQUEST_READBACK_AFTER_INVOKE_TIMEOUT_MS
-    : API_GATEWAY_REQUEST_READBACK_TIMEOUT_MS;
-  const deadline = performance.now() + readbackTimeoutMs;
-  let readback: ResourceRow | null = null;
-  let firstReadbackAt: number | null = null;
-  while (performance.now() <= deadline) {
-    readback = await readApiGatewayRequestTestReadback(filters);
-    if (readback && apiGatewayReadbackTerminal(readback, expectShipment)) break;
-    if (readback) {
-      firstReadbackAt ??= performance.now();
-      if (performance.now() - firstReadbackAt >= API_GATEWAY_TERMINAL_SETTLE_AFTER_FIRST_READBACK_MS) break;
-    }
-    if (performance.now() >= deadline) break;
-    await sleep(API_GATEWAY_REQUEST_READBACK_INTERVAL_MS);
-  }
-
-  if (!readback) {
-    if (invokeErrorMessage) throw new Error(invokeErrorMessage);
-    throw new Error('api-gateway request did not produce backend request readback');
-  }
-  assertApiGatewaySelectedSourceMatchesReadback(args, readback);
-
-  const result = buildApiGatewayRequestResult(
-    {
-      ...args,
-      method,
-      path,
-      query_string: query,
-      correlation_id: responseCorrelationId,
-      idempotency_key: idempotencyKey,
-    },
-    response,
-    readback,
-    { invokeErrorMessage },
-  );
-  if (result.shipment_id) {
-    await requireLiveResourceReadback('shipments', result.shipment_id, 'api-gateway');
-    await requireLiveResourceReadback('shipment_directory', result.shipment_id, 'api-gateway');
-  }
-  if (expectShipment && result.intake_state === 'shipment_materialized' && !result.shipment_id) {
-    throw new Error('api-gateway materialized shipment without canonical shipment readback');
-  }
-  return result;
+  const { runApiGatewayRequestTest } = await import('./data-source/external-intake');
+  return runApiGatewayRequestTest(args);
 }
 
 export async function runWebhookReceiverTest(
   args: RunWebhookReceiverTestArgs,
 ): Promise<RunWebhookReceiverTestResult> {
-  const token = asNonEmptyString(args.auth_token);
-  if (!token) throw new Error('Intake source token is required');
-  const payload: Record<string, unknown> =
-    args.payload && typeof args.payload === 'object' && !Array.isArray(args.payload)
-      ? args.payload as Record<string, unknown>
-      : {};
-  const fallbackUuid = (): string => {
-    const timestampHex = Date.now().toString(16).padStart(12, '0').slice(-12);
-    const randomHex = Math.random().toString(16).slice(2).padEnd(20, '0').slice(0, 20);
-    return `${timestampHex.slice(0, 8)}-${timestampHex.slice(8, 12)}-4${randomHex.slice(0, 3)}-8${randomHex.slice(3, 6)}-${randomHex.slice(6, 18)}`;
-  };
-  const idempotencyKey =
-    asNonEmptyString(args.idempotency_key) ?? globalThis.crypto?.randomUUID?.() ?? fallbackUuid();
-  const signature = asNonEmptyString(args.signature);
-  const client = getSupabaseClient();
-  if (!client) {
-    if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('edge webhook-receiver');
-    return buildWebhookReceiverSyntheticResult({ ...args, idempotency_key: idempotencyKey }, nextCorrelationId);
-  }
-
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-    'x-webhook-token': token,
-    'idempotency-key': idempotencyKey,
-    'x-correlation-id': idempotencyKey,
-  };
-  if (signature) headers['x-signature'] = signature;
-
-  const startedAt = performance.now();
-  const invokeResult = await Promise.race([
-    invokeWebhookReceiverEdge(client, { payload, headers }).then((result) => ({ ...result, timed_out: false as const })),
-    sleep(WEBHOOK_RECEIVER_EDGE_INVOKE_TIMEOUT_MS).then(() => ({
-      data: null,
-      error: null,
-      timed_out: true as const,
-    })),
-  ]);
-  const invokeErrorMessage = invokeResult.error
-    ? await readFunctionErrorMessage(invokeResult.error, 'webhook-receiver failed')
-    : null;
-  const response = invokeErrorMessage
-    ? {
-        ...objectRecord(invokeResult.data),
-        accepted: false,
-        error: invokeErrorMessage,
-        ack_reason:
-          findNestedString(invokeResult.data, ['response_reason', 'ack_reason', 'reason', 'message', 'error', 'code', 'failure_code']) ??
-          invokeErrorMessage,
-        response_outcome:
-          findNestedString(invokeResult.data, ['response_outcome']) ?? 'response_failed',
-        idempotency_key: idempotencyKey,
-      }
-    : invokeResult.timed_out
-    ? {
-        accepted: true,
-        invoke_timeout: true,
-        idempotency_key: idempotencyKey,
-        message: 'webhook-receiver edge invocation timed out; using canonical inbox readback',
-      }
-    : objectRecord(invokeResult.data);
-  let workflowRunId = findNestedString(response, ['workflow_run_id']);
-  const followupWorkflowRunId = findNestedString(response, ['followup_workflow_run_id']);
-  const correlationId = findNestedString(response, ['correlation_id']) ?? idempotencyKey;
-  let ackOutcome = findNestedString(response, ['ack_outcome']);
-  let responseOutcome =
-    findNestedString(response, ['response_outcome']) ??
-    (response.accepted === true || findNestedString(response, ['status']) === 'accepted_async'
-      ? 'accepted'
-      : null);
-  let ackStatusCode = findNestedNumber(response, ['ack_status_code', 'status_code']);
-  let ackReason = findNestedString(response, ['ack_reason']);
-  let webhookId = findNestedString(response, ['webhook_id']);
-  let canonicalIntent = findNestedString(response, ['canonical_intent']);
-  let authRejectionId: string | null = null;
-  let authRejectionFailureCode: string | null = null;
-  let authRejectionFailureMessage: string | null = null;
-  let authRejectionHttpStatus: number | null = null;
-  let authRejectionSourceLabel: string | null = null;
-  let authRejectionSourceIdentifier: string | null = null;
-  let authRejectionSourceResolved: boolean | null = null;
-  let authRejectionTokenFingerprint: string | null = null;
-  let authRejectionRejectionClass: string | null = null;
-
-  let workflowSteps: ResourceRow[] = [];
-  let shipmentId: string | null = null;
-  let trackingNumber = findNestedString(response, ['tracking_number', 'planned_tracking_number']);
-  let webhookProcessingStatus: string | null = null;
-  let sourceLabel: string | null = null;
-  let sourceIdentifier: string | null = null;
-  let providerTypeLabel: string | null = null;
-  let mappingConfigId: string | null = null;
-  let mappingLabel: string | null = null;
-  let mappingTarget: string | null = null;
-  let mappingVersion: number | null = null;
-  let mappingRulesCount: number | null = null;
-  let errorMessage: string | null = invokeErrorMessage;
-  let isTerminal: boolean | null = null;
-  let isActionable: boolean | null = null;
-  const applyWebhookDirectoryReadback = (row: ResourceRow): void => {
-    const rowIsTerminal = typeof row.is_terminal === 'boolean' ? row.is_terminal : null;
-    webhookId = webhookId ?? asNonEmptyString(row.id);
-    workflowRunId = workflowRunId ?? asNonEmptyString(row.workflow_run_id);
-    canonicalIntent = canonicalIntent ?? asNonEmptyString(row.canonical_intent);
-    trackingNumber = trackingNumber ?? asNonEmptyString(row.tracking_number);
-    ackOutcome = asNonEmptyString(row.ack_outcome) ?? ackOutcome;
-    responseOutcome = asNonEmptyString(row.response_outcome) ?? responseOutcome;
-    ackStatusCode = findNestedNumber(row, ['ack_status_code', 'response_status_code', 'status_code']) ?? ackStatusCode;
-    ackReason = asNonEmptyString(row.ack_reason) ?? asNonEmptyString(row.response_reason) ?? ackReason;
-    webhookProcessingStatus = asNonEmptyString(row.processing_status);
-    sourceLabel = asNonEmptyString(row.source_label);
-    sourceIdentifier = asNonEmptyString(row.source_identifier);
-    providerTypeLabel = asNonEmptyString(row.provider_type_label);
-    mappingConfigId = asNonEmptyString(row.mapping_config_id);
-    mappingLabel = asNonEmptyString(row.mapping_label);
-    mappingTarget = asNonEmptyString(row.mapping_target);
-    mappingVersion = typeof row.mapping_version === 'number' ? row.mapping_version : null;
-    mappingRulesCount = typeof row.mapping_rules_count === 'number' ? row.mapping_rules_count : null;
-    errorMessage = asNonEmptyString(row.error_message);
-    isTerminal = rowIsTerminal;
-    isActionable = typeof row.is_actionable === 'boolean' ? row.is_actionable : null;
-    if (rowIsTerminal === true) {
-      shipmentId = shipmentId ?? asNonEmptyString(row.shipment_id);
-    }
-  };
-  const readWebhookDirectory = async (
-    filters: Array<Record<string, unknown>>,
-  ): Promise<boolean> => {
-    for (const filter of filters) {
-      const readback = await ui_list_resource_v1<ResourceRow>('webhook_inbox_directory', {
-        filter,
-        page_size: 1,
-      });
-      const row = readback.rows[0];
-      if (!row) continue;
-      applyWebhookDirectoryReadback(row);
-      return true;
-    }
-    return false;
-  };
-  const readWebhookDirectoryUntil = async (
-    filters: Array<Record<string, unknown>>,
-    timeoutMs: number,
-    requireWorkflowRun = false,
-  ): Promise<boolean> => {
-    const deadline = performance.now() + timeoutMs;
-    while (performance.now() <= deadline) {
-      const found = await readWebhookDirectory(filters);
-      if (found && (!requireWorkflowRun || Boolean(workflowRunId))) return true;
-      if (performance.now() >= deadline) break;
-      await sleep(WEBHOOK_RECEIVER_READBACK_INTERVAL_MS);
-    }
-    return false;
-  };
-  const isWebhookReceiverTerminalFailure = (status: string | null): boolean => {
-    const value = String(status ?? '').trim().toLowerCase();
-    return (
-      value.includes('fail') ||
-      value === 'error' ||
-      value === 'errored' ||
-      value === 'rejected' ||
-      value === 'dead_lettered'
-    );
-  };
-  const applyWebhookAuthRejectionReadback = (row: ResourceRow): void => {
-    authRejectionId = asNonEmptyString(row.id);
-    authRejectionFailureCode = asNonEmptyString(row.failure_code);
-    authRejectionFailureMessage = asNonEmptyString(row.failure_message);
-    authRejectionHttpStatus = findNestedNumber(row, ['http_status']);
-    authRejectionSourceLabel = asNonEmptyString(row.source_label);
-    authRejectionSourceIdentifier = asNonEmptyString(row.source_identifier);
-    authRejectionSourceResolved = typeof row.source_resolved === 'boolean' ? row.source_resolved : null;
-    authRejectionTokenFingerprint = asNonEmptyString(row.token_fingerprint);
-    authRejectionRejectionClass = asNonEmptyString(row.rejection_class);
-    ackOutcome = 'auth_rejected';
-    responseOutcome = 'auth_rejected';
-    ackStatusCode = ackStatusCode ?? authRejectionHttpStatus ?? 401;
-    ackReason = ackReason ?? authRejectionFailureMessage ?? authRejectionFailureCode ?? 'auth_rejected';
-    errorMessage = errorMessage ?? authRejectionFailureMessage ?? authRejectionFailureCode;
-    sourceLabel = sourceLabel ?? authRejectionSourceLabel;
-    sourceIdentifier = sourceIdentifier ?? authRejectionSourceIdentifier;
-    webhookProcessingStatus = webhookProcessingStatus ?? 'auth_rejected';
-    isTerminal = true;
-    isActionable = false;
-  };
-  const responseStatus = findNestedNumber(response, ['status', 'status_code', 'http_status']);
-  const edgeRejectedWithoutLineage =
-    !workflowRunId &&
-    typeof responseStatus === 'number' &&
-    responseStatus >= 400 &&
-    responseStatus < 500;
-  const responseHasAuthSignal =
-    Boolean(invokeErrorMessage) ||
-    responseStatus === 401 ||
-    responseStatus === 403 ||
-    /unauthorized|invalid_token|forbidden|auth/i.test(
-      [
-        findNestedString(response, ['error', 'message', 'code', 'failure_code']),
-        invokeErrorMessage,
-      ].filter(Boolean).join(' '),
-    );
-  if (responseHasAuthSignal && !workflowRunId && !edgeRejectedWithoutLineage) {
-    const authRejection = await readWebhookReceiverAuthRejectionUntil({
-      correlationId,
-      idempotencyKey,
-      startedAtMs: startedAt,
-    });
-    if (authRejection) {
-      applyWebhookAuthRejectionReadback(authRejection);
-    }
-  }
-  if (edgeRejectedWithoutLineage && !authRejectionId) {
-    ackOutcome = ackOutcome ?? 'response_failed';
-    responseOutcome = responseOutcome ?? 'response_failed';
-    ackStatusCode = ackStatusCode ?? responseStatus;
-    ackReason =
-      ackReason ??
-      findNestedString(response, ['response_reason', 'ack_reason', 'reason', 'message', 'error', 'code', 'failure_code']) ??
-      invokeErrorMessage ??
-      `webhook-receiver failed with HTTP ${responseStatus}`;
-    errorMessage = errorMessage ?? ackReason;
-    webhookProcessingStatus = webhookProcessingStatus ?? 'response_failed';
-    isTerminal = true;
-    isActionable = false;
-  }
-  if (!workflowRunId) {
-    const foundReplayReadback = authRejectionId || edgeRejectedWithoutLineage
-      ? false
-      : await readWebhookDirectoryUntil(
-          [
-            webhookId ? { id: webhookId } : null,
-            { idempotency_key: idempotencyKey },
-            { correlation_id: correlationId },
-          ].filter(Boolean) as Array<Record<string, unknown>>,
-          WEBHOOK_RECEIVER_READBACK_AFTER_INVOKE_TIMEOUT_MS,
-          false,
-        );
-    const terminalFailureWithoutWorkflow =
-      foundReplayReadback &&
-      isTerminal === true &&
-      isWebhookReceiverTerminalFailure(webhookProcessingStatus);
-    const terminalAuthRejectionWithoutWorkflow = Boolean(authRejectionId);
-    if (
-      (!foundReplayReadback || !workflowRunId) &&
-      !terminalFailureWithoutWorkflow &&
-      !terminalAuthRejectionWithoutWorkflow &&
-      !edgeRejectedWithoutLineage
-    ) {
-      throw new Error(invokeErrorMessage ?? 'webhook-receiver did not return workflow_run_id evidence');
-    }
-  }
-  try {
-    const workflowIds = Array.from(new Set([workflowRunId, followupWorkflowRunId].filter(Boolean)));
-    const stepResults = await Promise.all(
-      workflowIds.map((id) =>
-        ui_list_resource_v1<ResourceRow>('workflow_run_steps', {
-          filter: { workflow_run_id: id },
-          page_size: 50,
-        }),
-      ),
-    );
-    workflowSteps = stepResults.flatMap((result) => result.rows);
-    trackingNumber = trackingNumber ?? findNestedString(workflowSteps, ['tracking_number', 'planned_tracking_number']);
-  } catch {
-    // The receiver evidence is still useful; the UI will show that step/shipment
-    // readback is pending rather than treating the edge call as full readiness.
-  }
-  if (!authRejectionId && workflowRunId) {
-    await readWebhookDirectory([
-      webhookId ? { id: webhookId } : null,
-      { workflow_run_id: workflowRunId },
-      { idempotency_key: idempotencyKey },
-      { correlation_id: correlationId },
-    ].filter(Boolean) as Array<Record<string, unknown>>);
-  }
-  const webhookPayloadIntent = findNestedString(payload, ['event_type', 'type', 'intent', 'target']);
-  const shipmentCreateReadbackRequired = [canonicalIntent, mappingTarget, webhookPayloadIntent]
-    .some((value) => isShipmentCreateIntent(value));
-  const shouldPollShipmentCreateTerminalReadback = !Object.is(isTerminal, false);
-  try {
-    const readDirectoryOnce = async (): Promise<boolean> => {
-      const readbackFilters = [
-        webhookId ? { id: webhookId } : null,
-        workflowRunId ? { workflow_run_id: workflowRunId } : null,
-        { idempotency_key: idempotencyKey },
-        { correlation_id: correlationId },
-      ].filter(Boolean) as Array<Record<string, unknown>>;
-      const found = await readWebhookDirectory(readbackFilters);
-      return found && (isTerminal === true || Boolean(shipmentId));
-    };
-    if (!authRejectionId && !edgeRejectedWithoutLineage && shipmentCreateReadbackRequired && shouldPollShipmentCreateTerminalReadback) {
-      const deadline = performance.now() + WEBHOOK_RECEIVER_TERMINAL_READBACK_TIMEOUT_MS;
-      do {
-        const complete = await readDirectoryOnce();
-        if (complete) break;
-        if (performance.now() >= deadline) break;
-        await sleep(WEBHOOK_RECEIVER_READBACK_INTERVAL_MS);
-      } while (!shipmentId || isTerminal !== true);
-    }
-  } catch {
-    // Keep the receiver result visible; missing directory readback prevents
-    // production readiness proof and is surfaced as pending UI evidence.
-  }
-
-  const shipmentCreateTerminalFailure = isWebhookReceiverTerminalFailure(webhookProcessingStatus);
-  if (shipmentCreateReadbackRequired && shipmentCreateTerminalFailure) {
-    shipmentId = null;
-    trackingNumber = null;
-  }
-
-  if (!shipmentId && isTerminal === true && trackingNumber && !shipmentCreateTerminalFailure) {
-    try {
-      const readback = await ui_list_resource_v1<ResourceRow>('shipment_directory', {
-        filter: { identifier: trackingNumber },
-        page_size: 1,
-      });
-      const row = readback.rows[0];
-      shipmentId = asNonEmptyString(row?.id) ?? asNonEmptyString(row?.shipment_id) ?? shipmentId;
-    } catch {
-      // Tracking-only evidence keeps the receiver result visible, but the
-      // shipment action remains disabled until a canonical id can be read.
-    }
-  }
-
-  if (shipmentId) {
-    await requireLiveResourceReadback('shipments', shipmentId, 'webhook-receiver');
-    await requireLiveResourceReadback('shipment_directory', shipmentId, 'webhook-receiver');
-  }
-
-  if (shipmentCreateReadbackRequired && !authRejectionId && isTerminal === true && !shipmentId && !shipmentCreateTerminalFailure) {
-    throw new Error('webhook-receiver completed shipment.create without shipment readback');
-  }
-
-  return buildWebhookReceiverTestResult({
-    receiverStatus: ackStatusCode ?? 200,
-    durationMs: Math.round(performance.now() - startedAt),
-    correlationId,
-    idempotencyKey,
-    ackOutcome,
-    responseOutcome,
-    ackStatusCode,
-    ackReason,
-    workflowRunId,
-    followupWorkflowRunId,
-    webhookId,
-    canonicalIntent,
-    webhookProcessingStatus,
-    sourceLabel,
-    sourceIdentifier,
-    providerTypeLabel,
-    mappingConfigId,
-    mappingLabel,
-    mappingTarget,
-    mappingVersion,
-    mappingRulesCount,
-    errorMessage,
-    isTerminal,
-    isActionable,
-    shipmentId,
-    trackingNumber,
-    authRejectionId,
-    authRejectionFailureCode,
-    authRejectionFailureMessage,
-    authRejectionHttpStatus,
-    authRejectionSourceLabel,
-    authRejectionSourceIdentifier,
-    authRejectionSourceResolved,
-    authRejectionTokenFingerprint,
-    authRejectionRejectionClass,
-    response,
-    workflowSteps,
-  });
+  const { runWebhookReceiverTest } = await import('./data-source/external-intake');
+  return runWebhookReceiverTest(args);
 }
 
 // ----------- Plugin Studio 4-stage authoring loop -----------
@@ -21264,205 +13529,13 @@ export interface PluginStudioSaveResult extends Record<string, unknown> {
   correlation_id: string;
 }
 
-async function requireLivePluginStudioSaveReadback(
-  result: PluginStudioSaveResult,
-): Promise<void> {
-  const saved = objectRecord(result.result);
-  const report = objectRecord(result.report);
-  const mappingConfigId = asNonEmptyString(saved.mapping_config_id)
-    ?? asNonEmptyString(result.mapping_config_id);
-  if (mappingConfigId) {
-    await requireLiveResourceReadback('mapping_configs', mappingConfigId, 'integration-plugin-studio/save');
-    await requireLiveResourceReadback('mapping_config_directory', mappingConfigId, 'integration-plugin-studio/save');
-  }
-  const pluginVersionId = asNonEmptyString(saved.plugin_version_id)
-    ?? asNonEmptyString(result.plugin_version_id);
-  if (pluginVersionId) {
-    await requireLiveResourceReadback('integration_plugin_versions', pluginVersionId, 'integration-plugin-studio/save');
-  }
-  const pluginId = asNonEmptyString(saved.plugin_id)
-    ?? asNonEmptyString(result.plugin_id);
-  if (pluginId) {
-    await requireLiveResourceReadback('integration_plugins', pluginId, 'integration-plugin-studio/save');
-    await requireLiveResourceReadback('integration_plugin_directory', pluginId, 'integration-plugin-studio/save');
-  }
-  const reportId = asNonEmptyString(report.mapping_operation_report_id)
-    ?? asNonEmptyString(report.operation_report_id)
-    ?? asNonEmptyString(report.report_id)
-    ?? asNonEmptyString(report.id)
-    ?? asNonEmptyString(result.report_id);
-  if (reportId) {
-    await requireLiveResourceReadback('mapping_operation_reports', reportId, 'integration-plugin-studio/save');
-  }
-  if (!mappingConfigId && !pluginVersionId && !pluginId) {
-    throw new Error('integration-plugin-studio/save did not return persisted artifact id for readback');
-  }
-}
-
-interface EdgeStudioErrorEnvelope {
+export interface EdgeStudioErrorEnvelope {
   error?: { code?: string; message?: string };
   message?: string;
   ok?: false;
 }
 
-const PLUGIN_STUDIO_FN = 'integration-plugin-studio';
-
-async function invokeStudioStage<TBody extends Record<string, unknown>, TResult>(
-  stage: 'parse' | 'infer' | 'preview' | 'save',
-  body: TBody,
-): Promise<TResult | null> {
-  const client = getSupabaseClient();
-  if (!client) {
-    if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError(`edge ${PLUGIN_STUDIO_FN}/${stage}`);
-    return null;
-  }
-  // Edge fn resolves the endpoint from the URL path. Supabase JS client builds
-  // the URL as `${SUPABASE_URL}/functions/v1/${name}`, so we pass the stage as a
-  // sub-path on the function name. The edge fn's `resolveEndpoint` accepts both
-  // path-based and `body.action` forms; we set both to be defensive.
-  const { data, error } = await client.functions.invoke<TResult>(`${PLUGIN_STUDIO_FN}/${stage}`, {
-    body: { ...body, action: stage },
-  });
-  if (error) {
-    // Supabase wraps non-2xx responses in FunctionsHttpError with the response
-    // body available via `await error.context?.json()`. Surface the structured
-    // edge envelope when available, otherwise fall back to the error message.
-    let message = error.message || `integration-plugin-studio/${stage} failed`;
-    try {
-      const ctx = (error as unknown as { context?: Response }).context;
-      if (ctx && typeof ctx.json === 'function') {
-        const envelope = (await ctx.json()) as EdgeStudioErrorEnvelope;
-        message = envelope.error?.message || envelope.message || message;
-      }
-    } catch {
-      // best-effort; keep original message
-    }
-    throw new Error(message);
-  }
-  if (!data) {
-    throw new Error(`integration-plugin-studio/${stage} returned no payload`);
-  }
-  const rec = objectRecord(data);
-  if (Object.keys(rec).length === 0) {
-    throw new Error(`integration-plugin-studio/${stage} returned no payload`);
-  }
-  const outcomeError = backendOutcomeError(rec, `integration-plugin-studio/${stage} was rejected by the backend`);
-  if (outcomeError) throw outcomeError;
-  requireLiveEvidence(
-    rec,
-    ['correlation_id'],
-    `integration-plugin-studio/${stage} did not return backend edge evidence`,
-  );
-  if (stage === 'save') {
-    requireLiveEvidence(
-      rec,
-      ['result', 'report', 'plugin_version_id', 'mapping_config_id', 'report_id'],
-      'integration-plugin-studio/save did not return backend save evidence',
-    );
-  }
-  return data;
-}
-
-function buildSyntheticContract(args: PluginStudioParseArgs): PluginStudioNormalizedContract {
-  const explicitKind = args.plugin_kind;
-  if (args.source_type === 'curl') {
-    const raw = typeof args.source_payload === 'string'
-      ? args.source_payload
-      : (args.source_payload as { curl?: string; raw?: string } | null)?.curl
-        ?? (args.source_payload as { curl?: string; raw?: string } | null)?.raw
-        ?? '';
-    // Naive curl extraction for the demo branch — only recognizes URL + METHOD
-    const urlMatch = /https?:\/\/[^\s'"]+/i.exec(raw);
-    const url = urlMatch ? urlMatch[0] : 'https://example.invalid/path';
-    let path = '/';
-    try {
-      path = new URL(url).pathname || '/';
-    } catch {
-      path = '/';
-    }
-    const methodMatch = /(?:-X|--request)\s+([A-Z]+)/.exec(raw);
-    const method = (methodMatch?.[1] ?? 'POST').toUpperCase();
-    return {
-      source_type: 'curl',
-      plugin_kind: explicitKind ?? 'api',
-      route: {
-        method,
-        path_template: path,
-        upstream_method: method,
-        upstream_path_template: path,
-      },
-      sample_schema: { type: 'object', properties: {} },
-      metadata: { source_url: url },
-    };
-  }
-  if (args.source_type === 'webhook_sample') {
-    const sample = (args.source_payload as { sample?: unknown; payload?: unknown } | null)?.sample
-      ?? (args.source_payload as { sample?: unknown; payload?: unknown } | null)?.payload
-      ?? args.source_payload
-      ?? {};
-    return {
-      source_type: 'webhook_sample',
-      plugin_kind: explicitKind ?? 'webhook',
-      webhook: { sample_payload: sample },
-      sample_schema: { type: 'object', properties: {} },
-      metadata: {},
-    };
-  }
-  if (args.source_type === 'openapi') {
-    return {
-      source_type: 'openapi',
-      plugin_kind: explicitKind ?? 'api',
-      route: { method: 'POST', path_template: '/', upstream_method: 'POST', upstream_path_template: '/' },
-      sample_schema: { type: 'object', properties: {} },
-      metadata: { document_kind: 'openapi' },
-    };
-  }
-  return {
-    source_type: 'manual',
-    plugin_kind: explicitKind ?? 'webhook',
-    webhook: { sample_payload: {} },
-    sample_schema: { type: 'object', properties: {} },
-    metadata: {},
-  };
-}
-
-function buildSyntheticMapping(contract: PluginStudioNormalizedContract): Record<string, unknown> {
-  return {
-    version: 1,
-    mode: 'deterministic',
-    plugin_kind: contract.plugin_kind,
-    fields: [
-      { target_field: 'external_id', source_path: '$.id', confidence: 0.75, source: 'deterministic' },
-      { target_field: 'event_type', source_path: '$.event', confidence: 0.75, source: 'deterministic' },
-    ],
-  };
-}
-
-function buildSyntheticReview(coerciveBlocking = 0): PluginStudioReview {
-  return {
-    mapping_config: { version: 1, fields: [] },
-    coerced_preview: {},
-    coercions: [],
-    diagnostics: coerciveBlocking > 0
-      ? [{
-          level: 'error',
-          blocking: true,
-          code: 'demo_blocking',
-          fieldPath: null,
-          message: 'Synthetic blocking diagnostic (demo branch).',
-          why: 'In-memory mode; live mode returns real diagnostics from edge fn.',
-          recommended_fix: 'Run against a live Supabase project to see real diagnostics.',
-        }]
-      : [],
-    review_summary: {
-      blocking_count: coerciveBlocking,
-      warning_count: 0,
-      coercion_count: 0,
-      next_steps: [],
-      egress_policy_resolution_id: null,
-    },
-  };
-}
+export const PLUGIN_STUDIO_FN = 'integration-plugin-studio';
 
 /**
  * Stage 1 — `parse`. Normalizes a raw source (curl text, OpenAPI doc, webhook
@@ -21473,18 +13546,8 @@ function buildSyntheticReview(coerciveBlocking = 0): PluginStudioReview {
 export async function plugin_studio_parse_v1(
   args: PluginStudioParseArgs,
 ): Promise<PluginStudioParseResult> {
-  const live = await invokeStudioStage<typeof args, PluginStudioParseResult>('parse', args);
-  if (live) return live;
-  await sleep(160);
-  const contract = buildSyntheticContract(args);
-  return {
-    ok: true,
-    endpoint: 'parse',
-    normalized_contract: contract,
-    mapping_suggestion: buildSyntheticMapping(contract),
-    draft: null,
-    correlation_id: nextCorrelationId(),
-  };
+  const { plugin_studio_parse_v1 } = await import('./data-source/plugin-studio');
+  return plugin_studio_parse_v1(args);
 }
 
 /**
@@ -21494,29 +13557,8 @@ export async function plugin_studio_parse_v1(
 export async function plugin_studio_infer_v1(
   args: PluginStudioInferArgs,
 ): Promise<PluginStudioInferResult> {
-  const live = await invokeStudioStage<typeof args, PluginStudioInferResult>('infer', args);
-  if (live) return live;
-  await sleep(180);
-  const contract = args.normalized_contract ?? buildSyntheticContract(args);
-  return {
-    ok: true,
-    endpoint: 'infer',
-    mapping_suggestion: buildSyntheticMapping(contract),
-    outbound_suggestions: contract.plugin_kind === 'api'
-      ? [{
-          operation_name: 'forward_event',
-          method: (contract.route as { method?: string } | undefined)?.method ?? 'POST',
-          url_template: 'https://example-provider.invalid/',
-          headers_template: { 'content-type': 'application/json' },
-          body_template: { payload: '$.payload' },
-          auth: { mode: 'bearer_token_header' },
-          timeout_seconds: 30,
-        }]
-      : [],
-    normalized_contract: contract,
-    draft: null,
-    correlation_id: nextCorrelationId(),
-  };
+  const { plugin_studio_infer_v1 } = await import('./data-source/plugin-studio');
+  return plugin_studio_infer_v1(args);
 }
 
 /**
@@ -21527,28 +13569,8 @@ export async function plugin_studio_infer_v1(
 export async function plugin_studio_preview_v1(
   args: PluginStudioPreviewArgs,
 ): Promise<PluginStudioPreviewResult> {
-  const live = await invokeStudioStage<typeof args, PluginStudioPreviewResult>('preview', args);
-  if (live) return live;
-  await sleep(150);
-  const contract = args.normalized_contract ?? buildSyntheticContract({
-    source_type: (args.source_type ?? 'manual') as PluginStudioSourceType,
-    source_payload: args.source_payload ?? {},
-    plugin_kind: args.plugin_kind,
-  });
-  return {
-    ok: true,
-    endpoint: 'preview',
-    artifact: args.artifact,
-    normalized_contract: args.artifact === 'tabular_import' ? null : contract,
-    mapping_suggestion: args.mapping_config ?? buildSyntheticMapping(contract),
-    review: buildSyntheticReview(),
-    save_modes: {
-      direct_allowed: args.artifact !== 'integration_plugin',
-      draft_allowed: args.artifact !== 'tabular_import',
-      recommended: args.artifact === 'integration_plugin' ? 'draft' : 'direct',
-    },
-    correlation_id: nextCorrelationId(),
-  };
+  const { plugin_studio_preview_v1 } = await import('./data-source/plugin-studio');
+  return plugin_studio_preview_v1(args);
 }
 
 /**
@@ -21564,40 +13586,8 @@ export async function plugin_studio_preview_v1(
 export async function plugin_studio_save_v1(
   args: PluginStudioSaveArgs,
 ): Promise<PluginStudioSaveResult> {
-  const live = await invokeStudioStage<typeof args, PluginStudioSaveResult>('save', args);
-  if (live) {
-    await requireLivePluginStudioSaveReadback(live);
-    return live;
-  }
-  await sleep(220);
-  const contract = args.normalized_contract ?? buildSyntheticContract({
-    source_type: (args.source_type ?? 'manual') as PluginStudioSourceType,
-    source_payload: args.source_payload ?? {},
-    plugin_kind: args.plugin_kind,
-  });
-  const recommendedMode: PluginStudioSaveMode = args.save_mode
-    ?? (args.artifact === 'integration_plugin' ? 'draft' : 'direct');
-  return {
-    ok: true,
-    endpoint: 'save',
-    artifact: args.artifact,
-    save_mode: recommendedMode,
-    normalized_contract: args.artifact === 'tabular_import' ? null : contract,
-    review: buildSyntheticReview(),
-    result: {
-      primary_resource_type: args.artifact,
-      primary_resource_id: nextResourceId('art'),
-      mapping_config_id: nextResourceId('mc'),
-      ...(args.artifact === 'integration_plugin'
-        ? { plugin_id: nextResourceId('plg'), plugin_version_id: nextResourceId('pv') }
-        : {}),
-    },
-    report: {
-      report_id: nextResourceId('rep'),
-      status: 'succeeded',
-    },
-    correlation_id: nextCorrelationId(),
-  };
+  const { plugin_studio_save_v1 } = await import('./data-source/plugin-studio');
+  return plugin_studio_save_v1(args);
 }
 
 // ----------- Resource Import Studio file pipeline -----------
@@ -21653,9 +13643,9 @@ export interface ResourceImportStudioCancelResult extends Record<string, unknown
   correlation_id: string;
 }
 
-const RESOURCE_IMPORT_STUDIO_FN = 'resource-import-studio';
+export const RESOURCE_IMPORT_STUDIO_FN = 'resource-import-studio';
 
-const RESOURCE_IMPORT_PREPARE_READBACK_COUNT_KEYS = [
+export const RESOURCE_IMPORT_PREPARE_READBACK_COUNT_KEYS = [
   'total_rows',
   'valid_rows',
   'will_create',
@@ -21669,7 +13659,7 @@ const RESOURCE_IMPORT_PREPARE_READBACK_COUNT_KEYS = [
   'failed_count',
 ] as const;
 
-const RESOURCE_IMPORT_PREPARE_READBACK_SUMMARY_KEYS = [
+export const RESOURCE_IMPORT_PREPARE_READBACK_SUMMARY_KEYS = [
   'unmatched_headers',
   'unresolved_targets',
   'automatic_corrections',
@@ -21683,345 +13673,25 @@ const RESOURCE_IMPORT_PREPARE_READBACK_SUMMARY_KEYS = [
   'scope_context',
 ] as const;
 
-function mergeResourceImportPrepareReadback(
-  result: ResourceImportStudioPrepareResult,
-  readback: Record<string, unknown>,
-): ResourceImportStudioPrepareResult {
-  const summary = objectRecord(readback.summary);
-  const dryRun = objectRecord(result.dry_run);
-  const mergedDryRun: Record<string, unknown> = {
-    ...dryRun,
-    id: readback.id ?? dryRun.id,
-    run_id: readback.id ?? dryRun.run_id,
-    resource_key: readback.resource_key ?? dryRun.resource_key,
-    write_mode: readback.write_mode ?? dryRun.write_mode,
-    source_format: readback.source_format ?? dryRun.source_format,
-    source_file_name: readback.source_file_name ?? dryRun.source_file_name,
-    header_fingerprint: readback.header_fingerprint ?? dryRun.header_fingerprint,
-    sheet_name: readback.sheet_name ?? dryRun.sheet_name,
-    status: readback.status ?? dryRun.status,
-  };
-
-  for (const key of RESOURCE_IMPORT_PREPARE_READBACK_COUNT_KEYS) {
-    if (readback[key] !== undefined && readback[key] !== null) {
-      mergedDryRun[key] = readback[key];
-    }
-  }
-  for (const key of RESOURCE_IMPORT_PREPARE_READBACK_SUMMARY_KEYS) {
-    if (summary[key] !== undefined && summary[key] !== null) {
-      mergedDryRun[key] = summary[key];
-    }
-  }
-  if (readback.rows !== undefined && readback.rows !== null) {
-    mergedDryRun.rows = readback.rows;
-  } else if (summary.rows_preview !== undefined && summary.rows_preview !== null) {
-    mergedDryRun.rows = summary.rows_preview;
-  }
-  if (summary.related_node_summary !== undefined && summary.related_node_summary !== null) {
-    mergedDryRun.related_nodes = summary.related_node_summary;
-  }
-
-  const summaryProfileMatch = objectRecord(summary.profile_match);
-  const summaryAvailableProfiles = Array.isArray(summary.available_profiles) ? summary.available_profiles : null;
-  const summaryResolvedRules = Array.isArray(summary.resolved_rules) ? summary.resolved_rules : null;
-
-  return {
-    ...result,
-    dry_run: mergedDryRun,
-    profile_match: Object.keys(summaryProfileMatch).length > 0 ? summaryProfileMatch : result.profile_match,
-    available_profiles: summaryAvailableProfiles ?? result.available_profiles,
-    resolved_rules: summaryResolvedRules ?? result.resolved_rules,
-  };
-}
-
-async function requireLiveResourceImportPrepareReadback(
-  result: ResourceImportStudioPrepareResult,
-  args: ResourceImportStudioPrepareArgs,
-): Promise<Record<string, unknown>> {
-  const dryRun = objectRecord(result.dry_run);
-  const runId = asNonEmptyString(dryRun.run_id)
-    ?? asNonEmptyString(dryRun.id)
-    ?? asNonEmptyString(result.run_id);
-  if (!runId) throw new Error('resource-import-studio/prepare did not return run_id');
-  const readback = await requireLiveResourceReadback('tabular_import_runs', runId, 'resource-import-studio/prepare');
-  const status = String(readback.status ?? '').trim();
-  if (status !== 'prepared') {
-    throw new Error(`resource-import-studio/prepare backend readback status mismatch for tabular_import_runs:${runId}`);
-  }
-  const expectedResource = asNonEmptyString(dryRun.resource_key)
-    ?? asNonEmptyString(args.resource_key);
-  const actualResource = asNonEmptyString(readback.resource_key);
-  if (expectedResource && actualResource && actualResource !== expectedResource) {
-    throw new Error(`resource-import-studio/prepare backend readback resource mismatch for tabular_import_runs:${runId}`);
-  }
-
-  const profile = objectRecord(result.profile_match);
-  const mappingConfigId = asNonEmptyString(profile.mapping_config_id)
-    ?? asNonEmptyString(profile.id);
-  if (mappingConfigId) {
-    await requireLiveResourceReadback('mapping_configs', mappingConfigId, 'resource-import-studio/prepare');
-    await requireLiveResourceReadback('mapping_config_directory', mappingConfigId, 'resource-import-studio/prepare');
-  }
-  return readback;
-}
-
-async function requireLiveResourceImportStartReadback(
-  result: ResourceImportStudioStartResult,
-  args: ResourceImportStudioStartArgs,
-): Promise<void> {
-  const run = objectRecord(result.run);
-  const runId = asNonEmptyString(run.id)
-    ?? asNonEmptyString(run.run_id)
-    ?? asNonEmptyString(args.run_id);
-  if (!runId) throw new Error('resource-import-studio/start did not return run_id');
-  const readback = await requireLiveResourceReadback('tabular_import_runs', runId, 'resource-import-studio/start');
-  const status = String(readback.status ?? run.status ?? '').trim();
-  if (!['queued', 'processing', 'completed', 'completed_with_errors'].includes(status)) {
-    throw new Error(`resource-import-studio/start backend readback status mismatch for tabular_import_runs:${runId}`);
-  }
-  if (['queued', 'processing'].includes(status) && !asNonEmptyString(readback.task_id) && !asNonEmptyString(run.task_id)) {
-    throw new Error(`resource-import-studio/start backend readback missing task for tabular_import_runs:${runId}`);
-  }
-
-  const importJobId = asNonEmptyString(run.import_job_id)
-    ?? asNonEmptyString(result.import_job_id)
-    ?? asNonEmptyString(run.job_id)
-    ?? asNonEmptyString(result.job_id);
-  if (importJobId) {
-    await requireLiveImportJobReadback('resource-import-studio/start', importJobId);
-  }
-
-  const profile = objectRecord(args.save_profile);
-  const mappingConfigId = asNonEmptyString(run.mapping_config_id)
-    ?? asNonEmptyString(result.mapping_config_id)
-    ?? asNonEmptyString(profile.mapping_config_id)
-    ?? asNonEmptyString(profile.id);
-  if (mappingConfigId) {
-    await requireLiveResourceReadback('mapping_configs', mappingConfigId, 'resource-import-studio/start');
-    await requireLiveResourceReadback('mapping_config_directory', mappingConfigId, 'resource-import-studio/start');
-  }
-}
-
-async function recoverLiveResourceImportStartReadback(
-  args: ResourceImportStudioStartArgs,
-  failureMessage: string,
-): Promise<ResourceImportStudioStartResult | null> {
-  const runId = asNonEmptyString(args.run_id);
-  if (!runId || !hasConsoleLiveBackend()) return null;
-  try {
-    const readback = await requireLiveResourceReadback(
-      'tabular_import_runs',
-      runId,
-      'resource-import-studio/start recovery',
-    );
-    const status = String(readback.status ?? '').trim();
-    if (!['queued', 'processing', 'completed', 'completed_with_errors'].includes(status)) return null;
-    if (['queued', 'processing'].includes(status) && !asNonEmptyString(readback.task_id)) return null;
-    const result: ResourceImportStudioStartResult = {
-      ok: true,
-      run: {
-        ...readback,
-        id: asNonEmptyString(readback.id) ?? runId,
-        recovered_from_edge_error: failureMessage,
-      },
-      report: objectRecord(readback.report),
-      correlation_id: nextCorrelationId(),
-    };
-    await requireLiveResourceImportStartReadback(result, args);
-    return result;
-  } catch {
-    return null;
-  }
-}
-
-async function requireLiveResourceImportCancelReadback(
-  result: ResourceImportStudioCancelResult,
-  args: ResourceImportStudioCancelArgs,
-): Promise<void> {
-  const run = objectRecord(result.run);
-  const runId = asNonEmptyString(run.id)
-    ?? asNonEmptyString(run.run_id)
-    ?? asNonEmptyString(args.run_id);
-  if (!runId) throw new Error('resource-import-studio/cancel did not return run_id');
-  const expectedReason = asNonEmptyString(args.reason);
-  if (!expectedReason) throw new Error('resource-import-studio/cancel requires reason');
-  const readback = await requireLiveResourceReadback(
-    'tabular_import_runs',
-    runId,
-    'resource-import-studio/cancel',
-  );
-  const status = String(readback.status ?? run.status ?? '').trim();
-  if (status !== 'canceled') {
-    throw new Error(`resource-import-studio/cancel backend readback status mismatch for tabular_import_runs:${runId}`);
-  }
-  const summary = objectRecord(readback.summary);
-  const cancellation = objectRecord(summary.cancellation);
-  const actualReason = asNonEmptyString(cancellation.reason)
-    ?? asNonEmptyString(summary.cancel_reason)
-    ?? asNonEmptyString(summary.cancellation_reason);
-  if (actualReason !== expectedReason) {
-    throw new Error(`resource-import-studio/cancel backend readback reason mismatch for tabular_import_runs:${runId}`);
-  }
-}
-
-async function readFunctionsErrorMessage(error: unknown, fallback: string): Promise<string> {
-  let message = (error as { message?: string } | null)?.message || fallback;
-  try {
-    const ctx = (error as { context?: Response } | null)?.context;
-    if (ctx && typeof ctx.json === 'function') {
-      const envelope = (await ctx.json()) as EdgeStudioErrorEnvelope;
-      message = envelope.error?.message || envelope.message || message;
-    }
-  } catch {
-    // best-effort; keep original message
-  }
-  return message;
-}
-
 export async function resource_import_studio_prepare_v1(
   args: ResourceImportStudioPrepareArgs,
 ): Promise<ResourceImportStudioPrepareResult> {
-  const client = getSupabaseClient();
-  if (client) {
-    const form = new FormData();
-    form.append('action', 'prepare');
-    form.append('file', args.file);
-    form.append('resource_key', args.resource_key);
-    form.append('write_mode', args.write_mode ?? 'create');
-    form.append('rule_source', args.rule_source ?? 'auto');
-    if (args.sheet_name) form.append('sheet_name', args.sheet_name);
-    if (args.rules) form.append('rules', JSON.stringify(args.rules));
-    if (args.row_overrides) form.append('row_overrides', JSON.stringify(args.row_overrides));
-    if (args.scope_context) form.append('scope_context', JSON.stringify(args.scope_context));
-
-    const { data, error } = await client.functions.invoke<ResourceImportStudioPrepareResult>(
-      RESOURCE_IMPORT_STUDIO_FN,
-      { body: form },
-    );
-    if (error) {
-      throw new Error(await readFunctionsErrorMessage(error, `${RESOURCE_IMPORT_STUDIO_FN}/prepare failed`));
-    }
-    if (!data) throw new Error(`${RESOURCE_IMPORT_STUDIO_FN}/prepare returned no payload`);
-    const readback = await requireLiveResourceImportPrepareReadback(data, args);
-    return mergeResourceImportPrepareReadback(data, readback);
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('resource_import_studio_prepare_v1');
-  await sleep(140);
-  let rowCount = 0;
-  try {
-    const text = await args.file.text();
-    rowCount = Math.max(0, text.split(/\r?\n/).filter((line) => line.trim()).length - 1);
-  } catch {
-    rowCount = 0;
-  }
-  const runId = '00000000-0000-4000-8000-' + String(Math.floor(Math.random() * 999999999999)).padStart(12, '0');
-  return {
-    ok: true,
-    dry_run: {
-      run_id: runId,
-      resource_key: args.resource_key,
-      write_mode: args.write_mode ?? 'create',
-      total_rows: rowCount,
-      valid_rows: rowCount,
-      error_rows: 0,
-      source_file_name: args.file.name,
-    },
-    profile_match: null,
-    available_profiles: [],
-    resolved_rules: [],
-    correlation_id: nextCorrelationId(),
-  };
+  const { resource_import_studio_prepare_v1 } = await import('./data-source/resource-import');
+  return resource_import_studio_prepare_v1(args);
 }
 
 export async function resource_import_studio_start_v1(
   args: ResourceImportStudioStartArgs,
 ): Promise<ResourceImportStudioStartResult> {
-  const client = getSupabaseClient();
-  if (client) {
-    const { data, error } = await client.functions.invoke<ResourceImportStudioStartResult>(
-      RESOURCE_IMPORT_STUDIO_FN,
-      {
-        body: {
-          action: 'start',
-          run_id: args.run_id,
-          save_profile: args.save_profile ?? null,
-        },
-      },
-    );
-    if (error) {
-      const message = await readFunctionsErrorMessage(error, `${RESOURCE_IMPORT_STUDIO_FN}/start failed`);
-      const recovered = await recoverLiveResourceImportStartReadback(args, message);
-      if (recovered) return recovered;
-      throw new Error(message);
-    }
-    if (!data) throw new Error(`${RESOURCE_IMPORT_STUDIO_FN}/start returned no payload`);
-    await requireLiveResourceImportStartReadback(data, args);
-    return data;
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('resource_import_studio_start_v1');
-  await sleep(120);
-  return {
-    ok: true,
-    run: {
-      id: args.run_id,
-      status: 'queued',
-      started_at: new Date().toISOString(),
-    },
-    report: null,
-    correlation_id: nextCorrelationId(),
-  };
+  const { resource_import_studio_start_v1 } = await import('./data-source/resource-import');
+  return resource_import_studio_start_v1(args);
 }
 
 export async function resource_import_studio_cancel_v1(
   args: ResourceImportStudioCancelArgs,
 ): Promise<ResourceImportStudioCancelResult> {
-  const runId = asNonEmptyString(args.run_id);
-  if (!runId) throw new Error('resource-import-studio/cancel requires run_id');
-  const reason = asNonEmptyString(args.reason);
-  if (!reason) throw new Error('resource-import-studio/cancel requires reason');
-
-  const client = getSupabaseClient();
-  if (client) {
-    const { data, error } = await client.functions.invoke<ResourceImportStudioCancelResult>(
-      RESOURCE_IMPORT_STUDIO_FN,
-      {
-        body: {
-          action: 'cancel',
-          run_id: runId,
-          reason,
-        },
-      },
-    );
-    if (error) {
-      throw new Error(await readFunctionsErrorMessage(error, `${RESOURCE_IMPORT_STUDIO_FN}/cancel failed`));
-    }
-    if (!data) throw new Error(`${RESOURCE_IMPORT_STUDIO_FN}/cancel returned no payload`);
-    await requireLiveResourceImportCancelReadback(data, { run_id: runId, reason });
-    return data;
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('resource_import_studio_cancel_v1');
-  await sleep(80);
-  const now = new Date().toISOString();
-  return {
-    ok: true,
-    run: {
-      id: runId,
-      status: 'canceled',
-      canceled_at: now,
-      completed_at: now,
-      summary: {
-        cancellation: {
-          reason,
-          canceled_at: now,
-        },
-        cancel_reason: reason,
-      },
-    },
-    correlation_id: nextCorrelationId(),
-  };
+  const { resource_import_studio_cancel_v1 } = await import('./data-source/resource-import');
+  return resource_import_studio_cancel_v1(args);
 }
 
 export type ResourceDownloadResource =
@@ -22049,33 +13719,8 @@ export interface ResourceDownloadUrlResult extends Record<string, unknown> {
 export async function resolve_resource_download_url_v1(
   args: ResourceDownloadUrlArgs,
 ): Promise<ResourceDownloadUrlResult> {
-  const client = getSupabaseClient();
-  if (client) {
-    const { data, error } = await client.functions.invoke<ResourceDownloadUrlResult>(
-      'ui-resource-download',
-      { body: args },
-    );
-    if (error) {
-      throw new Error(await readFunctionErrorMessage(error, 'ui-resource-download failed'));
-    }
-    const rec = objectRecord(data);
-    const outcomeError = backendOutcomeError(rec, 'ui-resource-download was rejected by the backend');
-    if (outcomeError) throw outcomeError;
-    const url = asNonEmptyString(rec.url);
-    if (!url) {
-      throw new Error('ui-resource-download returned no signed URL');
-    }
-    return {
-      ...rec,
-      url,
-      expires_at: asNonEmptyString(rec.expires_at),
-      file_name: asNonEmptyString(rec.file_name),
-      mime_type: asNonEmptyString(rec.mime_type),
-    };
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('resolve_resource_download_url_v1');
-  throw new Error('resolve_resource_download_url_v1 requires a live backend download service');
+  const { resolve_resource_download_url_v1 } = await import('./data-source/resource-import');
+  return resolve_resource_download_url_v1(args);
 }
 
 // ----------- Workflow runs (canonical RPCs) -----------
@@ -22094,7 +13739,7 @@ export interface WorkflowRunStartContext extends Record<string, unknown> {
   };
 }
 
-interface SyntheticRunStep {
+export interface SyntheticRunStep {
   id: string;
   step_id: string;
   label: string;
@@ -22110,85 +13755,7 @@ interface SyntheticRunStep {
   decision_log_id?: string;
 }
 
-const _runStepCache = new Map<string, SyntheticRunStep[]>();
-
-function _materializeRunSteps(runId: string): SyntheticRunStep[] {
-  const cached = _runStepCache.get(runId);
-  if (cached) return cached;
-  // Try seed first (deterministic for known runs)
-  const seedSteps = (seed.workflow_run_steps as Record<string, unknown[]> | undefined)?.[runId];
-  if (Array.isArray(seedSteps)) {
-    const list = seedSteps.map((s, i) => {
-      const r = s as Record<string, unknown>;
-      const enq = (r.started_at as string) ?? new Date().toISOString();
-      return {
-        id: (r.id as string) ?? `wfs_${runId}_${i}`,
-        step_id: (r.step_id as string) ?? `st_${i + 1}`,
-        label: (r.label as string) ?? `Step ${i + 1}`,
-        status: ((r.status as SyntheticRunStep['status']) ?? 'succeeded'),
-        duration_ms: (r.duration_ms as number | null | undefined) ?? null,
-        enqueued_at: enq,
-        operation_started_at: enq,
-        ...((r.duration_ms as number | undefined) != null
-          ? { operation_completed_at: new Date(new Date(enq).getTime() + (r.duration_ms as number)).toISOString() }
-          : {}),
-        operation_result: (r.operation_result as Record<string, unknown> | undefined) ?? null,
-        last_error: (r.error as string | undefined) ?? null,
-        retry_attempt: (r.retry_attempt as number | undefined) ?? 1,
-      } satisfies SyntheticRunStep;
-    });
-    _runStepCache.set(runId, list);
-    return list;
-  }
-  // Fallback: derive from run + template steps (live behavior parity for newly-started runs)
-  const run = (seed.workflow_runs as Record<string, unknown>[] | undefined)?.find(
-    (r) => (r as Record<string, unknown>).id === runId,
-  ) as Record<string, unknown> | undefined;
-  const template = run
-    ? (seed.workflow_templates as Record<string, unknown>[] | undefined)?.find(
-        (t) => (t as Record<string, unknown>).id === run.template_id,
-      )
-    : undefined;
-  const tplSteps = (template as { steps?: Record<string, unknown>[] } | undefined)?.steps ?? [];
-  const main = tplSteps.filter(
-    (s) => (s as Record<string, unknown>).branch !== 'error' && (s as Record<string, unknown>).branch !== 'manual',
-  );
-  const status = (run?.status as string) ?? 'succeeded';
-  const startedAt = (run?.started_at as string) ?? new Date().toISOString();
-  const out = main.map((s, i) => {
-    const r = s as Record<string, unknown>;
-    let stepStatus: SyntheticRunStep['status'] = 'succeeded';
-    let dur: number | null = 80 + i * 60;
-    let err: string | null = null;
-    if (status === 'running') {
-      if (i === 0) { stepStatus = 'succeeded'; dur = 80; }
-      else if (i === 1) { stepStatus = 'running'; dur = null; }
-      else { stepStatus = 'pending'; dur = null; }
-    } else if (status === 'failed' && i === main.length - 1) {
-      stepStatus = 'failed'; dur = 220;
-      err = (run?.error as string) ?? 'workflow_handlers.run failed';
-    } else if (status === 'failed' && i > main.length - 1) {
-      stepStatus = 'skipped'; dur = null;
-    }
-    const enq = new Date(new Date(startedAt).getTime() + i * 80).toISOString();
-    return {
-      id: `wfs_${runId}_${i}`,
-      step_id: (r.id as string) ?? `st_${i + 1}`,
-      label: (r.label as string) ?? `Step ${i + 1}`,
-      kind: (r.kind as string) ?? 'action',
-      status: stepStatus,
-      duration_ms: dur,
-      enqueued_at: enq,
-      ...(dur != null ? { operation_started_at: enq, operation_completed_at: new Date(new Date(enq).getTime() + dur).toISOString() } : { operation_started_at: enq }),
-      operation_result: stepStatus === 'failed' ? { ok: false, error: err } : { ok: true },
-      last_error: err,
-      retry_attempt: 1,
-      decision_log_id: `dlog_run_${runId}_${i}`,
-    } satisfies SyntheticRunStep;
-  });
-  _runStepCache.set(runId, out);
-  return out;
-}
+export const _runStepCache = new Map<string, SyntheticRunStep[]>();
 
 export async function start_workflow_run(
   templateId: string,
@@ -22204,88 +13771,8 @@ export async function start_workflow_run(
   started_at: string;
   canonical_entrypoint: 'progress_workflow_run';
 }> {
-  const liveTemplateId = looksLikeUuid(templateId) ? templateId : (await loadLiveWorkflowTemplateId(templateId)) ?? templateId;
-  const live = await liveRpc<Record<string, unknown>>('ui_start_workflow_run_v1', {
-    p_workflow_template_id: liveTemplateId,
-    p_payload: context,
-    p_require_active: context.ui?.allow_inactive ? false : true,
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'ui_start_workflow_run_v1', [
-      'workflow_run_id',
-    ]);
-    const runId = requireLiveStringField(
-      rec,
-      ['workflow_run_id', 'id'],
-      'ui_start_workflow_run_v1 did not return workflow_run_id',
-    );
-    await requireLiveResourceReadback('workflow_runs', runId, 'ui_start_workflow_run_v1');
-    await requireLiveResourceListReadback('workflow_run_steps', { workflow_run_id: runId }, 'ui_start_workflow_run_v1');
-    const startedAt = String(rec.started_at ?? new Date().toISOString());
-    return {
-      ok: true,
-      workflow_run_id: runId,
-      workflow_template_id: String(rec.workflow_template_id ?? liveTemplateId),
-      workflow_status: (rec.workflow_status as 'pending' | 'running' | undefined) ?? 'running',
-      dry_run: Boolean(context.ui?.dry_run ?? rec.dry_run),
-      idempotency_key: String(rec.idempotency_key ?? ''),
-      correlation_id: String(rec.correlation_id ?? ''),
-      started_at: startedAt,
-      canonical_entrypoint: 'progress_workflow_run',
-    };
-  }
-
-  await sleep(120);
-  const dry = !!context.ui?.dry_run;
-  const runId = (context.ui?.replay_of ? `wfr_replay_${Date.now()}` : `wfr_${Date.now()}`);
-  const correlationId = `cor_${Math.random().toString(36).slice(2, 8)}`;
-  const idem = `idem_${templateId}_${Math.random().toString(36).slice(2, 6)}`;
-  // Materialize step trace eagerly so progress_workflow_run can return it.
-  // W34c — accept either the FE seed `id` or the canonical_uuid so callers
-  // routed through `resolve_workflow_template_id_v1(template_key)` stay
-  // stable across demo/live mode without a translation layer.
-  const t = (seed.workflow_templates as Record<string, unknown>[] | undefined)?.find(
-    (x) =>
-      (x as Record<string, unknown>).id === templateId ||
-      (x as Record<string, unknown>).canonical_uuid === templateId,
-  );
-  const tplSteps = (t as { steps?: Record<string, unknown>[] } | undefined)?.steps ?? [];
-  const main = tplSteps.filter(
-    (s) => (s as Record<string, unknown>).branch !== 'error' && (s as Record<string, unknown>).branch !== 'manual',
-  );
-  const startedAt = new Date().toISOString();
-  const trace: SyntheticRunStep[] = main.map((s, i) => {
-    const r = s as Record<string, unknown>;
-    const dur = 60 + i * 40 + Math.floor(Math.random() * 80);
-    const enq = new Date(new Date(startedAt).getTime() + i * 30).toISOString();
-    return {
-      id: `wfs_${runId}_${i}`,
-      step_id: (r.id as string) ?? `st_${i + 1}`,
-      label: (r.label as string) ?? `Step ${i + 1}`,
-      kind: (r.kind as string) ?? 'action',
-      status: 'succeeded',
-      duration_ms: dur,
-      enqueued_at: enq,
-      operation_started_at: enq,
-      operation_completed_at: new Date(new Date(enq).getTime() + dur).toISOString(),
-      operation_result: { ok: true, dry_run: dry },
-      last_error: null,
-      retry_attempt: 1,
-      decision_log_id: `dlog_${runId}_${i}`,
-    };
-  });
-  _runStepCache.set(runId, trace);
-  return {
-    ok: true,
-    workflow_run_id: runId,
-    workflow_template_id: templateId,
-    workflow_status: dry ? 'pending' : 'running',
-    dry_run: dry,
-    idempotency_key: idem,
-    correlation_id: correlationId,
-    started_at: startedAt,
-    canonical_entrypoint: 'progress_workflow_run',
-  };
+  const { start_workflow_run } = await import('./data-source/workflows');
+  return start_workflow_run(templateId, context);
 }
 
 /**
@@ -22309,71 +13796,8 @@ export async function progress_workflow_run(
   payload?: unknown;
   action?: typeof action;
 }> {
-  const livePayload =
-    payload && typeof payload === 'object'
-      ? { ...(payload as Record<string, unknown>), ...(action ? { action } : {}) }
-      : { input: payload ?? {}, ...(action ? { action } : {}) };
-  const live = await liveRpc<Record<string, unknown>>('progress_workflow_run', {
-    p_workflow_run_id: runId,
-    p_input: livePayload,
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'progress_workflow_run', [
-      'workflow_run_id',
-      'workflow_status',
-      'status',
-    ]);
-    const workflowStatus = String(rec.workflow_status ?? rec.status ?? '').toLowerCase();
-    const errorMessage = asNonEmptyString(rec.error);
-    const message = asNonEmptyString(rec.message);
-    const isBenignOpenStatus = workflowStatus === 'in_progress' || workflowStatus === 'pending';
-    if (workflowStatus === 'failed' || errorMessage || (message && !isBenignOpenStatus)) {
-      throw new Error(errorMessage || 'progress_workflow_run returned failed status');
-    }
-    const workflowRunId = requireLiveStringField(
-      rec,
-      ['workflow_run_id', 'id'],
-      'progress_workflow_run did not return workflow_run_id',
-    );
-    const stepsResult = await ui_list_resource_v1<SyntheticRunStep>('workflow_run_steps', {
-      filter: { workflow_run_id: runId },
-      sort: { key: 'enqueued_at', dir: 'asc' },
-    }).catch(() => ({ rows: [] as SyntheticRunStep[], total: 0 }));
-    const steps = stepsResult.rows;
-    return {
-      ok: true,
-      workflow_run_id: workflowRunId,
-      workflow_status: (rec.workflow_status as 'completed' | 'failed' | 'in_progress' | 'pending' | 'paused' | undefined) ??
-        (action === 'pause' ? 'paused' : 'completed'),
-      duration_ms: Number(rec.duration_ms ?? steps.reduce((acc, step) => acc + (step.duration_ms ?? 0), 0)),
-      steps,
-      ...(payload !== undefined ? { payload } : {}),
-      ...(action !== undefined ? { action } : {}),
-      ...rec,
-    } as {
-      ok: true;
-      workflow_run_id: string;
-      workflow_status: 'completed' | 'failed' | 'paused';
-      duration_ms: number;
-      steps: SyntheticRunStep[];
-      payload?: unknown;
-      action?: typeof action;
-    };
-  }
-
-  await sleep(180);
-  const steps = _materializeRunSteps(runId);
-  const total = steps.reduce((acc, s) => acc + (s.duration_ms ?? 0), 0);
-  const failed = steps.find((s) => s.status === 'failed');
-  return {
-    ok: true,
-    workflow_run_id: runId,
-    workflow_status: action === 'pause' ? 'paused' : failed ? 'failed' : 'completed',
-    duration_ms: total,
-    steps,
-    ...(payload !== undefined ? { payload } : {}),
-    ...(action !== undefined ? { action } : {}),
-  };
+  const { progress_workflow_run } = await import('./data-source/workflows');
+  return progress_workflow_run(runId, payload, action);
 }
 
 export async function progress_workflow_run_until_wait_v1(
@@ -22388,92 +13812,16 @@ export async function progress_workflow_run_until_wait_v1(
   steps: SyntheticRunStep[];
   payload?: unknown;
 }> {
-  const livePayload = payload && typeof payload === 'object'
-    ? { ...(payload as Record<string, unknown>) }
-    : { input: payload ?? {} };
-  const live = await liveRpc<Record<string, unknown>>('progress_workflow_run_until_wait_v1', {
-    p_workflow_run_id: runId,
-    p_operation_result: livePayload,
-    p_budget_ms: opts.budget_ms ?? 5000,
-    p_max_steps: opts.max_steps ?? 8,
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'progress_workflow_run_until_wait_v1', [
-      'workflow_run_id',
-      'workflow_status',
-      'status',
-    ]);
-    const workflowStatus = String(rec.workflow_status ?? rec.status ?? '').toLowerCase();
-    const errorMessage = asNonEmptyString(rec.error);
-    const message = asNonEmptyString(rec.message);
-    const isBenignOpenStatus = workflowStatus === 'in_progress' || workflowStatus === 'pending' || workflowStatus === 'waiting';
-    if (workflowStatus === 'failed' || errorMessage || (message && !isBenignOpenStatus)) {
-      throw new Error(errorMessage || 'progress_workflow_run_until_wait_v1 returned failed status');
-    }
-    const workflowRunId = requireLiveStringField(
-      rec,
-      ['workflow_run_id', 'id'],
-      'progress_workflow_run_until_wait_v1 did not return workflow_run_id',
-    );
-    const stepsResult = await ui_list_resource_v1<SyntheticRunStep>('workflow_run_steps', {
-      filter: { workflow_run_id: runId },
-      sort: { key: 'enqueued_at', dir: 'asc' },
-    }).catch(() => ({ rows: [] as SyntheticRunStep[], total: 0 }));
-    const steps = stepsResult.rows;
-    return {
-      ok: true,
-      workflow_run_id: workflowRunId,
-      workflow_status: (rec.workflow_status as 'completed' | 'failed' | 'in_progress' | 'pending' | 'paused' | undefined) ?? 'in_progress',
-      duration_ms: Number(rec.duration_ms ?? steps.reduce((acc, step) => acc + (step.duration_ms ?? 0), 0)),
-      steps,
-      ...(payload !== undefined ? { payload } : {}),
-      ...rec,
-    } as {
-      ok: true;
-      workflow_run_id: string;
-      workflow_status: 'completed' | 'failed' | 'in_progress' | 'pending' | 'paused';
-      duration_ms: number;
-      steps: SyntheticRunStep[];
-      payload?: unknown;
-    };
-  }
-
-  return progress_workflow_run(runId, payload);
+  const { progress_workflow_run_until_wait_v1 } = await import('./data-source/workflows');
+  return progress_workflow_run_until_wait_v1(runId, payload, opts);
 }
 
 export async function progress_workflow_run_base(
   runId: string,
   payload?: unknown,
 ): Promise<{ ok: true; workflow_run_id: string; payload?: unknown }> {
-  const live = await liveRpc<Record<string, unknown>>('progress_workflow_run', {
-    p_workflow_run_id: runId,
-    p_input: payload ?? {},
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'progress_workflow_run', [
-      'workflow_run_id',
-      'workflow_status',
-      'status',
-    ]);
-    const workflowRunId = requireLiveStringField(
-      rec,
-      ['workflow_run_id', 'id'],
-      'progress_workflow_run did not return workflow_run_id',
-    );
-    return {
-      ...rec,
-      ok: true,
-      workflow_run_id: workflowRunId,
-      ...(payload !== undefined ? { payload } : {}),
-    } as { ok: true; workflow_run_id: string; payload?: unknown };
-  }
-
-  await sleep(60);
-  return {
-    ok: true,
-    workflow_run_id: runId,
-    ...(payload !== undefined ? { payload } : {}),
-  };
+  const { progress_workflow_run_base } = await import('./data-source/workflows');
+  return progress_workflow_run_base(runId, payload);
 }
 
 /**
@@ -22486,27 +13834,8 @@ export async function close_workflow_run(
   runId: string,
   status: 'completed' | 'failed' | 'cancelled',
 ): Promise<{ ok: true; workflow_run_id: string; workflow_status: typeof status; closed_at: string }> {
-  const live = await liveRpc<null>('close_workflow_run', {
-    p_workflow_run_id: runId,
-    p_status: status,
-  });
-  if (live) {
-    const run = await requireLiveResourceReadback('workflow_runs', runId, 'close_workflow_run');
-    await requireLiveResourceListReadback('workflow_run_steps', { workflow_run_id: runId }, 'close_workflow_run');
-    const readbackStatus = asNonEmptyString(run.workflow_status) ?? asNonEmptyString(run.status);
-    if (readbackStatus && readbackStatus !== status) {
-      throw new Error('close_workflow_run backend readback status mismatch');
-    }
-    return {
-      ok: true,
-      workflow_run_id: runId,
-      workflow_status: status,
-      closed_at: String(run.completed_at ?? run.closed_at ?? new Date().toISOString()),
-    };
-  }
-
-  await sleep(80);
-  return { ok: true, workflow_run_id: runId, workflow_status: status, closed_at: new Date().toISOString() };
+  const { close_workflow_run } = await import('./data-source/workflows');
+  return close_workflow_run(runId, status);
 }
 
 // Operation templates type — kept exported for module typing convenience.
@@ -22541,123 +13870,8 @@ export async function ui_get_trace_v1(correlationId: string): Promise<{
   domain_events: Array<Record<string, unknown>>;
   workflow_runs: Array<Record<string, unknown>>;
 }> {
-  const live = await liveRpc<Record<string, unknown>>('ui_get_trace_v2', {
-    p_args: { correlation_id: correlationId },
-  });
-  if (live) {
-    // W44 cutover: use canonical (p_args jsonb) RETURNS jsonb sibling
-    // `ui_get_trace_v2` (migration 202605020200_w44_rpc_v2_normalizations.sql).
-    // Envelope: { ok, trace: { correlation_id, observability_events,
-    // domain_events, workflow_runs } }. The exported adapter signature is
-    // unchanged (still takes a string correlationId).
-    const envelope = requireLiveRpcRecord(live.data, 'ui_get_trace_v2 returned no backend trace outcome');
-    const outcomeError = backendOutcomeError(envelope, 'ui_get_trace_v2 was rejected by the backend');
-    if (outcomeError) throw outcomeError;
-    const env = objectRecord(envelope.trace);
-    if (Object.keys(env).length === 0) {
-      throw new Error('ui_get_trace_v2 did not return backend trace evidence');
-    }
-    const liveCorrelationId = asNonEmptyString(env.correlation_id) ?? asNonEmptyString(envelope.correlation_id);
-    if (!liveCorrelationId) {
-      throw new Error('ui_get_trace_v2 did not return backend correlation evidence');
-    }
-    return {
-      correlation_id: liveCorrelationId,
-      observability_events: (env.observability_events as Array<Record<string, unknown>>) ?? [],
-      domain_events: (env.domain_events as Array<Record<string, unknown>>) ?? [],
-      workflow_runs: (env.workflow_runs as Array<Record<string, unknown>>) ?? [],
-    };
-  }
-
-  await sleep(60);
-  // Demo synth — derive a small representative 3-section payload anchored on
-  // the supplied correlation_id so the FE has stable rows to render.
-  const baseTime = Date.now() - 30 * 1000;
-  const observability_events = [
-    {
-      event_id: `oev_${correlationId}_1`,
-      organization_id: state.user.organization_id ?? null,
-      event_source: 'api_call_log',
-      event_type: 'webhook.receive',
-      resource_type: 'webhook_inbox',
-      resource_id: `wbi_${correlationId.slice(0, 6)}`,
-      correlation_id: correlationId,
-      status: 'succeeded',
-      event_time: new Date(baseTime).toISOString(),
-      metadata: { method: 'POST', url: '/v1/webhook', response_status: 202, duration_ms: 28 },
-    },
-    {
-      event_id: `oev_${correlationId}_2`,
-      organization_id: state.user.organization_id ?? null,
-      event_source: 'decision_log',
-      event_type: 'workflow_dispatch',
-      resource_type: 'workflow_run',
-      resource_id: `wr_${correlationId.slice(0, 6)}`,
-      correlation_id: correlationId,
-      status: 'started',
-      event_time: new Date(baseTime + 12).toISOString(),
-      metadata: { decision_point: 'workflow.start_workflow_run', performed_by: 'orchestrator', duration_ms: 14 },
-    },
-    {
-      event_id: `oev_${correlationId}_3`,
-      organization_id: state.user.organization_id ?? null,
-      event_source: 'decision_log',
-      event_type: 'mapping_apply',
-      resource_type: 'mapping_config',
-      resource_id: `mp_exampleparcel_ksa_v3`,
-      correlation_id: correlationId,
-      status: 'succeeded',
-      event_time: new Date(baseTime + 18).toISOString(),
-      metadata: { decision_point: 'mapping.apply', performed_by: 'mapping-engine', duration_ms: 6 },
-    },
-    {
-      event_id: `oev_${correlationId}_4`,
-      organization_id: state.user.organization_id ?? null,
-      event_source: 'decision_log',
-      event_type: 'shipments_create',
-      resource_type: 'shipment',
-      resource_id: `shp_${correlationId.slice(0, 6)}`,
-      correlation_id: correlationId,
-      status: 'succeeded',
-      event_time: new Date(baseTime + 22).toISOString(),
-      metadata: { decision_point: 'shipments.create', performed_by: 'shipments-service', duration_ms: 4 },
-    },
-  ];
-  const domain_events = [
-    {
-      id: `de_${correlationId}_1`,
-      organization_id: state.user.organization_id ?? null,
-      event_type: 'shipment.created',
-      resource_type: 'shipment',
-      resource_id: `shp_${correlationId.slice(0, 6)}`,
-      correlation_id: correlationId,
-      payload: { tracking_number: 'TR-DEMO-1' },
-      created_at: new Date(baseTime + 24).toISOString(),
-    },
-  ];
-  // W27-cycle-D §1 — workflow_runs.status canonical SSOT is the
-  // workflow_run_status enum (pending|running|succeeded|failed|timeout|
-  // cancelled). The legacy FE-projection alias `'completed'` is retired here;
-  // emit the canonical `'succeeded'` value so insights/traces (and any other
-  // consumer driven by the workflow_run_status lookup) renders the correct
-  // tone without inline equality branches.
-  const workflow_runs = [
-    {
-      id: `wr_${correlationId.slice(0, 6)}`,
-      organization_id: state.user.organization_id ?? null,
-      workflow_template_id: 'wt_exampleparcel_ksa_v3',
-      status: 'succeeded',
-      triggered_by_request_id: correlationId,
-      created_at: new Date(baseTime + 12).toISOString(),
-      completed_at: new Date(baseTime + 28).toISOString(),
-    },
-  ];
-  return {
-    correlation_id: correlationId,
-    observability_events,
-    domain_events,
-    workflow_runs,
-  };
+  const { ui_get_trace_v1 } = await import('./data-source/insights');
+  return ui_get_trace_v1(correlationId);
 }
 
 // ----------- Planning OS -----------
@@ -22722,7 +13936,7 @@ export interface SenderLifecycleResult {
   settings_resolution_id: string;
 }
 
-function nextCorrelationIdHex(): string {
+export function nextCorrelationIdHex(): string {
   // Mirrors `encode(gen_random_bytes(8), 'hex')` shape (16 hex chars).
   return Array.from({ length: 16 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
 }
@@ -22732,139 +13946,31 @@ export async function client_suspend_v1(args: {
   organization_id?: string;
   reason?: string;
 }): Promise<ClientLifecycleResult> {
-  const live = await livePArgsMutationResult('client_suspend_v1', args, ['client_id', 'id']);
-  if (live) {
-    const result = withRequiredLiveStringField<ClientLifecycleResult>(
-      live,
-      ['client_id', 'id'],
-      'client_id',
-      'client_suspend_v1 did not return client_id',
-    );
-    await requireLiveCustomerLifecycleReadback('client_suspend_v1', 'clients', 'client_summary', result.client_id);
-    return result;
-  }
-  await sleep(80);
-  if (!args?.client_id) throw new Error('client_suspend_v1 requires client_id');
-  const clients = (seed.clients ?? []) as Array<Record<string, unknown> & { id: string; status: string; suspension_reason?: string | null }>;
-  const row = clients.find((r) => r.id === args.client_id);
-  if (!row) throw new Error(`client_suspend_v1 client ${args.client_id} not found`);
-  const wasSuspended = row.status === 'suspended';
-  if (!wasSuspended) {
-    row.status = 'suspended';
-    row.suspension_reason = args.reason ?? null;
-    (row as Record<string, unknown>).updated_at = new Date().toISOString();
-  }
-  return {
-    ok: true,
-    client_id: args.client_id,
-    idempotent_no_op: wasSuspended,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { client_suspend_v1 } = await import('./data-source/customers');
+  return client_suspend_v1(args);
 }
 
 export async function client_reactivate_v1(args: {
   client_id: string;
   organization_id?: string;
 }): Promise<ClientLifecycleResult> {
-  const live = await livePArgsMutationResult('client_reactivate_v1', args, ['client_id', 'id']);
-  if (live) {
-    const result = withRequiredLiveStringField<ClientLifecycleResult>(
-      live,
-      ['client_id', 'id'],
-      'client_id',
-      'client_reactivate_v1 did not return client_id',
-    );
-    await requireLiveCustomerLifecycleReadback('client_reactivate_v1', 'clients', 'client_summary', result.client_id);
-    return result;
-  }
-  await sleep(80);
-  if (!args?.client_id) throw new Error('client_reactivate_v1 requires client_id');
-  const clients = (seed.clients ?? []) as Array<Record<string, unknown> & { id: string; status: string; suspension_reason?: string | null }>;
-  const row = clients.find((r) => r.id === args.client_id);
-  if (!row) throw new Error(`client_reactivate_v1 client ${args.client_id} not found`);
-  const wasActive = row.status === 'active';
-  if (!wasActive) {
-    row.status = 'active';
-    row.suspension_reason = null;
-    (row as Record<string, unknown>).updated_at = new Date().toISOString();
-  }
-  return {
-    ok: true,
-    client_id: args.client_id,
-    idempotent_no_op: wasActive,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { client_reactivate_v1 } = await import('./data-source/customers');
+  return client_reactivate_v1(args);
 }
 
 export async function sender_suspend_v1(args: {
   sender_id: string;
   reason?: string;
 }): Promise<SenderLifecycleResult> {
-  const live = await livePArgsMutationResult('sender_suspend_v1', args, ['sender_id', 'id']);
-  if (live) {
-    const result = withRequiredLiveStringField<SenderLifecycleResult>(
-      live,
-      ['sender_id', 'id'],
-      'sender_id',
-      'sender_suspend_v1 did not return sender_id',
-    );
-    await requireLiveCustomerLifecycleReadback('sender_suspend_v1', 'senders', 'sender_summary', result.sender_id);
-    return result;
-  }
-  await sleep(80);
-  if (!args?.sender_id) throw new Error('sender_suspend_v1 requires sender_id');
-  const senders = (seed.senders ?? []) as Array<Record<string, unknown> & { id: string; status: string; suspension_reason?: string | null }>;
-  const row = senders.find((r) => r.id === args.sender_id);
-  if (!row) throw new Error(`sender_suspend_v1 sender ${args.sender_id} not found`);
-  const wasInactive = row.status === 'inactive';
-  if (!wasInactive) {
-    row.status = 'inactive';
-    row.suspension_reason = args.reason ?? null;
-    (row as Record<string, unknown>).updated_at = new Date().toISOString();
-  }
-  return {
-    ok: true,
-    sender_id: args.sender_id,
-    idempotent_no_op: wasInactive,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { sender_suspend_v1 } = await import('./data-source/customers');
+  return sender_suspend_v1(args);
 }
 
 export async function sender_reactivate_v1(args: {
   sender_id: string;
 }): Promise<SenderLifecycleResult> {
-  const live = await livePArgsMutationResult('sender_reactivate_v1', args, ['sender_id', 'id']);
-  if (live) {
-    const result = withRequiredLiveStringField<SenderLifecycleResult>(
-      live,
-      ['sender_id', 'id'],
-      'sender_id',
-      'sender_reactivate_v1 did not return sender_id',
-    );
-    await requireLiveCustomerLifecycleReadback('sender_reactivate_v1', 'senders', 'sender_summary', result.sender_id);
-    return result;
-  }
-  await sleep(80);
-  if (!args?.sender_id) throw new Error('sender_reactivate_v1 requires sender_id');
-  const senders = (seed.senders ?? []) as Array<Record<string, unknown> & { id: string; status: string; suspension_reason?: string | null }>;
-  const row = senders.find((r) => r.id === args.sender_id);
-  if (!row) throw new Error(`sender_reactivate_v1 sender ${args.sender_id} not found`);
-  const wasActive = row.status === 'active';
-  if (!wasActive) {
-    row.status = 'active';
-    row.suspension_reason = null;
-    (row as Record<string, unknown>).updated_at = new Date().toISOString();
-  }
-  return {
-    ok: true,
-    sender_id: args.sender_id,
-    idempotent_no_op: wasActive,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { sender_reactivate_v1 } = await import('./data-source/customers');
+  return sender_reactivate_v1(args);
 }
 
 // ----------- Wave 6: Customers create/update RPCs -----------
@@ -22925,33 +14031,6 @@ export interface RecipientDeleteResult {
   settings_resolution_id: string;
 }
 
-async function requireLiveCustomerLifecycleReadback(
-  rpcName: string,
-  resourceKey: string,
-  projectionKey: string,
-  resourceId: string,
-): Promise<void> {
-  await requireLiveResourceReadback(resourceKey, resourceId, rpcName);
-  await requireLiveResourceReadback(projectionKey, resourceId, rpcName);
-}
-
-async function requireLiveCustomerDeletionReadback(
-  rpcName: string,
-  resourceType: string,
-  resourceId: string,
-): Promise<void> {
-  if (resourceType === 'recipient') {
-    await requireLiveResourceAbsenceReadback('recipients', { id: resourceId }, rpcName, `recipients:${resourceId}`);
-    await requireLiveResourceAbsenceReadback(
-      'recipient_directory',
-      { recipient_id: resourceId },
-      rpcName,
-      `recipient_directory:${resourceId}`,
-    );
-  }
-  await requireLiveResourceListReadback('decision_log', { resource_type: resourceType, resource_id: resourceId }, rpcName);
-}
-
 export async function client_create_v1(args: {
   name: string;
   slug: string;
@@ -22962,59 +14041,8 @@ export async function client_create_v1(args: {
   organization_id?: string;
   settings_override?: Record<string, unknown> | null;
 }): Promise<ClientCreateResult> {
-  const live = await livePArgsMutationResult('client_create_v1', args, ['client_id', 'id']);
-  if (live) {
-    const result = withRequiredLiveStringField<ClientCreateResult>(
-      live,
-      ['client_id', 'id'],
-      'client_id',
-      'client_create_v1 did not return client_id',
-    );
-    await requireLiveCustomerLifecycleReadback('client_create_v1', 'clients', 'client_summary', result.client_id);
-    return result;
-  }
-  await sleep(120);
-  if (!args?.name) throw new Error('client_create_v1 requires name');
-  if (!args?.slug) throw new Error('client_create_v1 requires slug');
-  const clients = (seed.clients ?? []) as Array<Record<string, unknown>>;
-  if (clients.some((r) => (r as { slug?: string }).slug === args.slug)) {
-    throw new Error(`client_create_v1 slug "${args.slug}" already taken`);
-  }
-  const scopeCtx = state.scope as Record<string, { id?: string } | undefined>;
-  const id = 'cl_new_' + Math.floor(Math.random() * 90000);
-  const now = new Date().toISOString();
-  // In-memory branch: derive organization_id from the explicit arg or the
-  // active tenant scope. No hardcoded tenant fallback (live RPC enforces
-  // organization scoping via `auth.jwt()` claims; in-memory must mirror by
-  // requiring an explicit value or active scope — never bake a tenant id into
-  // source).
-  const inMemoryOrgId = args.organization_id ?? scopeCtx.tenant?.id;
-  if (!inMemoryOrgId) {
-    throw new Error(
-      'client_create_v1 (in-memory): organization_id is required when no tenant scope is active',
-    );
-  }
-  clients.unshift({
-    id,
-    organization_id: inMemoryOrgId,
-    name: args.name,
-    slug: args.slug,
-    sla_tier: args.sla_tier ?? 'standard',
-    status: 'active',
-    account_manager_id: args.account_manager_id ?? null,
-    contract_start_date: args.contract_start_date ?? null,
-    contract_end_date: args.contract_end_date ?? null,
-    suspension_reason: null,
-    settings_override: args.settings_override ?? null,
-    created_at: now,
-    updated_at: now,
-  });
-  return {
-    ok: true,
-    client_id: id,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { client_create_v1 } = await import('./data-source/customers');
+  return client_create_v1(args);
 }
 
 export async function client_update_v1(args: {
@@ -23029,44 +14057,8 @@ export async function client_update_v1(args: {
   billing_settings?: Record<string, unknown> | null;
   settings_override?: Record<string, unknown> | null;
 }): Promise<ClientUpdateResult> {
-  const patch = (args.patch ?? {}) as Record<string, unknown>;
-  const normalizedArgs = { ...args, ...patch };
-  delete (normalizedArgs as Record<string, unknown>).patch;
-  const live = await livePArgsMutationResult('client_update_v1', normalizedArgs, ['client_id', 'id']);
-  if (live) {
-    const result = withRequiredLiveStringField<ClientUpdateResult>(
-      live,
-      ['client_id', 'id'],
-      'client_id',
-      'client_update_v1 did not return client_id',
-    );
-    await requireLiveCustomerLifecycleReadback('client_update_v1', 'clients', 'client_summary', result.client_id);
-    return result;
-  }
-  await sleep(100);
-  if (!args?.client_id) throw new Error('client_update_v1 requires client_id');
-  if ((normalizedArgs as Record<string, unknown>).status !== undefined) {
-    throw new Error('client_update_v1 cannot mutate status — use client_suspend_v1 / client_reactivate_v1');
-  }
-  const clients = (seed.clients ?? []) as Array<Record<string, unknown> & { id: string }>;
-  const row = clients.find((r) => r.id === args.client_id);
-  if (!row) throw new Error(`client_update_v1 client ${args.client_id} not found`);
-  let no_op = true;
-  if (normalizedArgs.name !== undefined) { row.name = normalizedArgs.name; no_op = false; }
-  if (normalizedArgs.sla_tier !== undefined) { row.sla_tier = normalizedArgs.sla_tier; no_op = false; }
-  if (normalizedArgs.account_manager_id !== undefined) { row.account_manager_id = normalizedArgs.account_manager_id; no_op = false; }
-  if (normalizedArgs.contract_start_date !== undefined) { row.contract_start_date = normalizedArgs.contract_start_date; no_op = false; }
-  if (normalizedArgs.contract_end_date !== undefined) { row.contract_end_date = normalizedArgs.contract_end_date; no_op = false; }
-  if (normalizedArgs.billing_settings !== undefined) { row.billing_settings = normalizedArgs.billing_settings; no_op = false; }
-  if (normalizedArgs.settings_override !== undefined) { row.settings_override = normalizedArgs.settings_override; no_op = false; }
-  if (!no_op) row.updated_at = new Date().toISOString();
-  return {
-    ok: true,
-    client_id: args.client_id,
-    idempotent_no_op: no_op,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { client_update_v1 } = await import('./data-source/customers');
+  return client_update_v1(args);
 }
 
 export async function sender_create_v1(args: {
@@ -23076,42 +14068,8 @@ export async function sender_create_v1(args: {
   auto_recreate?: boolean;
   settings_override?: Record<string, unknown> | null;
 }): Promise<SenderCreateResult> {
-  const live = await livePArgsMutationResult('sender_create_v1', args, ['sender_id', 'id']);
-  if (live) {
-    const result = withRequiredLiveStringField<SenderCreateResult>(
-      live,
-      ['sender_id', 'id'],
-      'sender_id',
-      'sender_create_v1 did not return sender_id',
-    );
-    await requireLiveCustomerLifecycleReadback('sender_create_v1', 'senders', 'sender_summary', result.sender_id);
-    return result;
-  }
-  await sleep(120);
-  if (!args?.client_id) throw new Error('sender_create_v1 requires client_id');
-  if (!args?.name) throw new Error('sender_create_v1 requires name');
-  const senders = (seed.senders ?? []) as Array<Record<string, unknown>>;
-  const id = 'snd_new_' + Math.floor(Math.random() * 90000);
-  const now = new Date().toISOString();
-  senders.unshift({
-    id,
-    client_id: args.client_id,
-    name: args.name,
-    brand_name: args.brand_name ?? null,
-    auto_provisioned: false,
-    auto_recreate: args.auto_recreate ?? true,
-    status: 'active',
-    suspension_reason: null,
-    settings_override: args.settings_override ?? null,
-    created_at: now,
-    updated_at: now,
-  });
-  return {
-    ok: true,
-    sender_id: id,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { sender_create_v1 } = await import('./data-source/customers');
+  return sender_create_v1(args);
 }
 
 export async function sender_update_v1(args: {
@@ -23122,39 +14080,8 @@ export async function sender_update_v1(args: {
   warehouse_address_id?: string | null;
   settings_override?: Record<string, unknown> | null;
 }): Promise<SenderUpdateResult> {
-  const live = await livePArgsMutationResult('sender_update_v1', args, ['sender_id', 'id']);
-  if (live) {
-    const result = withRequiredLiveStringField<SenderUpdateResult>(
-      live,
-      ['sender_id', 'id'],
-      'sender_id',
-      'sender_update_v1 did not return sender_id',
-    );
-    await requireLiveCustomerLifecycleReadback('sender_update_v1', 'senders', 'sender_summary', result.sender_id);
-    return result;
-  }
-  await sleep(100);
-  if (!args?.sender_id) throw new Error('sender_update_v1 requires sender_id');
-  if ((args as Record<string, unknown>).status !== undefined) {
-    throw new Error('sender_update_v1 cannot mutate status — use sender_suspend_v1 / sender_reactivate_v1');
-  }
-  const senders = (seed.senders ?? []) as Array<Record<string, unknown> & { id: string }>;
-  const row = senders.find((r) => r.id === args.sender_id);
-  if (!row) throw new Error(`sender_update_v1 sender ${args.sender_id} not found`);
-  let no_op = true;
-  if (args.name !== undefined) { row.name = args.name; no_op = false; }
-  if (args.brand_name !== undefined) { row.brand_name = args.brand_name; no_op = false; }
-  if (args.auto_recreate !== undefined) { row.auto_recreate = args.auto_recreate; no_op = false; }
-  if (args.warehouse_address_id !== undefined) { row.warehouse_address_id = args.warehouse_address_id; no_op = false; }
-  if (args.settings_override !== undefined) { row.settings_override = args.settings_override; no_op = false; }
-  if (!no_op) row.updated_at = new Date().toISOString();
-  return {
-    ok: true,
-    sender_id: args.sender_id,
-    idempotent_no_op: no_op,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { sender_update_v1 } = await import('./data-source/customers');
+  return sender_update_v1(args);
 }
 
 export async function recipient_create_v1(args: {
@@ -23170,62 +14097,8 @@ export async function recipient_create_v1(args: {
   communication_preferences?: Record<string, unknown> | null;
   organization_id?: string;
 }): Promise<RecipientCreateResult> {
-  const live = await livePArgsMutationResult('recipient_create_v1', args, ['recipient_id', 'id']);
-  if (live) {
-    const result = withRequiredLiveStringField<RecipientCreateResult>(
-      live,
-      ['recipient_id', 'id'],
-      'recipient_id',
-      'recipient_create_v1 did not return recipient_id',
-    );
-    await requireLiveCustomerLifecycleReadback('recipient_create_v1', 'recipients', 'recipient_directory', result.recipient_id);
-    return result;
-  }
-  await sleep(120);
-  if (!args?.client_id) throw new Error('recipient_create_v1 requires client_id');
-  if (!args?.name) throw new Error('recipient_create_v1 requires name');
-  if (!args?.phone_number) throw new Error('recipient_create_v1 requires phone_number');
-  const clients = (seed.clients ?? []) as Array<Record<string, unknown> & { id: string; organization_id?: string }>;
-  const clientRow = clients.find((r) => r.id === args.client_id);
-  if (!clientRow) throw new Error(`recipient_create_v1 client ${args.client_id} not found`);
-  const recipients = (seed.recipients ?? []) as Array<Record<string, unknown>>;
-  const scopeCtx = state.scope as Record<string, { id?: string } | undefined>;
-  const id = 'rcp_new_' + Math.floor(Math.random() * 90000);
-  const now = new Date().toISOString();
-  const orgId = args.organization_id ?? clientRow.organization_id ?? scopeCtx.tenant?.id;
-  const defaultLanguage = getLookups('preferred_language').find((r) => r.is_default)?.value;
-  if (!orgId) {
-    throw new Error(
-      'recipient_create_v1 (in-memory): organization_id is required when client row has no organization and no tenant scope is active',
-    );
-  }
-  if (!args.preferred_language && !defaultLanguage) {
-    throw new Error('recipient_create_v1 (in-memory): preferred_language default lookup is required');
-  }
-  recipients.unshift({
-    id,
-    organization_id: orgId,
-    client_id: args.client_id,
-    external_id: args.external_id ?? null,
-    name: args.name,
-    phone_number: args.phone_number,
-    phone_validation_status: 'pending',
-    phone_validated_at: null,
-    email: args.email ?? null,
-    preferred_language: args.preferred_language ?? defaultLanguage,
-    preferred_comm_channel: args.preferred_comm_channel ?? null,
-    quiet_hours_start: args.quiet_hours_start ?? null,
-    quiet_hours_end: args.quiet_hours_end ?? null,
-    communication_preferences: args.communication_preferences ?? null,
-    created_at: now,
-    updated_at: now,
-  });
-  return {
-    ok: true,
-    recipient_id: id,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { recipient_create_v1 } = await import('./data-source/customers');
+  return recipient_create_v1(args);
 }
 
 export async function recipient_update_v1(args: {
@@ -23240,81 +14113,16 @@ export async function recipient_update_v1(args: {
   quiet_hours_end?: string | null;
   communication_preferences?: Record<string, unknown> | null;
 }): Promise<RecipientUpdateResult> {
-  const live = await livePArgsMutationResult('recipient_update_v1', args, ['recipient_id', 'id']);
-  if (live) {
-    const result = withRequiredLiveStringField<RecipientUpdateResult>(
-      live,
-      ['recipient_id', 'id'],
-      'recipient_id',
-      'recipient_update_v1 did not return recipient_id',
-    );
-    await requireLiveCustomerLifecycleReadback('recipient_update_v1', 'recipients', 'recipient_directory', result.recipient_id);
-    return result;
-  }
-  await sleep(100);
-  if (!args?.recipient_id) throw new Error('recipient_update_v1 requires recipient_id');
-  const recipients = (seed.recipients ?? []) as Array<Record<string, unknown> & { id: string }>;
-  const row = recipients.find((r) => r.id === args.recipient_id);
-  if (!row) throw new Error(`recipient_update_v1 recipient ${args.recipient_id} not found`);
-  let no_op = true;
-  if (args.name !== undefined) { row.name = args.name; no_op = false; }
-  if (args.phone_number !== undefined) {
-    row.phone_number = args.phone_number;
-    row.phone_validation_status = 'pending';
-    row.phone_validated_at = null;
-    no_op = false;
-  }
-  if (args.email !== undefined) { row.email = args.email; no_op = false; }
-  if (args.external_id !== undefined) { row.external_id = args.external_id; no_op = false; }
-  if (args.preferred_language !== undefined) { row.preferred_language = args.preferred_language; no_op = false; }
-  if (args.preferred_comm_channel !== undefined) { row.preferred_comm_channel = args.preferred_comm_channel; no_op = false; }
-  if (args.quiet_hours_start !== undefined) { row.quiet_hours_start = args.quiet_hours_start; no_op = false; }
-  if (args.quiet_hours_end !== undefined) { row.quiet_hours_end = args.quiet_hours_end; no_op = false; }
-  if (args.communication_preferences !== undefined) { row.communication_preferences = args.communication_preferences; no_op = false; }
-  if (!no_op) row.updated_at = new Date().toISOString();
-  return {
-    ok: true,
-    recipient_id: args.recipient_id,
-    idempotent_no_op: no_op,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { recipient_update_v1 } = await import('./data-source/customers');
+  return recipient_update_v1(args);
 }
 
 export async function recipient_delete_v1(args: {
   recipient_id: string;
   reason?: string;
 }): Promise<RecipientDeleteResult> {
-  const live = await livePArgsMutationResult('recipient_delete_v1', args, ['recipient_id', 'id', 'deleted']);
-  if (live) {
-    const result = withRequiredLiveStringField<RecipientDeleteResult>(
-      live,
-      ['recipient_id', 'id'],
-      'recipient_id',
-      'recipient_delete_v1 did not return recipient_id',
-    );
-    await requireLiveCustomerDeletionReadback('recipient_delete_v1', 'recipient', result.recipient_id);
-    return result;
-  }
-  await sleep(100);
-  if (!args?.recipient_id) throw new Error('recipient_delete_v1 requires recipient_id');
-  const recipients = (seed.recipients ?? []) as Array<Record<string, unknown> & { id: string }>;
-  const index = recipients.findIndex((r) => r.id === args.recipient_id);
-  if (index < 0) throw new Error(`recipient_delete_v1 recipient ${args.recipient_id} not found`);
-  const shipments = (seed.shipments ?? []) as Array<Record<string, unknown> & { recipient_id?: string | null }>;
-  const shipmentReferenceCount = shipments.filter((s) => s.recipient_id === args.recipient_id).length;
-  recipients.splice(index, 1);
-  for (const shipment of shipments) {
-    if (shipment.recipient_id === args.recipient_id) shipment.recipient_id = null;
-  }
-  return {
-    ok: true,
-    recipient_id: args.recipient_id,
-    deleted: true,
-    shipment_reference_count: shipmentReferenceCount,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { recipient_delete_v1 } = await import('./data-source/customers');
+  return recipient_delete_v1(args);
 }
 
 // ----------- Phase B6: Catalog service offering RPCs -----------
@@ -23351,39 +14159,8 @@ export async function service_offering_create_v1(args: {
   priority?: number;
   metadata?: Record<string, unknown>;
 }): Promise<ServiceOfferingMutationResult> {
-  const live = await livePArgsMutationResult('service_offering_create_v1', args, ['service_offering_id', 'id']);
-  if (live) {
-    return withRequiredLiveStringField<ServiceOfferingMutationResult>(
-      live,
-      ['service_offering_id', 'id'],
-      'service_offering_id',
-      'service_offering_create_v1 did not return service_offering_id',
-    );
-  }
-  await sleep(120);
-  if (!args?.service_level_id) throw new Error('service_offering_create_v1 requires service_level_id');
-  const offerings = (seed.service_offerings ?? []) as Array<Record<string, unknown>>;
-  const id = 'sof_new_' + Math.floor(Math.random() * 90000);
-  const now = new Date().toISOString();
-  offerings.unshift({
-    id,
-    service_level_id: args.service_level_id,
-    branch_id: args.branch_id ?? null,
-    zone_id: args.zone_id ?? null,
-    priority: Math.max(args.priority ?? 0, 0),
-    is_active: true,
-    metadata: args.metadata ?? {},
-    effective_from: now,
-    effective_to: null,
-    created_at: now,
-    updated_at: now,
-  });
-  return {
-    ok: true,
-    service_offering_id: id,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { service_offering_create_v1 } = await import('./data-source/catalog');
+  return service_offering_create_v1(args);
 }
 
 export async function service_offering_update_v1(args: {
@@ -23396,104 +14173,24 @@ export async function service_offering_update_v1(args: {
   metadata?: Record<string, unknown>;
   price?: { base_price: number; currency: string };
 }): Promise<ServiceOfferingMutationResult> {
-  const live = await livePArgsMutationResult('service_offering_update_v1', args, ['service_offering_id', 'id']);
-  if (live) {
-    return withRequiredLiveStringField<ServiceOfferingMutationResult>(
-      live,
-      ['service_offering_id', 'id'],
-      'service_offering_id',
-      'service_offering_update_v1 did not return service_offering_id',
-    );
-  }
-  await sleep(120);
-  if (!args?.service_offering_id) throw new Error('service_offering_update_v1 requires service_offering_id');
-  const offerings = (seed.service_offerings ?? []) as Array<Record<string, unknown> & { id: string }>;
-  const row = offerings.find((r) => r.id === args.service_offering_id);
-  if (!row) throw new Error(`service_offering_update_v1 service_offering ${args.service_offering_id} not found`);
-  if (args.zone_id !== undefined) row.zone_id = args.zone_id;
-  if (args.priority !== undefined) row.priority = args.priority;
-  if (args.effective_from !== undefined) row.effective_from = args.effective_from;
-  if (args.effective_to !== undefined) row.effective_to = args.effective_to;
-  if (args.is_active !== undefined) row.is_active = args.is_active;
-  if (args.metadata !== undefined) {
-    row.metadata = { ...((row.metadata as Record<string, unknown> | undefined) ?? {}), ...args.metadata };
-  }
-  if (args.price !== undefined) {
-    row.metadata = { ...((row.metadata as Record<string, unknown> | undefined) ?? {}), ...args.price };
-  }
-  row.updated_at = new Date().toISOString();
-  return {
-    ok: true,
-    service_offering_id: args.service_offering_id,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { service_offering_update_v1 } = await import('./data-source/catalog');
+  return service_offering_update_v1(args);
 }
 
 export async function service_offering_archive_v1(args: {
   service_offering_id: string;
   reason?: string;
 }): Promise<ServiceOfferingMutationResult> {
-  const live = await livePArgsMutationResult('service_offering_archive_v1', args, ['service_offering_id', 'id']);
-  if (live) {
-    return withRequiredLiveStringField<ServiceOfferingMutationResult>(
-      live,
-      ['service_offering_id', 'id'],
-      'service_offering_id',
-      'service_offering_archive_v1 did not return service_offering_id',
-    );
-  }
-  await sleep(120);
-  if (!args?.service_offering_id) throw new Error('service_offering_archive_v1 requires service_offering_id');
-  const offerings = (seed.service_offerings ?? []) as Array<Record<string, unknown> & { id: string; is_active: boolean; metadata?: Record<string, unknown> }>;
-  const row = offerings.find((r) => r.id === args.service_offering_id);
-  if (!row) throw new Error(`service_offering_archive_v1 service_offering ${args.service_offering_id} not found`);
-  const wasArchived = row.is_active === false;
-  if (!wasArchived) {
-    row.is_active = false;
-    row.metadata = { ...(row.metadata ?? {}), retired_reason: args.reason ?? null };
-    (row as Record<string, unknown>).updated_at = new Date().toISOString();
-  }
-  return {
-    ok: true,
-    service_offering_id: args.service_offering_id,
-    idempotent_no_op: wasArchived,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { service_offering_archive_v1 } = await import('./data-source/catalog');
+  return service_offering_archive_v1(args);
 }
 
 export async function service_offering_toggle_v1(args: {
   service_offering_id: string;
   is_active?: boolean;
 }): Promise<ServiceOfferingMutationResult> {
-  const live = await livePArgsMutationResult('service_offering_toggle_v1', args, ['service_offering_id', 'id']);
-  if (live) {
-    return withRequiredLiveStringField<ServiceOfferingMutationResult>(
-      live,
-      ['service_offering_id', 'id'],
-      'service_offering_id',
-      'service_offering_toggle_v1 did not return service_offering_id',
-    );
-  }
-  await sleep(120);
-  if (!args?.service_offering_id) throw new Error('service_offering_toggle_v1 requires service_offering_id');
-  const offerings = (seed.service_offerings ?? []) as Array<Record<string, unknown> & { id: string; is_active: boolean }>;
-  const row = offerings.find((r) => r.id === args.service_offering_id);
-  if (!row) throw new Error(`service_offering_toggle_v1 service_offering ${args.service_offering_id} not found`);
-  const target = args.is_active !== undefined ? args.is_active : !row.is_active;
-  const idempotent = row.is_active === target;
-  if (!idempotent) {
-    row.is_active = target;
-    (row as Record<string, unknown>).updated_at = new Date().toISOString();
-  }
-  return {
-    ok: true,
-    service_offering_id: args.service_offering_id,
-    idempotent_no_op: idempotent,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { service_offering_toggle_v1 } = await import('./data-source/catalog');
+  return service_offering_toggle_v1(args);
 }
 
 export async function service_level_create_v1(args: {
@@ -23503,38 +14200,8 @@ export async function service_level_create_v1(args: {
   metadata?: Record<string, unknown>;
   organization_id?: string;
 }): Promise<ServiceLevelMutationResult> {
-  const live = await livePArgsMutationResult('service_level_create_v1', args, ['service_level_id', 'id']);
-  if (live) {
-    return withRequiredLiveStringField<ServiceLevelMutationResult>(
-      live,
-      ['service_level_id', 'id'],
-      'service_level_id',
-      'service_level_create_v1 did not return service_level_id',
-    );
-  }
-  await sleep(120);
-  if (!args?.key || !args?.name) throw new Error('service_level_create_v1 requires key and name');
-  const levels = (seed.service_levels ?? []) as Array<Record<string, unknown>>;
-  const id = 'svl_new_' + Math.floor(Math.random() * 90000);
-  const now = new Date().toISOString();
-  const scopeCtx = state.scope as Record<string, { id?: string } | undefined>;
-  levels.unshift({
-    id,
-    organization_id: args.organization_id ?? scopeCtx.tenant?.id ?? null,
-    key: args.key.toLowerCase(),
-    name: args.name,
-    description: args.description ?? null,
-    is_active: true,
-    metadata: args.metadata ?? {},
-    created_at: now,
-    updated_at: now,
-  });
-  return {
-    ok: true,
-    service_level_id: id,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { service_level_create_v1 } = await import('./data-source/catalog');
+  return service_level_create_v1(args);
 }
 
 export async function service_level_update_v1(args: {
@@ -23544,33 +14211,8 @@ export async function service_level_update_v1(args: {
   is_active?: boolean;
   metadata?: Record<string, unknown>;
 }): Promise<ServiceLevelMutationResult> {
-  const live = await livePArgsMutationResult('service_level_update_v1', args, ['service_level_id', 'id']);
-  if (live) {
-    return withRequiredLiveStringField<ServiceLevelMutationResult>(
-      live,
-      ['service_level_id', 'id'],
-      'service_level_id',
-      'service_level_update_v1 did not return service_level_id',
-    );
-  }
-  await sleep(120);
-  if (!args?.service_level_id) throw new Error('service_level_update_v1 requires service_level_id');
-  const levels = (seed.service_levels ?? []) as Array<Record<string, unknown> & { id: string }>;
-  const row = levels.find((r) => r.id === args.service_level_id);
-  if (!row) throw new Error(`service_level_update_v1 service_level ${args.service_level_id} not found`);
-  if (args.name !== undefined) row.name = args.name;
-  if (args.description !== undefined) row.description = args.description;
-  if (args.is_active !== undefined) row.is_active = args.is_active;
-  if (args.metadata !== undefined) {
-    row.metadata = { ...((row.metadata as Record<string, unknown> | undefined) ?? {}), ...args.metadata };
-  }
-  row.updated_at = new Date().toISOString();
-  return {
-    ok: true,
-    service_level_id: args.service_level_id,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { service_level_update_v1 } = await import('./data-source/catalog');
+  return service_level_update_v1(args);
 }
 
 // ----------- Phase B6: Catalog lookup RPCs -----------
@@ -23610,31 +14252,8 @@ export async function lookup_definition_create_v1(args: {
   scope_type?: string;
   organization_id?: string;
 }): Promise<LookupDefinitionMutationResult> {
-  const live = await livePArgsMutationResult('lookup_definition_create_v1', args, ['lookup_definition_id', 'id']);
-  if (live) {
-    const rec = withRequiredLiveStringField<LookupDefinitionMutationResult>(
-      live,
-      ['lookup_definition_id', 'id'],
-      'lookup_definition_id',
-      'lookup_definition_create_v1 did not return lookup_definition_id',
-    );
-    const category = requireLiveStringField(
-      live,
-      ['category'],
-      'lookup_definition_create_v1 did not return category',
-    );
-    return { ...rec, category } as LookupDefinitionMutationResult;
-  }
-  await sleep(120);
-  if (!args?.category) throw new Error('lookup_definition_create_v1 requires category');
-  const id = 'lkd_new_' + Math.floor(Math.random() * 90000);
-  return {
-    ok: true,
-    lookup_definition_id: id,
-    category: args.category.toLowerCase(),
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { lookup_definition_create_v1 } = await import('./data-source/catalog');
+  return lookup_definition_create_v1(args);
 }
 
 export async function lookup_value_create_v1(args: {
@@ -23647,27 +14266,8 @@ export async function lookup_value_create_v1(args: {
   metadata?: Record<string, unknown>;
   status?: 'draft' | 'active' | 'archived';
 }): Promise<LookupValueMutationResult> {
-  const live = await livePArgsMutationResult('lookup_value_create_v1', args, ['lookup_value_id', 'id']);
-  if (live) {
-    return withRequiredLiveStringField<LookupValueMutationResult>(
-      live,
-      ['lookup_value_id', 'id'],
-      'lookup_value_id',
-      'lookup_value_create_v1 did not return lookup_value_id',
-    );
-  }
-  await sleep(120);
-  if (!args?.value || !args?.label) {
-    throw new Error('lookup_value_create_v1 requires value and label');
-  }
-  const id = 'lkv_new_' + Math.floor(Math.random() * 90000);
-  return {
-    ok: true,
-    lookup_value_id: id,
-    status: args.status ?? 'draft',
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { lookup_value_create_v1 } = await import('./data-source/catalog');
+  return lookup_value_create_v1(args);
 }
 
 export async function lookup_value_update_v1(args: {
@@ -23678,47 +14278,16 @@ export async function lookup_value_update_v1(args: {
   is_default?: boolean;
   metadata?: Record<string, unknown>;
 }): Promise<LookupValueMutationResult> {
-  const live = await livePArgsMutationResult('lookup_value_update_v1', args, ['lookup_value_id', 'id']);
-  if (live) {
-    return withRequiredLiveStringField<LookupValueMutationResult>(
-      live,
-      ['lookup_value_id', 'id'],
-      'lookup_value_id',
-      'lookup_value_update_v1 did not return lookup_value_id',
-    );
-  }
-  await sleep(120);
-  if (!args?.lookup_value_id) throw new Error('lookup_value_update_v1 requires lookup_value_id');
-  return {
-    ok: true,
-    lookup_value_id: args.lookup_value_id,
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { lookup_value_update_v1 } = await import('./data-source/catalog');
+  return lookup_value_update_v1(args);
 }
 
 export async function lookup_value_archive_v1(args: {
   lookup_value_id: string;
   reason?: string;
 }): Promise<LookupValueMutationResult> {
-  const live = await livePArgsMutationResult('lookup_value_archive_v1', args, ['lookup_value_id', 'id']);
-  if (live) {
-    return withRequiredLiveStringField<LookupValueMutationResult>(
-      live,
-      ['lookup_value_id', 'id'],
-      'lookup_value_id',
-      'lookup_value_archive_v1 did not return lookup_value_id',
-    );
-  }
-  await sleep(120);
-  if (!args?.lookup_value_id) throw new Error('lookup_value_archive_v1 requires lookup_value_id');
-  return {
-    ok: true,
-    lookup_value_id: args.lookup_value_id,
-    status: 'archived',
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { lookup_value_archive_v1 } = await import('./data-source/catalog');
+  return lookup_value_archive_v1(args);
 }
 
 export async function lookup_value_promote_v1(args: {
@@ -23726,24 +14295,8 @@ export async function lookup_value_promote_v1(args: {
   effective_from?: string;
   effective_until?: string | null;
 }): Promise<LookupValueMutationResult> {
-  const live = await livePArgsMutationResult('lookup_value_promote_v1', args, ['lookup_value_id', 'id']);
-  if (live) {
-    return withRequiredLiveStringField<LookupValueMutationResult>(
-      live,
-      ['lookup_value_id', 'id'],
-      'lookup_value_id',
-      'lookup_value_promote_v1 did not return lookup_value_id',
-    );
-  }
-  await sleep(120);
-  if (!args?.lookup_value_id) throw new Error('lookup_value_promote_v1 requires lookup_value_id');
-  return {
-    ok: true,
-    lookup_value_id: args.lookup_value_id,
-    status: 'active',
-    correlation_id: nextCorrelationIdHex(),
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-  };
+  const { lookup_value_promote_v1 } = await import('./data-source/catalog');
+  return lookup_value_promote_v1(args);
 }
 
 // ----------- Generic command runner -----------
@@ -23885,7 +14438,7 @@ async function requireCommandReadback(
 }
 
 // ----------- Helpers -----------
-function sleep(ms: number): Promise<void> {
+export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
@@ -23897,7 +14450,7 @@ function sleep(ms: number): Promise<void> {
 // shape adopts the canonical column names; FE display joins (sender label,
 // client label) are deferred to G1 paired registry projection — for the
 // synthetic adapter these are surfaced as text identifiers.
-function pickupRequestsSeed(): Record<string, unknown>[] {
+export function pickupRequestsSeed(): Record<string, unknown>[] {
   return [
     { id: 'pr_881', shipment_id: 'PR-2026-0481', sender_id: 'Exampleparcel JED Warehouse', client_id: 'Exampleparcel KSA', requested_window_start_at: '2026-04-25T14:00:00Z', box_count: 22, status: 'pending' },
     { id: 'pr_880', shipment_id: 'PR-2026-0480', sender_id: 'Examplemart RUH DC', client_id: 'Examplemart KSA', requested_window_start_at: '2026-04-25T15:30:00Z', box_count: 14, status: 'assigned' },
@@ -23911,7 +14464,7 @@ function pickupRequestsSeed(): Record<string, unknown>[] {
 // row shape adopts the canonical column names; the human-readable `wave_id`
 // label was dropped (canonical SSOT is route_run_id). FE display joins
 // (branch name, driver name) are deferred to G1 paired registry projection.
-function pickupWavesSeed(): Record<string, unknown>[] {
+export function pickupWavesSeed(): Record<string, unknown>[] {
   return [
     { id: 'pwv_221', route_run_id: '00000000-0000-4000-8000-000000000221', branch_id: 'RUH-N', driver_user_id: 'Khalid Al-Otaibi', pickup_stop_count: 4, total_box_count: 67, status: 'in_progress' },
     { id: 'pwv_220', route_run_id: '00000000-0000-4000-8000-000000000220', branch_id: 'RUH-S', driver_user_id: 'Tariq Al-Mutairi', pickup_stop_count: 3, total_box_count: 38, status: 'completed' },
@@ -23923,7 +14476,7 @@ function pickupWavesSeed(): Record<string, unknown>[] {
 // followup_tasks, pickup_request`. The seed row shape adopts the canonical
 // column names. `retry_strategy` was already dropped in W13-2 (no canonical
 // column; resolved via `pickup_policy` ladder).
-function pickupFailuresSeed(): Record<string, unknown>[] {
+export function pickupFailuresSeed(): Record<string, unknown>[] {
   return [
     { id: 'pf_71', shipment_id: 'PR-2026-0476', failure_reason: 'Sender not ready', failed_at: '2026-04-25T12:30:00Z' },
     { id: 'pf_70', shipment_id: 'PR-2026-0475', failure_reason: 'Out of zone', failed_at: '2026-04-25T11:15:00Z' },

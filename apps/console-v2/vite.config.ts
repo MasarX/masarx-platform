@@ -7,6 +7,22 @@ import path from 'node:path';
 
 import { resolveDevServerAllowedHosts } from './dev-server-allowed-hosts';
 
+function consoleRuntimeChunk(id: string): string | undefined {
+  if (id.includes('/node_modules/@tanstack/')) return 'tanstack';
+  if (id.includes('/node_modules/react/')) return 'react';
+
+  // The SDK publishes independent clients. Keep each client's runtime together
+  // and keep the auth client separate from its protocol and storage helpers.
+  const supabasePackage = id.match(/\/node_modules\/@supabase\/([^/]+)\//)?.[1];
+  if (supabasePackage) {
+    if (id.endsWith('/auth-js/dist/module/GoTrueClient.js')) return 'supabase-auth-client';
+    return `supabase-${supabasePackage}`;
+  }
+
+  const sharedRuntime = id.match(/\/src\/lib\/(data-source|api|queries|i18n)\.tsx?$/)?.[1];
+  return sharedRuntime ? `console-${sharedRuntime}` : undefined;
+}
+
 // Phase F (lazy seed). The seed catalog under src/lib/seed-raw/ is only
 // consumed in seed/demo mode; production builds (`VITE_USE_SEED=false`) must
 // tree-shake it entirely. Vite's standard `import.meta.env.VITE_USE_SEED`
@@ -87,6 +103,8 @@ export default defineConfig(({ mode }) => {
     build: {
       target: 'es2022',
       sourcemap: true,
+      minify: 'terser',
+      terserOptions: { compress: { passes: 2 } },
       rollupOptions: {
         // @sentry/react is an opt-in runtime dep: it's only dynamically imported when
         // VITE_SENTRY_DSN is set, and is intentionally NOT in package.json. Externalise so
@@ -94,10 +112,8 @@ export default defineConfig(({ mode }) => {
         // into Sentry it must install the package and provide the DSN.
         external: ['@sentry/react'],
         output: {
-          manualChunks: {
-            react: ['react', 'react-dom'],
-            tanstack: ['@tanstack/react-router', '@tanstack/react-query'],
-          },
+          onlyExplicitManualChunks: true,
+          manualChunks: consoleRuntimeChunk,
         },
       },
     },
