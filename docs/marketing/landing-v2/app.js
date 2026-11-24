@@ -2248,7 +2248,12 @@
   function startLiveDelivery(payload) {
     const tracking = payload && typeof payload === 'object' ? payload.tracking || payload : null;
     const status = String(tracking?.shipment?.status || '').trim().toLowerCase();
-    setLiveDeliveryView(status === 'out_for_delivery' ? 'loading' : 'none');
+    // live_delivery is null outside out-for-delivery, so other statuses need no session fetch.
+    if (status !== 'out_for_delivery') {
+      setLiveDeliveryView('none');
+      return;
+    }
+    setLiveDeliveryView('loading');
     fetchLiveDelivery();
   }
 
