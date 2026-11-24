@@ -1,7 +1,18 @@
 BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(7);
+SELECT plan(8);
+
+SELECT ok((
+  SELECT proowner='ui_rpc_executor'::regrole FROM pg_proc
+  WHERE oid='public.ui_list_resource_v1(text,jsonb,integer,integer,jsonb)'::regprocedure
+) AND NOT has_schema_privilege('ui_rpc_executor', 'public', 'CREATE')
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_auth_members
+    WHERE roleid='ui_rpc_executor'::regrole
+      AND (COALESCE((to_jsonb(pg_auth_members)->>'inherit_option')::boolean, true)
+        OR COALESCE((to_jsonb(pg_auth_members)->>'set_option')::boolean, true))
+  ), 'the bounded count retains its executor owner without replacement authority');
 
 CREATE TABLE public.ui_test_scoped_log_totals (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

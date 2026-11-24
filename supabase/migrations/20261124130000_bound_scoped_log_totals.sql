@@ -3,8 +3,10 @@ SET LOCAL search_path TO public, extensions, pg_temp;
 
 DO $migration$
 DECLARE
+  migration_role name := current_user;
+  entrypoint constant regprocedure := 'public.ui_list_resource_v1(text,jsonb,integer,integer,jsonb)'::regprocedure;
   definition text := pg_get_functiondef(
-    'public.ui_list_resource_v1(text,jsonb,integer,integer,jsonb)'::regprocedure
+    entrypoint
   );
   old_declaration constant text := 'v_total BIGINT := 0;';
   old_strategies constant text := $sql$v_total_strategy NOT IN ('exact', 'estimate')$sql$;
@@ -41,7 +43,8 @@ DECLARE
   ELSIF v_total IS NULL THEN
     v_sql := format($sql$;
 BEGIN
-  IF cardinality(string_to_array(definition, old_declaration)) <> 2
+  IF (SELECT proowner FROM pg_proc WHERE oid = entrypoint) <> 'ui_rpc_executor'::regrole
+     OR cardinality(string_to_array(definition, old_declaration)) <> 2
      OR cardinality(string_to_array(definition, old_strategies)) <> 2
      OR cardinality(string_to_array(definition, old_count)) <> 2 THEN
     RAISE EXCEPTION 'Unexpected ui_list_resource_v1 definition while bounding log totals';
@@ -49,7 +52,27 @@ BEGIN
   definition := replace(definition, old_declaration, 'v_total BIGINT;');
   definition := replace(definition, old_strategies,
     $sql$v_total_strategy NOT IN ('exact', 'estimate', 'exact_then_estimate')$sql$);
+
+  IF current_setting('server_version_num')::int >= 160000 THEN
+    EXECUTE format('GRANT ui_rpc_executor TO %I WITH INHERIT FALSE, SET TRUE', migration_role);
+  ELSE
+    EXECUTE format('GRANT ui_rpc_executor TO %I', migration_role);
+  END IF;
+  GRANT CREATE ON SCHEMA public TO ui_rpc_executor;
+  SET LOCAL ROLE ui_rpc_executor;
   EXECUTE replace(definition, old_count, new_count);
+  EXECUTE format('SET LOCAL ROLE %I', migration_role);
+  REVOKE CREATE ON SCHEMA public FROM ui_rpc_executor;
+  EXECUTE format('REVOKE ui_rpc_executor FROM %I', migration_role);
+
+  IF has_schema_privilege('ui_rpc_executor', 'public', 'CREATE') OR EXISTS (
+    SELECT 1 FROM pg_auth_members
+    WHERE roleid = 'ui_rpc_executor'::regrole
+      AND (COALESCE((to_jsonb(pg_auth_members)->>'inherit_option')::boolean, true)
+        OR COALESCE((to_jsonb(pg_auth_members)->>'set_option')::boolean, true))
+  ) THEN
+    RAISE EXCEPTION 'Temporary executor replacement authority was not revoked';
+  END IF;
 END;
 $migration$;
 
