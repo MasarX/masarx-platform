@@ -22,5 +22,17 @@
     "image_id": "sha256:04332d354964b089d81eb872ce1604119a9cf62b54d3556338f3a46d81bfcc8e",
     "mirror": "ghcr.io",
     "cli_tag": "v1.74.3"
+  },
+  {
+    "role": "mailpit",
+    "image": "supabase/mailpit",
+    "tag": "v1.30.2",
+    "source": "https://github.com/supabase/cli/blob/v2.116.0/apps/cli-go/pkg/config/templates/Dockerfile#L5",
+    "registry_endpoint": "https://ghcr.io/v2/supabase/mailpit/manifests/v1.30.2",
+    "digest": "sha256:37a38e48e9338cd7e89dfeb487f37b02ebfcd9cb23111bed2d345e79d37d6dd6",
+    "amd64_manifest": "sha256:f0b0ed33c8cf53aac0dd004abbe245c83420a7ae44914e25178f7791dec5723a",
+    "image_id": "sha256:cdb09a322d77e0b233727104beaafb4b7b503fd3badce6a6d9e58fd9993025f6",
+    "mirror": "ghcr.io",
+    "cli_tag": "v1.30.2"
   }
 ]

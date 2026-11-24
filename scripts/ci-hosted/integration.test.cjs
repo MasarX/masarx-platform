@@ -5,7 +5,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
-const { integrationCoverage, restoreIntegrationDatabase, runIntegration } = require('./integration.cjs');
+const { integrationCoverage, integrationFunctionConfig, integrationInventory, integrationShards,
+  restoreIntegrationDatabase, runIntegration } = require('./integration.cjs');
+const { loadRegistry, planDeploy } = require('../edge/functions-registry.js');
+const timing = require('./integration-timings.json');
 
 test('the required database workflow checks integration coverage by default', () => {
   const workflow = fs.readFileSync(path.join(__dirname, '../../.github/workflows/public-ci.yml'), 'utf8');
@@ -59,20 +62,72 @@ test('releases the pgTAP database maintenance holds before integration', async (
   await assert.rejects(restoreIntegrationDatabase(async () => 'f'), /Could not reload/);
 });
 
-test('retains file results from the single cloud wrapper attempt', async t => {
+test('renders JWT overrides only for public functions enabled in the development registry', () => {
+  const { noVerifyJwt } = planDeploy(loadRegistry(), 'dev');
+  assert.deepEqual(integrationFunctionConfig(), noVerifyJwt.flatMap(({ name }) => [
+    '[functions.' + name + ']', 'verify_jwt = false',
+  ]));
+  assert.ok(integrationFunctionConfig().includes('[functions.webhook-receiver]'));
+  assert.ok(!integrationFunctionConfig().includes('[functions.label-renderer]'));
+});
+
+test('assigns all discovered files once using stable duration-weighted shards', () => {
+  const inventory = integrationInventory();
+  const shards = integrationShards(inventory);
+  assert.equal(shards.length, timing.jobs.length);
+  assert.ok(shards.every(files => files.length));
+  assert.deepEqual(shards.flat().sort(), inventory);
+  assert.deepEqual(integrationShards([...inventory].reverse()), shards);
+
+  const files = ['slow.test.js', 'quick.test.js', 'new.test.js'];
+  const sample = { ...timing, seconds: { 'slow.test.js': 100, 'quick.test.js': 1 },
+    jobs: [{ baseSeconds: 90, startSeconds: 0 }, { baseSeconds: 10, startSeconds: 0 }] };
+  assert.deepEqual(integrationShards(files, sample), [['new.test.js', 'quick.test.js'], ['slow.test.js']]);
+});
+
+test('accepts only current, numbered known failures and rejects stale entries', () => {
+  const file = 'tests/integration/synthetic.test.js';
+  const result = { file, passed: 3, failed: 1, skipped: 0 };
+  const shards = [{ shard: '1/6', integration: 'passed', integrationFiles: [result] }];
+  const entry = { file, kind: 'known-failure', runner: 'Hosted integration',
+    reason: 'Synthetic teardown failure', issue: '#1', expires: '2026-12-08' };
+  const verdict = (entries, day = '2026-12-08') => integrationCoverage(shards, [file], entries, day);
+  assert.equal(verdict([entry]).ok, true);
+  assert.deepEqual(verdict([entry]).knownFailures, [file + ' (#1, expires 2026-12-08)']);
+  assert.match(verdict([]).errors[0], /Unlisted integration failure/);
+  assert.match(verdict([entry], '2026-12-09').errors[0], /Expired integration exception/);
+  assert.match(verdict([{ ...entry, expires: '2026-12-10' }]).errors[0], /Invalid.*integration exception/);
+  result.skipped = 1;
+  assert.equal(verdict([entry]).ok, false);
+  result.skipped = 0;
+  result.failed = 0;
+  assert.match(verdict([entry]).errors[0], /Stale integration exception/);
+});
+
+test('counts suite-level teardown failures from the single cloud wrapper attempt', async t => {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'integration-result-'));
   t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
   const raw = path.join(folder, 'result.json');
   const file = `tests/integration/${randomUUID()}.test.js`;
-  const failure = new Error('Synthetic test failed');
-  const observed = await runIntegration('2/6', {}, async (command, args, env, timeout) => {
+  const failure = Object.assign(new Error('Synthetic test failed'), { failure: { exitCode: 1 } });
+  const report = { wasInterrupted: false, numFailedTestSuites: 1, success: false, testResults: [{
+    name: path.resolve(file), status: 'failed', message: 'Synthetic afterAll failure', startTime: 10, endTime: 20,
+    assertionResults: [{ status: 'passed' }],
+  }] };
+  const invoke = () => runIntegration([file], {}, async (command, args, env, timeout) => {
     assert.equal(command, process.execPath);
-    assert.deepEqual(args, ['scripts/tests/run-integration-cloud.js', '--shard=2/6', '--json', `--outputFile=${raw}`]);
+    assert.deepEqual(args, ['scripts/tests/run-integration-cloud.js', '--json', '--outputFile=' + raw, '--runTestsByPath', file]);
     assert.equal(env.INTEGRATION_JEST_RETRY_COUNT, '0');
+    assert.equal(env.INTEGRATION_AUTO_ENABLE_TEST_TOGGLES, '0');
     assert.equal(env.RUN_LIVE_3PL_TESTS, 'false');
     assert.equal(timeout, 1234);
-    fs.writeFileSync(raw, JSON.stringify({ testResults: [{ name: path.resolve(file), assertionResults: [{ status: 'failed' }] }] }));
+    fs.writeFileSync(raw, JSON.stringify(report));
     throw failure;
   }, () => 1234, raw);
-  assert.deepEqual(observed, { files: [{ file, passed: 0, skipped: 0, failed: 1 }], failure });
+  assert.deepEqual(await invoke(), [{ file, passed: 1, skipped: 0, failed: 1, durationMs: 10 }]);
+  failure.failure.timeout = true;
+  await assert.rejects(invoke, failure);
+  failure.failure.timeout = false;
+  report.wasInterrupted = true;
+  await assert.rejects(invoke, failure);
 });
