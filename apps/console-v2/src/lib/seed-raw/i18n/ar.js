@@ -5,6 +5,11 @@ export const ar = {
     role: 'مشرف',
     search: 'ابحث في الشحنات، الخطط، السائقين، الإعدادات…',
     skip: 'تخطي إلى المحتوى الرئيسي',
+    openPalette: 'فتح لوحة الأوامر',
+    switchScope: 'تبديل النطاق',
+    // Starts with the visible label of the language button (WCAG 2.5.3).
+    switchLanguage: 'EN, التبديل إلى الإنجليزية',
+    userMenu: 'قائمة المستخدم',
   },
   nav: {
     today: 'اليوم',
@@ -44,7 +49,10 @@ export const ar = {
     amendCancel: { eyebrow: 'التشغيل', accent: 'التعديل', plain: 'والإلغاء' },
     exceptions: { eyebrow: 'التشغيل', accent: 'الاستثناءات', plain: '(NDR)' },
     returnedToBranch: { eyebrow: 'التشغيل', accent: 'الإرجاع', plain: 'إلى الفرع' },
-    pickups: { eyebrow: 'التشغيل', accent: 'الالتقاط', plain: '— الميل الأول' },
+    pickups: {
+      eyebrow: 'التشغيل', accent: 'الالتقاط', plain: '— الميل الأول',
+      invalidWindowTime: 'أدخل وقت بداية ووقت نهاية صالحين بالتوقيت المحلي.',
+    },
     trackingMap: { eyebrow: 'التشغيل', accent: 'خريطة', plain: 'التتبّع' },
     hubs: { eyebrow: 'الشبكة', accent: 'المراكز', plain: 'والمناطق' },
     partners: { eyebrow: 'الشبكة', accent: 'الشركاء', plain: '— شركاء السوق' },
@@ -97,6 +105,7 @@ export const ar = {
     apply: 'تطبيق',
     publish: 'نشر',
     none: 'لا شيء',
+    notAvailable: 'غير متوفر',
     all: 'الكل',
     yes: 'نعم',
     no: 'لا',

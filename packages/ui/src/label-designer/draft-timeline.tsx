@@ -29,9 +29,9 @@ function formatDate(value: string | null): string {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  draft: "bg-amber-400",
-  published: "bg-green-500",
-  validated: "bg-blue-500",
+  draft: "bg-[rgb(var(--ui-warning))]",
+  published: "bg-[rgb(var(--ui-success))]",
+  validated: "bg-[rgb(var(--ui-info))]",
 };
 
 export function DraftTimeline({
@@ -61,14 +61,14 @@ export function DraftTimeline({
       {sorted.map((draft, i) => {
         const isSelected = draft.id === selectedDraftId;
         const date = draft.updated_at || draft.published_at;
-        const dotColor = STATUS_COLORS[draft.status.toLowerCase()] || "bg-gray-400";
+        const dotColor = STATUS_COLORS[draft.status.toLowerCase()] || "bg-ui-muted";
 
         return (
           <button
             key={draft.id}
             type="button"
             className={`group flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
-              isSelected ? "bg-blue-50" : "hover:bg-gray-50"
+              isSelected ? "bg-ui-accent-soft" : "hover:bg-ui-highlight"
             }`}
             onClick={() => onSelect(draft.id)}
             data-testid={`${prefix}-item-${i}`}

@@ -170,8 +170,8 @@ Exports `getPublicConfig()`, `getUiDefaults()`, `resolveUiMessages()`, UI defaul
 ## Dev Commands
 
 ```
-npm run dev:console    # Console V2 Vite dev on port 5175
-npm run dev:console:legacy # legacy Next.js console on port 3001
+npm run dev:console:v2 # Console V2 Vite dev on port 5175
+npm run dev:console    # Next.js console on port 3001 (same as dev:console:legacy)
 npm run dev:portal     # Next.js dev on port 3002
 npm run dev:fieldops   # Expo start
 npm run test:ui        # Jest UI component tests

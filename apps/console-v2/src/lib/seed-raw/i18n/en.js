@@ -5,6 +5,11 @@ export const en = {
     role: 'admin',
     search: 'Search shipments, plans, drivers, settings…',
     skip: 'Skip to main content',
+    openPalette: 'open command palette',
+    switchScope: 'Switch scope',
+    // Starts with the visible label of the language button (WCAG 2.5.3).
+    switchLanguage: 'AR, switch to Arabic',
+    userMenu: 'user menu',
   },
   nav: {
     today: 'Today',
@@ -44,7 +49,10 @@ export const en = {
     amendCancel: { eyebrow: 'Operate', accent: 'Amend', plain: '& cancel' },
     exceptions: { eyebrow: 'Operate', accent: 'Exceptions', plain: 'queue (NDR)' },
     returnedToBranch: { eyebrow: 'Operate', accent: 'Returned', plain: 'to branch' },
-    pickups: { eyebrow: 'Operate', accent: 'Pickups', plain: '— first-mile orchestration' },
+    pickups: {
+      eyebrow: 'Operate', accent: 'Pickups', plain: '— first-mile orchestration',
+      invalidWindowTime: 'Enter a valid local start and end time.',
+    },
     trackingMap: { eyebrow: 'Operate', accent: 'Tracking', plain: 'map' },
     hubs: { eyebrow: 'Network', accent: 'Hubs', plain: '& zones' },
     partners: { eyebrow: 'Network', accent: 'Partners', plain: '— marketplace participants' },
@@ -97,6 +105,7 @@ export const en = {
     apply: 'Apply',
     publish: 'Publish',
     none: 'None',
+    notAvailable: 'Not available',
     all: 'All',
     yes: 'Yes',
     no: 'No',

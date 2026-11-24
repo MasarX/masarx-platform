@@ -63,7 +63,7 @@ export function CanvasLayersPanel({
             <div
               key={index}
               className={`flex items-center gap-1 rounded px-2 py-1 text-xs cursor-pointer ${
-                isSelected ? "bg-blue-50 text-blue-700" : "text-ui-ink hover:bg-gray-50"
+                isSelected ? "bg-blue-50 text-blue-700" : "text-ui-ink hover:bg-ui-highlight"
               } ${isHidden ? "opacity-50" : ""}`}
               onClick={() => onSelect(index)}
               data-testid={`layer-${index}`}

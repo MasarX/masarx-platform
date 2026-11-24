@@ -28,7 +28,7 @@ export function AssetThumbnail({
   return (
     <button
       type="button"
-      className="group relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-ui-border/50 bg-ui-paper/30 transition-all hover:border-blue-300 hover:shadow-sm"
+      className="group relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-ui-border/50 bg-ui-paper/30 transition-all hover:border-ui-accent/60 hover:shadow-sm"
       onClick={onClick}
       title={asset.name}
       data-testid={`${prefix}-${asset.name}`}
@@ -61,8 +61,8 @@ export function AssetThumbnail({
       )}
 
       {/* Hover overlay with name */}
-      <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-        <p className="truncate text-center text-[8px] text-white">{asset.name}</p>
+      <div className="absolute inset-x-0 bottom-0 bg-ui-ink/70 px-1 py-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        <p className="truncate text-center text-[8px] text-ui-paper">{asset.name}</p>
       </div>
     </button>
   );

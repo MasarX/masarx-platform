@@ -81,9 +81,9 @@ function computeDiff(leftJson: string, rightJson: string): DiffLine[] {
 }
 
 const STATUS_BG: Record<string, string> = {
-  added: "bg-green-50",
-  removed: "bg-red-50",
-  changed: "bg-amber-50",
+  added: "bg-[rgb(var(--ui-success)/0.08)]",
+  removed: "bg-[rgb(var(--ui-danger)/0.08)]",
+  changed: "bg-[rgb(var(--ui-warning)/0.08)]",
   equal: "",
 };
 

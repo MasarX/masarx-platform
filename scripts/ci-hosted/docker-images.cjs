@@ -28,6 +28,10 @@ function inspectedImage(route) {
   const parts = route.split('/');
   return parts[1] === 'images' && parts.length > 3 && parts.at(-1) === 'json' ? parts.slice(2, -1).join('/') : null;
 }
+function hasAmbiguousKey(config, canonical) {
+  // Docker decodes keys with Unicode case folding, so compare ASCII keys only.
+  return Object.keys(config).some(key => key !== canonical && (/[^\x00-\x7f]/.test(key) || key.toLowerCase() === canonical.toLowerCase()));
+}
 function rewrite(method, url, body, pins, initContainer) {
   const route = dockerPath(url);
   if (route === '/images/create') throw new Error('CLI image pulls are forbidden; images must already be pulled by digest');
@@ -48,8 +52,7 @@ function rewrite(method, url, body, pins, initContainer) {
       if (!database || config.Image !== pinnedReference(database.image, pins)) throw new Error('Docker init requires the reviewed database image');
       const { HostConfig } = config;
       if (!HostConfig || typeof HostConfig !== 'object' || Array.isArray(HostConfig)
-        || Object.keys(config).some(key => key !== 'HostConfig' && key.toLowerCase() === 'hostconfig')
-        || Object.keys(HostConfig).some(key => key !== 'Init' && key.toLowerCase() === 'init')) {
+        || hasAmbiguousKey(config, 'HostConfig') || hasAmbiguousKey(HostConfig, 'Init')) {
         throw new Error('Invalid Docker HostConfig for database init');
       }
       // Docker's init reaps abandoned healthcheck processes before Postgres can see their exits.
