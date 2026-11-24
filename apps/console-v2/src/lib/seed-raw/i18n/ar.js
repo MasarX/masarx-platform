@@ -97,6 +97,7 @@ export const ar = {
     apply: 'تطبيق',
     publish: 'نشر',
     none: 'لا شيء',
+    notAvailable: 'غير متوفر',
     all: 'الكل',
     yes: 'نعم',
     no: 'لا',

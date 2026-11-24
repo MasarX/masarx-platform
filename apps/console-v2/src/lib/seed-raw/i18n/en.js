@@ -97,6 +97,7 @@ export const en = {
     apply: 'Apply',
     publish: 'Publish',
     none: 'None',
+    notAvailable: 'Not available',
     all: 'All',
     yes: 'Yes',
     no: 'No',
