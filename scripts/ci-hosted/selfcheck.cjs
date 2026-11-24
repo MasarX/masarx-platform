@@ -189,7 +189,9 @@ assert.throws(() => guardPlan('candidate.js', base, readBase));
 assert.throws(() => guardPlan('jest.cjs', 'HEAD', readBase));
 assert.throws(() => guardPlan('jest.cjs', base, () => `120000 blob ${base}\tfile\0`));
 const affected = files => Object.entries(select(files)).filter(([, enabled]) => enabled).map(([gate]) => gate);
-assert.deepEqual(affected(['README.md']), []);
+for (const file of ['AGENTS.md', 'DELIVERY.md', 'DESIGN.md', 'CLAUDE.md', 'GEMINI.md', 'agents.md', 'SECURITY.md', 'README.md']) {
+  assert.deepEqual(affected([file]), ['unit'], file);
+}
 for (const file of ['docs/guides/synthetic.md', 'docs/api/openapi.json']) {
   assert.deepEqual(affected([file]), ['unit']);
 }
@@ -197,12 +199,14 @@ assert.deepEqual(affected(['supabase/migrations/synthetic.sql']), ['database', '
 for (const file of ['docs/marketing/landing-v2/index.html', 'scripts/frontend/serve-landing.js']) {
   assert.deepEqual(affected([file]), ['unit', 'build_landing', 'e2e']);
 }
-assert.deepEqual(affected(['tests/landing-e2e/synthetic.spec.ts']), ['e2e']);
+assert.deepEqual(affected(['tests/landing-e2e/synthetic.spec.ts']), ['unit', 'e2e']);
+assert.deepEqual(affected(['playwright.landing.config.ts']), ['unit', 'e2e']);
 assert.deepEqual(affected(['apps/console/app/page.tsx']), ['typecheck', 'unit', 'ui', 'build_console']);
 assert.deepEqual(affected(['apps/portal/app/page.tsx']), ['typecheck', 'unit', 'ui', 'build_portal']);
 assert.deepEqual(affected(['apps/landing/src/synthetic.ts']), ['typecheck', 'unit', 'ui', 'build_landing', 'e2e']);
 assert.deepEqual(affected(['apps/fieldops/src/synthetic.ts']), ['typecheck', 'unit', 'ui', 'build_console', 'build_portal', 'build_landing']);
 assert.deepEqual(affected(['tests/unit/synthetic.test.js', 'tests/ui/synthetic.test.tsx']), ['unit', 'ui']);
+assert.deepEqual(affected(['tests/ui/synthetic.test.tsx']), ['unit', 'ui']);
 for (const file of ['unknown/path.ts', 'unknown/path.md', 'synthetic.mdx', 'apps/shared/synthetic.ts',
   'apps/portal/package.json', 'packages/ui/src/synthetic.ts', 'packages/ui/bun.lockb',
   'docs/synthetic/manifest.yaml', '.github/workflows/public-ci.yml', 'scripts/ci-hosted/changes.cjs', 'config/synthetic.json']) {

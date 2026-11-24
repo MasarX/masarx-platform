@@ -299,6 +299,8 @@ jobs:
       - name: Check deploy branch references
         timeout-minutes: 1
         run: node scripts/ci-hosted/deploy-branch-refs.cjs
+      - name: Test database deploy retry
+        run: bash scripts/deploy/supabase-db-push-retry.test.sh
 
   lint:
     name: Lint
@@ -620,7 +622,7 @@ jobs:
         run: node scripts/ci-hosted/tasks.cjs build landing
 
   e2e:
-    name: Landing E2E (full-app E2E excluded)
+    name: Landing E2E and Console V2 axe (full-app E2E excluded)
     needs: append-only
     if: ${{ !cancelled() && (needs.append-only.result != 'success' || needs.append-only.outputs.e2e != 'false') }}
     runs-on: ubuntu-24.04
@@ -635,6 +637,9 @@ jobs:
       - name: Detect landing browser subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect landing
+      - name: Detect Console V2 browser subject
+        id: console
+        run: node scripts/ci-hosted/tasks.cjs detect apps/console-v2
       - *timing_node
       - *setup_npm
       - *timing_restore
@@ -642,13 +647,29 @@ jobs:
       - *timing_install
       - *install_locked
       - name: Install lockfile-selected Chromium
-        if: steps.subject.outputs.present == 'true'
+        if: steps.subject.outputs.present == 'true' || steps.console.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs browser-install
       - *timing_work
       - name: Run synthetic local landing suite
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs landing-e2e
+      # Runs after a landing failure too, so one run reports both suites.
+      - name: Run Console V2 seed-mode axe suite
+        id: console_a11y
+        if: ${{ !cancelled() && steps.console.outputs.present == 'true' }}
+        env:
+          A11Y_EVIDENCE_DIR: test-results/console-a11y/evidence
+        run: node scripts/ci-hosted/tasks.cjs console-a11y
       - *timing_report
+      - name: Upload Console V2 axe evidence
+        if: ${{ !cancelled() && steps.console_a11y.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
+        with:
+          name: console-a11y-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/console-a11y/evidence
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: false
       - name: Explain full-app browser exclusion
         run: |
           printf '%s\n' 'SKIPPED_BY_DESIGN: full Console/Portal/FieldOps E2E has no proven secret-free local fixture/auth contract.'
