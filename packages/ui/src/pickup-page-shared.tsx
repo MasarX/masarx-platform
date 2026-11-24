@@ -10,6 +10,7 @@ import { buildLookupFriendlyLabel } from "./lookup-friendly-label";
 import { createUiTranslator } from "./i18n";
 import { formatUiError } from "./utils";
 import { normalizeObject, stringValue } from "./pickup-operations-utils";
+import { pickupErrorText, pickupKindLabel } from "./pickup-text";
 
 export type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -39,7 +40,7 @@ export async function loadPickupAssignmentOptions(organizationId: string): Promi
     return { options, error: null };
   } catch (error) {
     return { options: { branches: [], drivers: [], vehicles: [], partners: [] },
-      error: formatUiError(error, "Pickup assignment choices could not be loaded. Reload to retry.") };
+      error: formatUiError(error, pickupErrorText("assignmentChoices")) };
   }
 }
 
@@ -48,32 +49,32 @@ export async function loadPickupRelationshipOptions(resource: "clients" | "sende
   try {
     const result = await ui.listResource(resource, clientId ? { client_id: clientId } : {}, 200, 0);
     const options = result.items.map((row) => ({
-      value: String(row.id), label: String(row.name || row.brand_name || row.slug || row.code || buildLookupFriendlyLabel("Reference", row.id)),
+      value: String(row.id), label: String(row.name || row.brand_name || row.slug || row.code || buildLookupFriendlyLabel(pickupKindLabel("reference"), row.id)),
       groupValue: typeof row.client_id === "string" ? row.client_id : typeof row.organization_id === "string" ? row.organization_id : null,
     }));
     return { options, error: null };
   } catch (error) {
     return { options: [] as PickupLookupOption[],
-      error: formatUiError(error, `Pickup ${resource} could not be loaded. Reload to retry.`) };
+      error: formatUiError(error, pickupErrorText("relationship", { resource })) };
   }
 }
 
 export function pickupRelationshipLabel(options: PickupLookupOption[], value: unknown) {
   const id = stringValue(value);
-  return options.find((option) => option.value === id)?.label ?? buildLookupFriendlyLabel("Reference", id);
+  return options.find((option) => option.value === id)?.label ?? buildLookupFriendlyLabel(pickupKindLabel("reference"), id);
 }
 
 export function buildPickupRequestOptions(rows: Record<string, unknown>[]): PickupLookupOption[] {
   return rows.flatMap((row) => {
     const value = stringValue(row.shipment_id);
     if (!value) return [];
-    return [{ value, label: stringValue(row.tracking_number) || stringValue(row.client_reference_number) || stringValue(row.carrier_reference_number) || buildLookupFriendlyLabel("Shipment", value),
+    return [{ value, label: stringValue(row.tracking_number) || stringValue(row.client_reference_number) || stringValue(row.carrier_reference_number) || buildLookupFriendlyLabel(pickupKindLabel("shipment"), value),
       searchText: [row.tracking_number, row.client_reference_number, row.carrier_reference_number].filter(Boolean).join(" ") }];
   });
 }
 
 async function withPickupLabels<T extends Record<string, unknown>>(rows: T[], kind: "shipment" | "route", error: unknown): Promise<PickupViewResult<T>> {
-  if (error || rows.length === 0) return { rows, error: pickupListError(error, "Unable to load pickups.") };
+  if (error || rows.length === 0) return { rows, error: pickupListError(error, pickupErrorText("loadPickups")) };
   const key = kind === "shipment" ? "shipment_id" : "route_run_id";
   try {
     const labels = await createUiServerClient().rpc<Record<string, Record<string, string>>>("pickup_relationship_labels_v1", {
@@ -82,7 +83,7 @@ async function withPickupLabels<T extends Record<string, unknown>>(rows: T[], ki
     });
     return { rows: rows.map((row) => ({ ...row, ...labels[`${kind}:${row[key]}`] })), error: null };
   } catch (labelError) {
-    return { rows, error: formatUiError(labelError, "Pickup display labels could not be loaded. Reload to retry.") };
+    return { rows, error: formatUiError(labelError, pickupErrorText("displayLabels")) };
   }
 }
 
@@ -174,10 +175,11 @@ export function PickupPageNavigation({
   appBasePath: string;
   activePath: string;
 }) {
+  const t = createUiTranslator("ui.pickupOperations.navigation");
   const routes = [
-    { href: `${appBasePath}/operations/pickups/requests`, label: "Requests" },
-    { href: `${appBasePath}/operations/pickups/waves`, label: "Waves" },
-    { href: `${appBasePath}/operations/pickups/failures`, label: "Failures" },
+    { href: `${appBasePath}/operations/pickups/requests`, label: t("requests") },
+    { href: `${appBasePath}/operations/pickups/waves`, label: t("waves") },
+    { href: `${appBasePath}/operations/pickups/failures`, label: t("failures") },
   ];
 
   return (

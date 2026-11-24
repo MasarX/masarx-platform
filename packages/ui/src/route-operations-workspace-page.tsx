@@ -23,8 +23,7 @@ import { Section } from "./section";
 import { createUiTranslator } from "./i18n";
 import type { NavigationItem, NavigationSection } from "./navigation";
 import { normalizeAppHref } from "./navigation-paths";
-import { buildLookupFriendlyLabel } from "./lookup-friendly-label";
-import { isUuidValue } from "./resource-utils";
+import { formatReferenceValue, isUuidValue } from "./resource-utils";
 import { buildTestId } from "./test-ids";
 import { buildHref } from "./url";
 import { formatUiError } from "./utils";
@@ -338,16 +337,24 @@ function firstValue(value: string | string[] | undefined) {
   return value;
 }
 
+const SCOPE_TYPES = new Set(["global", "tenant", "client", "sender"]);
+
 function resolveScopeLabel(me: UiMe | null, t: ReturnType<typeof createUiTranslator>) {
   const scope = me?.access_scope;
   const scopeType = normalizeUiScopeType(scope?.scope_type ?? null);
   if (!scopeType) return t("unknown");
+  const scopeTypeLabel = SCOPE_TYPES.has(scopeType) ? t(`scopeTypes.${scopeType}`) : t("unknown");
   const label = typeof scope?.scope_label === "string" ? scope.scope_label.trim() : "";
   const id = typeof scope?.scope_id === "string" ? scope.scope_id.trim() : "";
-  const fallback = scopeType !== "global" && isUuidValue(id) ? buildLookupFriendlyLabel(scopeType, id) : id;
+  const fallback = scopeType !== "global" && isUuidValue(id) ? formatReferenceValue(id) : id;
   const scopeLabel = label || fallback;
-  if (scopeType === "global" && !scopeLabel) return scopeType;
-  return t("scopeLabel", { scopeType, scopeLabel: scopeLabel || t("unknown") });
+  if (scopeType === "global" && !scopeLabel) return scopeTypeLabel;
+  // The label or reference can be in either script, so isolate it from the translated scope word.
+  return (
+    <>
+      {scopeTypeLabel}: <bdi>{scopeLabel || t("unknown")}</bdi>
+    </>
+  );
 }
 
 function resolveTrackingHref(

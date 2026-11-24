@@ -31,18 +31,7 @@ export function jsonTextareaValue(value: unknown, fallback = "{}") {
   }
 }
 
-export function parseJsonValue(
-  raw: string,
-  fallback: unknown,
-): { ok: true; value: unknown } | { ok: false; message: string } {
-  const trimmed = raw.trim();
-  if (!trimmed) return { ok: true, value: fallback };
-  try {
-    return { ok: true, value: JSON.parse(trimmed) };
-  } catch {
-    return { ok: false, message: "Invalid JSON payload." };
-  }
-}
+export { parseJsonValue } from "./json-field";
 
 export function marketplaceOrganizationLabel(...values: unknown[]) {
   return Array.from(new Set(values.map(stringValue).filter(Boolean))).join(" | ") || null;

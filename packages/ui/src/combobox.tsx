@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { useCombobox, type ComboboxOption } from "./use-combobox";
 import { resolveTagColor } from "./tag-colors";
 import { cn } from "./utils";
@@ -22,7 +23,41 @@ export type ComboboxProps = {
   className?: string;
   "aria-label"?: string;
   "aria-labelledby"?: string;
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
 };
+
+// English labels for renders without a translation provider; keys match ui.combobox.
+const FALLBACK_TEXT = {
+  placeholder: "Select…",
+  searchAria: "Search options",
+  clearAria: "Clear selection",
+  removeAria: "Remove {label}",
+  createOption: "Create “{query}”",
+  empty: "No results",
+  loading: "Loading…",
+  listAria: "Options",
+} as const;
+type ComboboxTextKey = keyof typeof FALLBACK_TEXT;
+
+function useOptionalComboboxTranslations() {
+  try {
+    // useTranslations throws when no provider is mounted; the hook call order stays the same either way.
+    return useTranslations("ui.combobox");
+  } catch {
+    return null;
+  }
+}
+
+function useComboboxText() {
+  const t = useOptionalComboboxTranslations();
+  return (key: ComboboxTextKey, values?: Record<string, string>) => {
+    // A missing key comes back as its path (next-intl's default fallback and the test mock's); show English then.
+    const text = t?.(key, values);
+    if (text && text !== `ui.combobox.${key}`) return text;
+    return FALLBACK_TEXT[key].replace(/\{(\w+)\}/g, (_, name: string) => values?.[name] ?? "");
+  };
+}
 
 export function Combobox({
   mode,
@@ -33,15 +68,19 @@ export function Combobox({
   onCreateOption,
   allowCreate,
   loading,
-  loadingMessage = "Loading…",
+  loadingMessage,
   disabled,
-  placeholder = "Select…",
-  emptyMessage = "No results",
+  placeholder: placeholderProp,
+  emptyMessage,
   ariaLabel,
   className,
   "aria-label": ariaLabelProp,
   "aria-labelledby": ariaLabelledBy,
+  "aria-describedby": ariaDescribedBy,
+  "aria-invalid": ariaInvalid,
 }: ComboboxProps) {
+  const text = useComboboxText();
+  const placeholder = placeholderProp ?? text("placeholder");
   const {
     open,
     setOpen,
@@ -165,10 +204,12 @@ export function Combobox({
         aria-haspopup="listbox"
         aria-disabled={disabled}
         aria-labelledby={ariaLabelledBy}
+        aria-describedby={ariaDescribedBy}
+        aria-invalid={ariaInvalid || undefined}
         aria-controls={open ? listboxId : undefined}
         aria-activedescendant={open ? activeOptionId : undefined}
         className={cn(
-          "flex min-h-[44px] w-full cursor-pointer flex-wrap items-center gap-1 rounded-lg border border-ui-border bg-ui-surface px-3 py-2 text-sm text-ui-ink transition",
+          "flex min-h-[44px] w-full cursor-pointer flex-wrap items-center gap-1 rounded-lg border border-ui-border bg-ui-surface px-3 py-2 text-sm text-ui-ink transition aria-invalid:border-ui-danger aria-invalid:ring-ui-danger/40",
           "focus-within:ring-2 focus-within:ring-ui-accent/40 focus-within:ring-offset-2 focus-within:ring-offset-ui-paper",
           disabled && "cursor-not-allowed opacity-60",
           className
@@ -207,7 +248,7 @@ export function Combobox({
                     if (!disabled) selectOption(tag.value);
                   }}
                   className="ml-0.5 text-current opacity-60 hover:opacity-100"
-                  aria-label={`Remove ${tag.label}`}
+                  aria-label={text("removeAria", { label: tag.label })}
                 >
                   ×
                 </button>
@@ -239,7 +280,7 @@ export function Combobox({
             className="min-w-[60px] flex-1 bg-transparent text-sm outline-none placeholder:text-ui-muted"
             placeholder={hasValue ? "" : placeholder}
             role="searchbox"
-            aria-label="Search options"
+            aria-label={text("searchAria")}
             aria-controls={listboxId}
             aria-activedescendant={activeOptionId}
             autoComplete="off"
@@ -255,7 +296,7 @@ export function Combobox({
                 clearAll();
               }}
               className="inline-flex h-5 w-5 items-center justify-center rounded text-ui-muted hover:text-ui-ink"
-              aria-label="Clear selection"
+              aria-label={text("clearAria")}
             >
               <svg
                 aria-hidden
@@ -292,16 +333,16 @@ export function Combobox({
           ref={listboxRef}
           id={listboxId}
           role="listbox"
-          aria-label="Options"
+          aria-label={text("listAria")}
           aria-multiselectable={mode === "multi" || undefined}
           className="absolute left-0 top-full z-50 mt-1 max-h-[300px] w-full overflow-auto rounded-lg border border-ui-border bg-ui-paper p-1 shadow-xl"
         >
           {loading ? (
-            <div className="px-3 py-2 text-xs text-ui-muted">{loadingMessage}</div>
+            <div className="px-3 py-2 text-xs text-ui-muted">{loadingMessage ?? text("loading")}</div>
           ) : null}
           {!loading && filteredOptions.length === 0 && !showCreateRow ? (
             <div className="px-3 py-2 text-xs text-ui-muted">
-              {emptyMessage}
+              {emptyMessage ?? text("empty")}
             </div>
           ) : null}
           {filteredOptions.map((option, index) => {
@@ -394,7 +435,7 @@ export function Combobox({
                 setQuery("");
               }}
             >
-              Create &ldquo;{query.trim()}&rdquo;
+              {text("createOption", { query: query.trim() })}
             </div>
           ) : null}
         </div>

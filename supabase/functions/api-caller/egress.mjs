@@ -298,6 +298,7 @@ export const executeBoundedEgress = async ({
   timeoutMs,
   policy,
   httpAllowedHost,
+  localRendererEndpoint,
   resolveDns,
   directFetch = fetch,
   guardedFetch,
@@ -306,7 +307,9 @@ export const executeBoundedEgress = async ({
   setTimer = setTimeout,
   clearTimer = clearTimeout,
 }) => {
-  let currentUrl = canonicalizeHttpsUrl(url, httpAllowedHost);
+  const localRendererUrl = localRendererEndpoint ? new URL(localRendererEndpoint) : null;
+  const isLocalRenderer = localRendererUrl?.protocol === "http:" && localRendererUrl.href === url;
+  let currentUrl = isLocalRenderer ? localRendererUrl : canonicalizeHttpsUrl(url, httpAllowedHost);
   const totalTimeoutMs = Math.max(Number(timeoutMs) || 0, 1);
   const startedAt = now();
   const controller = new AbortController();
@@ -334,18 +337,18 @@ export const executeBoundedEgress = async ({
       }
 
       assertDomainPolicy(currentUrl, policy);
-      if (policy.transportMode === "direct_trusted_host") {
+      if (!isLocalRenderer && policy.transportMode === "direct_trusted_host") {
         // Direct transport is safe only for public IP literals because native Deno fetch does
         // not expose a hostname-to-peer pinning hook. Hostnames require the guarded boundary.
         await resolvePublicAddresses(currentUrl.hostname, resolveDns, controller.signal);
-      } else if (proxyRequired) {
+      } else if (!isLocalRenderer && proxyRequired) {
         if (!bypassProxy && typeof guardedFetch !== "function") {
           throw new EgressPolicyError("Egress policy violation: guarded proxy transport is unavailable");
         }
         // This lookup is an additional fail-closed check. The guarded transport remains the
         // authoritative boundary that must validate and pin the address it actually connects to.
         await resolvePublicAddresses(currentUrl.hostname, resolveDns, controller.signal, bypassProxy);
-      } else {
+      } else if (!isLocalRenderer) {
         throw new EgressPolicyError("Egress policy violation: unsupported transport mode");
       }
 
@@ -355,8 +358,8 @@ export const executeBoundedEgress = async ({
       }
       visited.add(visitKey);
 
-      const fetchImpl = proxyRequired && !bypassProxy ? guardedFetch : directFetch;
-      if (bypassProxy) {
+      const fetchImpl = proxyRequired && !bypassProxy && !isLocalRenderer ? guardedFetch : directFetch;
+      if (bypassProxy && !isLocalRenderer) {
         controller.signal.throwIfAborted();
         // shortcut: fetch resolves again after validation, use a peer-pinning client when Edge supports one.
         console.warn("egress_proxy_bypassed_dev");
@@ -370,7 +373,7 @@ export const executeBoundedEgress = async ({
       });
 
       const location = response.headers.get("location");
-      if (bypassProxy || !policy.followRedirects || !location || !REDIRECT_STATUSES.has(response.status)) {
+      if (isLocalRenderer || bypassProxy || !policy.followRedirects || !location || !REDIRECT_STATUSES.has(response.status)) {
         const responseBody = await readBoundedBody(response, maxResponseBytes, controller.signal);
         return {
           status: response.status,

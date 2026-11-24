@@ -22,20 +22,36 @@ if (!fs.existsSync(sharedSource)) {
 }
 
 const copyRecursive = (source, target) => {
-  if (!fs.existsSync(target)) {
+  const targetStat = fs.lstatSync(target, { throwIfNoEntry: false });
+  if (!targetStat?.isDirectory()) {
+    if (targetStat) fs.rmSync(target, { recursive: true, force: true });
     fs.mkdirSync(target, { recursive: true });
   }
 
   const entries = fs.readdirSync(source, { withFileTypes: true });
-  entries.forEach((entry) => {
+  const sourceNames = new Set(entries.map((entry) => entry.name));
+  for (const name of fs.readdirSync(target)) {
+    if (!sourceNames.has(name)) {
+      fs.rmSync(path.join(target, name), { recursive: true, force: true });
+    }
+  }
+
+  for (const entry of entries) {
     const sourcePath = path.join(source, entry.name);
     const targetPath = path.join(target, entry.name);
     if (entry.isDirectory()) {
       copyRecursive(sourcePath, targetPath);
-    } else {
-      fs.copyFileSync(sourcePath, targetPath);
+      continue;
     }
-  });
+
+    const existing = fs.lstatSync(targetPath, { throwIfNoEntry: false });
+    if (existing?.isFile()) {
+      if (fs.readFileSync(sourcePath).equals(fs.readFileSync(targetPath))) continue;
+    } else if (existing) {
+      fs.rmSync(targetPath, { recursive: true, force: true });
+    }
+    fs.copyFileSync(sourcePath, targetPath);
+  }
 };
 
 const targets = fs.readdirSync(functionsRoot, { withFileTypes: true })
@@ -43,7 +59,6 @@ const targets = fs.readdirSync(functionsRoot, { withFileTypes: true })
   .map((entry) => path.join(functionsRoot, entry.name, '_shared'));
 
 targets.forEach((target) => {
-  fs.rmSync(target, { recursive: true, force: true });
   copyRecursive(sharedSource, target);
   console.log(`[edge:sync-shared] Synced ${path.relative(functionsRoot, target)}`);
 });

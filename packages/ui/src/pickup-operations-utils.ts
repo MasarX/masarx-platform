@@ -14,27 +14,7 @@ export function stringValue(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-export function parseJsonValue(
-  raw: string,
-  fallback: unknown,
-): { ok: true; value: unknown } | { ok: false; message: string } {
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return { ok: true, value: fallback };
-  }
-
-  try {
-    return { ok: true, value: JSON.parse(trimmed) };
-  } catch (error) {
-    return {
-      ok: false,
-      message:
-        error instanceof Error && error.message.trim()
-          ? error.message.trim()
-          : "Invalid JSON payload.",
-    };
-  }
-}
+export { parseJsonValue } from "./json-field";
 
 export function parsePickupIdList(raw: string): string[] {
   const trimmed = raw.trim();
