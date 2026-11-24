@@ -181,7 +181,7 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 - File each finding as an issue and revert a change that breaks a critical user journey.
 - Delegate the hands-on checks to a worker that returns only the findings.
 - Sweep signed-in screens on dev only with the [synthetic sweep accounts](DELIVERY.md#signed-in-dev-sweep) and keep credentials out of logs, captures and issues.
-- Design changes, including UI, mockups, `DESIGN.md` and sweep findings, get no independent review, and green CI is enough. A change to which personal data a screen shows, or to whom, is high risk and gets one review under the engineering standard's high-risk rule.
+- For design changes, follow the [critical-change review rule](AGENTS.md#critical-changes-the-only-changes-that-get-a-review).
 
 ### Changing this file
 
