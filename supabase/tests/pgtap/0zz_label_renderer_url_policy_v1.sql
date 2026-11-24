@@ -83,6 +83,7 @@ CROSS JOIN LATERAL public.claim_edge_job_by_id_v1((r.receipt->>'edge_job_id')::u
 SELECT is(public.get_claimed_edge_job_call_spec_v1(job_id, lease_token)->>'url', local_url,
   'leased renderer spec accepts the exact database-configured local endpoint') FROM renderer_local_lease;
 -- Simulate an active settings row written before the save guard existed.
+SET CONSTRAINTS ALL IMMEDIATE;
 ALTER TABLE public.settings DISABLE TRIGGER a00_label_provider_seal_cache;
 UPDATE public.settings s SET cached_value = jsonb_set(s.cached_value, '{providers,0,invoke_url}', to_jsonb(f.rejected_url))
 FROM renderer_url_case f WHERE s.category = 'label_provider' AND s.scope_type = 'tenant' AND s.scope_id = f.org;
