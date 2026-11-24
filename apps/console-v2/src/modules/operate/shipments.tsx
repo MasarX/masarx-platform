@@ -70,7 +70,7 @@ import {
   refreshShipmentOperationReadModels,
 } from '@/lib/queries';
 import { useCapability, useIdentity } from '@/lib/identity';
-import { useI18n } from '@/lib/i18n';
+import { englishT, fill, useI18n, useT, type Translate } from '@/lib/i18n';
 import * as api from '@/lib/api';
 import { getLookups, lookupRow } from '@/lib/api';
 import { CAP } from '@/lib/capabilities';
@@ -163,15 +163,22 @@ function operationGuardStringArray(value: unknown): string[] {
 function policyBlockedReasonText(
   guard: api.ShipmentOperationGuardState | null,
   actionLabel: string,
+  t: Translate = englishT,
 ): string {
   const reason = typeof guard?.reason === 'string' && guard.reason.trim()
     ? humanizeToken(guard.reason)
-    : 'Policy check did not approve this action';
+    : t('shipments.policy.policyCheckDidNotApprove');
   const allowedStatuses = operationGuardStringArray(guard?.allowed_statuses);
   const allowedText = allowedStatuses.length
-    ? ` Allowed statuses: ${allowedStatuses.map((status) => humanizeToken(status)).join(', ')}.`
+    ? fill(t('shipments.policy.allowedStatuses'), {
+      statuses: allowedStatuses.map((status) => humanizeToken(status)).join(', '),
+    })
     : '';
-  return `Shipment policy blocks ${actionLabel}: ${reason}.${allowedText}`;
+  return fill(t('shipments.policy.blocksAction'), {
+    action: actionLabel,
+    reason,
+    allowed: allowedText,
+  });
 }
 
 function operationDisabledReason(
@@ -179,12 +186,13 @@ function operationDisabledReason(
   state: { isLoading: boolean; hasError: boolean },
   operation: ShipmentOperationName,
   actionLabel: string,
+  t: Translate = englishT,
 ): string | undefined {
-  if (state.isLoading) return 'Checking shipment policy';
-  if (state.hasError || !options) return 'Shipment policy unavailable';
+  if (state.isLoading) return t('shipments.policy.checkingShipmentPolicy');
+  if (state.hasError || !options) return t('shipments.policy.shipmentPolicyUnavailable');
   const guard = operationGuard(options, operation);
   if (guard?.allowed === true) return undefined;
-  return policyBlockedReasonText(guard, actionLabel);
+  return policyBlockedReasonText(guard, actionLabel, t);
 }
 
 function anyOperationDisabledReason(
@@ -192,14 +200,14 @@ function anyOperationDisabledReason(
   state: { isLoading: boolean; hasError: boolean },
   operations: ShipmentOperationName[],
   actionLabel: string,
+  t: Translate = englishT,
 ): string | undefined {
-  if (state.isLoading) return 'Checking shipment policy';
-  if (state.hasError || !options) return 'Shipment policy unavailable';
+  if (state.isLoading) return t('shipments.policy.checkingShipmentPolicy');
+  if (state.hasError || !options) return t('shipments.policy.shipmentPolicyUnavailable');
   if (operations.some((operation) => operationGuard(options, operation)?.allowed === true)) return undefined;
-  return policyBlockedReasonText(operationGuard(options, operations[0]), actionLabel);
+  return policyBlockedReasonText(operationGuard(options, operations[0]), actionLabel, t);
 }
 
-const ROW_ACTION_POLICY_CHECK_REASON = 'Open detail to check shipment policy first';
 
 interface ShipmentActionPaymentRow extends Record<string, unknown> {
   id: string;
@@ -283,18 +291,19 @@ export interface ShipmentDirectoryRow extends Record<string, unknown> {
   is_at_risk?: boolean;
 }
 
-const SHIPMENT_LIST_COLUMN_BLUEPRINT: Array<DataTableColumn<Shipment>> = [
-  { key: 'tracking_number', label: 'Tracking', mono: true, sortable: true, filterable: true },
-  { key: 'client_label', label: 'Client', sortable: true, filterable: true },
-  { key: 'recipient_label', label: 'Recipient', sortable: true, filterable: true },
-  { key: 'destination_city', label: 'Destination', sortable: true, filterable: true },
-  { key: 'service_type', label: 'Service', lookup: 'service_type', editable: true, sortable: true, filterable: true },
-  { key: 'status', label: 'Status', lookup: 'shipment_status', editable: true, sortable: true, filterable: true },
-  { key: 'promised_delivery_date', label: 'Promised', format: 'datetime', sortable: true, filterable: true },
-  { key: 'cod_amount', label: 'COD', type: 'number', align: 'right', format: 'currency', editable: true, sortable: true, filterable: true },
-  { key: 'box_actual_count', label: 'Boxes', type: 'number', align: 'right', sortable: true, filterable: true },
-  { key: 'active_task_count', label: 'Tasks', type: 'number', align: 'right', sortable: true, filterable: true },
-  { key: 'last_scan_at', label: 'Last scan', format: 'datetime', sortable: true, filterable: true },
+// Labels are catalog keys so the list renders in the active locale.
+const SHIPMENT_LIST_COLUMN_BLUEPRINT: Array<Omit<DataTableColumn<Shipment>, 'label'> & { labelKey: string }> = [
+  { key: 'tracking_number', labelKey: 'shipments.list.columnTracking', mono: true, sortable: true, filterable: true },
+  { key: 'client_label', labelKey: 'shipments.list.columnClient', sortable: true, filterable: true },
+  { key: 'recipient_label', labelKey: 'shipments.list.columnRecipient', sortable: true, filterable: true },
+  { key: 'destination_city', labelKey: 'shipments.list.columnDestination', sortable: true, filterable: true },
+  { key: 'service_type', labelKey: 'shipments.list.columnService', lookup: 'service_type', editable: true, sortable: true, filterable: true },
+  { key: 'status', labelKey: 'shipments.list.columnStatus', lookup: 'shipment_status', editable: true, sortable: true, filterable: true },
+  { key: 'promised_delivery_date', labelKey: 'shipments.list.columnPromised', format: 'datetime', sortable: true, filterable: true },
+  { key: 'cod_amount', labelKey: 'shipments.common.cod', type: 'number', align: 'right', format: 'currency', editable: true, sortable: true, filterable: true },
+  { key: 'box_actual_count', labelKey: 'shipments.list.columnBoxes', type: 'number', align: 'right', sortable: true, filterable: true },
+  { key: 'active_task_count', labelKey: 'shipments.list.columnTasks', type: 'number', align: 'right', sortable: true, filterable: true },
+  { key: 'last_scan_at', labelKey: 'shipments.list.columnLastScan', format: 'datetime', sortable: true, filterable: true },
 ];
 
 const RECIPIENT_LANGUAGE_LOOKUP_CATEGORY = 'language_code';
@@ -306,11 +315,13 @@ function lookupDefaultValue(category: string): string | null {
 
 export function resolveShipmentListColumns(
   registryColumns: Array<DataTableColumn<Shipment>> | undefined,
+  t: Translate = englishT,
 ): Array<DataTableColumn<Shipment>> {
   const registryByKey = new Map((registryColumns ?? []).map((column) => [column.key, column]));
-  return SHIPMENT_LIST_COLUMN_BLUEPRINT.map((column) => ({
+  return SHIPMENT_LIST_COLUMN_BLUEPRINT.map(({ labelKey, ...column }) => ({
     ...(registryByKey.get(column.key) ?? {}),
     ...column,
+    label: t(labelKey),
     hidden: false,
   }));
 }
@@ -328,21 +339,21 @@ function isPermissionDeniedError(error: unknown): boolean {
   return /42501|permission denied|requires .*permission|requires .*capability/i.test(message);
 }
 
-function operatorShipmentCreateErrorMessage(error: unknown): string {
+function operatorShipmentCreateErrorMessage(error: unknown, t: Translate = englishT): string {
   const message = error instanceof Error ? error.message : String(error ?? '');
   if (/shipment_status_not_allowed|status/i.test(message)) {
-    return 'Shipment creation is blocked by the current shipment state. Check the shipment details and try again.';
+    return t('shipments.create.shipmentCreationIsBlockedBy');
   }
   if (/address amendment failed|geocode|address/i.test(message)) {
-    return 'Address verification failed. Check the destination address and try again.';
+    return t('shipments.create.addressVerificationFailedCheckThe');
   }
   return sanitizeOperatorMessage(
     message,
-    'Shipment could not be created. Check the form and try again.',
+    t('shipments.create.shipmentCouldNotBeCreated'),
   );
 }
 
-export function compactReferenceToken(raw: unknown, label = 'Reference'): string {
+export function compactReferenceToken(raw: unknown, label?: string, t: Translate = englishT): string {
   const value = String(raw ?? '').trim();
   if (!value) return '—';
   const parts = value
@@ -351,22 +362,23 @@ export function compactReferenceToken(raw: unknown, label = 'Reference'): string
     .filter(Boolean);
   const meaningful = parts.length > 1 ? parts[parts.length - 1] : parts[0];
   const suffix = String(meaningful ?? '').replace(/[^a-z0-9]/gi, '').toUpperCase().slice(-6);
-  return `${label} #${suffix || 'UNKNOWN'}`;
+  return `${label ?? t('shipments.common.reference')} #${suffix || 'UNKNOWN'}`;
 }
 
-function compactReference(raw: unknown, label = 'Reference'): ReactNode {
-  const compact = compactReferenceToken(raw, label);
+function compactReference(raw: unknown, label?: string, t: Translate = englishT): ReactNode {
+  const resolvedLabel = label ?? t('shipments.common.reference');
+  const compact = compactReferenceToken(raw, resolvedLabel);
   if (compact === '—') return compact;
   return (
-    <span className="mono" title={`${label} reference`}>
+    <span className="mono" title={fill(t('shipments.common.referenceTitle'), { label: resolvedLabel })}>
       {compact}
     </span>
   );
 }
 
-function titleCaseKey(raw: unknown, fallback = 'Not recorded'): string {
+function titleCaseKey(raw: unknown, fallback?: string, t: Translate = englishT): string {
   const value = String(raw ?? '').trim();
-  if (!value) return fallback;
+  if (!value) return fallback ?? t('shipments.common.notRecorded');
   return value
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -374,10 +386,11 @@ function titleCaseKey(raw: unknown, fallback = 'Not recorded'): string {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function lookupDisplayValue(lookup: string, value: unknown, fallback = 'Not recorded'): string {
+function lookupDisplayValue(lookup: string, value: unknown, fallback?: string, t: Translate = englishT): string {
   const token = String(value ?? '').trim();
-  if (!token) return fallback;
-  return String(lookupRow(lookup, token)?.label ?? titleCaseKey(token, fallback));
+  const resolvedFallback = fallback ?? t('shipments.common.notRecorded');
+  if (!token) return resolvedFallback;
+  return String(lookupRow(lookup, token)?.label ?? titleCaseKey(token, resolvedFallback));
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -407,47 +420,48 @@ function firstText(...values: unknown[]): string | null {
 function workflowMutationProofRows(
   record: Record<string, unknown>,
   slotDate?: string | null,
+  t: Translate = englishT,
 ): KvRow[] {
   const operationResult = asRecord(record.operation_result) ?? {};
   const reserveResult = asRecord(operationResult.reserve_result) ?? {};
   const rows: KvRow[] = [
     {
       key: 'workflow_status',
-      label: 'Workflow status',
-      value: titleCaseKey(firstText(record.workflow_status, record.workflow_step_status), 'Not reported'),
+      label: t('shipments.workflow.workflowStatus'),
+      value: titleCaseKey(firstText(record.workflow_status, record.workflow_step_status), t('shipments.workflow.notReported')),
     },
     {
       key: 'template',
-      label: 'Workflow definition',
-      value: firstText(record.workflow_template_name) ?? (firstText(record.workflow_template, record.workflow_template_id) ? 'Ready' : 'Not reported'),
+      label: t('shipments.workflow.workflowDefinition'),
+      value: firstText(record.workflow_template_name) ?? (firstText(record.workflow_template, record.workflow_template_id) ? t('shipments.common.ready') : t('shipments.workflow.notReported')),
     },
     {
       key: 'run',
-      label: 'Workflow',
-      value: firstText(record.workflow_run_id) ? 'Started' : 'Not reported',
+      label: t('shipments.common.workflow'),
+      value: firstText(record.workflow_run_id) ? t('shipments.workflow.started') : t('shipments.workflow.notReported'),
     },
     {
       key: 'entrypoint',
-      label: 'Workflow path',
-      value: firstText(record.canonical_entrypoint, record.started_via) ? 'Confirmed' : 'Not reported',
+      label: t('shipments.workflow.workflowPath'),
+      value: firstText(record.canonical_entrypoint, record.started_via) ? t('shipments.common.confirmed') : t('shipments.workflow.notReported'),
     },
     {
       key: 'slot_date',
-      label: 'Reserved date',
-      value: firstText(operationResult.slot_date, slotDate) ?? 'Not applicable',
+      label: t('shipments.workflow.reservedDate'),
+      value: firstText(operationResult.slot_date, slotDate) ?? t('shipments.workflow.notApplicable'),
     },
     {
       key: 'shipment_action',
-      label: 'Activity',
+      label: t('shipments.common.activity'),
       value: firstText(record.shipment_action_id, operationResult.shipment_action_id, reserveResult.action_id)
-        ? 'Recorded'
-        : 'Not reported',
+        ? t('shipments.workflow.recorded')
+        : t('shipments.workflow.notReported'),
     },
   ];
-  return rows.filter((row) => row.value !== 'Not applicable');
+  return rows.filter((row) => row.value !== t('shipments.workflow.notApplicable'));
 }
 
-function previewSummaryRows(value: Record<string, unknown> | null | undefined): KvRow[] {
+function previewSummaryRows(value: Record<string, unknown> | null | undefined, t: Translate = englishT): KvRow[] {
   const record = value ?? {};
   const importantKeys = [
     'status',
@@ -468,8 +482,8 @@ function previewSummaryRows(value: Record<string, unknown> | null | undefined): 
     seen.add(key);
     rows.push({
       key,
-      label: titleCaseKey(key),
-      value: previewSummaryValue(key, record[key]),
+      label: titleCaseKey(key, undefined, t),
+      value: previewSummaryValue(key, record[key], t),
     });
   }
   for (const [key, raw] of Object.entries(record)) {
@@ -477,29 +491,33 @@ function previewSummaryRows(value: Record<string, unknown> | null | undefined): 
     if (seen.has(key)) continue;
     rows.push({
       key,
-      label: titleCaseKey(key),
-      value: previewSummaryValue(key, raw),
+      label: titleCaseKey(key, undefined, t),
+      value: previewSummaryValue(key, raw, t),
     });
   }
   return rows.length > 0
     ? rows
-    : [{ key: 'result', label: 'Result', value: 'No visible changes returned' }];
+    : [{ key: 'result', label: t('shipments.workflow.result'), value: t('shipments.workflow.noVisibleChangesReturned') }];
 }
 
-function previewSummaryValue(key: string, value: unknown): string {
-  if (value == null || value === '') return 'Not reported';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+function previewSummaryValue(key: string, value: unknown, t: Translate = englishT): string {
+  if (value == null || value === '') return t('shipments.workflow.notReported');
+  if (typeof value === 'boolean') return value ? t('common.yes') : t('common.no');
   if (typeof value === 'number') return String(value);
   if (typeof value === 'string') {
     if (/_id$/.test(key) || key.includes('resolution') || key.includes('template')) {
-      return compactReferenceToken(value, 'Reference');
+      return compactReferenceToken(value, t('shipments.common.reference'));
     }
-    return titleCaseKey(value);
+    return titleCaseKey(value, undefined, t);
   }
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+  if (Array.isArray(value)) {
+    return fill(value.length === 1 ? t('shipments.workflow.itemCountOne') : t('shipments.workflow.itemCountOther'), {
+      count: value.length,
+    });
+  }
   if (typeof value === 'object') {
     const count = Object.keys(value as Record<string, unknown>).length;
-    return `${count} detail${count === 1 ? '' : 's'}`;
+    return fill(count === 1 ? t('shipments.workflow.detailCountOne') : t('shipments.workflow.detailCountOther'), { count });
   }
   return String(value);
 }
@@ -511,9 +529,10 @@ function WorkflowMutationProof({
   record: Record<string, unknown>;
   slotDate?: string | null;
 }): ReactNode {
+  const t = useT();
   return (
     <div data-testid="shipment-workflow-proof" style={{ marginTop: 12 }}>
-      <KvGrid rows={workflowMutationProofRows(record, slotDate)} />
+      <KvGrid rows={workflowMutationProofRows(record, slotDate, t)} />
     </div>
   );
 }
@@ -647,6 +666,7 @@ function latestCodPaymentProjection(rows: ShipmentActionPaymentRow[] | undefined
 export function podEvidenceProjectionFromRow(
   row: Record<string, unknown> | undefined,
   source: ShipmentPodEvidenceProjection['source'],
+  t: Translate = englishT,
 ): ShipmentPodEvidenceProjection | null {
   if (!row) return null;
   const actionData = asRecord(row.action_data) ?? row;
@@ -712,7 +732,7 @@ export function podEvidenceProjectionFromRow(
   const evidence: ShipmentPodEvidenceProjection = {
     id: String(row.id ?? row.task_id ?? `pod-${source}`),
     source,
-    sourceLabel: source === 'shipment_action' ? 'Shipment action' : 'Task closeout',
+    sourceLabel: source === 'shipment_action' ? t('shipments.common.shipmentAction') : t('shipments.evidence.taskCloseout'),
     occurredAt: firstText(row.timestamp, row.created_at, row.completed_at, taskEventPayload?.created_at),
     completionKind: firstText(
       row.completion_kind,
@@ -819,8 +839,8 @@ export function isCompletedRouteStopEvidenceTask(row: Record<string, unknown>): 
   return ['completed', 'closed', 'resolved', 'done'].includes(status);
 }
 
-function operatorActorLabel(raw: unknown): string {
-  return String(raw ?? '').trim() ? 'Operator' : 'System';
+function operatorActorLabel(raw: unknown, t: Translate = englishT): string {
+  return String(raw ?? '').trim() ? t('shipments.common.operator') : t('shipments.common.system');
 }
 
 function basketDirectZoneLabel(row: Record<string, unknown> | undefined): string | null {
@@ -842,12 +862,12 @@ function basketZoneLabel(
   return zoneDisplayLabel(zoneById.get(zoneId));
 }
 
-function basketRelationLabel(row: Record<string, unknown> | undefined, zoneOverride?: string | null): string {
-  if (!row) return 'Basket assignment';
-  const type = titleCaseKey(row.basket_type, 'Basket');
-  const zone = firstText(zoneOverride, basketDirectZoneLabel(row)) ?? 'Unzoned';
+function basketRelationLabel(row: Record<string, unknown> | undefined, zoneOverride?: string | null, t: Translate = englishT): string {
+  if (!row) return t('shipments.baskets.basketAssignment');
+  const type = titleCaseKey(row.basket_type, t('shipments.baskets.basket'));
+  const zone = firstText(zoneOverride, basketDirectZoneLabel(row)) ?? t('shipments.baskets.unzoned');
   const current = Number(row.current_count ?? 0);
-  const capacity = row.capacity_count == null ? 'open' : String(row.capacity_count);
+  const capacity = row.capacity_count == null ? t('shipments.baskets.capacityOpen') : String(row.capacity_count);
   return `${type} · ${zone} · ${current}/${capacity}`;
 }
 
@@ -1040,12 +1060,12 @@ function shipmentLabelCount(row: Record<string, unknown> | null | undefined): nu
   return Number.isFinite(n) ? n : 0;
 }
 
-function withLabelDownloadTimeout<T>(promise: Promise<T>, timeoutMs = 15000): Promise<T> {
+function withLabelDownloadTimeout<T>(promise: Promise<T>, timeoutMs = 15000, t: Translate = englishT): Promise<T> {
   let timer: number | null = null;
   return new Promise<T>((resolve, reject) => {
     timer = window.setTimeout(() => {
       timer = null;
-      reject(new Error('Label download was not ready in time. Try again.'));
+      reject(new Error(t('shipments.labels.labelDownloadWasNotReady')));
     }, timeoutMs);
     promise.then(
       (value) => {
@@ -1107,21 +1127,21 @@ function shipmentLabelProjectionFingerprint(
   return `${labelPart}::${jobPart}::${versionPart}`;
 }
 
-function labelPrintWorkflowFailure(row: Record<string, unknown> | null | undefined): Error | null {
+function labelPrintWorkflowFailure(row: Record<string, unknown> | null | undefined, t: Translate = englishT): Error | null {
   if (!row) return null;
   const rawStatus = row.workflow_status ?? row.status ?? row.step_status ?? '';
   const status = String(rawStatus).trim().toLowerCase();
   if (!['blocked', 'cancelled', 'canceled', 'failed', 'error', 'rejected'].includes(status)) {
     return null;
   }
-  return new Error('Label print could not be completed. Check the label queue before retrying.');
+  return new Error(t('shipments.labels.printCouldNotComplete'));
 }
 
-async function readLabelPrintWorkflowFailure(workflowRunId: string | null | undefined): Promise<Error | null> {
+async function readLabelPrintWorkflowFailure(workflowRunId: string | null | undefined, t: Translate = englishT): Promise<Error | null> {
   const normalizedId = typeof workflowRunId === 'string' ? workflowRunId.trim() : '';
   if (!normalizedId) return null;
   const row = await api.ui_get_resource_v1<Record<string, unknown>>('workflow_runs', normalizedId);
-  return labelPrintWorkflowFailure(row);
+  return labelPrintWorkflowFailure(row, t);
 }
 
 function labelJobSortTime(row: ShipmentLabelJobRow): number {
@@ -1164,26 +1184,27 @@ function shipmentLabelJobWorkflowRef(row: ShipmentLabelJobRow | null | undefined
 }
 
 function RefreshRoutingButton({ shipment }: { shipment: Shipment }) {
+  const t = useT();
   const { refreshRouting, isPending } = useShipmentRoutingRefresh();
   const [routingStatus, setRoutingStatus] = useState<{ tone: 'good' | 'danger'; message: string } | null>(null);
   return (
     <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '2px' }}>
       <Button
-        label={isPending ? 'Refreshing routing' : 'Refresh routing'}
+        label={isPending ? t('shipments.routing.refreshingRouting') : t('shipments.routing.refreshRouting')}
         iconName="route"
         kind="ghost"
         capability={CAP.SHIPMENTS_WRITE}
         disabled={isPending}
-        title="Refresh routing details for this shipment"
+        title={t('shipments.routing.refreshRoutingDetailsForThis')}
         onClick={async () => {
           setRoutingStatus(null);
           try {
             await refreshRouting(shipment);
-            const message = 'Routing refresh queued';
+            const message = t('shipments.routing.routingRefreshQueued');
             setRoutingStatus({ tone: 'good', message });
             pushToast(message, 'good');
           } catch (err) {
-            const message = 'Routing refresh failed. Try again.';
+            const message = t('shipments.routing.routingRefreshFailedTryAgain');
             setRoutingStatus({ tone: 'danger', message });
             pushToast(message, 'danger');
           }
@@ -1215,6 +1236,7 @@ function ShipmentFooterReprintLabelButton({
   shipment: Shipment;
   onOpenLabels: () => void;
 }) {
+  const t = useT();
   const reprint = useReprintLabel();
   const queryClient = useQueryClient();
   const [isReprintSubmitting, setIsReprintSubmitting] = useState(false);
@@ -1248,32 +1270,32 @@ function ShipmentFooterReprintLabelButton({
     };
   }, [labelJobListOpts, labelListOpts, labelVersionListOpts, queryClient]);
   const disabledReason = labelsQuery.isLoading
-    ? 'Checking active label status'
+    ? t('shipments.common.checkingActiveLabelStatus')
     : labelsQuery.error
-      ? 'Label status unavailable'
+      ? t('shipments.footer.labelStatusUnavailable')
       : !activeLabelId
-        ? 'Active label required for reprint'
+        ? t('shipments.footer.activeLabelRequiredForReprint')
         : isReprintSubmitting
-          ? 'Reprint is already syncing'
+          ? t('shipments.common.reprintIsAlreadySyncing')
         : undefined;
 
   return (
     <Button
-      label="Reprint label"
+      label={t('shipments.common.reprintLabel')}
       iconName="refresh"
       kind="ghost"
       capability={CAP.LABELS_REPRINT}
       disabled={Boolean(disabledReason) || reprint.isPending || isReprintSubmitting}
-      title={disabledReason ?? 'Queue a label reprint and open label status'}
+      title={disabledReason ?? t('shipments.footer.queueALabelReprintAnd')}
       onClick={async () => {
         if (!activeLabelId) {
-          pushToast('No active label - cannot reprint', 'danger');
+          pushToast(t('shipments.common.noActiveLabelCannotReprint'), 'danger');
           onOpenLabels();
           return;
         }
         const reason = defaultLabelReprintReason();
         if (!reason) {
-          pushToast('No label reprint reason is configured.', 'danger');
+          pushToast(t('shipments.common.noLabelReprintReasonIs'), 'danger');
           return;
         }
         try {
@@ -1294,15 +1316,15 @@ function ShipmentFooterReprintLabelButton({
               nextProjection.versions,
             );
             if (nextFingerprint !== previousFingerprint) {
-              pushToast('Reprint queued - label status refreshed', 'good');
+              pushToast(t('shipments.footer.reprintQueuedLabelStatusRefreshed'), 'good');
               onOpenLabels();
               return;
             }
           }
-          pushToast('Reprint queued, but label refresh is still pending', 'warn');
+          pushToast(t('shipments.footer.reprintQueuedButLabelRefresh'), 'warn');
           onOpenLabels();
         } catch {
-          pushToast('Reprint request could not be started. Try again.', 'danger');
+          pushToast(t('shipments.common.reprintRequestCouldNotBe'), 'danger');
         } finally {
           setIsReprintSubmitting(false);
         }
@@ -1326,6 +1348,7 @@ function ShipmentDrawerFooter({
   onOpenCancelPreview: () => void;
   onOpenAmend: () => void;
 }) {
+  const t = useT();
   const [isResortSubmitting, setIsResortSubmitting] = useState(false);
   const operationOptionsQuery = useShipmentOperationOptions(shipment.id);
   const policyState = {
@@ -1336,30 +1359,33 @@ function ShipmentDrawerFooter({
     operationOptionsQuery.data,
     policyState,
     'reschedule',
-    'reschedule',
+    t('shipments.policy.actionReschedule'),
+    t,
   );
   const cancelDisabledReason = operationDisabledReason(
     operationOptionsQuery.data,
     policyState,
     'cancel',
-    'cancel',
+    t('shipments.policy.actionCancel'),
+    t,
   );
   const amendDisabledReason = anyOperationDisabledReason(
     operationOptionsQuery.data,
     policyState,
     ['modify', 'address'],
-    'amend',
+    t('shipments.policy.actionAmend'),
+    t,
   );
 
   return (
     <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
       <Button
-        label="Resort"
+        label={t('common.resort')}
         iconName="rotate"
         kind="ghost"
         capability={CAP.SHIPMENTS_WRITE}
         disabled={isResortSubmitting}
-        title={isResortSubmitting ? 'Resort is already syncing' : 'Reapply basket policy for this shipment'}
+        title={isResortSubmitting ? t('shipments.footer.resortIsAlreadySyncing') : t('shipments.footer.reapplyBasketPolicyForThis')}
         onClick={() => {
           setIsResortSubmitting(true);
           void onResort().finally(() => setIsResortSubmitting(false));
@@ -1367,12 +1393,12 @@ function ShipmentDrawerFooter({
       />
       <RefreshRoutingButton shipment={shipment} />
       <Button
-        label="Reschedule..."
+        label={t('shipments.footer.reschedule')}
         iconName="history"
         kind="ghost"
         capability={CAP.SHIPMENTS_WRITE}
         disabled={Boolean(rescheduleDisabledReason)}
-        title={rescheduleDisabledReason ?? 'Open delivery slot policy options'}
+        title={rescheduleDisabledReason ?? t('shipments.footer.openDeliverySlotPolicyOptions')}
         onClick={onOpenReschedule}
       />
       <ShipmentFooterReprintLabelButton
@@ -1381,21 +1407,21 @@ function ShipmentDrawerFooter({
       />
       <div style={{ flex: 1 }} />
       <Button
-        label="Preview cancel"
+        label={t('shipments.common.previewCancel')}
         iconName="close"
         kind="danger"
         capability={CAP.SHIPMENTS_WRITE}
         disabled={Boolean(cancelDisabledReason)}
-        title={cancelDisabledReason ?? 'Preview cancel through shipment policy'}
+        title={cancelDisabledReason ?? t('shipments.footer.previewCancelThroughShipmentPolicy')}
         onClick={onOpenCancelPreview}
       />
       <Button
-        label="Amend"
+        label={t('shipments.common.amend')}
         iconName="edit"
         kind="primary"
         capability={CAP.SHIPMENTS_WRITE}
         disabled={Boolean(amendDisabledReason)}
-        title={amendDisabledReason ?? 'Open allowed amendment workflow'}
+        title={amendDisabledReason ?? t('shipments.footer.openAllowedAmendmentWorkflow')}
         onClick={onOpenAmend}
       />
     </div>
@@ -1520,12 +1546,12 @@ export function ShipmentsModule() {
   // behavior matches.
   const reg = (api.getReadRegistry() as { shipments?: { columns?: Array<DataTableColumn<Shipment>> } }).shipments;
   const columns: Array<DataTableColumn<Shipment>> = useMemo(() => {
-    const resolved = resolveShipmentListColumns(reg?.columns);
+    const resolved = resolveShipmentListColumns(reg?.columns, t);
     if (canWrite) return resolved;
     return resolved.map((column) =>
       column.editable ? { ...column, editable: false } : column,
     );
-  }, [canWrite, reg]);
+  }, [canWrite, reg, t]);
 
   // Deep-link: open drawer if the URL has /operate/shipments?focus=<id|tracking>.
   useEffect(() => {
@@ -1619,6 +1645,7 @@ export function ShipmentsModule() {
     if (drawer.isOpen) drawer.close();
 
     function NewShipmentForm() {
+      const t = useT();
       // AGENTS.md §2/§3: tenant currency for new shipment COD draft
       // resolves strictly from canonical `tenant_currency.iso_code`
       // (W30/G1). NO 'SAR' literal default.
@@ -1976,69 +2003,69 @@ export function ShipmentsModule() {
         setErr('');
         setDryRunPreview(null);
         if (!formState.client_id) {
-          setErr('Client is required.');
+          setErr(t('shipments.create.clientIsRequired'));
           return;
         }
         if (!formState.sender_id) {
-          setErr(availableSenders.length === 0 ? 'No active sender is available for the selected client.' : 'Sender is required.');
+          setErr(availableSenders.length === 0 ? t('shipments.create.noActiveSenderIsAvailable') : t('shipments.create.senderIsRequired'));
           return;
         }
         if (!availableSenders.some((sender) => sender.id === formState.sender_id)) {
-          setErr('Sender must belong to the selected client.');
+          setErr(t('shipments.create.senderMustBelongToThe'));
           return;
         }
         if (!formState.recipient_id) {
           if (recipientMode !== 'new') {
-            setErr('Recipient is required.');
+            setErr(t('shipments.create.recipientIsRequired'));
             return;
           }
         }
         if (recipientMode === 'existing') {
           if (!availableRecipients.some((recipient) => recipient.id === formState.recipient_id)) {
-            setErr('Recipient must belong to the selected client.');
+            setErr(t('shipments.create.recipientMustBelongToThe'));
             return;
           }
         } else {
           if (!recipientDraft.name.trim()) {
-            setErr('Recipient name is required.');
+            setErr(t('shipments.create.recipientNameIsRequired'));
             return;
           }
           if (!recipientDraft.phone_number.trim()) {
-            setErr('Recipient phone is required.');
+            setErr(t('shipments.create.recipientPhoneIsRequired'));
             return;
           }
           if (!isE164PhoneNumber(recipientDraft.phone_number)) {
-            setErr(e164PhoneError('Recipient phone'));
+            setErr(e164PhoneError(t('shipments.create.recipientPhone')));
             return;
           }
           if (duplicateRecipient) {
-            setErr(`Recipient already exists for this client. Use existing recipient: ${duplicateRecipient.name}.`);
+            setErr(fill(t('shipments.create.recipientAlreadyExistsForThis'), { name: String(duplicateRecipient.name) }));
             return;
           }
         }
         if (!formState.service_offering_id) {
-          setErr('Service offering is required.');
+          setErr(t('shipments.create.serviceOfferingIsRequired'));
           return;
         }
         if (!formState.client_reference_number) {
-          setErr('Client reference is required.');
+          setErr(t('shipments.create.clientReferenceIsRequired'));
           return;
         }
         if (!formState.promised_delivery_date) {
-          setErr('Promised date is required.');
+          setErr(t('shipments.create.promisedDateIsRequired'));
           return;
         }
         const codAmount = codAmountText.trim() ? Number(codAmountText) : 0;
         if (!Number.isFinite(codAmount) || codAmount < 0) {
-          setErr('COD amount must be zero or greater.');
+          setErr(t('shipments.create.codAmountMustBeZero'));
           return;
         }
         if (!addressDraft.line1.trim()) {
-          setErr('Address line is required.');
+          setErr(t('shipments.create.addressLineIsRequired'));
           return;
         }
         if (!addressDraft.city.trim()) {
-          setErr('Address city is required.');
+          setErr(t('shipments.create.addressCityIsRequired'));
           return;
         }
         const latitudeText = addressDraft.latitude.trim();
@@ -2048,14 +2075,14 @@ export function ShipmentsModule() {
         const latitude = hasLatitude ? Number(latitudeText) : null;
         const longitude = hasLongitude ? Number(longitudeText) : null;
         if (hasLatitude !== hasLongitude) {
-          setErr('Latitude and longitude must be provided together.');
+          setErr(t('shipments.create.latitudeAndLongitudeMustBe'));
           return;
         }
         if (
           (hasLatitude && (!Number.isFinite(latitude) || latitude == null || latitude < -90 || latitude > 90)) ||
           (hasLongitude && (!Number.isFinite(longitude) || longitude == null || longitude < -180 || longitude > 180))
         ) {
-          setErr('Coordinates must be valid latitude and longitude values.');
+          setErr(t('shipments.create.coordinatesMustBeValidLatitude'));
           return;
         }
         const shortNationalAddress = addressDraft.sa_short_code.trim().toUpperCase();
@@ -2120,7 +2147,7 @@ export function ShipmentsModule() {
           });
           if (dryRun) {
             setDryRunPreview(result as Record<string, unknown>);
-            pushToast('Shipment, recipient, address and label preview ready.', 'info');
+            pushToast(t('shipments.create.shipmentRecipientAddressAndLabel'), 'info');
             return;
           }
           if (!result.shipment_id) {
@@ -2136,11 +2163,11 @@ export function ShipmentsModule() {
           pushToast(
             [
               reusedExistingShipment
-                ? 'Existing shipment opened'
-                : recipientMode === 'new' ? 'Recipient, shipment and address created' : 'Shipment and address created',
+                ? t('shipments.create.existingShipmentOpened')
+                : recipientMode === 'new' ? t('shipments.create.recipientShipmentAndAddressCreated') : t('shipments.create.shipmentAndAddressCreated'),
               reusedExistingShipment
-                ? createOperation === 'reused_client_reference' ? 'duplicate client reference' : 'duplicate reference'
-                : result.label_job_id ? 'label queued' : null,
+                ? createOperation === 'reused_client_reference' ? t('shipments.create.duplicateClientReference') : t('shipments.create.duplicateReference')
+                : result.label_job_id ? t('shipments.create.labelQueued') : null,
               result.tracking_number ?? formState.client_reference_number,
             ].filter(Boolean).join(' · '),
             'good',
@@ -2171,7 +2198,7 @@ export function ShipmentsModule() {
             has_destination_address: true,
             dry_run: false,
           });
-          setErr(operatorShipmentCreateErrorMessage(err));
+          setErr(operatorShipmentCreateErrorMessage(err, t));
         } finally {
           setSubmitting(false);
         }
@@ -2181,30 +2208,30 @@ export function ShipmentsModule() {
         return (
           <StateView
             kind="error"
-            title="Shipment defaults unavailable"
+            title={t('shipments.create.shipmentDefaultsUnavailable')}
             hint={(shipmentDefaultsError as Error).message}
           />
         );
       }
 
       if (!seedRows) {
-        return <StateView kind="loading" hint="Loading shipment defaults..." />;
+        return <StateView kind="loading" hint={t('shipments.create.loadingShipmentDefaults')} />;
       }
 
       return (
         <>
           <p className="state__hint">
-            Submitted through the approved shipment creation workflow.
+            {t('shipments.create.submittedThroughTheApprovedShipment')}
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '8px', alignItems: 'center', padding: '0 4px' }}>
-            <label className="mono" htmlFor="shipment-create-client">Client</label>
+            <label className="mono" htmlFor="shipment-create-client">{t('shipments.common.client')}</label>
             <select id="shipment-create-client" className="dt-inline-input" value={formState.client_id} onChange={(e) => updateClient(e.target.value)}>
               {seedRows.clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <label className="mono" htmlFor="shipment-create-sender">Sender</label>
+            <label className="mono" htmlFor="shipment-create-sender">{t('shipments.common.sender')}</label>
             <select id="shipment-create-sender" className="dt-inline-input" value={formState.sender_id} onChange={(e) => update('sender_id', e.target.value)}>
               {availableSenders.length === 0 ? (
-                <option value="" disabled>No active sender configured</option>
+                <option value="" disabled>{t('shipments.create.noActiveSenderConfigured')}</option>
               ) : (
                 availableSenders.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)
               )}
@@ -2213,7 +2240,7 @@ export function ShipmentsModule() {
               <>
                 <div />
                 <div style={{ color: 'var(--warning-ink)', fontSize: 12 }}>
-                  Reactivate or create a sender for this client before receiving shipments.
+                  {t('shipments.create.reactivateOrCreateASender')}
                 </div>
               </>
             ) : null}
@@ -2221,12 +2248,12 @@ export function ShipmentsModule() {
               className="mono"
               htmlFor={recipientMode === 'existing' ? 'shipment-create-recipient' : 'shipment-new-recipient-name'}
             >
-              Recipient
+              {t('shipments.common.recipient')}
             </label>
             <div style={{ display: 'grid', gap: '8px' }}>
-              <div role="group" aria-label="Recipient mode" style={{ display: 'flex', gap: 6 }}>
+              <div role="group" aria-label={t('shipments.create.recipientMode')} style={{ display: 'flex', gap: 6 }}>
                 <Button
-                  label="Existing"
+                  label={t('shipments.create.existing')}
                   kind={recipientMode === 'existing' ? 'primary' : 'ghost'}
                   size="sm"
                   onClick={() => {
@@ -2237,7 +2264,7 @@ export function ShipmentsModule() {
                   disabled={availableRecipients.length === 0}
                 />
                 <Button
-                  label="New recipient"
+                  label={t('shipments.create.newRecipient')}
                   kind={recipientMode === 'new' ? 'primary' : 'ghost'}
                   size="sm"
                   capability={CAP.RECIPIENTS_WRITE}
@@ -2251,12 +2278,12 @@ export function ShipmentsModule() {
               {recipientMode === 'existing' ? (
                 <div style={{ display: 'grid', gap: '6px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '72px 1fr', gap: '6px', alignItems: 'center' }}>
-                    <label className="mono" htmlFor="shipment-create-recipient-search">Find</label>
+                    <label className="mono" htmlFor="shipment-create-recipient-search">{t('shipments.create.find')}</label>
                     <input
                       id="shipment-create-recipient-search"
-                      aria-label="Find recipient"
+                      aria-label={t('shipments.create.findRecipient')}
                       className="dt-inline-input"
-                      placeholder="Name, phone, or external ID"
+                      placeholder={t('shipments.create.namePhoneOrExternalId')}
                       value={recipientSearch}
                       onChange={(e) => {
                         setErr('');
@@ -2288,9 +2315,9 @@ export function ShipmentsModule() {
                         fontSize: 12,
                       }}
                     >
-                      <span>No matching recipient for this client.</span>
+                      <span>{t('shipments.create.noMatchingRecipientForThis')}</span>
                       <Button
-                        label="Create new"
+                        label={t('shipments.create.createNew')}
                         kind="ghost"
                         size="sm"
                         capability={CAP.RECIPIENTS_WRITE}
@@ -2305,14 +2332,14 @@ export function ShipmentsModule() {
                 </div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px', alignItems: 'center' }}>
-                  <label className="mono" htmlFor="shipment-new-recipient-name">Recipient name</label>
+                  <label className="mono" htmlFor="shipment-new-recipient-name">{t('shipments.create.recipientName')}</label>
                   <input
                     id="shipment-new-recipient-name"
                     className="dt-inline-input"
                     value={recipientDraft.name}
                     onChange={(e) => updateRecipientDraft('name', e.target.value)}
                   />
-                  <label className="mono" htmlFor="shipment-new-recipient-phone">Recipient phone</label>
+                  <label className="mono" htmlFor="shipment-new-recipient-phone">{t('shipments.create.recipientPhone')}</label>
                   <input
                     id="shipment-new-recipient-phone"
                     className="dt-inline-input"
@@ -2320,21 +2347,21 @@ export function ShipmentsModule() {
                     value={recipientDraft.phone_number}
                     onChange={(e) => updateRecipientDraft('phone_number', e.target.value)}
                   />
-                  <label className="mono" htmlFor="shipment-new-recipient-email">Recipient email</label>
+                  <label className="mono" htmlFor="shipment-new-recipient-email">{t('shipments.create.recipientEmail')}</label>
                   <input
                     id="shipment-new-recipient-email"
                     className="dt-inline-input"
                     value={recipientDraft.email}
                     onChange={(e) => updateRecipientDraft('email', e.target.value)}
                   />
-                  <label className="mono" htmlFor="shipment-new-recipient-external">Recipient external ID</label>
+                  <label className="mono" htmlFor="shipment-new-recipient-external">{t('shipments.create.recipientExternalId')}</label>
                   <input
                     id="shipment-new-recipient-external"
                     className="dt-inline-input"
                     value={recipientDraft.external_id}
                     onChange={(e) => updateRecipientDraft('external_id', e.target.value)}
                   />
-                  <label className="mono" htmlFor="shipment-new-recipient-lang">Language</label>
+                  <label className="mono" htmlFor="shipment-new-recipient-lang">{t('shipments.common.language')}</label>
                   <select
                     id="shipment-new-recipient-lang"
                     className="dt-inline-input"
@@ -2345,7 +2372,7 @@ export function ShipmentsModule() {
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
                   </select>
-                  <label className="mono" htmlFor="shipment-new-recipient-channel">Channel</label>
+                  <label className="mono" htmlFor="shipment-new-recipient-channel">{t('shipments.common.channel')}</label>
                   <select
                     id="shipment-new-recipient-channel"
                     className="dt-inline-input"
@@ -2356,7 +2383,7 @@ export function ShipmentsModule() {
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
                   </select>
-                  <label className="mono" htmlFor="shipment-new-recipient-quiet-from">Quiet from</label>
+                  <label className="mono" htmlFor="shipment-new-recipient-quiet-from">{t('shipments.common.quietFrom')}</label>
                   <input
                     id="shipment-new-recipient-quiet-from"
                     className="dt-inline-input"
@@ -2365,7 +2392,7 @@ export function ShipmentsModule() {
                     value={recipientDraft.quiet_hours_start}
                     onChange={(e) => updateRecipientDraft('quiet_hours_start', e.target.value)}
                   />
-                  <label className="mono" htmlFor="shipment-new-recipient-quiet-to">Quiet to</label>
+                  <label className="mono" htmlFor="shipment-new-recipient-quiet-to">{t('shipments.common.quietTo')}</label>
                   <input
                     id="shipment-new-recipient-quiet-to"
                     className="dt-inline-input"
@@ -2376,9 +2403,9 @@ export function ShipmentsModule() {
                   />
                   {duplicateRecipient ? (
                     <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--warning-ink)', fontSize: 12 }}>
-                      <span>Existing recipient match: {duplicateRecipient.name}</span>
+                      <span>{t('shipments.create.existingRecipientMatch')} {duplicateRecipient.name}</span>
                       <Button
-                        label="Use existing"
+                        label={t('shipments.create.useExisting')}
                         kind="ghost"
                         size="sm"
                         onClick={() => selectExistingRecipient(duplicateRecipient.id)}
@@ -2388,7 +2415,7 @@ export function ShipmentsModule() {
                 </div>
               )}
             </div>
-            <label className="mono" htmlFor="shipment-create-service-offering">Service offering</label>
+            <label className="mono" htmlFor="shipment-create-service-offering">{t('shipments.create.serviceOffering')}</label>
             <select
               id="shipment-create-service-offering"
               className="dt-inline-input"
@@ -2399,8 +2426,8 @@ export function ShipmentsModule() {
               {offeringRows.length === 0 ? (
                 <option value="" disabled>
                   {offeringsQuery.isLoading
-                    ? 'Loading offerings…'
-                    : 'No active service offerings configured'}
+                    ? t('shipments.create.loadingOfferings')
+                    : t('shipments.create.noActiveServiceOfferingsConfigured')}
                 </option>
               ) : (
                 offeringRows.map((o) => {
@@ -2408,7 +2435,7 @@ export function ShipmentsModule() {
                       o.display_name
                       ?? o.metadata?.display?.name
                       ?? [o.level_name, o.branch_name].filter(Boolean).join(' · ')
-                    ) || 'Service offering display pending';
+                    ) || t('shipments.create.serviceOfferingDisplayPending');
                     const price = o.base_price ?? o.metadata?.base_price;
                     const ccy = o.currency ?? o.metadata?.currency ?? tenantCurrencyIso ?? '—';
                   return (
@@ -2419,16 +2446,16 @@ export function ShipmentsModule() {
                 })
               )}
             </select>
-            <label className="mono" htmlFor="shipment-create-client-reference">Client reference</label>
+            <label className="mono" htmlFor="shipment-create-client-reference">{t('shipments.common.clientReference')}</label>
             <input
               id="shipment-create-client-reference"
               className="dt-inline-input"
               type="text"
-              placeholder="e.g. EXAMPLEMARKET-99281"
+              placeholder={t('shipments.create.eGExamplemarket99281')}
               value={formState.client_reference_number}
               onChange={(e) => update('client_reference_number', e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-create-cod-amount">COD amount ({tenantCurrencyIso || '—'})</label>
+            <label className="mono" htmlFor="shipment-create-cod-amount">{fill(t('shipments.create.codAmountWithCurrency'), { currency: tenantCurrencyIso || '—' })}</label>
             <input
               id="shipment-create-cod-amount"
               className="dt-inline-input"
@@ -2438,7 +2465,7 @@ export function ShipmentsModule() {
               value={codAmountText}
               onChange={(e) => updateCodAmount(e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-create-promised-date">Promised date</label>
+            <label className="mono" htmlFor="shipment-create-promised-date">{t('shipments.create.promisedDate')}</label>
             <input
               id="shipment-create-promised-date"
               className="dt-inline-input"
@@ -2447,60 +2474,60 @@ export function ShipmentsModule() {
               onInput={(e) => update('promised_delivery_date', e.currentTarget.value)}
               onChange={(e) => update('promised_delivery_date', e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-create-address-line1">Address line</label>
+            <label className="mono" htmlFor="shipment-create-address-line1">{t('shipments.create.addressLine')}</label>
             <input
               id="shipment-create-address-line1"
               className="dt-inline-input"
-              placeholder="Building, street, landmark"
+              placeholder={t('shipments.create.buildingStreetLandmark')}
               value={addressDraft.line1}
               onChange={(e) => updateAddressDraft('line1', e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-create-address-line2">Address line 2</label>
+            <label className="mono" htmlFor="shipment-create-address-line2">{t('shipments.create.addressLine2')}</label>
             <input
               id="shipment-create-address-line2"
               className="dt-inline-input"
-              placeholder="Apartment, floor, suite"
+              placeholder={t('shipments.create.apartmentFloorSuite')}
               value={addressDraft.line2}
               onChange={(e) => updateAddressDraft('line2', e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-create-address-district">District</label>
+            <label className="mono" htmlFor="shipment-create-address-district">{t('shipments.common.district')}</label>
             <input
               id="shipment-create-address-district"
               className="dt-inline-input"
               value={addressDraft.district}
               onChange={(e) => updateAddressDraft('district', e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-create-address-city">City</label>
+            <label className="mono" htmlFor="shipment-create-address-city">{t('shipments.common.city')}</label>
             <input
               id="shipment-create-address-city"
               className="dt-inline-input"
               value={addressDraft.city}
               onChange={(e) => updateAddressDraft('city', e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-create-address-postal">Postal code</label>
+            <label className="mono" htmlFor="shipment-create-address-postal">{t('shipments.create.postalCode')}</label>
             <input
               id="shipment-create-address-postal"
               className="dt-inline-input"
               value={addressDraft.postal_code}
               onChange={(e) => updateAddressDraft('postal_code', e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-create-address-country">Country</label>
+            <label className="mono" htmlFor="shipment-create-address-country">{t('shipments.common.country')}</label>
             <input
               id="shipment-create-address-country"
               className="dt-inline-input"
-              placeholder="Policy default when blank"
+              placeholder={t('shipments.create.policyDefaultWhenBlank')}
               value={addressDraft.country}
               onChange={(e) => updateAddressDraft('country', e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-create-address-short-code">Saudi short national address</label>
+            <label className="mono" htmlFor="shipment-create-address-short-code">{t('shipments.create.saudiShortNationalAddress')}</label>
             <input
               id="shipment-create-address-short-code"
               className="dt-inline-input"
-              placeholder="e.g. RNQA7082"
+              placeholder={t('shipments.create.eGRnqa7082')}
               value={addressDraft.sa_short_code}
               onChange={(e) => updateAddressDraft('sa_short_code', e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-create-address-latitude">Latitude</label>
+            <label className="mono" htmlFor="shipment-create-address-latitude">{t('shipments.create.latitude')}</label>
             <input
               id="shipment-create-address-latitude"
               className="dt-inline-input"
@@ -2509,7 +2536,7 @@ export function ShipmentsModule() {
               value={addressDraft.latitude}
               onChange={(e) => updateAddressDraft('latitude', e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-create-address-longitude">Longitude</label>
+            <label className="mono" htmlFor="shipment-create-address-longitude">{t('shipments.create.longitude')}</label>
             <input
               id="shipment-create-address-longitude"
               className="dt-inline-input"
@@ -2518,14 +2545,14 @@ export function ShipmentsModule() {
               value={addressDraft.longitude}
               onChange={(e) => updateAddressDraft('longitude', e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-create-address-building">Building no.</label>
+            <label className="mono" htmlFor="shipment-create-address-building">{t('shipments.create.buildingNo')}</label>
             <input
               id="shipment-create-address-building"
               className="dt-inline-input"
               value={addressDraft.building_number}
               onChange={(e) => updateAddressDraft('building_number', e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-create-address-notes">Delivery notes</label>
+            <label className="mono" htmlFor="shipment-create-address-notes">{t('shipments.create.deliveryNotes')}</label>
             <input
               id="shipment-create-address-notes"
               className="dt-inline-input"
@@ -2548,34 +2575,34 @@ export function ShipmentsModule() {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                <strong style={{ fontSize: 12 }}>Preview</strong>
-                <Chip kind="info" label="No shipment created yet" />
+                <strong style={{ fontSize: 12 }}>{t('common.preview')}</strong>
+                <Chip kind="info" label={t('shipments.create.noShipmentCreatedYet')} />
               </div>
               <KvGrid rows={[
                 {
                   key: 'status',
-                  label: 'Status',
-                  value: String(dryRunPreview.status ?? dryRunPreview.workflow_status ?? 'previewed'),
+                  label: t('shipments.common.status'),
+                  value: String(dryRunPreview.status ?? dryRunPreview.workflow_status ?? t('shipments.create.previewedStatus')),
                 },
                 {
                   key: 'workflow_run',
-                  label: 'Workflow',
-                  value: dryRunPreview.workflow_run_id ? 'Ready' : 'Pending',
+                  label: t('shipments.common.workflow'),
+                  value: dryRunPreview.workflow_run_id ? t('shipments.common.ready') : t('shipments.common.pending'),
                 },
                 {
                   key: 'correlation',
-                  label: 'Activity',
-                  value: dryRunPreview.correlation_id ? 'Prepared' : 'Pending',
+                  label: t('shipments.common.activity'),
+                  value: dryRunPreview.correlation_id ? t('shipments.create.prepared') : t('shipments.common.pending'),
                 },
                 {
                   key: 'recipient_mode',
-                  label: 'Recipient mode',
-                  value: recipientMode === 'new' ? 'Inline new recipient' : 'Existing recipient',
+                  label: t('shipments.create.recipientMode'),
+                  value: recipientMode === 'new' ? t('shipments.create.inlineNewRecipient') : t('shipments.create.existingRecipient'),
                 },
                 {
                   key: 'label_job',
-                  label: 'Label',
-                  value: dryRunPreview.label_job_id ? 'Ready after creation' : 'Not queued in preview',
+                  label: t('shipments.create.label'),
+                  value: dryRunPreview.label_job_id ? t('shipments.create.readyAfterCreation') : t('shipments.create.notQueuedInPreview'),
                 },
               ]} />
             </div>
@@ -2588,7 +2615,7 @@ export function ShipmentsModule() {
               disabled={submitting}
             />
             <Button
-              label="Preview creation"
+              label={t('shipments.create.previewCreation')}
               kind="ghost"
               capabilities={recipientMode === 'new'
                 ? [CAP.SHIPMENTS_WRITE, CAP.RECIPIENTS_WRITE]
@@ -2597,7 +2624,7 @@ export function ShipmentsModule() {
               disabled={submitting}
             />
             <Button
-              label={submitting ? 'Creating…' : 'Create'}
+              label={submitting ? t('shipments.create.creating') : t('common.create')}
               kind="primary"
               capabilities={recipientMode === 'new'
                 ? [CAP.SHIPMENTS_WRITE, CAP.RECIPIENTS_WRITE]
@@ -2616,18 +2643,18 @@ export function ShipmentsModule() {
       );
     }
 
-    modal.open({ title: 'New shipment', body: <NewShipmentForm /> });
+    modal.open({ title: t('shipments.create.newShipment'), body: <NewShipmentForm /> });
   }
 
   function openCancelPreviewModal(s: Shipment) {
     const applyCancel = async () => {
       modal.open({
-        title: `Apply cancel ${s.tracking_number}`,
+        title: fill(t('shipments.cancel.applyCancelTrackingnumber'), { trackingNumber: String(s.tracking_number) }),
         body: (
           <StateView
             kind="loading"
-            title="Applying cancel workflow"
-            hint="Starting the workflow and refreshing the visible shipment context."
+            title={t('shipments.cancel.applyingCancelWorkflow')}
+            hint={t('shipments.common.startingTheWorkflowAndRefreshing')}
           />
         ),
       });
@@ -2644,45 +2671,45 @@ export function ShipmentsModule() {
         await refetchShipmentOperationViews(s.id);
         const record = (result ?? {}) as Record<string, unknown>;
         modal.open({
-          title: `Cancel applied ${s.tracking_number}`,
+          title: fill(t('shipments.cancel.cancelAppliedTrackingnumber'), { trackingNumber: String(s.tracking_number) }),
           body: (
             <div data-testid="shipment-cancel-apply-result">
               <p className="state__hint">
-                Cancel workflow started and the visible shipment views were refreshed.
+                {t('shipments.cancel.cancelWorkflowStartedAndThe')}
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '10px 0' }}>
-                <Chip size="xs" kind="good" label="Workflow started" />
+                <Chip size="xs" kind="good" label={t('shipments.common.workflowStarted')} />
                 {record.workflow_run_id ? (
-                  <Chip size="xs" kind="info" label="Workflow confirmed" />
+                  <Chip size="xs" kind="info" label={t('shipments.common.workflowConfirmed')} />
                 ) : null}
                 {record.canonical_entrypoint ? (
-                  <Chip size="xs" kind="info" label="Workflow path confirmed" />
+                  <Chip size="xs" kind="info" label={t('shipments.common.workflowPathConfirmed')} />
                 ) : null}
               </div>
               <WorkflowMutationProof record={record} />
             </div>
           ),
-          footer: <Button label="Close" kind="ghost" onClick={() => modal.close()} />,
+          footer: <Button label={t('shell.close')} kind="ghost" onClick={() => modal.close()} />,
         });
-        pushToast(`Cancel workflow started · ${s.tracking_number}`, 'good');
+        pushToast(fill(t('shipments.cancel.cancelWorkflowStartedTrackingnumber'), { trackingNumber: String(s.tracking_number) }), 'good');
       } catch (caught) {
-        const message = caught instanceof Error && caught.message ? caught.message : 'Cancel apply failed';
+        const message = caught instanceof Error && caught.message ? caught.message : t('shipments.cancel.cancelApplyFailed');
         modal.open({
-          title: `Apply cancel ${s.tracking_number}`,
-          body: <StateView kind="error" title="Cancel apply failed" hint={message} />,
-          footer: <Button label="Close" kind="ghost" onClick={() => modal.close()} />,
+          title: fill(t('shipments.cancel.applyCancelTrackingnumber'), { trackingNumber: String(s.tracking_number) }),
+          body: <StateView kind="error" title={t('shipments.cancel.cancelApplyFailed')} hint={message} />,
+          footer: <Button label={t('shell.close')} kind="ghost" onClick={() => modal.close()} />,
         });
-        pushToast(`Cancel apply failed - ${message}`, 'danger');
+        pushToast(fill(t('shipments.cancel.cancelApplyFailedMessage'), { message: String(message) }), 'danger');
       }
     };
 
     modal.open({
-      title: `Cancel preview ${s.tracking_number}`,
+      title: fill(t('shipments.cancel.cancelPreviewTrackingnumber'), { trackingNumber: String(s.tracking_number) }),
       body: (
         <StateView
           kind="loading"
-          title="Checking cancel policy"
-          hint="Checking policy before showing the operator result."
+          title={t('shipments.cancel.checkingCancelPolicy')}
+          hint={t('shipments.cancel.checkingPolicyBeforeShowingThe')}
         />
       ),
     });
@@ -2691,51 +2718,51 @@ export function ShipmentsModule() {
         const record = (result ?? {}) as Record<string, unknown>;
         const diff = (record.diff as Record<string, unknown> | null | undefined) ?? null;
         modal.open({
-          title: `Cancel preview ${s.tracking_number}`,
+          title: fill(t('shipments.cancel.cancelPreviewTrackingnumber'), { trackingNumber: String(s.tracking_number) }),
           body: (
             <div data-testid="shipment-cancel-preview-result">
               <p className="state__hint">
-                Policy check completed. Review the result before applying any destructive shipment change.
+                {t('shipments.cancel.policyCheckCompletedReviewThe')}
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '10px 0' }}>
-                <Chip size="xs" kind="warn" label="Preview" />
+                <Chip size="xs" kind="warn" label={t('common.preview')} />
                 <Chip
                   size="xs"
                   kind={record.settings_resolution_id ? 'info' : 'neutral'}
                   label={
                     record.settings_resolution_id
-                      ? 'Policy confirmed'
-                      : 'Policy checked'
+                      ? t('shipments.cancel.policyConfirmed')
+                      : t('shipments.cancel.policyChecked')
                   }
                 />
                 {record.workflow_template ? (
-                  <Chip size="xs" kind="info" label="Workflow ready" />
+                  <Chip size="xs" kind="info" label={t('shipments.cancel.workflowReady')} />
                 ) : null}
               </div>
               <KvGrid rows={[
                 {
                   key: 'policy',
-                  label: 'Policy check',
-                  value: record.settings_resolution_id ? 'Passed' : 'Checked',
+                  label: t('shipments.cancel.policyCheck'),
+                  value: record.settings_resolution_id ? t('shipments.cancel.passed') : t('shipments.cancel.checked'),
                 },
                 {
                   key: 'workflow',
-                  label: 'Workflow',
-                  value: record.workflow_template ? 'Ready' : 'Pending',
+                  label: t('shipments.common.workflow'),
+                  value: record.workflow_template ? t('shipments.common.ready') : t('shipments.common.pending'),
                 },
                 {
                   key: 'changes',
-                  label: 'Change summary',
-                  value: diff ? 'Changes prepared for review' : 'No visible field changes returned',
+                  label: t('shipments.cancel.changeSummary'),
+                  value: diff ? t('shipments.cancel.changesPreparedForReview') : t('shipments.cancel.noVisibleFieldChangesReturned'),
                 },
               ]} />
             </div>
           ),
           footer: (
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', width: '100%' }}>
-              <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+              <Button label={t('shell.close')} kind="ghost" onClick={() => modal.close()} />
               <Button
-                label="Apply cancel"
+                label={t('shipments.cancel.applyCancel')}
                 iconName="close"
                 kind="danger"
                 capability={CAP.SHIPMENTS_WRITE}
@@ -2744,16 +2771,16 @@ export function ShipmentsModule() {
             </div>
           ),
         });
-        pushToast('Cancel preview ready', 'warn');
+        pushToast(t('shipments.cancel.cancelPreviewReady'), 'warn');
       })
       .catch((caught) => {
-        const message = caught instanceof Error && caught.message ? caught.message : 'Cancel preview failed';
+        const message = caught instanceof Error && caught.message ? caught.message : t('shipments.cancel.cancelPreviewFailed');
         modal.open({
-          title: `Cancel preview ${s.tracking_number}`,
-          body: <StateView kind="error" title="Cancel preview failed" hint={message} />,
-          footer: <Button label="Close" kind="ghost" onClick={() => modal.close()} />,
+          title: fill(t('shipments.cancel.cancelPreviewTrackingnumber'), { trackingNumber: String(s.tracking_number) }),
+          body: <StateView kind="error" title={t('shipments.cancel.cancelPreviewFailed')} hint={message} />,
+          footer: <Button label={t('shell.close')} kind="ghost" onClick={() => modal.close()} />,
         });
-        pushToast(`Cancel preview failed - ${message}`, 'danger');
+        pushToast(fill(t('shipments.cancel.cancelPreviewFailedMessage'), { message: String(message) }), 'danger');
       });
   }
 
@@ -2777,9 +2804,9 @@ export function ShipmentsModule() {
             try {
               await resort.mutateAsync(s.id);
               await refetchShipmentOperationViews(s.id);
-              pushToast('Resort ok - basket policy reapplied', 'good');
+              pushToast(t('shipments.page.resortOkBasketPolicyReapplied'), 'good');
             } catch (err) {
-              pushToast('Resort failed. Try again.', 'danger');
+              pushToast(t('shipments.page.resortFailedTryAgain'), 'danger');
             }
           }}
           onOpenReschedule={() => openRescheduleModal(s)}
@@ -2799,6 +2826,7 @@ export function ShipmentsModule() {
     // The canonical backend remains slot-date-first: reserve_delivery_slot_v1
     // resolves the final policy window and returns the persisted readback.
     function RescheduleForm() {
+      const t = useT();
       const [slotDate, setSlotDate] = useState<string>('');
       const slotsQuery = useListDeliverySlots({ shipment_id: s.id, slot_date: slotDate });
       const reschedule = useShipmentAmendCancel();
@@ -2832,31 +2860,29 @@ export function ShipmentsModule() {
               label={
                 <span
                   className="mono"
-                  title="Resolved through the override ladder"
+                  title={t('shipments.reschedule.resolvedThroughTheOverrideLadder')}
                   data-testid="reschedule-resolved-policy"
                 >
-                  Delivery slot policy
+                  {t('shipments.reschedule.deliverySlotPolicy')}
                   {slotPolicy.data
-                    ? ` · scope: ${slotPolicy.data.resolved_from}`
-                    : ' · resolving…'}
+                    ? fill(t('shipments.reschedule.policyScope'), { scope: String(slotPolicy.data.resolved_from) })
+                    : t('shipments.reschedule.policyResolving')}
                 </span>
               }
             />
             <Chip
               size="xs"
               kind="neutral"
-              label="Delivery slot policy"
+              label={t('shipments.reschedule.deliverySlotPolicy')}
             />
             <Chip
               size="xs"
               kind="neutral"
-              label="Reservation workflow"
+              label={t('shipments.reschedule.reservationWorkflow')}
             />
           </div>
           <p className="state__hint">
-            Pick a date to start the reschedule workflow. Available windows are
-            checked for operator review; the system confirms the final reserved
-            window after apply.
+            {t('shipments.reschedule.pickADateToStart')}
           </p>
           <div
             style={{
@@ -2868,7 +2894,7 @@ export function ShipmentsModule() {
               marginTop: '10px',
             }}
           >
-            <label className="mono" htmlFor="reschedule-date">Date</label>
+            <label className="mono" htmlFor="reschedule-date">{t('shipments.reschedule.date')}</label>
             <input
               id="reschedule-date"
               data-testid="reschedule-date"
@@ -2881,15 +2907,15 @@ export function ShipmentsModule() {
             />
           </div>
           <div style={{ marginTop: '14px' }}>
-            <div className="section-eyebrow" style={{ marginBottom: '6px' }}>Available windows</div>
+            <div className="section-eyebrow" style={{ marginBottom: '6px' }}>{t('shipments.reschedule.availableWindows')}</div>
             {!slotDate ? (
-              <StateView kind="empty" hint="Pick a date to load windows." />
+              <StateView kind="empty" hint={t('shipments.reschedule.pickADateToLoad')} />
             ) : slotsQuery.isLoading ? (
-              <StateView kind="loading" hint="Loading windows…" />
+              <StateView kind="loading" hint={t('shipments.reschedule.loadingWindows')} />
             ) : slotsQuery.error ? (
               <StateView kind="error" hint={String(slotsQuery.error)} />
             ) : list.length === 0 ? (
-              <StateView kind="empty" hint="No windows available for that date." />
+              <StateView kind="empty" hint={t('shipments.reschedule.noWindowsAvailableForThat')} />
             ) : (
               <div data-testid="reschedule-window-list" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                 {list.map((slot) => {
@@ -2904,7 +2930,7 @@ export function ShipmentsModule() {
                         {slot.window_start_local}–{slot.window_end_local}
                       </span>
                       <span style={{ marginInlineStart: '6px', color: 'var(--ink-3)' }}>
-                        · {slot.remaining == null ? 'open capacity' : `${slot.remaining} spots`}
+                        · {slot.remaining == null ? t('shipments.reschedule.openCapacity') : fill(t('shipments.reschedule.remainingSpots'), { remaining: String(slot.remaining) })}
                       </span>
                     </span>
                   );
@@ -2915,7 +2941,7 @@ export function ShipmentsModule() {
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
             <Button label={t('common.cancel', 'Cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Apply reschedule"
+              label={t('shipments.reschedule.applyReschedule')}
               kind="primary"
               capability={CAP.SHIPMENTS_WRITE}
               disabled={!canApply}
@@ -2925,16 +2951,16 @@ export function ShipmentsModule() {
                   return;
                 }
                 if (slotsQuery.isLoading || slotsQuery.error || list.length === 0) {
-                  pushToast('Choose a date with an available delivery window before applying reschedule.', 'danger');
+                  pushToast(t('shipments.reschedule.chooseADateWithAn'), 'danger');
                   return;
                 }
                 modal.open({
-                  title: `Apply reschedule ${s.tracking_number}`,
+                  title: fill(t('shipments.reschedule.applyRescheduleTrackingnumber'), { trackingNumber: String(s.tracking_number) }),
                   body: (
                     <StateView
                       kind="loading"
-                      title="Applying reschedule workflow"
-                      hint="Starting the workflow and refreshing the visible shipment context."
+                      title={t('shipments.reschedule.applyingRescheduleWorkflow')}
+                      hint={t('shipments.common.startingTheWorkflowAndRefreshing')}
                     />
                   ),
                 });
@@ -2951,36 +2977,36 @@ export function ShipmentsModule() {
                   await refetchShipmentOperationViews(s.id);
                   const record = (result ?? {}) as Record<string, unknown>;
                   modal.open({
-                    title: `Reschedule applied ${s.tracking_number}`,
+                    title: fill(t('shipments.reschedule.rescheduleAppliedTrackingnumber'), { trackingNumber: String(s.tracking_number) }),
                     body: (
                       <div data-testid="shipment-reschedule-apply-result">
                         <p className="state__hint">
-                          Reschedule workflow started and the visible shipment views were refreshed.
+                          {t('shipments.reschedule.rescheduleWorkflowStartedAndThe')}
                         </p>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '10px 0' }}>
-                          <Chip size="xs" kind="good" label="Workflow started" />
-                          <Chip size="xs" kind="info" label={`Date ${slotDate}`} />
+                          <Chip size="xs" kind="good" label={t('shipments.common.workflowStarted')} />
+                          <Chip size="xs" kind="info" label={fill(t('shipments.reschedule.dateSlotdate'), { slotDate: String(slotDate) })} />
                           {record.workflow_run_id ? (
-                            <Chip size="xs" kind="info" label="Workflow confirmed" />
+                            <Chip size="xs" kind="info" label={t('shipments.common.workflowConfirmed')} />
                           ) : null}
                           {record.canonical_entrypoint ? (
-                            <Chip size="xs" kind="info" label="Workflow path confirmed" />
+                            <Chip size="xs" kind="info" label={t('shipments.common.workflowPathConfirmed')} />
                           ) : null}
                         </div>
                         <WorkflowMutationProof record={record} slotDate={slotDate} />
                       </div>
                     ),
-                    footer: <Button label="Close" kind="ghost" onClick={() => modal.close()} />,
+                    footer: <Button label={t('shell.close')} kind="ghost" onClick={() => modal.close()} />,
                   });
-                  pushToast(`Shipment reschedule workflow started for ${slotDate}`, 'good');
+                  pushToast(fill(t('shipments.reschedule.shipmentRescheduleWorkflowStartedFor'), { slotDate: String(slotDate) }), 'good');
                 } catch (caught) {
-                  const message = caught instanceof Error && caught.message ? caught.message : 'Reschedule apply failed';
+                  const message = caught instanceof Error && caught.message ? caught.message : t('shipments.reschedule.rescheduleApplyFailed');
                   modal.open({
-                    title: `Apply reschedule ${s.tracking_number}`,
-                    body: <StateView kind="error" title="Reschedule apply failed" hint={message} />,
-                    footer: <Button label="Close" kind="ghost" onClick={() => modal.close()} />,
+                    title: fill(t('shipments.reschedule.applyRescheduleTrackingnumber'), { trackingNumber: String(s.tracking_number) }),
+                    body: <StateView kind="error" title={t('shipments.reschedule.rescheduleApplyFailed')} hint={message} />,
+                    footer: <Button label={t('shell.close')} kind="ghost" onClick={() => modal.close()} />,
                   });
-                  pushToast(`Reschedule apply failed - ${message}`, 'danger');
+                  pushToast(fill(t('shipments.reschedule.rescheduleApplyFailedMessage'), { message: String(message) }), 'danger');
                 }
               }}
             />
@@ -2988,7 +3014,7 @@ export function ShipmentsModule() {
         </>
       );
     }
-    modal.open({ title: `Reschedule ${s.tracking_number}`, body: <RescheduleForm /> });
+    modal.open({ title: fill(t('shipments.reschedule.rescheduleTrackingnumber'), { trackingNumber: String(s.tracking_number) }), body: <RescheduleForm /> });
   }
 
   function openAmendShipmentModal(s: Shipment) {
@@ -3002,6 +3028,7 @@ export function ShipmentsModule() {
     }
 
     function AmendShipmentForm() {
+      const t = useT();
       const serviceOptions = (getLookups('service_type') as Array<{ value: string; label?: string }>).filter(
         (row) => row.value,
       );
@@ -3052,7 +3079,7 @@ export function ShipmentsModule() {
       async function submit(dryRun: boolean) {
         const payload = buildPayload();
         if (Object.keys(payload).length === 0) {
-          setErr('Change at least one shipment field before applying.');
+          setErr(t('shipments.amend.changeAtLeastOneShipment'));
           return;
         }
         setErr('');
@@ -3068,22 +3095,22 @@ export function ShipmentsModule() {
           });
           if (dryRun) {
             setPreview((result as Record<string, unknown>) ?? {});
-            pushToast('Shipment amend preview ready', 'info');
+            pushToast(t('shipments.amend.shipmentAmendPreviewReady'), 'info');
             return;
           }
           modal.close();
-          pushToast(`Shipment amend workflow started · ${s.tracking_number}`, 'good');
+          pushToast(fill(t('shipments.amend.shipmentAmendWorkflowStartedTrackingnumber'), { trackingNumber: String(s.tracking_number) }), 'good');
         } catch (caught) {
-          const message = caught instanceof Error && caught.message ? caught.message : 'Shipment amend failed';
+          const message = caught instanceof Error && caught.message ? caught.message : t('shipments.amend.shipmentAmendFailed');
           setErr(message);
-          pushToast(`Shipment amend failed · ${message}`, 'danger');
+          pushToast(fill(t('shipments.amend.shipmentAmendFailedMessage'), { message: String(message) }), 'danger');
         }
       }
 
       return (
         <div data-testid="shipment-amend-form">
           <p className="state__hint">
-            Apply shipment changes through the approved workflow. Customer or sender requests remain in the review queue.
+            {t('shipments.amend.applyShipmentChangesThroughThe')}
           </p>
           <div
             style={{
@@ -3095,7 +3122,7 @@ export function ShipmentsModule() {
               marginTop: '10px',
             }}
           >
-            <label className="mono" htmlFor="shipment-amend-service">Service</label>
+            <label className="mono" htmlFor="shipment-amend-service">{t('shipments.common.service')}</label>
             <select
               id="shipment-amend-service"
               className="dt-inline-input"
@@ -3103,7 +3130,7 @@ export function ShipmentsModule() {
               onChange={(e) => update('service_type', e.target.value)}
             >
               {serviceOptions.length === 0 ? (
-                <option value={draft.service_type}>{draft.service_type || 'Current service'}</option>
+                <option value={draft.service_type}>{draft.service_type || t('shipments.amend.currentService')}</option>
               ) : (
                 serviceOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -3112,21 +3139,21 @@ export function ShipmentsModule() {
                 ))
               )}
             </select>
-            <label className="mono" htmlFor="shipment-amend-client-ref">Client reference</label>
+            <label className="mono" htmlFor="shipment-amend-client-ref">{t('shipments.common.clientReference')}</label>
             <input
               id="shipment-amend-client-ref"
               className="dt-inline-input"
               value={draft.client_reference_number}
               onChange={(e) => update('client_reference_number', e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-amend-carrier-ref">Carrier reference</label>
+            <label className="mono" htmlFor="shipment-amend-carrier-ref">{t('shipments.amend.carrierReference')}</label>
             <input
               id="shipment-amend-carrier-ref"
               className="dt-inline-input"
               value={draft.carrier_reference_number}
               onChange={(e) => update('carrier_reference_number', e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-amend-cod-amount">COD amount</label>
+            <label className="mono" htmlFor="shipment-amend-cod-amount">{t('shipments.amend.codAmount')}</label>
             <input
               id="shipment-amend-cod-amount"
               className="dt-inline-input"
@@ -3134,7 +3161,7 @@ export function ShipmentsModule() {
               value={draft.cod_amount}
               onChange={(e) => update('cod_amount', e.target.value)}
             />
-            <label className="mono" htmlFor="shipment-amend-currency">Currency</label>
+            <label className="mono" htmlFor="shipment-amend-currency">{t('shipments.common.currency')}</label>
             <select
               id="shipment-amend-currency"
               className="dt-inline-input"
@@ -3142,7 +3169,7 @@ export function ShipmentsModule() {
               onChange={(e) => update('cod_currency', e.target.value)}
             >
               {currencyOptions.length === 0 ? (
-                <option value={draft.cod_currency}>{draft.cod_currency || 'Current currency'}</option>
+                <option value={draft.cod_currency}>{draft.cod_currency || t('shipments.amend.currentCurrency')}</option>
               ) : (
                 currencyOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -3151,7 +3178,7 @@ export function ShipmentsModule() {
                 ))
               )}
             </select>
-            <label className="mono" htmlFor="shipment-amend-instructions">Instructions</label>
+            <label className="mono" htmlFor="shipment-amend-instructions">{t('shipments.amend.instructions')}</label>
             <textarea
               id="shipment-amend-instructions"
               className="dt-inline-input"
@@ -3162,21 +3189,21 @@ export function ShipmentsModule() {
           </div>
           {preview ? (
             <div style={{ marginTop: 12 }}>
-              <KvGrid rows={previewSummaryRows((preview.diff ?? preview) as Record<string, unknown>)} />
+              <KvGrid rows={previewSummaryRows((preview.diff ?? preview) as Record<string, unknown>, t)} />
             </div>
           ) : null}
           {err ? <div style={{ color: 'var(--danger-ink)', fontSize: 11, padding: '8px 4px 0' }}>{err}</div> : null}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
             <Button label={t('common.cancel', 'Cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Preview amend"
+              label={t('shipments.amend.previewAmend')}
               kind="ghost"
               capability={CAP.SHIPMENTS_WRITE}
               disabled={amend.isPending}
               onClick={() => void submit(true)}
             />
             <Button
-              label="Apply amend"
+              label={t('shipments.amend.applyAmend')}
               iconName="edit"
               kind="primary"
               capability={CAP.SHIPMENTS_WRITE}
@@ -3188,7 +3215,7 @@ export function ShipmentsModule() {
       );
     }
 
-    modal.open({ title: `Amend ${s.tracking_number}`, body: <AmendShipmentForm /> });
+    modal.open({ title: fill(t('shipments.amend.amendTrackingnumber'), { trackingNumber: String(s.tracking_number) }), body: <AmendShipmentForm /> });
   }
 
   async function ensureShipmentOperationAllowed(
@@ -3204,6 +3231,7 @@ export function ShipmentsModule() {
         { isLoading: false, hasError: false },
         operations,
         actionLabel,
+        t,
       );
       if (disabledReason) {
         pushToast(disabledReason, 'danger');
@@ -3211,19 +3239,19 @@ export function ShipmentsModule() {
       }
       return true;
     } catch {
-      pushToast('Shipment policy unavailable', 'danger');
+      pushToast(t('shipments.policy.shipmentPolicyUnavailable'), 'danger');
       return false;
     }
   }
 
   async function openAmendShipmentModalWithPolicy(s: Shipment) {
-    if (await ensureShipmentOperationAllowed(s, ['modify', 'address'], 'amend')) {
+    if (await ensureShipmentOperationAllowed(s, ['modify', 'address'], t('shipments.policy.actionAmend'))) {
       openAmendShipmentModal(s);
     }
   }
 
   async function openCancelPreviewModalWithPolicy(s: Shipment) {
-    if (await ensureShipmentOperationAllowed(s, ['cancel'], 'cancel')) {
+    if (await ensureShipmentOperationAllowed(s, ['cancel'], t('shipments.policy.actionCancel'))) {
       openCancelPreviewModal(s);
     }
   }
@@ -3246,7 +3274,7 @@ export function ShipmentsModule() {
       scopeType={scope.client?.id ? 'client' : 'tenant'}
       scopeId={scope.client?.id ?? scope.tenant?.id}
     />,
-    <Chip key="reg" size="xs" label="Shipment data" />,
+    <Chip key="reg" size="xs" label={t('shipments.page.shipmentData')} />,
   ];
 
   if (!canRead) {
@@ -3254,14 +3282,14 @@ export function ShipmentsModule() {
       <div className="page">
         <PageHeader
           moduleKey="shipments"
-          eyebrow="Operate"
-          titleAccent="Shipments"
-          titlePlain="operations workbench"
+          eyebrow={t('modules.shipments.eyebrow')}
+          titleAccent={t('modules.shipments.accent')}
+          titlePlain={t('shipments.page.titlePlain')}
         />
         <StateView
           kind="denied"
           capability={CAP.SHIPMENTS_READ}
-          hint="You do not have permission to view shipments."
+          hint={t('shipments.page.youDoNotHavePermission')}
         />
       </div>
     );
@@ -3271,14 +3299,14 @@ export function ShipmentsModule() {
     <div className="page">
       <PageHeader
         moduleKey="shipments"
-        eyebrow="Operate"
-        titleAccent="Shipments"
-        titlePlain="operations workbench"
+        eyebrow={t('modules.shipments.eyebrow')}
+        titleAccent={t('modules.shipments.accent')}
+        titlePlain={t('shipments.page.titlePlain')}
         pills={pills}
         actions={[
           <Button
             key="import"
-            label="Import shipments"
+            label={t('shipments.page.importShipments')}
             iconName="upload"
             kind="ghost"
             capability={CAP.IMPORTS_WRITE}
@@ -3288,7 +3316,7 @@ export function ShipmentsModule() {
           />,
           <Button
             key="bulk"
-            label="Bulk amend / cancel"
+            label={t('shipments.page.bulkAmendCancel')}
             iconName="edit"
             kind="ghost"
             capability={CAP.SHIPMENTS_WRITE}
@@ -3298,7 +3326,7 @@ export function ShipmentsModule() {
           />,
           <Button
             key="create"
-            label="Create shipment"
+            label={t('shipments.page.createShipment')}
             iconName="plus"
             kind="primary"
             capability={CAP.SHIPMENTS_WRITE}
@@ -3312,7 +3340,7 @@ export function ShipmentsModule() {
       ) : shipmentsError ? (
         <StateView
           kind={isPermissionDeniedError(shipmentsError) ? 'denied' : 'error'}
-          title="Shipments unavailable"
+          title={t('shipments.page.shipmentsUnavailable')}
           capability={isPermissionDeniedError(shipmentsError) ? CAP.SHIPMENTS_READ : undefined}
           hint={(shipmentsError as Error).message}
         />
@@ -3348,7 +3376,7 @@ export function ShipmentsModule() {
           }
           bulkActions={[
             {
-              label: 'Bulk cancel preview',
+              label: t('shipments.page.bulkCancelPreview'),
               icon: 'close',
               kind: 'danger',
               capability: CAP.SHIPMENTS_WRITE,
@@ -3359,11 +3387,11 @@ export function ShipmentsModule() {
                   payload: {},
                   dryRun: true,
                 })) as { count?: number };
-                pushToast(`Bulk cancel preview ready - ${r.count ?? rows.length} rows`, 'warn');
+                pushToast(fill(t('shipments.page.bulkCancelPreviewReadyCount'), { count: String(r.count ?? rows.length) }), 'warn');
               },
             },
             {
-              label: 'Bulk cancel apply',
+              label: t('shipments.page.bulkCancelApply'),
               icon: 'close',
               kind: 'danger',
               capability: CAP.SHIPMENTS_WRITE,
@@ -3375,32 +3403,32 @@ export function ShipmentsModule() {
                   dryRun: false,
                 })) as { count?: number };
                 await refetchShipmentOperationViews(rows.map((rr) => rr.id));
-                pushToast(`Bulk cancel applied to ${r.count ?? rows.length} rows`, 'good');
+                pushToast(fill(t('shipments.page.bulkCancelAppliedToCount'), { count: String(r.count ?? rows.length) }), 'good');
               },
             },
             {
-              label: 'Resort',
+              label: t('common.resort'),
               icon: 'rotate',
               capability: CAP.SHIPMENTS_WRITE,
               onClick: async (rows) => {
                 try {
                   await Promise.all(rows.map((r) => resort.mutateAsync(r.id)));
                   await refetchShipmentOperationViews(rows.map((r) => r.id));
-                  pushToast(`Resorted ${rows.length} shipments`, 'good');
+                  pushToast(fill(t('shipments.page.resortedCountShipments'), { count: String(rows.length) }), 'good');
                 } catch (err) {
-                  pushToast('Resort failed. Try again.', 'danger');
+                  pushToast(t('shipments.page.resortFailedTryAgain'), 'danger');
                 }
               },
             },
             {
-              label: 'Bulk print labels',
+              label: t('shipments.page.bulkPrintLabels'),
               icon: 'file',
               kind: 'primary',
               capability: CAP.LABELS_DOWNLOAD,
               onClick: async (rows) => {
                 const selectedIds = rows.map((r) => r.id).filter(Boolean);
                 if (!selectedIds.length) {
-                  pushToast('No shipments selected for label printing', 'warn');
+                  pushToast(t('shipments.page.noShipmentsSelectedForLabel'), 'warn');
                   return;
                 }
                 const organizationIds = Array.from(
@@ -3425,11 +3453,14 @@ export function ShipmentsModule() {
                     { dryRun: false },
                   );
                   pushToast(
-                    `Print queued for ${selectedIds.length} shipment${selectedIds.length === 1 ? '' : 's'}`,
+                    fill(
+                      selectedIds.length === 1 ? t('shipments.page.bulkPrintQueuedOne') : t('shipments.page.bulkPrintQueuedOther'),
+                      { count: selectedIds.length },
+                    ),
                     'good',
                   );
                 } catch {
-                  pushToast('Bulk print request could not be started. Try again.', 'danger');
+                  pushToast(t('shipments.page.bulkPrintRequestCouldNot'), 'danger');
                 }
               },
             },
@@ -3440,7 +3471,7 @@ export function ShipmentsModule() {
             // the canonical labels resource per shipment; rows without an
             // active label are skipped (no synthetic id minting).
             {
-              label: 'Bulk reprint labels',
+              label: t('shipments.page.bulkReprintLabels'),
               icon: 'refresh',
               capability: CAP.LABELS_REPRINT,
               disabled: (rows) =>
@@ -3449,17 +3480,17 @@ export function ShipmentsModule() {
                   : rows.every((row) => !activeLabelByShipmentId.has(row.id)),
               disabledReason: (rows) => {
                 if (rows.some((row) => shipmentLabelCount(row) > 0) && shipmentLabelsReadbackQuery.isLoading) {
-                  return 'Checking active label status';
+                  return t('shipments.common.checkingActiveLabelStatus');
                 }
                 if (rows.every((row) => !activeLabelByShipmentId.has(row.id))) {
-                  return 'Select at least one shipment with an active label';
+                  return t('shipments.page.selectAtLeastOneShipment');
                 }
                 return undefined;
               },
               onClick: async (rows) => {
                 const reason = defaultLabelReprintReason();
                 if (!reason) {
-                  pushToast('No label reprint reason is configured.', 'danger');
+                  pushToast(t('shipments.common.noLabelReprintReasonIs'), 'danger');
                   return;
                 }
                 const results = await Promise.all(
@@ -3474,45 +3505,45 @@ export function ShipmentsModule() {
                 const skipped = results.length - queued;
                 if (skipped > 0) {
                   pushToast(
-                    `${queued} label reprints queued · ${skipped} skipped without an active label`,
+                    fill(t('shipments.page.queuedLabelReprintsQueuedSkipped'), { queued: String(queued), skipped: String(skipped) }),
                     queued > 0 ? 'warn' : 'danger',
                   );
                 } else {
-                  pushToast(`${queued} label reprints queued`, 'good');
+                  pushToast(fill(t('shipments.page.queuedLabelReprintsQueued'), { queued: String(queued) }), 'good');
                 }
               },
             },
           ]}
           rowActions={[
-            { label: 'Open detail', icon: 'eye', onClick: openShipmentDrawer },
+            { label: t('shipments.page.openDetail'), icon: 'eye', onClick: openShipmentDrawer },
             {
-              label: 'Amend',
+              label: t('shipments.common.amend'),
               icon: 'edit',
               kind: 'primary',
               capability: CAP.SHIPMENTS_WRITE,
               onClick: (r) => void openAmendShipmentModalWithPolicy(r),
             },
             {
-              label: 'Resort (basket policy)',
+              label: t('shipments.page.resortBasketPolicy'),
               icon: 'rotate',
               capability: CAP.SHIPMENTS_WRITE,
               disabled: true,
-              disabledReason: ROW_ACTION_POLICY_CHECK_REASON,
+              disabledReason: t('shipments.policy.openDetailFirst'),
               onClick: async (r) => {
                 await resort.mutateAsync(r.id);
                 await refetchShipmentOperationViews(r.id);
-                pushToast('Resort ok', 'good');
+                pushToast(t('shipments.page.resortOk'), 'good');
               },
             },
             {
-              label: 'View decision trail',
+              label: t('shipments.page.viewDecisionTrail'),
               icon: 'trace',
               onClick: (r) => {
                 openShipmentDrawer(r, 'decisions');
               },
             },
             {
-              label: 'Preview cancel',
+              label: t('shipments.common.previewCancel'),
               icon: 'close',
               kind: 'danger',
               capability: CAP.SHIPMENTS_WRITE,
@@ -3538,10 +3569,10 @@ export interface ShipmentContextPanelProps {
   directoryOverride?: ShipmentDirectoryRow | null;
 }
 
-export function shipmentContextTitle(shipment: Pick<Shipment, 'id'> & Partial<Shipment>): string {
+export function shipmentContextTitle(shipment: Pick<Shipment, 'id'> & Partial<Shipment>, t: Translate = englishT): string {
   const tracking = String(shipment.tracking_number ?? shipment.id ?? '').trim();
   const service = String(shipment.service_type ?? '').trim();
-  return service ? `${tracking} · ${service}` : tracking || 'Shipment context';
+  return service ? `${tracking} · ${service}` : tracking || t('shipments.drawer.shipmentContext');
 }
 
 export interface OpenShipmentContextDrawerOptions {
@@ -3554,9 +3585,10 @@ export function openShipmentContextDrawer(
   drawer: Pick<UseDrawerHandle, 'open'>,
   shipmentId: string,
   options: OpenShipmentContextDrawerOptions = {},
+  t: Translate = englishT,
 ): void {
   drawer.open({
-    title: 'Shipment context',
+    title: t('shipments.drawer.shipmentContext'),
     size: 'xl',
     deepLink: options.deepLink === false
       ? undefined
@@ -3578,7 +3610,7 @@ export function ShipmentContextPanel({
   initialTab = 'timeline',
   directoryOverride = null,
 }: ShipmentContextPanelProps) {
-  const { fmtCurrency, fmtDateTime } = useI18n();
+  const { t, fmtCurrency, fmtDateTime } = useI18n();
   const canWrite = useCapability(CAP.SHIPMENTS_WRITE);
   const amend = useShipmentAmendCancel();
   const shipmentQuery = useResource<Shipment>('shipments', shipmentId);
@@ -3597,12 +3629,12 @@ export function ShipmentContextPanel({
       return (
         <StateView
           kind="denied"
-          title="Shipment context unavailable"
-          hint="Shipment context requires shipment read permission."
+          title={t('shipments.drawer.shipmentContextUnavailable')}
+          hint={t('shipments.drawer.shipmentContextRequiresShipmentRead')}
         />
       );
     }
-    return <StateView kind="error" title="Shipment context unavailable" hint={(shipmentQuery.error as Error).message} />;
+    return <StateView kind="error" title={t('shipments.drawer.shipmentContextUnavailable')} hint={(shipmentQuery.error as Error).message} />;
   }
   const shipment =
     shipmentQuery.data ??
@@ -3613,13 +3645,13 @@ export function ShipmentContextPanel({
     return (
       <StateView
         kind="loading"
-        title="Loading shipment context"
-        hint={`Loading shipment record ${reference}.`}
+        title={t('shipments.drawer.loadingShipmentContext')}
+        hint={fill(t('shipments.drawer.loadingShipmentRecordReference'), { reference: String(reference) })}
       />
     );
   }
   if (!shipment) {
-    return <StateView kind="empty" title="Shipment not found" hint="The selected shipment is not visible in this scope." />;
+    return <StateView kind="empty" title={t('shipments.drawer.shipmentNotFound')} hint={t('shipments.drawer.theSelectedShipmentIsNot')} />;
   }
 
   // Shared shipment drawer body for every operator surface that references a
@@ -3630,86 +3662,86 @@ export function ShipmentContextPanel({
   const queuedLabelJobCount = labelJobsBadgeQuery.data?.total ?? labelJobsBadgeQuery.data?.rows?.length ?? 0;
   const labelBadgeCount = Math.max(directory?.label_count ?? 0, queuedLabelJobCount);
   const summaryRows: KvRow[] = [
-    { key: 'tracking_number', label: 'Tracking #', value: shipment.tracking_number, mono: true, editable: false },
-    { key: 'client_reference_number', label: 'Client ref', value: shipment.client_reference_number, mono: true, capability: CAP.SHIPMENTS_WRITE },
-    { key: 'carrier_reference_number', label: 'Carrier ref', value: shipment.carrier_reference_number, mono: true, capability: CAP.SHIPMENTS_WRITE },
-    { key: 'status', label: 'Status', value: shipment.status, lookup: 'shipment_status', capability: CAP.SHIPMENTS_WRITE },
-    { key: 'service_type', label: 'Service', value: shipment.service_type, lookup: 'service_type', capability: CAP.SHIPMENTS_WRITE },
+    { key: 'tracking_number', label: t('shipments.drawer.tracking'), value: shipment.tracking_number, mono: true, editable: false },
+    { key: 'client_reference_number', label: t('shipments.drawer.clientRef'), value: shipment.client_reference_number, mono: true, capability: CAP.SHIPMENTS_WRITE },
+    { key: 'carrier_reference_number', label: t('shipments.drawer.carrierRef'), value: shipment.carrier_reference_number, mono: true, capability: CAP.SHIPMENTS_WRITE },
+    { key: 'status', label: t('shipments.common.status'), value: shipment.status, lookup: 'shipment_status', capability: CAP.SHIPMENTS_WRITE },
+    { key: 'service_type', label: t('shipments.common.service'), value: shipment.service_type, lookup: 'service_type', capability: CAP.SHIPMENTS_WRITE },
     {
       key: 'cod_amount',
-      label: 'COD',
+      label: t('shipments.common.cod'),
       value: shipment.cod_amount ? fmtCurrency(shipment.cod_amount, shipment.cod_currency) : '—',
       mono: true,
       editable: false,
     },
-    { key: 'cod_currency', label: 'Currency', value: shipment.cod_currency, lookup: 'currency', editable: false },
-    { key: 'promised_delivery_date', label: 'Promised', value: fmtDateTime(shipment.promised_delivery_date ?? ''), editable: false },
-    { key: 'destination_city', label: 'Destination', value: destinationLabel, editable: false },
+    { key: 'cod_currency', label: t('shipments.common.currency'), value: shipment.cod_currency, lookup: 'currency', editable: false },
+    { key: 'promised_delivery_date', label: t('shipments.common.promised'), value: fmtDateTime(shipment.promised_delivery_date ?? ''), editable: false },
+    { key: 'destination_city', label: t('shipments.common.destination'), value: destinationLabel, editable: false },
     ...(directory?.client_label
-      ? [{ key: 'client_label', label: 'Client', value: directory.client_label, editable: false }]
+      ? [{ key: 'client_label', label: t('shipments.common.client'), value: directory.client_label, editable: false }]
       : []),
     ...(directory?.sender_label
-      ? [{ key: 'sender_label', label: 'Sender', value: directory.sender_label, editable: false }]
+      ? [{ key: 'sender_label', label: t('shipments.common.sender'), value: directory.sender_label, editable: false }]
       : []),
     ...(directory?.recipient_label
-      ? [{ key: 'recipient_label', label: 'Recipient', value: directory.recipient_label, editable: false }]
+      ? [{ key: 'recipient_label', label: t('shipments.common.recipient'), value: directory.recipient_label, editable: false }]
       : []),
   ];
 
   const tabs: RelatedTab[] = [
-    { id: 'timeline', label: 'Timeline', render: () => <TimelineTab shipmentId={shipment.id} /> },
-    { id: 'evidence', label: 'Evidence', render: () => <EvidenceTab shipment={shipment} /> },
+    { id: 'timeline', label: t('shipments.drawer.timeline'), render: () => <TimelineTab shipmentId={shipment.id} /> },
+    { id: 'evidence', label: t('shipments.drawer.evidence'), render: () => <EvidenceTab shipment={shipment} /> },
     {
       id: 'boxes',
-      label: 'Boxes',
+      label: t('shipments.common.boxes'),
       count: directory?.box_actual_count ?? shipment.box_count,
       render: () => <BoxesTab shipmentId={shipment.id} />,
     },
-    { id: 'baskets', label: 'Baskets', render: () => <BasketsTab shipmentId={shipment.id} /> },
-    { id: 'recipient', label: 'Recipient', count: 1, render: () => <RecipientTab shipment={shipment} /> },
+    { id: 'baskets', label: t('shipments.drawer.baskets'), render: () => <BasketsTab shipmentId={shipment.id} /> },
+    { id: 'recipient', label: t('shipments.common.recipient'), count: 1, render: () => <RecipientTab shipment={shipment} /> },
     {
       id: 'address',
-      label: 'Address',
+      label: t('shipments.drawer.address'),
       count: 1,
       render: () => (
-        <Suspense fallback={<StateView kind="loading" title="Loading address" />}>
+        <Suspense fallback={<StateView kind="loading" title={t('shipments.drawer.loadingAddress')} />}>
           <AddressTabLazy shipment={shipment} />
         </Suspense>
       ),
     },
-    { id: 'cod', label: 'COD', count: shipment.cod_amount ? 1 : 0, render: () => <CodTab shipment={shipment} /> },
-    { id: 'route', label: 'Route', render: () => <RouteTab shipment={shipment} /> },
+    { id: 'cod', label: t('shipments.common.cod'), count: shipment.cod_amount ? 1 : 0, render: () => <CodTab shipment={shipment} /> },
+    { id: 'route', label: t('shipments.drawer.route'), render: () => <RouteTab shipment={shipment} /> },
     {
       id: 'tasks',
-      label: 'Tasks',
+      label: t('shipments.common.tasks'),
       count: directory?.active_task_count,
       render: () => <TasksTab shipment={shipment} />,
     },
     {
       id: 'comms',
-      label: 'Comms',
+      label: t('shipments.drawer.comms'),
       count: directory?.comms_attempt_count,
       render: () => <CommsTab shipment={shipment} />,
     },
     {
       id: 'labels',
-      label: 'Labels',
+      label: t('shipments.drawer.labels'),
       count: labelBadgeCount,
       render: () => <LabelsTab shipment={shipment} />,
     },
     {
       id: 'scans',
-      label: 'Scans',
+      label: t('shipments.drawer.scans'),
       count: directory?.scan_event_count,
       render: () => <ScansTab shipment={shipment} />,
     },
-    { id: 'decisions', label: 'Decisions', render: () => <DecisionsTab shipment={shipment} /> },
-    { id: 'audit', label: 'Audit', render: () => <AuditTab shipment={shipment} /> },
+    { id: 'decisions', label: t('shipments.drawer.decisions'), render: () => <DecisionsTab shipment={shipment} /> },
+    { id: 'audit', label: t('shipments.drawer.audit'), render: () => <AuditTab shipment={shipment} /> },
   ];
 
   const summary: ReactNode = (
     <div className="rail-body" style={{ paddingBottom: 0 }}>
-      <h4 className="eyebrow">Shipment</h4>
+      <h4 className="eyebrow">{t('shipments.drawer.shipment')}</h4>
       <KvGrid
         rows={summaryRows}
         onEdit={
@@ -3728,9 +3760,9 @@ export function ShipmentContextPanel({
                   });
                   const readback = await api.ui_get_resource_v1<Shipment>('shipments', shipment.id);
                   assertShipmentSummaryReadback(readback, key, next);
-                  pushToast(`Saved · ${key}`, 'good');
+                  pushToast(fill(t('shipments.drawer.savedKey'), { key: String(key) }), 'good');
                 } catch {
-                  pushToast('Shipment summary could not be updated. Try again.', 'danger');
+                  pushToast(t('shipments.drawer.shipmentSummaryCouldNotBe'), 'danger');
                 }
               }
             : undefined
@@ -3778,7 +3810,7 @@ function TimelineTab({ shipmentId }: { shipmentId: string }) {
 }
 
 function EvidenceTab({ shipment }: { shipment: Shipment }) {
-  const { fmtCurrency, fmtDateTime } = useI18n();
+  const { t, fmtCurrency, fmtDateTime } = useI18n();
   const actionsQuery = useResourceList<Record<string, unknown>>('shipment_actions', {
     filter: { shipment_id: shipment.id },
     sort: { key: 'timestamp', dir: 'desc' },
@@ -3800,21 +3832,21 @@ function EvidenceTab({ shipment }: { shipment: Shipment }) {
       return (
         <StateView
           kind="denied"
-          title="Proof of delivery unavailable"
-          hint="Evidence reads require shipment action and task visibility."
+          title={t('shipments.evidence.proofOfDeliveryUnavailable')}
+          hint={t('shipments.evidence.evidenceReadsRequireShipmentAction')}
         />
       );
     }
-    return <StateView kind="error" title="Proof of delivery unavailable" hint={(error as Error | null)?.message} />;
+    return <StateView kind="error" title={t('shipments.evidence.proofOfDeliveryUnavailable')} hint={(error as Error | null)?.message} />;
   }
   const partialError = actionsError ?? tasksError;
 
   const evidence = [
     ...(!actionsError ? actionsQuery.data?.rows ?? [] : [])
-      .map((row) => podEvidenceProjectionFromRow(row, 'shipment_action')),
+      .map((row) => podEvidenceProjectionFromRow(row, 'shipment_action', t)),
     ...(!tasksError ? tasksQuery.data?.rows ?? [] : [])
       .filter(isCompletedRouteStopEvidenceTask)
-      .map((row) => podEvidenceProjectionFromRow(row, 'task_closeout')),
+      .map((row) => podEvidenceProjectionFromRow(row, 'task_closeout', t)),
   ]
     .filter((row): row is ShipmentPodEvidenceProjection => Boolean(row))
     .sort((a, b) => {
@@ -3826,7 +3858,7 @@ function EvidenceTab({ shipment }: { shipment: Shipment }) {
   if (!evidence.length) {
     return (
       <div className="state__hint" style={{ padding: '6px 14px' }}>
-        No proof of delivery has been captured for this shipment yet. Close the delivery stop from Dispatch to record handover, identity, artifacts, and geostamp evidence.
+        {t('shipments.evidence.noProofOfDeliveryHas')}
       </div>
     );
   }
@@ -3839,76 +3871,79 @@ function EvidenceTab({ shipment }: { shipment: Shipment }) {
       ]
         .filter(Boolean)
         .join(', ')
-    : 'Not captured';
+    : t('shipments.evidence.notCaptured');
   const identityText = latest.identityKind || latest.identityLast4
-    ? `${lookupDisplayValue('recipient_identity_kind', latest.identityKind, titleCaseKey(latest.identityKind))}${latest.identityLast4 ? ` ending ${latest.identityLast4}` : ''}`
-    : 'Not captured';
+    ? `${lookupDisplayValue('recipient_identity_kind', latest.identityKind, titleCaseKey(latest.identityKind, undefined, t))}${latest.identityLast4 ? fill(t('shipments.evidence.identityEnding'), { last4: latest.identityLast4 }) : ''}`
+    : t('shipments.evidence.notCaptured');
   const artifactSummary = latest.artifactIds.length
-    ? `${latest.artifactIds.length} artifact${latest.artifactIds.length === 1 ? '' : 's'} linked`
-    : 'No artifact bundle';
+    ? fill(
+      latest.artifactIds.length === 1 ? t('shipments.evidence.artifactsLinkedOne') : t('shipments.evidence.artifactsLinkedOther'),
+      { count: latest.artifactIds.length },
+    )
+    : t('shipments.evidence.noArtifactBundle');
   const payment = latest.paymentCollection ?? null;
   const paymentCurrency = payment?.currency ?? shipment.cod_currency ?? '';
   const paymentOutcome = payment?.outcome
-    ? lookupDisplayValue('payment_collection_outcome', payment.outcome, titleCaseKey(payment.outcome))
-    : 'Not required';
+    ? lookupDisplayValue('payment_collection_outcome', payment.outcome, titleCaseKey(payment.outcome, undefined, t))
+    : t('shipments.evidence.notRequired');
   const paymentMethod = payment?.method
-    ? lookupDisplayValue('payment_collection_method', payment.method, titleCaseKey(payment.method))
-    : 'Not recorded';
+    ? lookupDisplayValue('payment_collection_method', payment.method, titleCaseKey(payment.method, undefined, t))
+    : t('shipments.common.notRecorded');
   const paymentExpected = payment?.expectedAmount == null
-    ? 'Not recorded'
+    ? t('shipments.common.notRecorded')
     : fmtCurrency(payment.expectedAmount, paymentCurrency);
   const paymentCollected = payment?.collectedAmount == null
-    ? 'Not recorded'
+    ? t('shipments.common.notRecorded')
     : fmtCurrency(payment.collectedAmount, paymentCurrency);
   const paymentVariance = payment?.varianceAmount == null
-    ? 'Not recorded'
+    ? t('shipments.common.notRecorded')
     : fmtCurrency(payment.varianceAmount, paymentCurrency);
   const rows: KvRow[] = [
-    { key: 'handover_mode', label: 'Handover', value: lookupDisplayValue('delivery_handover_mode', latest.handoverMode, 'Not recorded'), editable: false },
-    { key: 'recipient_name', label: 'Recipient', value: latest.recipientName ?? latest.recipientClass ?? 'Not recorded', editable: false },
-    { key: 'identity', label: 'Identity proof', value: identityText, editable: false },
-    { key: 'otp', label: 'OTP', value: latest.otpLast4 ? `Confirmed ending ${latest.otpLast4}` : latest.otpConfirmed ? 'Confirmed' : 'Not captured', editable: false },
-    { key: 'signature', label: 'Recipient signature', value: latest.signatureArtifactId ? compactReference(latest.signatureArtifactId, 'Artifact') : 'Not linked', editable: false },
-    { key: 'photo', label: 'Proof photo', value: latest.photoArtifactId ? compactReference(latest.photoArtifactId, 'Artifact') : 'Not linked', editable: false },
-    { key: 'artifact_bundle', label: 'Artifact bundle', value: artifactSummary, editable: false },
-    { key: 'payment_outcome', label: 'Payment outcome', value: paymentOutcome, editable: false },
-    { key: 'payment_method', label: 'Payment method', value: paymentMethod, editable: false },
-    { key: 'payment_expected', label: 'COD expected', value: paymentExpected, mono: payment?.expectedAmount != null, editable: false },
-    { key: 'payment_collected', label: 'COD collected', value: paymentCollected, mono: payment?.collectedAmount != null, editable: false },
-    { key: 'payment_variance', label: 'COD variance', value: paymentVariance, mono: payment?.varianceAmount != null, editable: false },
-    { key: 'payment_discrepancy', label: 'COD discrepancy', value: payment?.discrepancyKind ? titleCaseKey(payment.discrepancyKind) : 'Not recorded', editable: false },
-    { key: 'payment_receipt', label: 'Receipt context', value: payment?.receiptContext ?? 'Not recorded', editable: false },
-    { key: 'geostamp', label: 'Geostamp', value: geostampText, mono: geostampText !== 'Not captured', editable: false },
-    { key: 'route_stop_id', label: 'Route stop', value: latest.routeStopId ? compactReference(latest.routeStopId, 'Stop') : 'Not linked', mono: Boolean(latest.routeStopId), editable: false },
-    { key: 'captured_at', label: 'Captured', value: latest.capturedAt ? fmtDateTime(latest.capturedAt) : 'Not captured', editable: false },
-    { key: 'source', label: 'Source', value: latest.sourceLabel, editable: false },
+    { key: 'handover_mode', label: t('shipments.evidence.handover'), value: lookupDisplayValue('delivery_handover_mode', latest.handoverMode, t('shipments.common.notRecorded')), editable: false },
+    { key: 'recipient_name', label: t('shipments.common.recipient'), value: latest.recipientName ?? latest.recipientClass ?? t('shipments.common.notRecorded'), editable: false },
+    { key: 'identity', label: t('shipments.evidence.identityProof'), value: identityText, editable: false },
+    { key: 'otp', label: t('shipments.evidence.otp'), value: latest.otpLast4 ? fill(t('shipments.evidence.confirmedEndingOtplast4'), { otpLast4: String(latest.otpLast4) }) : latest.otpConfirmed ? t('shipments.common.confirmed') : t('shipments.evidence.notCaptured'), editable: false },
+    { key: 'signature', label: t('shipments.evidence.recipientSignature'), value: latest.signatureArtifactId ? compactReference(latest.signatureArtifactId, t('shipments.evidence.artifact'), t) : t('shipments.evidence.notLinked'), editable: false },
+    { key: 'photo', label: t('shipments.evidence.proofPhoto'), value: latest.photoArtifactId ? compactReference(latest.photoArtifactId, t('shipments.evidence.artifact'), t) : t('shipments.evidence.notLinked'), editable: false },
+    { key: 'artifact_bundle', label: t('shipments.evidence.artifactBundle'), value: artifactSummary, editable: false },
+    { key: 'payment_outcome', label: t('shipments.evidence.paymentOutcome'), value: paymentOutcome, editable: false },
+    { key: 'payment_method', label: t('shipments.evidence.paymentMethod'), value: paymentMethod, editable: false },
+    { key: 'payment_expected', label: t('shipments.evidence.codExpected'), value: paymentExpected, mono: payment?.expectedAmount != null, editable: false },
+    { key: 'payment_collected', label: t('shipments.evidence.codCollected'), value: paymentCollected, mono: payment?.collectedAmount != null, editable: false },
+    { key: 'payment_variance', label: t('shipments.evidence.codVariance'), value: paymentVariance, mono: payment?.varianceAmount != null, editable: false },
+    { key: 'payment_discrepancy', label: t('shipments.evidence.codDiscrepancy'), value: payment?.discrepancyKind ? titleCaseKey(payment.discrepancyKind, undefined, t) : t('shipments.common.notRecorded'), editable: false },
+    { key: 'payment_receipt', label: t('shipments.evidence.receiptContext'), value: payment?.receiptContext ?? t('shipments.common.notRecorded'), editable: false },
+    { key: 'geostamp', label: t('shipments.evidence.geostamp'), value: geostampText, mono: geostampText !== t('shipments.evidence.notCaptured'), editable: false },
+    { key: 'route_stop_id', label: t('shipments.evidence.routeStop'), value: latest.routeStopId ? compactReference(latest.routeStopId, t('shipments.evidence.stop'), t) : t('shipments.evidence.notLinked'), mono: Boolean(latest.routeStopId), editable: false },
+    { key: 'captured_at', label: t('shipments.evidence.captured'), value: latest.capturedAt ? fmtDateTime(latest.capturedAt) : t('shipments.evidence.notCaptured'), editable: false },
+    { key: 'source', label: t('shipments.common.source'), value: latest.sourceLabel, editable: false },
   ];
 
   return (
     <div className="rail-body" style={{ paddingTop: 0 }} data-testid="shipment-evidence-tab">
-      <h4 className="eyebrow">Proof of delivery</h4>
+      <h4 className="eyebrow">{t('shipments.evidence.proofOfDelivery')}</h4>
       {partialError ? (
         <div className="state__hint" data-testid="shipment-evidence-partial-read" style={{ padding: '0 14px 8px' }}>
           {isPermissionDeniedError(partialError)
-            ? 'Some evidence streams are hidden by permission, but available proof is still shown.'
-            : `Some evidence streams are unavailable: ${(partialError as Error).message}`}
+            ? t('shipments.evidence.someEvidenceStreamsAreHidden')
+            : fill(t('shipments.evidence.someEvidenceStreamsAreUnavailable'), { message: String((partialError as Error).message) })}
         </div>
       ) : null}
       <KvGrid rows={rows} />
       {latest.artifactIds.length ? (
         <div data-testid="shipment-evidence-artifacts" style={{ padding: '6px 14px 10px', display: 'grid', gap: 6 }}>
-          <h4 className="eyebrow" style={{ margin: 0 }}>Artifacts</h4>
+          <h4 className="eyebrow" style={{ margin: 0 }}>{t('shipments.evidence.artifacts')}</h4>
           {latest.artifactIds.map((artifactId) => (
             <div key={artifactId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <span className="mono">{compactReference(artifactId, 'Artifact')}</span>
+              <span className="mono">{compactReference(artifactId, t('shipments.evidence.artifact'), t)}</span>
               <Button
-                label="Copy ID"
+                label={t('shipments.evidence.copyId')}
                 iconName="copy"
                 kind="ghost"
                 size="sm"
                 onClick={async () => {
                   await navigator.clipboard?.writeText(artifactId);
-                  pushToast('Artifact ID copied', 'good');
+                  pushToast(t('shipments.evidence.artifactIdCopied'), 'good');
                 }}
               />
             </div>
@@ -3922,28 +3957,29 @@ function EvidenceTab({ shipment }: { shipment: Shipment }) {
       ) : null}
       <DataTable
         columns={[
-          { key: 'captured', label: 'Captured' },
-          { key: 'handover', label: 'Handover' },
-          { key: 'recipient', label: 'Recipient' },
-          { key: 'artifacts', label: 'Artifacts' },
-          { key: 'source', label: 'Source' },
+          { key: 'captured', label: t('shipments.evidence.captured') },
+          { key: 'handover', label: t('shipments.evidence.handover') },
+          { key: 'recipient', label: t('shipments.common.recipient') },
+          { key: 'artifacts', label: t('shipments.evidence.artifacts') },
+          { key: 'source', label: t('shipments.common.source') },
         ]}
         rows={evidence.map((item) => ({
           id: item.id,
-          captured: item.capturedAt ? fmtDateTime(item.capturedAt) : item.occurredAt ? fmtDateTime(item.occurredAt) : 'Not captured',
-          handover: lookupDisplayValue('delivery_handover_mode', item.handoverMode, 'Not recorded'),
-          recipient: item.recipientName ?? item.recipientClass ?? 'Not recorded',
-          artifacts: item.artifactIds.length ? String(item.artifactIds.length) : 'None',
+          captured: item.capturedAt ? fmtDateTime(item.capturedAt) : item.occurredAt ? fmtDateTime(item.occurredAt) : t('shipments.evidence.notCaptured'),
+          handover: lookupDisplayValue('delivery_handover_mode', item.handoverMode, t('shipments.common.notRecorded')),
+          recipient: item.recipientName ?? item.recipientClass ?? t('shipments.common.notRecorded'),
+          artifacts: item.artifactIds.length ? String(item.artifactIds.length) : t('common.none'),
           source: item.sourceLabel,
         }))}
         allowSelection={false}
-        emptyText="No proof evidence rows found."
+        emptyText={t('shipments.evidence.noProofEvidenceRowsFound')}
       />
     </div>
   );
 }
 
 function BoxesTab({ shipmentId }: { shipmentId: string }) {
+  const t = useT();
   // CLAIM-OPERATIONS-WIRING (Phase C1) — read seam moved from `api.seed.*` to
   // canonical resource registry (`ui_list_resource_v1('shipment_boxes')`).
   // Production swap: same call site reads from public.shipment_boxes via
@@ -3966,19 +4002,19 @@ function BoxesTab({ shipmentId }: { shipmentId: string }) {
     <DataTable
       columns={[
         { key: 'box_number', label: '#', sortable: true },
-        { key: 'barcode', label: 'Barcode', mono: true, sortable: true, filterable: true },
-        { key: 'weight_kg', label: 'Weight (kg)', align: 'right', type: 'number' },
-        { key: 'fragile', label: 'Fragile', type: 'boolean' },
+        { key: 'barcode', label: t('shipments.common.barcode'), mono: true, sortable: true, filterable: true },
+        { key: 'weight_kg', label: t('shipments.boxes.weightKg'), align: 'right', type: 'number' },
+        { key: 'fragile', label: t('shipments.boxes.fragile'), type: 'boolean' },
       ]}
       rows={boxes}
       allowSelection={false}
-      emptyText="No boxes recorded for this shipment."
+      emptyText={t('shipments.boxes.noBoxesRecordedForThis')}
     />
   );
 }
 
 function BasketsTab({ shipmentId }: { shipmentId: string }) {
-  const { fmtDateTime } = useI18n();
+  const { t, fmtDateTime } = useI18n();
   const [selectedBasketId, setSelectedBasketId] = useState<string | null>(null);
   const itemsQuery = useResourceList<Record<string, unknown>>('basket_items', {
     filter: { shipment_id: shipmentId },
@@ -4038,16 +4074,16 @@ function BasketsTab({ shipmentId }: { shipmentId: string }) {
       return (
         <StateView
           kind="denied"
-          title="Basket assignments unavailable"
-          hint="Basket relationship reads require basket and zone access permission."
+          title={t('shipments.baskets.basketAssignmentsUnavailable')}
+          hint={t('shipments.baskets.basketRelationshipReadsRequireBasket')}
         />
       );
     }
-    return <StateView kind="error" title="Basket assignments unavailable" hint={(error as Error).message} />;
+    return <StateView kind="error" title={t('shipments.baskets.basketAssignmentsUnavailable')} hint={(error as Error).message} />;
   }
 
   if (!items.length) {
-    return <div className="state__hint">No basket assignment recorded for this shipment.</div>;
+    return <div className="state__hint">{t('shipments.baskets.noBasketAssignmentRecordedFor')}</div>;
   }
 
   const basketById = new Map(basketRows.map((basket) => [String(basket.id), basket]));
@@ -4057,10 +4093,10 @@ function BasketsTab({ shipmentId }: { shipmentId: string }) {
     const zoneLabel = basketZoneLabel(basket, zoneById);
     return {
       ...item,
-      basket_label: basketRelationLabel(basket, zoneLabel),
+      basket_label: basketRelationLabel(basket, zoneLabel, t),
       basket_type: basket?.basket_type,
       state: basket?.state,
-      zone_label: zoneLabel ?? 'Zone not linked',
+      zone_label: zoneLabel ?? t('shipments.baskets.zoneNotLinked'),
       current_count: basket?.current_count,
       capacity_count: basket?.capacity_count,
       expires_at: basket?.expires_at,
@@ -4073,27 +4109,27 @@ function BasketsTab({ shipmentId }: { shipmentId: string }) {
   const selectedBasket = basketById.get(String(selectedRow?.basket_id ?? ''));
   const relationshipRows: KvRow[] = selectedRow
     ? [
-        { key: 'basket_label', label: 'Basket', value: selectedRow.basket_label },
-        { key: 'basket_type', label: 'Type', value: selectedRow.basket_type, lookup: 'basket_type' },
-        { key: 'state', label: 'State', value: selectedRow.state, lookup: 'basket_state' },
-        { key: 'zone_label', label: 'Zone', value: selectedRow.zone_label },
+        { key: 'basket_label', label: t('shipments.baskets.basket'), value: selectedRow.basket_label },
+        { key: 'basket_type', label: t('shipments.common.type'), value: selectedRow.basket_type, lookup: 'basket_type' },
+        { key: 'state', label: t('shipments.baskets.state'), value: selectedRow.state, lookup: 'basket_state' },
+        { key: 'zone_label', label: t('shipments.baskets.zone'), value: selectedRow.zone_label },
         {
           key: 'capacity',
-          label: 'Capacity',
-          value: `${selectedRow.current_count ?? 0}/${selectedRow.capacity_count ?? 'not set'}`,
+          label: t('shipments.baskets.capacity'),
+          value: `${selectedRow.current_count ?? 0}/${selectedRow.capacity_count ?? t('shipments.baskets.capacityNotSet')}`,
           mono: true,
         },
         {
           key: 'relationship_status',
-          label: 'Relationship',
-          value: selectedRow.removed_at ? 'Removed from basket' : 'Active assignment',
+          label: t('shipments.baskets.relationship'),
+          value: selectedRow.removed_at ? t('shipments.baskets.removedFromBasket') : t('shipments.baskets.activeAssignment'),
         },
-        { key: 'added_at', label: 'Added', value: fmtDateTime(String(selectedRow.added_at ?? '')) },
-        { key: 'removed_at', label: 'Removed', value: selectedRow.removed_at ? fmtDateTime(String(selectedRow.removed_at)) : 'Active' },
+        { key: 'added_at', label: t('shipments.baskets.added'), value: fmtDateTime(String(selectedRow.added_at ?? '')) },
+        { key: 'removed_at', label: t('shipments.baskets.removed'), value: selectedRow.removed_at ? fmtDateTime(String(selectedRow.removed_at)) : t('shipments.baskets.active') },
         {
           key: 'expires_at',
-          label: 'Expires',
-          value: selectedBasket?.expires_at ? fmtDateTime(String(selectedBasket.expires_at)) : 'No expiry recorded',
+          label: t('shipments.baskets.expires'),
+          value: selectedBasket?.expires_at ? fmtDateTime(String(selectedBasket.expires_at)) : t('shipments.baskets.noExpiryRecorded'),
         },
       ]
     : [];
@@ -4103,9 +4139,9 @@ function BasketsTab({ shipmentId }: { shipmentId: string }) {
       ...transition,
       basket_label: (() => {
         const basket = basketById.get(String(transition.basket_id ?? ''));
-        return basketRelationLabel(basket, basketZoneLabel(basket, zoneById));
+        return basketRelationLabel(basket, basketZoneLabel(basket, zoneById), t);
       })(),
-      actor_label: operatorActorLabel(transition.changed_by),
+      actor_label: operatorActorLabel(transition.changed_by, t),
     }))
     .sort((a, b) => String(b['changed_at'] ?? '').localeCompare(String(a['changed_at'] ?? '')));
 
@@ -4113,19 +4149,19 @@ function BasketsTab({ shipmentId }: { shipmentId: string }) {
     <div style={{ display: 'grid', gap: 12 }}>
       <DataTable
         columns={[
-          { key: 'basket_label', label: 'Basket', sortable: true, filterable: true },
-          { key: 'basket_type', label: 'Type', lookup: 'basket_type', sortable: true, filterable: true },
-          { key: 'state', label: 'State', lookup: 'basket_state', sortable: true, filterable: true },
-          { key: 'zone_label', label: 'Zone', sortable: true, filterable: true },
-          { key: 'current_count', label: 'Count', type: 'number', align: 'right' },
-          { key: 'capacity_count', label: 'Capacity', type: 'number', align: 'right' },
-          { key: 'added_at', label: 'Added', format: 'datetime', sortable: true },
-          { key: 'removed_at', label: 'Removed', format: 'datetime', sortable: true },
-          { key: 'expires_at', label: 'Expires', format: 'datetime', sortable: true },
+          { key: 'basket_label', label: t('shipments.baskets.basket'), sortable: true, filterable: true },
+          { key: 'basket_type', label: t('shipments.common.type'), lookup: 'basket_type', sortable: true, filterable: true },
+          { key: 'state', label: t('shipments.baskets.state'), lookup: 'basket_state', sortable: true, filterable: true },
+          { key: 'zone_label', label: t('shipments.baskets.zone'), sortable: true, filterable: true },
+          { key: 'current_count', label: t('shipments.baskets.count'), type: 'number', align: 'right' },
+          { key: 'capacity_count', label: t('shipments.baskets.capacity'), type: 'number', align: 'right' },
+          { key: 'added_at', label: t('shipments.baskets.added'), format: 'datetime', sortable: true },
+          { key: 'removed_at', label: t('shipments.baskets.removed'), format: 'datetime', sortable: true },
+          { key: 'expires_at', label: t('shipments.baskets.expires'), format: 'datetime', sortable: true },
         ]}
         rows={rows}
         allowSelection={false}
-        emptyText="No basket assignment recorded for this shipment."
+        emptyText={t('shipments.baskets.noBasketAssignmentRecordedFor')}
         onRowClick={(row) => {
           const basketId = String(row.basket_id ?? '');
           if (basketId) setSelectedBasketId(basketId);
@@ -4133,7 +4169,7 @@ function BasketsTab({ shipmentId }: { shipmentId: string }) {
         getRowClass={(row) => (String(row.basket_id ?? '') === activeBasketId ? 'is-active' : undefined)}
         rowActions={[
           {
-            label: 'Inspect basket relationship',
+            label: t('shipments.baskets.inspectBasketRelationship'),
             icon: 'layers',
             onClick: (row) => {
               const basketId = String(row.basket_id ?? '');
@@ -4144,28 +4180,28 @@ function BasketsTab({ shipmentId }: { shipmentId: string }) {
       />
       {relationshipRows.length ? (
         <div className="insight-card">
-          <div className="insight-card__title">Basket relationship detail</div>
+          <div className="insight-card__title">{t('shipments.baskets.basketRelationshipDetail')}</div>
           <KvGrid rows={relationshipRows} />
         </div>
       ) : null}
       <div className="insight-card">
-        <div className="insight-card__title">Basket activity for this shipment</div>
+        <div className="insight-card__title">{t('shipments.baskets.basketActivityForThisShipment')}</div>
         {transitions.length ? (
           <DataTable
             columns={[
-              { key: 'basket_label', label: 'Basket' },
-              { key: 'previous_state', label: 'From', lookup: 'basket_state' },
-              { key: 'new_state', label: 'To', lookup: 'basket_state' },
-              { key: 'changed_at', label: 'Changed', format: 'datetime' },
-              { key: 'actor_label', label: 'Changed by' },
-              { key: 'notes', label: 'Notes' },
+              { key: 'basket_label', label: t('shipments.baskets.basket') },
+              { key: 'previous_state', label: t('shipments.baskets.from'), lookup: 'basket_state' },
+              { key: 'new_state', label: t('shipments.baskets.to'), lookup: 'basket_state' },
+              { key: 'changed_at', label: t('shipments.baskets.changed'), format: 'datetime' },
+              { key: 'actor_label', label: t('shipments.baskets.changedBy') },
+              { key: 'notes', label: t('shipments.common.notes') },
             ]}
             rows={transitions}
             allowSelection={false}
-            emptyText="No basket state transitions recorded."
+            emptyText={t('shipments.baskets.noBasketStateTransitionsRecorded')}
           />
         ) : (
-          <div className="state__hint">No basket state transitions recorded.</div>
+          <div className="state__hint">{t('shipments.baskets.noBasketStateTransitionsRecorded')}</div>
         )}
       </div>
     </div>
@@ -4173,6 +4209,7 @@ function BasketsTab({ shipmentId }: { shipmentId: string }) {
 }
 
 function RecipientTab({ shipment }: { shipment: Shipment }) {
+  const t = useT();
   const recipientId = (shipment as { recipient_id?: string }).recipient_id;
   // Keep recipient edits inside the shipment drawer for operator flow, but write
   // to the customer SSOT through recipient_update_v1. Shipment modify only owns
@@ -4197,22 +4234,22 @@ function RecipientTab({ shipment }: { shipment: Shipment }) {
     return (
       <StateView
         kind="error"
-        title="Recipient unavailable"
+        title={t('shipments.recipient.recipientUnavailable')}
         hint={(recipientsQuery.error as Error).message}
       />
     );
   }
   if (recipient === undefined) return <StateView kind="loading" />;
-  if (!recipient) return <div className="state__hint">No recipient on this shipment.</div>;
+  if (!recipient) return <div className="state__hint">{t('shipments.recipient.noRecipientOnThisShipment')}</div>;
   const rows: KvRow[] = [
-    { key: 'name', label: 'Name', value: recipient.name, editable: true },
-    { key: 'phone_number', label: 'Phone', value: recipient.phone_number, mono: true, editable: true },
-    { key: 'email', label: 'Email', value: recipient.email, mono: true, editable: true },
-    { key: 'external_id', label: 'External ID', value: recipient.external_id, mono: true, editable: true },
-    { key: 'preferred_language', label: 'Language', value: recipient.preferred_language, editable: true },
-    { key: 'preferred_comm_channel', label: 'Channel', value: recipient.preferred_comm_channel, editable: true },
-    { key: 'quiet_hours_start', label: 'Quiet from', value: recipient.quiet_hours_start, mono: true, editable: true },
-    { key: 'quiet_hours_end', label: 'Quiet to', value: recipient.quiet_hours_end, mono: true, editable: true },
+    { key: 'name', label: t('shipments.recipient.name'), value: recipient.name, editable: true },
+    { key: 'phone_number', label: t('shipments.recipient.phone'), value: recipient.phone_number, mono: true, editable: true },
+    { key: 'email', label: t('shipments.recipient.email'), value: recipient.email, mono: true, editable: true },
+    { key: 'external_id', label: t('shipments.recipient.externalId'), value: recipient.external_id, mono: true, editable: true },
+    { key: 'preferred_language', label: t('shipments.common.language'), value: recipient.preferred_language, editable: true },
+    { key: 'preferred_comm_channel', label: t('shipments.common.channel'), value: recipient.preferred_comm_channel, editable: true },
+    { key: 'quiet_hours_start', label: t('shipments.common.quietFrom'), value: recipient.quiet_hours_start, mono: true, editable: true },
+    { key: 'quiet_hours_end', label: t('shipments.common.quietTo'), value: recipient.quiet_hours_end, mono: true, editable: true },
   ];
   return (
     <KvGrid
@@ -4229,9 +4266,9 @@ function RecipientTab({ shipment }: { shipment: Shipment }) {
                     shipment_id: shipment.id,
                   },
                 });
-                pushToast(`Recipient ${key} updated`, 'good');
+                pushToast(fill(t('shipments.recipient.recipientKeyUpdated'), { key: String(key) }), 'good');
               } catch {
-                pushToast('Recipient details could not be updated. Try again.', 'danger');
+                pushToast(t('shipments.recipient.recipientDetailsCouldNotBe'), 'danger');
               }
             }
           : undefined
@@ -4241,7 +4278,7 @@ function RecipientTab({ shipment }: { shipment: Shipment }) {
 }
 
 function CodTab({ shipment }: { shipment: Shipment }) {
-  const { fmtCurrency } = useI18n();
+  const { t, fmtCurrency } = useI18n();
   // W13-5 — closes OPERATIONS D3 §3 (CodTab.onEdit orphan-toast). Wires COD
   // amount/currency edits through `shipment_amend_cancel_v1(op='modify')`.
   // `cod_method` and `expected_at_stop` are display-only (synthetic column,
@@ -4258,35 +4295,35 @@ function CodTab({ shipment }: { shipment: Shipment }) {
     () => latestCodPaymentProjection(actionsQuery.data?.rows),
     [actionsQuery.data?.rows],
   );
-  if (!shipment.cod_amount) return <div className="state__hint">No COD on this shipment.</div>;
+  if (!shipment.cod_amount) return <div className="state__hint">{t('shipments.cod.noCodOnThisShipment')}</div>;
   const paymentMethod = lookupDisplayValue(
     'payment_collection_method',
     latestPayment?.method ?? shipment.payment_collection_method ?? shipment.cod_method,
-    'Pending collection proof',
+    t('shipments.cod.pendingCollectionProof'),
   );
   const collectionStatus = lookupDisplayValue(
     'payment_collection_outcome',
     latestPayment?.outcome ?? shipment.payment_collection_outcome ?? shipment.payment_collection_status,
-    'Pending stop closeout',
+    t('shipments.cod.pendingStopCloseout'),
   );
   const paymentCurrency = latestPayment?.currency ?? shipment.cod_currency;
   const collectedValue = latestPayment?.collectedAmount == null
-    ? 'Pending closeout'
+    ? t('shipments.cod.pendingCloseout')
     : fmtCurrency(latestPayment.collectedAmount, paymentCurrency);
   const varianceValue = latestPayment?.varianceAmount == null
-    ? 'Pending cashier count'
+    ? t('shipments.cod.pendingCashierCount')
     : fmtCurrency(latestPayment.varianceAmount, paymentCurrency);
   const closeoutTime = latestPayment?.occurredAt
     ?? shipment.payment_collection_expected_at
-    ?? 'Resolved when the delivery stop is closed';
+    ?? t('shipments.cod.resolvedWhenTheDeliveryStop');
   const rows: KvRow[] = [
-    { key: 'cod_amount', label: 'Amount', value: fmtCurrency(shipment.cod_amount, shipment.cod_currency), mono: true, editable: true },
-    { key: 'cod_currency', label: 'Currency', value: shipment.cod_currency, lookup: 'currency', editable: false },
-    { key: 'cod_method', label: 'Collection method', value: paymentMethod, editable: false },
-    { key: 'payment_collection_status', label: 'Collection status', value: collectionStatus, editable: false },
-    { key: 'payment_collected_amount', label: 'Collected', value: collectedValue, mono: latestPayment?.collectedAmount != null, editable: false },
-    { key: 'payment_variance_amount', label: 'Variance', value: varianceValue, mono: latestPayment?.varianceAmount != null, editable: false },
-    { key: 'payment_closeout_at', label: 'Closeout event', value: closeoutTime, editable: false },
+    { key: 'cod_amount', label: t('shipments.cod.amount'), value: fmtCurrency(shipment.cod_amount, shipment.cod_currency), mono: true, editable: true },
+    { key: 'cod_currency', label: t('shipments.common.currency'), value: shipment.cod_currency, lookup: 'currency', editable: false },
+    { key: 'cod_method', label: t('shipments.cod.collectionMethod'), value: paymentMethod, editable: false },
+    { key: 'payment_collection_status', label: t('shipments.cod.collectionStatus'), value: collectionStatus, editable: false },
+    { key: 'payment_collected_amount', label: t('shipments.cod.collected'), value: collectedValue, mono: latestPayment?.collectedAmount != null, editable: false },
+    { key: 'payment_variance_amount', label: t('shipments.cod.variance'), value: varianceValue, mono: latestPayment?.varianceAmount != null, editable: false },
+    { key: 'payment_closeout_at', label: t('shipments.cod.closeoutEvent'), value: closeoutTime, editable: false },
   ];
   return (
     <KvGrid
@@ -4306,9 +4343,9 @@ function CodTab({ shipment }: { shipment: Shipment }) {
                     source: 'console.shipments_drawer.cod_tab',
                   },
                 });
-                pushToast(`COD ${key} updated`, 'good');
+                pushToast(fill(t('shipments.cod.codKeyUpdated'), { key: String(key) }), 'good');
               } catch {
-                pushToast('COD details could not be updated. Try again.', 'danger');
+                pushToast(t('shipments.cod.codDetailsCouldNotBe'), 'danger');
               }
             }
           : undefined
@@ -4318,6 +4355,7 @@ function CodTab({ shipment }: { shipment: Shipment }) {
 }
 
 function RouteTab({ shipment }: { shipment: Shipment }) {
+  const t = useT();
   const go = useConsoleNavigator();
   // W13-5 — closes OPERATIONS D3 §4 (RouteTab.onEdit orphan-toast). Per the
   // deferred decision doc (`__audit__/DECISIONS/SHIPMENTS-DRAWER-CELL-EDITS.md`
@@ -4358,7 +4396,7 @@ function RouteTab({ shipment }: { shipment: Shipment }) {
     return (
       <StateView
         kind="error"
-        title="Route stops unavailable"
+        title={t('shipments.route.routeStopsUnavailable')}
         hint={(stops.error as Error).message}
       />
     );
@@ -4367,7 +4405,7 @@ function RouteTab({ shipment }: { shipment: Shipment }) {
     return (
       <StateView
         kind="error"
-        title="Route run unavailable"
+        title={t('shipments.route.routeRunUnavailable')}
         hint={(runs.error as Error).message}
       />
     );
@@ -4376,34 +4414,32 @@ function RouteTab({ shipment }: { shipment: Shipment }) {
     return (
       <StateView
         kind="error"
-        title="Route stop scope mismatch"
-        hint="Route stop details could not be matched to this shipment. Refresh and try again."
+        title={t('shipments.route.routeStopScopeMismatch')}
+        hint={t('shipments.route.routeStopDetailsCouldNot')}
       />
     );
   }
   const stop = shipmentStops[0];
-  if (!stop) return <div className="state__hint">Not yet on a route.</div>;
+  if (!stop) return <div className="state__hint">{t('shipments.route.notYetOnARoute')}</div>;
   const routeRunId = typeof stop.route_run_id === 'string' ? stop.route_run_id : '';
   const run = (runs.data?.rows ?? []).find((rr) => rr.id === routeRunId);
   const rows: KvRow[] = [
-    { key: 'run_id', label: 'Run', value: run?.run_id ?? '—', mono: true, editable: false },
-    { key: 'driver', label: 'Driver', value: run?.driver ?? '—', editable: false },
-    { key: 'vehicle', label: 'Vehicle', value: run?.vehicle ?? '—', mono: true, editable: false },
-    { key: 'sequence_order', label: 'Stop #', value: String(stop.sequence_order ?? ''), mono: true, editable: false },
-    { key: 'window', label: 'Window', value: `${stop.window_start ?? ''}–${stop.window_end ?? ''}`, mono: true, editable: false },
-    { key: 'sla_tone', label: 'SLA', value: stop.sla_tone, editable: false },
-    { key: 'status', label: 'Status', value: stop.status, editable: false },
+    { key: 'run_id', label: t('shipments.route.run'), value: run?.run_id ?? '—', mono: true, editable: false },
+    { key: 'driver', label: t('shipments.route.driver'), value: run?.driver ?? '—', editable: false },
+    { key: 'vehicle', label: t('shipments.route.vehicle'), value: run?.vehicle ?? '—', mono: true, editable: false },
+    { key: 'sequence_order', label: t('shipments.route.stop'), value: String(stop.sequence_order ?? ''), mono: true, editable: false },
+    { key: 'window', label: t('shipments.route.window'), value: `${stop.window_start ?? ''}–${stop.window_end ?? ''}`, mono: true, editable: false },
+    { key: 'sla_tone', label: t('shipments.route.sla'), value: stop.sla_tone, editable: false },
+    { key: 'status', label: t('shipments.common.status'), value: stop.status, editable: false },
   ];
   return (
     <div>
       <div className="state__hint" style={{ padding: '6px 14px' }}>
-        Route assignments are read-only here. Use Dispatch to reassign the
-        driver or route so conflict checks, audit ledgers, and COD float policy
-        are enforced.
+        {t('shipments.route.routeAssignmentsAreReadOnly')}
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 14px 10px' }}>
         <Button
-          label="Open dispatch"
+          label={t('shipments.route.openDispatch')}
           iconName="truck"
           kind="ghost"
           capability={CAP.ROUTES_READ}
@@ -4416,6 +4452,7 @@ function RouteTab({ shipment }: { shipment: Shipment }) {
 }
 
 function TasksTab({ shipment }: { shipment: Shipment }) {
+  const t = useT();
   const go = useConsoleNavigator();
   // W16-1 — closes OPERATIONS D3 §5/§6 (TasksTab cell-edit canonical wiring).
   // Aligns to the canonical `public.tasks` projection (`sla_due_at`, `id`,
@@ -4447,20 +4484,20 @@ function TasksTab({ shipment }: { shipment: Shipment }) {
     return (
       <StateView
         kind="error"
-        title="Tasks unavailable"
+        title={t('shipments.tasks.tasksUnavailable')}
         hint={(tasks.error as Error).message}
       />
     );
   }
   const rows = tasks.data?.rows ?? [];
-  if (!rows.length) return <div className="state__hint">No related tasks.</div>;
+  if (!rows.length) return <div className="state__hint">{t('shipments.tasks.noRelatedTasks')}</div>;
   return (
     <DataTable
       columns={[
-        { key: 'task_id', label: 'Task', sortable: true, render: (raw) => compactReference(raw, 'Task') },
-        { key: 'task_type', label: 'Type', lookup: 'task_type' },
-        { key: 'status', label: 'Status', lookup: 'task_status', editable: canTransitionTask },
-        { key: 'sla_due_at', label: 'SLA due', format: 'datetime' },
+        { key: 'task_id', label: t('shipments.tasks.task'), sortable: true, render: (raw) => compactReference(raw, t('shipments.tasks.task'), t) },
+        { key: 'task_type', label: t('shipments.common.type'), lookup: 'task_type' },
+        { key: 'status', label: t('shipments.common.status'), lookup: 'task_status', editable: canTransitionTask },
+        { key: 'sla_due_at', label: t('shipments.tasks.slaDue'), format: 'datetime' },
       ]}
       rows={rows as Array<Record<string, unknown>>}
       allowSelection={false}
@@ -4468,29 +4505,29 @@ function TasksTab({ shipment }: { shipment: Shipment }) {
         canTransitionTask
           ? async (row, key, value) => {
               if (key !== 'status') {
-                return { ok: false, error: `Field ${key} is read-only` };
+                return { ok: false, error: fill(t('shipments.tasks.fieldKeyIsReadOnly'), { key: String(key) }) };
               }
               const taskId = (row as { id?: string }).id;
               if (!taskId) {
-                return { ok: false, error: 'Task id missing' };
+                return { ok: false, error: t('shipments.tasks.taskIdMissing') };
               }
               try {
                 await transition.mutateAsync({
                   taskId,
                   transition: { next_status: String(value) },
                 });
-                pushToast(`Task status updated to ${value}`, 'good');
+                pushToast(fill(t('shipments.tasks.taskStatusUpdatedToValue'), { value: String(value) }), 'good');
                 return { ok: true };
               } catch {
-                pushToast('Task status could not be updated. Try again.', 'danger');
-                return { ok: false, error: 'Task status could not be updated. Try again.' };
+                pushToast(t('shipments.tasks.taskStatusCouldNotBe'), 'danger');
+                return { ok: false, error: t('shipments.tasks.taskStatusCouldNotBe') };
               }
             }
           : undefined
       }
       rowActions={[
         {
-          label: 'Open task',
+          label: t('shipments.tasks.openTask'),
           icon: 'eye',
           onClick: (row) => {
             go(resolveShipmentTaskTarget(row as Record<string, unknown>));
@@ -4502,6 +4539,7 @@ function TasksTab({ shipment }: { shipment: Shipment }) {
 }
 
 function CommsTab({ shipment }: { shipment: Shipment }) {
+  const t = useT();
   // CLAIM-OPERATIONS-WIRING (Phase C1) — replaces the 2-row inline literal
   // ('c1' / 'c2') with the canonical comms_attempts read seam. Production
   // swap: `ui_list_resource_v1('comms_attempts', { filter: { shipment_id }})`
@@ -4530,7 +4568,7 @@ function CommsTab({ shipment }: { shipment: Shipment }) {
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '6px' }}>
         <Button
-          label="Send now"
+          label={t('shipments.comms.sendNow')}
           iconName="bell"
           kind="primary"
           capability={CAP.COMMS_WRITE}
@@ -4539,7 +4577,7 @@ function CommsTab({ shipment }: { shipment: Shipment }) {
             // `communication_policy.allowed_channels[0]`. Missing canonical
             // row → loud error toast (NO silent fallback to inline 'sms').
             if (!defaultChannel) {
-              pushToast('No approved communication channel is configured.', 'danger');
+              pushToast(t('shipments.comms.noApprovedCommunicationChannelIs'), 'danger');
               return;
             }
             try {
@@ -4547,23 +4585,23 @@ function CommsTab({ shipment }: { shipment: Shipment }) {
                 shipment_id: shipment.id,
                 channel: defaultChannel,
               });
-              pushToast('Message queued for delivery.', 'good');
+              pushToast(t('shipments.comms.messageQueuedForDelivery'), 'good');
             } catch {
-              pushToast('Message could not be queued. Try again.', 'danger');
+              pushToast(t('shipments.comms.messageCouldNotBeQueued'), 'danger');
             }
           }}
         />
       </div>
       <DataTable
         columns={[
-          { key: 'occurred_at', label: 'When', format: 'datetime' },
-          { key: 'channel', label: 'Channel' },
-          { key: 'template', label: 'Template', mono: true },
-          { key: 'status', label: 'Status' },
+          { key: 'occurred_at', label: t('shipments.common.when'), format: 'datetime' },
+          { key: 'channel', label: t('shipments.common.channel') },
+          { key: 'template', label: t('shipments.comms.template'), mono: true },
+          { key: 'status', label: t('shipments.common.status') },
         ]}
         rows={rows}
         allowSelection={false}
-        emptyText="No comms attempts recorded."
+        emptyText={t('shipments.comms.noCommsAttemptsRecorded')}
       />
     </div>
   );
@@ -4572,7 +4610,7 @@ function CommsTab({ shipment }: { shipment: Shipment }) {
 function LabelsTab({ shipment }: { shipment: Shipment }) {
   const reprint = useReprintLabel();
   const queryClient = useQueryClient();
-  const { fmtDateTime } = useI18n();
+  const { t, fmtDateTime } = useI18n();
   const [isPrinting, setIsPrinting] = useState(false);
   const [isReprinting, setIsReprinting] = useState(false);
   const reprintInFlightRef = useRef(false);
@@ -4639,11 +4677,11 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
         await refreshShipmentLabels();
         return;
       }
-      const workflowFailure = await readLabelPrintWorkflowFailure(workflowRunId);
+      const workflowFailure = await readLabelPrintWorkflowFailure(workflowRunId, t);
       if (workflowFailure) throw workflowFailure;
     }
-    throw new Error('Print queued, but label status did not refresh yet.');
-  }, [readShipmentLabelProjection, refreshShipmentLabels]);
+    throw new Error(t('shipments.labels.printQueuedButLabelStatus'));
+  }, [readShipmentLabelProjection, refreshShipmentLabels, t]);
   const labels = labelsQuery.data?.rows ?? [];
   const labelJobs = labelJobsQuery.data?.rows ?? [];
   const labelVersions = labelVersionsQuery.data?.rows ?? [];
@@ -4655,13 +4693,13 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
       try {
         const nextProjection = await readShipmentLabelProjection();
         if (!disposed && !nextProjection.jobs.some((job) => shipmentLabelJobNeedsLiveRefresh(job))) {
-          setLabelDownloadStatus({ tone: 'good', message: 'Label status refreshed' });
+          setLabelDownloadStatus({ tone: 'good', message: t('shipments.labels.labelStatusRefreshed') });
         }
       } catch (err) {
         if (!disposed) {
           setLabelDownloadStatus({
             tone: 'warn',
-            message: (err as Error).message || 'Label refresh is still pending',
+            message: (err as Error).message || t('shipments.labels.labelRefreshIsStillPending'),
           });
         }
       }
@@ -4674,7 +4712,7 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
       disposed = true;
       window.clearInterval(intervalId);
     };
-  }, [hasActiveLabelJobWork, readShipmentLabelProjection]);
+  }, [hasActiveLabelJobWork, readShipmentLabelProjection, t]);
   if (labelsQuery.isLoading || labelJobsQuery.isLoading || labelVersionsQuery.isLoading) {
     return <StateView kind="loading" />;
   }
@@ -4683,7 +4721,7 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
     return (
       <StateView
         kind={isPermissionDeniedError(labelError) ? 'denied' : 'error'}
-        title="Labels unavailable"
+        title={t('shipments.labels.labelsUnavailable')}
         capability={isPermissionDeniedError(labelError) ? CAP.LABELS_DOWNLOAD : undefined}
         hint={(labelError as Error).message}
       />
@@ -4699,12 +4737,12 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
   const latestLabelJob = selectLatestShipmentLabelJob(labelJobs);
   const activeLabelChip = activeLabel
     ? activeLabel.active_version_number
-      ? `Active label v${activeLabel.active_version_number}`
-      : 'Active label ready'
-    : 'No active label';
+      ? fill(t('shipments.labels.activeLabelVActiveversionnumber'), { activeVersionNumber: String(activeLabel.active_version_number) })
+      : t('shipments.labels.activeLabelReady')
+    : t('shipments.labels.noActiveLabel');
   const latestJobChip = latestLabelJob
-    ? `Latest job: ${humanizeToken(shipmentLabelJobStatus(latestLabelJob))}`
-    : 'No label job';
+    ? fill(t('shipments.labels.latestJobLatestlabeljob'), { latestLabelJob: String(humanizeToken(shipmentLabelJobStatus(latestLabelJob))) })
+    : t('shipments.labels.noLabelJob');
 
   const openLabelArtifact = async (
     resource: 'labels' | 'label_jobs' | 'label_versions',
@@ -4712,13 +4750,13 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
   ) => {
     const resourceId = typeof id === 'string' && id.trim() ? id.trim() : null;
     if (!resourceId) {
-      pushToast('No label artifact available for download', 'warn');
+      pushToast(t('shipments.labels.noLabelArtifactAvailableFor'), 'warn');
       return;
     }
     const downloadKey = `${resource}:${resourceId}`;
     setDownloadingLabelKey(downloadKey);
-    setLabelDownloadStatus({ tone: 'info', message: 'Preparing label artifact download' });
-    pushToast('Preparing label artifact download', 'info', { durationMs: 8000 });
+    setLabelDownloadStatus({ tone: 'info', message: t('shipments.labels.preparingLabelArtifactDownload') });
+    pushToast(t('shipments.labels.preparingLabelArtifactDownload'), 'info', { durationMs: 8000 });
     try {
       const result = await withLabelDownloadTimeout(
         api.resolve_resource_download_url_v1({
@@ -4726,12 +4764,14 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
           id: resourceId,
           expires_seconds: 900,
         }),
+        undefined,
+        t,
       );
       const opened = window.open(result.url, '_blank', 'noopener,noreferrer');
       if (opened) {
         setDownloadingLabelKey(null);
-        setLabelDownloadStatus({ tone: 'good', message: 'Opening signed label artifact' });
-        pushToast('Opening label artifact', 'good', { durationMs: 15000 });
+        setLabelDownloadStatus({ tone: 'good', message: t('shipments.labels.openingSignedLabelArtifact') });
+        pushToast(t('shipments.labels.openingLabelArtifact'), 'good', { durationMs: 15000 });
       } else {
         let copied = false;
         try {
@@ -4740,6 +4780,7 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
               ? navigator.clipboard.writeText(result.url)
               : Promise.resolve(),
             3000,
+            t,
           );
           copied = true;
         } catch {
@@ -4749,17 +4790,17 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
         setLabelDownloadStatus({
           tone: 'warn',
           message: copied
-            ? 'Signed label download URL copied; browser blocked the new tab'
-            : 'Signed label download URL ready; browser blocked the new tab',
+            ? t('shipments.labels.signedLabelDownloadUrlCopied')
+            : t('shipments.labels.signedLabelDownloadUrlReady'),
         });
         pushToast(
-          copied ? 'Download URL copied; browser blocked the new tab' : 'Download URL ready; browser blocked the new tab',
+          copied ? t('shipments.labels.downloadUrlCopiedBrowserBlocked') : t('shipments.labels.downloadUrlReadyBrowserBlocked'),
           'warn',
           { durationMs: 15000 },
         );
       }
     } catch (err) {
-      const message = (err as Error).message || 'Label artifact download failed';
+      const message = (err as Error).message || t('shipments.labels.labelArtifactDownloadFailed');
       setDownloadingLabelKey(null);
       setLabelDownloadStatus({ tone: 'danger', message });
       pushToast(message, 'danger', { durationMs: 15000 });
@@ -4791,22 +4832,26 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
       const workflowRunId = typeof (result as Record<string, unknown>).workflow_run_id === 'string'
         ? String((result as Record<string, unknown>).workflow_run_id)
         : null;
-      setLabelDownloadStatus({ tone: 'info', message: 'Print queued; waiting for label status' });
-      pushToast('Print queued', 'good');
+      setLabelDownloadStatus({ tone: 'info', message: t('shipments.labels.printQueuedWaitingForLabel') });
+      pushToast(t('shipments.labels.printQueued'), 'good');
       try {
         await waitForShipmentLabelProjection(previousProjection, workflowRunId);
-        setLabelDownloadStatus({ tone: 'good', message: 'Label status refreshed' });
+        setLabelDownloadStatus({ tone: 'good', message: t('shipments.labels.labelStatusRefreshed') });
       } catch (err) {
-        const message = (err as Error).message || 'Print queued, but label refresh failed';
+        const message = (err as Error).message || t('shipments.labels.printQueuedButLabelRefresh');
         const lowerMessage = message.toLowerCase();
-        const tone = lowerMessage.includes('failed') || lowerMessage.includes('could not')
+        // The English keyword probe misses translated text, so the known failures are matched too.
+        const tone = !(err as Error).message
+          || lowerMessage.includes('failed')
+          || lowerMessage.includes('could not')
+          || message === t('shipments.labels.printCouldNotComplete')
           ? 'danger'
           : 'warn';
         setLabelDownloadStatus({ tone, message });
         pushToast(message, tone);
       }
     } catch (err) {
-      const message = (err as Error).message || 'Print request failed';
+      const message = (err as Error).message || t('shipments.labels.printRequestFailed');
       setLabelDownloadStatus({ tone: 'danger', message });
       pushToast(message, 'danger');
     } finally {
@@ -4815,36 +4860,36 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
   };
   const submitLabelReprint = async (labelId: string | null | undefined) => {
     if (reprintInFlightRef.current) {
-      pushToast('Reprint is already syncing', 'warn');
+      pushToast(t('shipments.common.reprintIsAlreadySyncing'), 'warn');
       return;
     }
     const resolvedLabelId = typeof labelId === 'string' && labelId.trim() ? labelId.trim() : null;
     if (!resolvedLabelId) {
-      pushToast('No active label - cannot reprint', 'danger');
+      pushToast(t('shipments.common.noActiveLabelCannotReprint'), 'danger');
       return;
     }
     const reason = defaultLabelReprintReason();
     if (!reason) {
-      pushToast('No label reprint reason is configured.', 'danger');
+      pushToast(t('shipments.common.noLabelReprintReasonIs'), 'danger');
       return;
     }
     const previousProjection = shipmentLabelProjectionFingerprint(labels, labelJobs, labelVersions);
-    setLabelDownloadStatus({ tone: 'info', message: 'Reprint queued; waiting for label status' });
+    setLabelDownloadStatus({ tone: 'info', message: t('shipments.labels.reprintQueuedWaitingForLabel') });
     reprintInFlightRef.current = true;
     setIsReprinting(true);
     try {
       await reprint.mutateAsync({ labelId: resolvedLabelId, reason, shipmentId: shipment.id });
-      pushToast('Reprint queued', 'good');
+      pushToast(t('shipments.labels.reprintQueued'), 'good');
       try {
         await waitForShipmentLabelProjection(previousProjection, null);
-        setLabelDownloadStatus({ tone: 'good', message: 'Reprint queued; label status refreshed' });
+        setLabelDownloadStatus({ tone: 'good', message: t('shipments.labels.reprintQueuedLabelStatusRefreshed') });
       } catch (err) {
-        const message = (err as Error).message || 'Reprint queued, but label refresh failed';
+        const message = (err as Error).message || t('shipments.labels.reprintQueuedButLabelRefresh');
         setLabelDownloadStatus({ tone: 'warn', message });
         pushToast(message, 'warn');
       }
     } catch (err) {
-      const message = (err as Error).message || 'Reprint request failed';
+      const message = (err as Error).message || t('shipments.labels.reprintRequestFailed');
       setLabelDownloadStatus({ tone: 'danger', message });
       pushToast(message, 'danger');
     } finally {
@@ -4856,7 +4901,7 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginBottom: '6px' }}>
         <Button
-          label="Print label"
+          label={t('shipments.labels.printLabel')}
           iconName="file"
           kind="primary"
           capability={CAP.LABELS_DOWNLOAD}
@@ -4864,7 +4909,7 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
           onClick={printShipmentLabel}
         />
         <Button
-          label={downloadingLabelKey === `labels:${activeLabelId}` ? 'Preparing download' : 'Download'}
+          label={downloadingLabelKey === `labels:${activeLabelId}` ? t('shipments.labels.preparingDownload') : t('shipments.labels.download')}
           iconName="download"
           kind="ghost"
           capability={CAP.LABELS_DOWNLOAD}
@@ -4872,7 +4917,7 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
           onClick={() => { void openLabelArtifact('labels', activeLabelId); }}
         />
         <Button
-          label="Reprint"
+          label={t('shipments.labels.reprint')}
           iconName="refresh"
           kind="primary"
           capability={CAP.LABELS_REPRINT}
@@ -4884,7 +4929,7 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
       </div>
       {!activeLabelId && labels.length === 0 ? (
         <div style={{ marginBottom: '6px', color: 'var(--ink-faint)', fontSize: '11px' }}>
-          No active label on this shipment · reprint disabled.
+          {t('shipments.labels.noActiveLabelOnThis')}
         </div>
       ) : null}
       {labelDownloadStatus ? (
@@ -4908,111 +4953,111 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
         <Chip size="xs" kind={activeLabel ? 'good' : 'neutral'} label={activeLabelChip} />
         <Chip size="xs" kind={latestLabelJob ? 'info' : 'neutral'} label={latestJobChip} />
-        {activeLabelUrl ? <Chip size="xs" kind="good" label="Artifact ready" /> : null}
+        {activeLabelUrl ? <Chip size="xs" kind="good" label={t('shipments.labels.artifactReady')} /> : null}
       </div>
       <DataTable
         columns={[
-          { key: 'barcode', label: 'Barcode', mono: true },
-          { key: 'active_version_id', label: 'Active version', render: (raw) => compactReference(raw, 'Version') },
-          { key: 'print_count', label: 'Prints', align: 'right' },
-          { key: 'last_printed_at', label: 'Last printed', format: 'datetime' },
-          { key: 'reprint_reason', label: 'Reprint reason' },
+          { key: 'barcode', label: t('shipments.common.barcode'), mono: true },
+          { key: 'active_version_id', label: t('shipments.labels.activeVersion'), render: (raw) => compactReference(raw, t('shipments.labels.version'), t) },
+          { key: 'print_count', label: t('shipments.labels.prints'), align: 'right' },
+          { key: 'last_printed_at', label: t('shipments.labels.lastPrinted'), format: 'datetime' },
+          { key: 'reprint_reason', label: t('shipments.labels.reprintReason') },
         ]}
         rows={labels}
         allowSelection={false}
         rowActions={[
           {
-            label: 'Download label',
+            label: t('shipments.labels.downloadLabel'),
             icon: 'download',
             kind: 'ghost',
             capability: CAP.LABELS_DOWNLOAD,
             disabled: (row) => !row.active_version_id,
-            disabledReason: () => 'Active label version required',
+            disabledReason: () => t('shipments.labels.activeLabelVersionRequired'),
             onClick: (row) => { void openLabelArtifact('labels', row.id); },
           },
           {
-            label: 'Reprint label',
+            label: t('shipments.common.reprintLabel'),
             icon: 'refresh',
             kind: 'primary',
             capability: CAP.LABELS_REPRINT,
             disabled: (row) => !row.active_version_id || isReprinting,
-            disabledReason: (row) => (!row.active_version_id ? 'Active label version required' : 'Reprint is already syncing'),
+            disabledReason: (row) => (!row.active_version_id ? t('shipments.labels.activeLabelVersionRequired') : t('shipments.common.reprintIsAlreadySyncing')),
             onClick: (row) => {
               void submitLabelReprint(row.id)
                 .then(() => undefined)
                 .catch(() => {
-                  pushToast('Reprint request could not be started. Try again.', 'danger');
+                  pushToast(t('shipments.common.reprintRequestCouldNotBe'), 'danger');
                 });
             },
           },
         ]}
-        emptyText="No labels on this shipment."
+        emptyText={t('shipments.labels.noLabelsOnThisShipment')}
       />
       <div style={{ marginTop: '14px' }}>
         <div className="state__hint" style={{ marginBottom: '6px' }}>
-          Generation and print queue
+          {t('shipments.labels.generationAndPrintQueue')}
         </div>
         {!activeLabelId && labelJobs.length > 0 ? (
           <div style={{ marginBottom: '6px', color: 'var(--ink-faint)', fontSize: '11px' }}>
-            Label generation or print work exists. Download and reprint unlock after an active label artifact is available.
+            {t('shipments.labels.labelGenerationOrPrintWork')}
           </div>
         ) : null}
         <DataTable
           columns={[
-            { key: 'id', label: 'Job', render: () => 'Label job' },
-            { key: 'status', label: 'Status', render: (_raw, row) => humanizeToken(shipmentLabelJobStatus(row)) },
-            { key: 'purpose', label: 'Purpose', render: (_raw, row) => humanizeToken(shipmentLabelJobPurpose(row)) },
-            { key: 'target_type', label: 'Target', render: (raw) => humanizeToken(raw) },
-            { key: 'queued_at', label: 'Queued', render: (_raw, row) => {
+            { key: 'id', label: t('shipments.labels.job'), render: () => t('shipments.labels.labelJob') },
+            { key: 'status', label: t('shipments.common.status'), render: (_raw, row) => humanizeToken(shipmentLabelJobStatus(row)) },
+            { key: 'purpose', label: t('shipments.labels.purpose'), render: (_raw, row) => humanizeToken(shipmentLabelJobPurpose(row)) },
+            { key: 'target_type', label: t('shipments.labels.target'), render: (raw) => humanizeToken(raw) },
+            { key: 'queued_at', label: t('shipments.labels.queued'), render: (_raw, row) => {
               const value = shipmentLabelJobQueuedAt(row);
-              return value ? fmtDateTime(value) : 'Not set';
+              return value ? fmtDateTime(value) : t('shipments.labels.notSet');
             } },
-            { key: 'completed_at', label: 'Completed', format: 'datetime' },
-            { key: 'workflow_run_id', label: 'Workflow', render: (_raw, row) => shipmentLabelJobWorkflowRef(row) ? 'Linked' : '-' },
+            { key: 'completed_at', label: t('shipments.labels.completed'), format: 'datetime' },
+            { key: 'workflow_run_id', label: t('shipments.common.workflow'), render: (_raw, row) => shipmentLabelJobWorkflowRef(row) ? t('shipments.common.linked') : '-' },
           ]}
           rows={labelJobs}
           allowSelection={false}
           rowActions={[
             {
-              label: 'Open print artifact',
+              label: t('shipments.labels.openPrintArtifact'),
               icon: 'download',
               kind: 'ghost',
               capability: CAP.LABELS_DOWNLOAD,
               disabled: (row) => !shipmentLabelJobHasOpenableArtifact(row),
-              disabledReason: () => 'Completed label artifact required',
+              disabledReason: () => t('shipments.labels.completedLabelArtifactRequired'),
               onClick: (row) => { void openLabelArtifact('label_jobs', row.id); },
             },
           ]}
-          emptyText="No label generation or print jobs queued."
+          emptyText={t('shipments.labels.noLabelGenerationOrPrint')}
         />
       </div>
       <div style={{ marginTop: '14px' }}>
         <div className="state__hint" style={{ marginBottom: '6px' }}>
-          Version history and artifacts
+          {t('shipments.labels.versionHistoryAndArtifacts')}
         </div>
         <DataTable
           columns={[
-            { key: 'version_number', label: 'Version', align: 'right' },
-            { key: 'version_status', label: 'Status', render: (raw) => humanizeToken(raw) },
-            { key: 'job_purpose', label: 'Purpose', render: (raw) => humanizeToken(raw) },
-            { key: 'label_job_id', label: 'Source job', render: (raw) => raw ? 'Linked' : '-' },
-            { key: 'reprint_reason', label: 'Reason' },
-            { key: 'generated_at', label: 'Generated', format: 'datetime' },
-            { key: 'last_printed_at', label: 'Printed', format: 'datetime' },
-            { key: 'print_count', label: 'Prints', align: 'right' },
+            { key: 'version_number', label: t('shipments.labels.version'), align: 'right' },
+            { key: 'version_status', label: t('shipments.common.status'), render: (raw) => humanizeToken(raw) },
+            { key: 'job_purpose', label: t('shipments.labels.purpose'), render: (raw) => humanizeToken(raw) },
+            { key: 'label_job_id', label: t('shipments.labels.sourceJob'), render: (raw) => raw ? t('shipments.common.linked') : '-' },
+            { key: 'reprint_reason', label: t('shipments.labels.reason') },
+            { key: 'generated_at', label: t('shipments.labels.generated'), format: 'datetime' },
+            { key: 'last_printed_at', label: t('shipments.labels.printed'), format: 'datetime' },
+            { key: 'print_count', label: t('shipments.labels.prints'), align: 'right' },
           ]}
           rows={labelVersions}
           allowSelection={false}
           rowActions={[
             {
-              label: 'Open version artifact',
+              label: t('shipments.labels.openVersionArtifact'),
               icon: 'download',
               kind: 'ghost',
               capability: CAP.LABELS_DOWNLOAD,
               onClick: (row) => { void openLabelArtifact('label_versions', row.id); },
             },
           ]}
-          emptyText="No label version history recorded for this shipment."
+          emptyText={t('shipments.labels.noLabelVersionHistoryRecorded')}
         />
       </div>
     </div>
@@ -5020,6 +5065,7 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
 }
 
 function ScansTab({ shipment }: { shipment: Shipment }) {
+  const t = useT();
   // CLAIM-OPERATIONS-WIRING (Phase C1) — read seam moved from `api.seed.*` to
   // canonical resource registry (`ui_list_resource_v1('scan_events')`).
   // Backed by public.scan_events (HASH partitioned;
@@ -5034,20 +5080,21 @@ function ScansTab({ shipment }: { shipment: Shipment }) {
   return (
     <DataTable
       columns={[
-        { key: 'occurred_at', label: 'When', format: 'datetime' },
-        { key: 'scan_type', label: 'Scan type', render: (raw) => humanizeToken(raw) },
-        { key: 'box_barcode', label: 'Barcode', mono: true },
-        { key: 'user_id', label: 'User', render: (raw) => compactReference(raw, 'User') },
-        { key: 'notes', label: 'Notes' },
+        { key: 'occurred_at', label: t('shipments.common.when'), format: 'datetime' },
+        { key: 'scan_type', label: t('shipments.scans.scanType'), render: (raw) => humanizeToken(raw) },
+        { key: 'box_barcode', label: t('shipments.common.barcode'), mono: true },
+        { key: 'user_id', label: t('shipments.scans.user'), render: (raw) => compactReference(raw, t('shipments.scans.user'), t) },
+        { key: 'notes', label: t('shipments.common.notes') },
       ]}
       rows={scans}
       allowSelection={false}
-      emptyText="No scans yet."
+      emptyText={t('shipments.scans.noScansYet')}
     />
   );
 }
 
 function DecisionsTab({ shipment }: { shipment: Shipment }) {
+  const t = useT();
   const go = useConsoleNavigator();
   const destinationAddressId = String(
     (shipment as { destination_address_id?: string | null }).destination_address_id ?? '',
@@ -5093,24 +5140,24 @@ function DecisionsTab({ shipment }: { shipment: Shipment }) {
     <div className="stack">
       {log.error || reviewDecisionLog.error ? (
         <p className="state__hint">
-          One decision stream is unavailable, so this view is showing the shipment decision rows that could be read.
+          {t('shipments.decisions.oneDecisionStreamIsUnavailable')}
         </p>
       ) : null}
       <DataTable
         columns={[
-          { key: 'timestamp', label: 'When', format: 'datetime' },
-          { key: 'decision_category', label: 'Category', lookup: 'decision_category' },
-          { key: 'decision_point', label: 'Decision', render: (raw) => humanizeToken(raw) },
-          { key: 'decision_outcome', label: 'Outcome', render: (raw) => humanizeToken(raw) },
-          { key: 'resolved_from', label: 'Scope' },
-          { key: 'settings_resolution_id', label: 'Resolution', render: (raw) => compactReference(raw, 'Resolution') },
+          { key: 'timestamp', label: t('shipments.common.when'), format: 'datetime' },
+          { key: 'decision_category', label: t('shipments.decisions.category'), lookup: 'decision_category' },
+          { key: 'decision_point', label: t('shipments.decisions.decision'), render: (raw) => humanizeToken(raw) },
+          { key: 'decision_outcome', label: t('shipments.decisions.outcome'), render: (raw) => humanizeToken(raw) },
+          { key: 'resolved_from', label: t('shipments.decisions.scope') },
+          { key: 'settings_resolution_id', label: t('shipments.decisions.resolution'), render: (raw) => compactReference(raw, t('shipments.decisions.resolution'), t) },
         ]}
         rows={rows}
         allowSelection={false}
-        emptyText="No decisions recorded for this shipment."
+        emptyText={t('shipments.decisions.noDecisionsRecordedForThis')}
         rowActions={[
           {
-            label: 'View activity',
+            label: t('shipments.decisions.viewActivity'),
             icon: 'trace_tree',
             onClick: (row) => {
               go(`/insights/traces?correlation_id=${encodeURIComponent(
@@ -5125,6 +5172,7 @@ function DecisionsTab({ shipment }: { shipment: Shipment }) {
 }
 
 function AuditTab({ shipment }: { shipment: Shipment }) {
+  const t = useT();
   const log = useResourceList<Record<string, unknown>>('audit_table_changes', {
     filter: { table_name: 'shipments', pk: { id: shipment.id } },
     sort: { key: 'created_at', dir: 'desc' },
@@ -5138,8 +5186,8 @@ function AuditTab({ shipment }: { shipment: Shipment }) {
   if (log.error && actions.error) {
     return (
       <div className="state state--denied">
-        <h3 className="state__title">Audit access denied</h3>
-        <p className="state__hint">Audit activity permission is required.</p>
+        <h3 className="state__title">{t('shipments.audit.auditAccessDenied')}</h3>
+        <p className="state__hint">{t('shipments.audit.auditActivityPermissionIsRequired')}</p>
       </div>
     );
   }
@@ -5150,7 +5198,7 @@ function AuditTab({ shipment }: { shipment: Shipment }) {
         .filter((row) => auditPkMatchesShipment(row.pk, shipment.id))
         .map((row) => ({
           ...row,
-          audit_source: 'System audit',
+          audit_source: t('shipments.audit.systemAudit'),
         }));
   const actionRows: Record<string, unknown>[] = actions.error
     ? []
@@ -5162,7 +5210,7 @@ function AuditTab({ shipment }: { shipment: Shipment }) {
           op: row.action_type ?? 'shipment_action',
           changed_by: row.performed_by_user_id ?? row.performed_by_system ?? row.created_by ?? row.actor_user_id,
           correlation_id: row.correlation_id ?? actionData.correlation_id,
-          audit_source: 'Shipment action',
+          audit_source: t('shipments.common.shipmentAction'),
         };
       });
   const rows: Record<string, unknown>[] = [...tableRows, ...actionRows].sort((a, b) => {
@@ -5174,20 +5222,20 @@ function AuditTab({ shipment }: { shipment: Shipment }) {
     <div className="stack">
       {log.error || actions.error ? (
         <p className="state__hint">
-          One audit stream is unavailable, so this view is showing the shipment audit records that could be read.
+          {t('shipments.audit.oneAuditStreamIsUnavailable')}
         </p>
       ) : null}
       <DataTable
         columns={[
-          { key: 'created_at', label: 'When', format: 'datetime' },
-          { key: 'audit_source', label: 'Source' },
-          { key: 'op', label: 'Operation', render: (raw) => humanizeToken(raw) },
-          { key: 'changed_by', label: 'Actor', render: (raw) => compactReference(raw, 'Actor') },
-          { key: 'correlation_id', label: 'Activity', render: (raw) => (raw ? 'Linked' : '-') },
+          { key: 'created_at', label: t('shipments.common.when'), format: 'datetime' },
+          { key: 'audit_source', label: t('shipments.common.source') },
+          { key: 'op', label: t('shipments.audit.operation'), render: (raw) => humanizeToken(raw) },
+          { key: 'changed_by', label: t('shipments.audit.actor'), render: (raw) => compactReference(raw, t('shipments.audit.actor'), t) },
+          { key: 'correlation_id', label: t('shipments.common.activity'), render: (raw) => (raw ? t('shipments.common.linked') : '-') },
         ]}
         rows={rows}
         allowSelection={false}
-        emptyText="No audit changes recorded for this shipment."
+        emptyText={t('shipments.audit.noAuditChangesRecordedFor')}
       />
     </div>
   );
