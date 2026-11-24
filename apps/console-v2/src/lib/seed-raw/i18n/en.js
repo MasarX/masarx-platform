@@ -3,6 +3,7 @@ export const en = {
   adapter: {
     dispatchScanner: 'Console V2 Dispatch scanner',
     pluginBlockingDiagnostic: 'Synthetic blocking diagnostic (demo branch).',
+    webhookReceiverTimeoutReadback: 'webhook-receiver edge invocation timed out; using canonical inbox readback',
     workflowStep: 'Step',
     labelDesignInvalid: 'label_design must be an object',
     labelTemplatesMissing: 'label_design.templates missing',

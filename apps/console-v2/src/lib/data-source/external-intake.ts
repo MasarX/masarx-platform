@@ -1,3 +1,4 @@
+import { translateAdapterMessage } from '../i18n';
 import {
   backendOutcomeError,
   liveBackendUnavailableError,
@@ -658,7 +659,7 @@ export async function runWebhookReceiverTest(
         accepted: true,
         invoke_timeout: true,
         idempotency_key: idempotencyKey,
-        message: 'webhook-receiver edge invocation timed out; using canonical inbox readback',
+        message: translateAdapterMessage('adapter.webhookReceiverTimeoutReadback'),
       }
     : objectRecord(invokeResult.data);
   let workflowRunId = findNestedString(response, ['workflow_run_id']);

@@ -3,6 +3,7 @@ export const ar = {
   adapter: {
     dispatchScanner: 'ماسح الإرسال في لوحة التحكم',
     pluginBlockingDiagnostic: 'تشخيص تجريبي مانع للمتابعة.',
+    webhookReceiverTimeoutReadback: 'انتهت مهلة استدعاء webhook-receiver؛ يُستخدم سجلّ صندوق الوارد المعتمد للتحقق من النتيجة',
     workflowStep: 'الخطوة',
     labelDesignInvalid: 'يجب أن يكون label_design كائنًا',
     labelTemplatesMissing: 'لا يوجد label_design.templates',
