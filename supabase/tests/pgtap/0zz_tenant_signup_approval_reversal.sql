@@ -107,7 +107,7 @@ BEGIN
       SELECT billing_status FROM public.organizations WHERE id = org_id
     ), CASE WHEN linked THEN 'active' ELSE 'suspended' END, scenario || ' signup applies the correct organization suspension');
     RETURN NEXT is((SELECT status FROM public.users WHERE id = invited_id),
-      CASE WHEN has_existing_user THEN 'active' ELSE 'inactive' END,
+      CASE WHEN has_existing_user THEN 'active' ELSE 'suspended' END,
       scenario || ' signup deactivates only the user created by approval');
     RETURN NEXT is((
       SELECT assignment.revoked_at IS NOT NULL FROM public.rbac_user_role_assignments assignment

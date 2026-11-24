@@ -111,7 +111,7 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'error', jsonb_build_object('code', 'reversal_provenance_unavailable'));
   END IF;
 
-  UPDATE public.users SET status = 'inactive', updated_at = reversed_at
+  UPDATE public.users SET status = 'suspended', updated_at = reversed_at
   WHERE id = request_row.approval_created_user_id AND organization_id = request_row.approved_organization_id
     AND status = 'active';
   user_deactivated := FOUND;
