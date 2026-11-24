@@ -78,7 +78,7 @@
   overflow: hidden;
 }
 .three-pane > .pane:not(:last-child) {
-  border-right: 1px solid var(--line);
+  border-inline-end: 1px solid var(--line);
 }
 .pane__header {
   padding: 8px 14px;
@@ -110,8 +110,8 @@
   transition: background var(--dur-fast);
 }
 .run-row:hover { background: var(--paper-3); }
-.run-row.is-active { background: var(--accent-soft); border-left: 2px solid var(--accent); padding-left: 12px; }
-.run-row.is-risk { border-left: 2px solid var(--danger); padding-left: 12px; }
+.run-row.is-active { background: var(--accent-soft); border-inline-start: 2px solid var(--accent); padding-inline-start: 12px; }
+.run-row.is-risk { border-inline-start: 2px solid var(--danger); padding-inline-start: 12px; }
 .run-row__head {
   display: flex;
   align-items: center;
@@ -243,7 +243,7 @@
 .ladder__step.is-match::before {
   content: '';
   position: absolute;
-  left: 0;
+  inset-inline-start: 0;
   top: 0;
   bottom: 0;
   width: 2px;
