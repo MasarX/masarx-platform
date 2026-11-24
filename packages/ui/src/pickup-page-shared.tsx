@@ -7,6 +7,7 @@ import type { PickupLookupOption } from "./pickup-operations-form";
 import { Badge } from "./badge";
 import { Button } from "./button";
 import { buildLookupFriendlyLabel } from "./lookup-friendly-label";
+import { createUiTranslator } from "./i18n";
 import { formatUiError } from "./utils";
 import { normalizeObject, stringValue } from "./pickup-operations-utils";
 
@@ -195,18 +196,36 @@ export function PickupPageNavigation({
   );
 }
 
+// Values from the pickup_request_status and pickup_wave_status lookups and the wave assignment record.
+const PICKUP_STATUSES = new Set([
+  "pending", "pickup_requested", "scheduled", "pickup_scheduled", "planned", "assigned",
+  "in_progress", "completed", "failed", "pickup_failed", "cancelled",
+]);
+const PICKUP_ASSIGNMENT_MODES = new Set(["internal_driver", "partner", "unassigned"]);
+
+// Unlisted values show the translated "unknown" label so raw enum text never reaches the UI.
+function pickupValueLabel(group: "statuses" | "assignmentModes", known: Set<string>, value: string) {
+  const t = createUiTranslator("ui.pickupStatus");
+  return known.has(value) ? t(`${group}.${value}`) : t("unknown");
+}
+
+export function pickupAssignmentModeLabel(mode: string | null | undefined) {
+  return pickupValueLabel("assignmentModes", PICKUP_ASSIGNMENT_MODES, (mode ?? "").trim().toLowerCase());
+}
+
 export function formatStatusBadge(status: string | null | undefined) {
   const value = (status ?? "").trim().toLowerCase();
-  if (!value) return <Badge tone="neutral">unknown</Badge>;
-  if (value.includes("failed")) return <Badge tone="danger">{value}</Badge>;
-  if (value.includes("completed")) return <Badge tone="success">{value}</Badge>;
+  const label = pickupValueLabel("statuses", PICKUP_STATUSES, value);
+  if (!value) return <Badge tone="neutral">{label}</Badge>;
+  if (value.includes("failed")) return <Badge tone="danger">{label}</Badge>;
+  if (value.includes("completed")) return <Badge tone="success">{label}</Badge>;
   if (value.includes("scheduled") || value.includes("planned")) {
-    return <Badge tone="info">{value}</Badge>;
+    return <Badge tone="info">{label}</Badge>;
   }
   if (value.includes("active") || value.includes("in_progress")) {
-    return <Badge tone="accent">{value}</Badge>;
+    return <Badge tone="accent">{label}</Badge>;
   }
-  return <Badge tone="neutral">{value}</Badge>;
+  return <Badge tone="neutral">{label}</Badge>;
 }
 
 function displayValue(value: unknown): string | null {

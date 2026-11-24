@@ -24,6 +24,7 @@ import {
   PickupPageNavigation,
   formatStatusBadge,
   loadPickupWaveRows,
+  pickupAssignmentModeLabel,
   pickupErrorMessage,
   recordValue,
   resolvePickupScopeFilters,
@@ -347,7 +348,7 @@ export async function PickupWavesPage({
                       <Badge tone="info">{stringValue(row.planned_date) ?? ""}</Badge>
                     ) : null}
                     {stringValue(pickupAssignment?.assignment_mode) ? (
-                      <Badge>{stringValue(pickupAssignment?.assignment_mode) ?? ""}</Badge>
+                      <Badge>{pickupAssignmentModeLabel(stringValue(pickupAssignment?.assignment_mode))}</Badge>
                     ) : null}
                     <Badge tone="accent">{`${shipments.length} shipment${shipments.length === 1 ? "" : "s"}`}</Badge>
                   </div>

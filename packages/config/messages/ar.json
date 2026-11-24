@@ -3419,6 +3419,27 @@
       "eta": "‏الوقت المتوقع",
       "noJobsDropHere": "‏لا توجد مهام — أسقط هنا للتعيين"
     },
+    "pickupStatus": {
+      "unknown": "غير معروف",
+      "statuses": {
+        "pending": "قيد الانتظار",
+        "pickup_requested": "تم طلب الاستلام",
+        "scheduled": "مجدول",
+        "pickup_scheduled": "الاستلام مجدول",
+        "planned": "مخطط",
+        "assigned": "مُعيَّن",
+        "in_progress": "قيد التنفيذ",
+        "completed": "مكتمل",
+        "failed": "فشل",
+        "pickup_failed": "فشل الاستلام",
+        "cancelled": "ملغى"
+      },
+      "assignmentModes": {
+        "internal_driver": "سائق داخلي",
+        "partner": "شريك",
+        "unassigned": "غير مُعيَّن"
+      }
+    },
     "commentThread": {
       "noComments": "‏لا توجد تعليقات بعد",
       "unknownUser": "‏غير معروف",
