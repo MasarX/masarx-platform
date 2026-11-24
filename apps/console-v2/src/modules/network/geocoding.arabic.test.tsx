@@ -6,7 +6,7 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { englishT } from '@/lib/i18n';
 import { ar } from '@/lib/seed-raw/i18n/areas/marketplace-geocoding';
-import { GeocodingModule } from '../geocoding';
+import { GeocodingModule } from './geocoding';
 
 const RASHED_TENANT_IDENTITY = {
   capabilities: ['all'],
