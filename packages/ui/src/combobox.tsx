@@ -52,7 +52,9 @@ function useOptionalComboboxTranslations() {
 function useComboboxText() {
   const t = useOptionalComboboxTranslations();
   return (key: ComboboxTextKey, values?: Record<string, string>) => {
-    if (t?.has(key)) return t(key, values);
+    // A missing key comes back as its path (next-intl's default fallback and the test mock's); show English then.
+    const text = t?.(key, values);
+    if (text && text !== `ui.combobox.${key}`) return text;
     return FALLBACK_TEXT[key].replace(/\{(\w+)\}/g, (_, name: string) => values?.[name] ?? "");
   };
 }
