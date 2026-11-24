@@ -1,5 +1,6 @@
 BEGIN;
 SET LOCAL search_path TO public, extensions, pg_temp;
+SET LOCAL lock_timeout = '10s';
 
 DO $migration$
 DECLARE
@@ -8,50 +9,28 @@ DECLARE
   definition text := pg_get_functiondef(
     entrypoint
   );
-  old_declaration constant text := 'v_total BIGINT := 0;';
   old_strategies constant text := $sql$v_total_strategy NOT IN ('exact', 'estimate')$sql$;
   old_count constant text := $sql$  IF v_total_strategy = 'estimate' THEN
     v_sql := format(
-      'EXPLAIN (FORMAT JSON) SELECT 1 FROM %I.%I WHERE %s',
-      v_schema,
-      v_table,
-      v_where
-    );
-    EXECUTE v_sql INTO v_explain;
-    v_total := COALESCE(NULLIF((v_explain->0->'Plan'->>'Plan Rows'), '')::bigint, 0);
-    v_total_is_estimate := TRUE;
-  ELSE
-    v_sql := format($sql$;
-  new_count constant text := $sql$  IF v_total_strategy = 'exact_then_estimate' THEN
+      'EXPLAIN (FORMAT JSON)$sql$;
+  new_count constant text := $sql$  IF v_total_strategy = 'capped' THEN
     EXECUTE format(
       'SELECT COUNT(*) FROM (SELECT 1 FROM %I.%I WHERE %s LIMIT $1) visible_rows',
       v_schema, v_table, v_where
     ) INTO v_total USING v_max_page_size + 1;
-    v_total_strategy := CASE WHEN v_total > v_max_page_size THEN 'estimate' ELSE 'exact' END;
-  END IF;
-
-  IF v_total_strategy = 'estimate' THEN
+    v_total_is_estimate := v_total > v_max_page_size;
+    v_total_strategy := CASE WHEN v_total_is_estimate THEN 'estimate' ELSE 'exact' END;
+  ELSIF v_total_strategy = 'estimate' THEN
     v_sql := format(
-      'EXPLAIN (FORMAT JSON) SELECT 1 FROM %I.%I WHERE %s',
-      v_schema,
-      v_table,
-      v_where
-    );
-    EXECUTE v_sql INTO v_explain;
-    v_total := COALESCE(GREATEST(v_total, NULLIF((v_explain->0->'Plan'->>'Plan Rows'), '')::bigint), 0);
-    v_total_is_estimate := TRUE;
-  ELSIF v_total IS NULL THEN
-    v_sql := format($sql$;
+      'EXPLAIN (FORMAT JSON)$sql$;
 BEGIN
   IF (SELECT proowner FROM pg_proc WHERE oid = entrypoint) <> 'ui_rpc_executor'::regrole
-     OR cardinality(string_to_array(definition, old_declaration)) <> 2
      OR cardinality(string_to_array(definition, old_strategies)) <> 2
      OR cardinality(string_to_array(definition, old_count)) <> 2 THEN
     RAISE EXCEPTION 'Unexpected ui_list_resource_v1 definition while bounding log totals';
   END IF;
-  definition := replace(definition, old_declaration, 'v_total BIGINT;');
   definition := replace(definition, old_strategies,
-    $sql$v_total_strategy NOT IN ('exact', 'estimate', 'exact_then_estimate')$sql$);
+    $sql$v_total_strategy NOT IN ('exact', 'estimate', 'capped')$sql$);
 
   IF current_setting('server_version_num')::int >= 160000 THEN
     EXECUTE format('GRANT ui_rpc_executor TO %I WITH INHERIT FALSE, SET TRUE', migration_role);
@@ -90,7 +69,7 @@ BEGIN
 
   SELECT jsonb_set(current_registry.value, '{resources}', jsonb_agg(
     CASE WHEN entry.value->>'key' IN ('decision_log', 'settings_resolution_log', 'webhook_inbox')
-      THEN entry.value || '{"total_strategy":"exact_then_estimate"}'::jsonb
+      THEN entry.value || '{"total_strategy":"capped"}'::jsonb
       ELSE entry.value END ORDER BY entry.ordinal
   )) INTO next_value
   FROM jsonb_array_elements(current_registry.value->'resources') WITH ORDINALITY AS entry(value, ordinal);
