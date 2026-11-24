@@ -175,11 +175,21 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 | --- | --- | --- | --- | --- | --- |
 | TBD per screen | TBD | TBD | TBD | TBD | TBD |
 
+### Where UI is verified
+
+- Verify UI changes in CI or from preview artifacts, never by local runs or renders. This covers tests, lint, type checks, builds, screenshots, accessibility scans, speed measurements and sweep captures.
+- When a check named in this file has no CI job yet, add the job to the workflow in the PR that relies on it.
+- These checks named in this file have no CI job yet:
+  - The ESLint configs in section 8 (Lint). No CI task runs ESLint. [#431](https://github.com/MasarX/masarx-platform/issues/431)
+  - Accessibility of Console, Console V2 and portal screens: rendered contrast, tab order and 24 by 24 pixel targets. Landing E2E covers only landing and public tracking, and CI does not run `tests/e2e`. [#301](https://github.com/MasarX/masarx-platform/issues/301), [#270](https://github.com/MasarX/masarx-platform/issues/270)
+  - Screen coverage and daily sweep captures of signed-in screens. Visual baselines run only on manual dispatch. [#432](https://github.com/MasarX/masarx-platform/issues/432)
+  - Time to usable for Console V2 and portal screens (Speed). [#388](https://github.com/MasarX/masarx-platform/issues/388)
+
 ### Review and sweeps
 
 - Have the Design lead run one daily sweep across roles, viewports, themes and states.
 - File each finding as an issue and revert a change that breaks a critical user journey.
-- Delegate the hands-on checks to a worker that returns only the findings.
+- Delegate the hands-on checks to a worker that reads the CI and preview artifacts and returns only the findings.
 - Sweep signed-in screens on dev only with the [synthetic sweep accounts](DELIVERY.md#signed-in-dev-sweep) and keep credentials out of logs, captures and issues.
 - Design changes, including UI, i18n, mockups, `DESIGN.md`, tests and sweep findings, get no review. The Design lead's thread opens each PR and merges it on green required CI. A change to which personal data a screen shows, or to whom, is high risk and gets one review under the engineering standard's high-risk rule.
 
