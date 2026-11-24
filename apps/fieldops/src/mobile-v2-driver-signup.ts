@@ -368,7 +368,7 @@ export function buildMobileV2DriverApplicationFollowUp(
   if (!status) return null;
   if (status.status === "rejected") {
     return {
-      title: "Application rejected",
+      title: status.applicationState === "compliance_denied" ? "Application did not meet compliance requirements" : "Application rejected",
       tone: "danger",
       reason: status.reviewReason,
       requestedDocuments: [],

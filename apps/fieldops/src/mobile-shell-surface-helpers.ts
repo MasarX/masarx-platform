@@ -8,8 +8,12 @@ type JsonRecord = Record<string, unknown>;
 
 export function formatMoneyLabel(amount: number | null, currency: string | null | undefined) {
   if (amount == null || !Number.isFinite(amount)) return null;
-  const rounded = Math.round(amount * 100) / 100;
-  return `${currency ?? "SAR"} ${rounded}`;
+  const code = currency ?? "SAR";
+  const decimals = /^[a-z]{3}$/i.test(code) && typeof Intl !== "undefined" && typeof Intl.NumberFormat === "function"
+    ? new Intl.NumberFormat("en", { style: "currency", currency: code }).resolvedOptions().maximumFractionDigits ?? 2
+    : 2;
+  const scale = 10 ** decimals;
+  return `${code} ${Math.round(amount * scale) / scale}`;
 }
 
 export type SurfaceCoordinates = {

@@ -246,6 +246,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     android: {
       ...config.android,
       package: androidPackage ?? config.android?.package,
+      blockedPermissions: [...new Set([...(config.android?.blockedPermissions ?? []), "android.permission.RECORD_AUDIO"])],
       ...(allowLocalCleartext ? { usesCleartextTraffic: true } : {}),
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png",

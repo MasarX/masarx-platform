@@ -41,6 +41,15 @@ export function resolveComposerPodPolicyState(input: {
   };
 }
 
+export function resolveComposerPodRequirements(
+  commandKey: string | null | undefined,
+  policy: Record<string, unknown>,
+): Record<string, unknown> {
+  const key = commandKey === "tasks.complete" ? "completed" : commandKey === "tasks.exception" ? "exception" : null;
+  if (!key) return {};
+  return { ...asRecord(asRecord(policy.requirements)[key]), ...asRecord(policy[key]) };
+}
+
 export function resolveComposerSignatureRequired(input: {
   podRequirements?: Record<string, unknown> | null;
   handoverMode?: string | null;

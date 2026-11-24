@@ -1,5 +1,6 @@
 import type { CircleLayerSpecification, LineLayerSpecification } from "@maplibre/maplibre-react-native";
 import type { MobileRealMapModel } from "./mobile-real-map-model";
+import type { RouteStatusTone } from "./mobile-shell-route-map";
 
 export type MobileRasterMapStyle = {
   version: 8;
@@ -26,9 +27,21 @@ export const MOBILE_REAL_MAP_LINE_PAINT = {
   "line-color": "#2563eb",
   "line-width": 3,
 } satisfies NonNullable<LineLayerSpecification["paint"]>;
+export const MOBILE_REAL_MAP_TONE_COLORS = {
+  done: "#15803d",
+  issue: "#b91c1c",
+  active: "#b45309",
+  neutral: "#2563eb",
+} satisfies Record<RouteStatusTone, string>;
+
 export const MOBILE_REAL_MAP_POINT_PAINT = {
   "circle-radius": ["case", ["==", ["get", "active"], true], 10, 7],
-  "circle-color": ["match", ["get", "tone"], "done", "#15803d", "issue", "#b91c1c", "active", "#b45309", "#2563eb"],
+  "circle-color": ["match", ["get", "tone"],
+    "done", MOBILE_REAL_MAP_TONE_COLORS.done,
+    "issue", MOBILE_REAL_MAP_TONE_COLORS.issue,
+    "active", MOBILE_REAL_MAP_TONE_COLORS.active,
+    MOBILE_REAL_MAP_TONE_COLORS.neutral,
+  ],
   "circle-stroke-width": 2,
   "circle-stroke-color": "#ffffff",
 } satisfies NonNullable<CircleLayerSpecification["paint"]>;

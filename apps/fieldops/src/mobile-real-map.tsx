@@ -3,6 +3,10 @@ import { Linking, Platform, Pressable, Text, View } from "react-native";
 import type { MobileRealMapModel } from "./mobile-real-map-model";
 import { resolveMobileMapConfiguration, type MobileOpenMapPolicy } from "./mobile-open-map-policy";
 import { MobileRealMapRenderer } from "./mobile-real-map-renderer";
+import { MOBILE_REAL_MAP_TONE_COLORS } from "./mobile-real-map-renderer.types";
+import type { RouteStatusTone } from "./mobile-shell-route-map";
+
+const legendTones: RouteStatusTone[] = ["done", "issue", "active", "neutral"];
 
 export type MobileRealMapStrings = {
   title: string;
@@ -10,6 +14,7 @@ export type MobileRealMapStrings = {
   eta: string;
   status: string;
   unknownStatus: string;
+  mapToneLabels?: Record<RouteStatusTone, string>;
   loading: string;
   empty: string;
   error: string;
@@ -25,6 +30,7 @@ export function MobileRealMap({ model, policy, strings, onSelect, interactionLoc
   onSelect: (id: string) => void;
   interactionLocked?: boolean;
 }) {
+  const { mapToneLabels } = strings;
   const runtime = Platform.OS === "web" ? "web" : Platform.OS === "ios" || Platform.OS === "android" ? "native" : "unsupported";
   const origin = runtime === "web" && typeof window !== "undefined" ? window.location.origin : undefined;
   const config = React.useMemo(() => resolveMobileMapConfiguration(policy, runtime, origin), [policy, runtime, origin]);
@@ -63,6 +69,16 @@ export function MobileRealMap({ model, policy, strings, onSelect, interactionLoc
           ) : null}
           {status === "ready" ? (
             <View>
+              {mapToneLabels ? (
+                <View testID="mobile-real-map-legend" style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+                  {legendTones.map((tone) => (
+                    <View key={tone} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <View aria-hidden={true} style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: MOBILE_REAL_MAP_TONE_COLORS[tone] }} />
+                      <Text>{mapToneLabels[tone]}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
               <Text>{strings.points}: {model.count}</Text>
               {model.points.features.map(({ properties: point }) => {
                 const label = [point.title, `${strings.status}: ${point.status ?? strings.unknownStatus}`, point.etaMinutes === null ? null : `${strings.eta}: ${point.etaMinutes}`]
