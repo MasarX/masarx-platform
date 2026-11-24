@@ -39,6 +39,8 @@ import {
 } from './command-routes';
 
 const NAV_PIN_KEY = 'console-v2.nav-pinned';
+// Matches the phone rule in shell.css, where the pinned sidenav is an overlay drawer.
+const PHONE_QUERY = '(max-width: 720px)';
 const NOTIFS_PIN_KEY = 'console-v2.notifs-pinned';
 const FLYOUT_CLOSE_DELAY_MS = 220;
 
@@ -152,6 +154,11 @@ export function AppShell({
       replace: true,
     });
   }, [location.pathname, location.search, router]);
+
+  // At phone width the sidenav is a drawer over the page: start closed and close on navigation.
+  useEffect(() => {
+    if (window.matchMedia?.(PHONE_QUERY).matches) setNavPinned(false);
+  }, [location.pathname]);
 
   // Persist pin states.
   useEffect(() => {
@@ -420,6 +427,8 @@ export function AppShell({
           onOpenScopePalette={onOpenScopePalette}
           onToggleNotifs={toggleNotifs}
           onOpenUserMenu={openUserMenu}
+          navOpen={navPinned}
+          onToggleNav={toggleNavPin}
           hasUnreadNotifs={hasUnreadNotifs}
         />
 
