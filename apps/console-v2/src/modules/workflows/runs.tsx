@@ -53,6 +53,7 @@ import { useConsoleNavigator } from '@/lib/useConsoleNavigator';
 import * as api from '@/lib/api';
 import { lookupRow } from '@/lib/api';
 import { workflowRunTraceSearch } from './_runs/trace-search';
+import { fill, useI18n } from '@/lib/i18n';
 
 // Cycle E (Workflows P2 #6) — canonical replay-playback animation budget
 // shape. Resolved through `useResolveSettings('ui_presentation_policy')
@@ -403,6 +404,7 @@ interface RunDrawerBodyProps {
 }
 
 function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawerBodyProps) {
+  const { t } = useI18n();
   const tplSteps = useMemo(() => template?.steps || [], [template]);
   // Phase C5: hook-driven cancel + replay so cache invalidates after the
   // canonical RPC settles. The progress/abort actions still ride through the
@@ -538,7 +540,7 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
    * api.progress_workflow_run with cache invalidation).
    */
   async function replayFromStep(startIdx: number) {
-    pushToast(`Replaying from step ${startIdx + 1} · ${run.run_id}`, 'info');
+    pushToast(fill(t('workflowRuns.runDrawerBody.replayingFromStep'), { value: String(startIdx + 1), run_id: String(run.run_id) }), 'info');
     const startStep = trace[startIdx];
     try {
       const replay = await replayRun.mutateAsync({
@@ -553,7 +555,7 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
       // injected. A toast warning surfaces the missing canonical row.
       if (!replayAnimation) {
         pushToast(
-          'Replay animation policy missing · ui_presentation_policy.workflow_replay_animation',
+          t('workflowRuns.runDrawerBody.replayAnimationPolicyMissing'),
           'warn',
         );
       }
@@ -574,10 +576,10 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
         }
       }
       setPlaybackIdx(trace.length);
-      pushToast(`Replay started · ${workflowRunDisplayId(replay.workflow_run_id)}`, 'good');
+      pushToast(fill(t('workflowRuns.runDrawerBody.replayStarted'), { value: String(workflowRunDisplayId(replay.workflow_run_id)) }), 'good');
       void stepsQuery.refetch();
     } catch (err) {
-      pushToast('Replay could not be started. Review the run and try again.', 'danger');
+      pushToast(t('workflowRuns.runDrawerBody.replayCouldNotBe'), 'danger');
     } finally {
       const releaseMs = replayAnimation?.cursor_release_ms ?? 0;
       if (releaseMs > 0) {
@@ -591,25 +593,25 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
   async function retryStep(stepIdx: number) {
     const step = trace[stepIdx];
     if (!step) return;
-    pushToast(`Retry queued · ${step.label}`, 'info');
+    pushToast(fill(t('workflowRuns.runDrawerBody.retryQueued'), { label: String(step.label) }), 'info');
     try {
       await api.progress_workflow_run(run.id, { from_step_id: step.id }, 'retry');
-      pushToast(`Retry succeeded · ${step.label}`, 'good');
+      pushToast(fill(t('workflowRuns.runDrawerBody.retrySucceeded'), { label: String(step.label) }), 'good');
       void stepsQuery.refetch();
     } catch (err) {
-      pushToast('Retry could not be started. Review the step and try again.', 'danger');
+      pushToast(t('workflowRuns.runDrawerBody.retryCouldNotBe'), 'danger');
     }
   }
 
   async function abortRun() {
-    pushToast(`Aborting · ${run.run_id}`, 'info');
+    pushToast(fill(t('workflowRuns.runDrawerBody.aborting'), { run_id: String(run.run_id) }), 'info');
     try {
       // Canonical entrypoint: useCancelWorkflowRun → close_workflow_run.
       await cancelRun.mutateAsync({ run_id: run.id });
-      pushToast(`Abort confirmed · ${run.run_id}`, 'good');
+      pushToast(fill(t('workflowRuns.runDrawerBody.abortConfirmed'), { run_id: String(run.run_id) }), 'good');
       void stepsQuery.refetch();
     } catch (err) {
-      pushToast('Cancellation could not be completed. Review the run and try again.', 'danger');
+      pushToast(t('workflowRuns.runDrawerBody.cancellationCouldNotBe'), 'danger');
     }
   }
 
@@ -620,8 +622,8 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
       // delay) instead of falling back to a literal `400ms`.
       const delay = replayAnimation?.autoplay_delay_ms ?? 0;
       if (delay > 0) {
-        const t = setTimeout(() => void replayFromStep(0), delay);
-        return () => clearTimeout(t);
+        const entry = setTimeout(() => void replayFromStep(0), delay);
+        return () => clearTimeout(entry);
       }
       void replayFromStep(0);
     }
@@ -639,19 +641,19 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
   // rather than relying on FE-fabricated synthetic ids.
   const correlationItems = [
     {
-      label: 'Webhook activity',
+      label: t('workflowRuns.runDrawerBody.webhookActivity'),
       href: `/integrations/webhook-tester?correlation_id=${encodeURIComponent(run.correlation_id)}`,
     },
     {
-      label: 'Audit activity',
+      label: t('workflowRuns.runDrawerBody.auditActivity'),
       href: `/insights/audit?correlation_id=${encodeURIComponent(run.correlation_id)}`,
     },
     {
-      label: 'Decision history',
+      label: t('workflowRuns.runDrawerBody.decisionHistory'),
       href: `/insights/decisions?correlation_id=${encodeURIComponent(run.correlation_id)}`,
     },
     {
-      label: 'Activity history',
+      label: t('workflowRuns.runDrawerBody.activityHistory'),
       href: `/insights/traces?correlation_id=${encodeURIComponent(run.correlation_id)}`,
     },
   ];
@@ -707,7 +709,7 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
             />
           ) : null}
         </div>
-        <span className="wf-run-gantt__dur mono">{dur > 0 ? `${dur}ms` : '—'}</span>
+        <span className="wf-run-gantt__dur mono">{dur > 0 ? fill(t('workflowRuns.runDrawerBody.ms'), { dur: String(dur) }) : '—'}</span>
         {(() => {
           const r = statusTone('workflow_step_status', status);
           return r.tone && r.label
@@ -718,7 +720,7 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
             )
             : (
               <span className="wf-run-gantt__pill chip chip--danger chip--xs">
-                Status label is not configured
+                {t('workflowRuns.runDrawerBody.statusLabelIsNot')}
               </span>
             );
         })()}
@@ -748,13 +750,13 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
               const r = statusTone('workflow_run_status', run.status);
               return r.tone && r.label
                 ? <Chip label={r.label} kind={r.tone} size="xs" />
-                : <Chip label="Status label is not configured" kind="danger" size="xs" />;
+                : <Chip label={t('workflowRuns.runDrawerBody.statusLabelIsNot')} kind="danger" size="xs" />;
             })()}
             <span
               className="mono"
               style={{ fontSize: '11px', color: 'var(--ink-3)' }}
             >
-              {run.duration_ms ? `${run.duration_ms}ms` : '—'}
+              {run.duration_ms ? fill(t('workflowRuns.runDrawerBody.ms2'), { duration_ms: String(run.duration_ms) }) : '—'}
             </span>
             <span
               className="mono"
@@ -766,13 +768,13 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
           <Button
-            label="View trace"
+            label={t('workflowRuns.runDrawerBody.viewTrace')}
             iconName="trace_tree"
             kind="ghost"
             onClick={() => onNavigateRun('/insights/traces')}
           />
           <Button
-            label="Replay run"
+            label={t('workflowRuns.runDrawerBody.replayRun')}
             iconName="rotate"
             kind="primary"
             // W37 — replay routes through the canonical workflow lifecycle
@@ -786,7 +788,7 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
         </div>
       </div>
 
-      <div className="wf-insp__section-eyebrow">Request trail</div>
+      <div className="wf-insp__section-eyebrow">{t('workflowRuns.runDrawerBody.requestTrail')}</div>
       <div className="wf-run-corr">
         {correlationItems.map((c) => (
           <button
@@ -801,9 +803,9 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
         ))}
       </div>
 
-      <div className="wf-insp__section-eyebrow">Step timeline</div>
+      <div className="wf-insp__section-eyebrow">{t('workflowRuns.runDrawerBody.stepTimeline')}</div>
       {trace.length === 0 ? (
-        <StateView kind="empty" hint="Workflow steps not yet materialized" />
+        <StateView kind="empty" hint={t('workflowRuns.runDrawerBody.workflowStepsNotYet')} />
       ) : (
       <div className="wf-run-split">
         <div className="wf-run-gantt">{traceRows}</div>
@@ -822,16 +824,16 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
                   const r = statusTone('workflow_step_status', selectedStep.status);
                   return r.tone && r.label
                     ? <Chip label={r.label} kind={r.tone} size="xs" />
-                    : <Chip label="Status label is not configured" kind="danger" size="xs" />;
+                    : <Chip label={t('workflowRuns.runDrawerBody.statusLabelIsNot')} kind="danger" size="xs" />;
                 })()}
               </div>
               {selectedStep.error ? (
                 <div className="wf-step-error">
-                  <span className="mono">ERROR</span>
+                  <span className="mono">{t('workflowRuns.runDrawerBody.error')}</span>
                   <div>{selectedStep.error}</div>
                 </div>
               ) : null}
-              <div className="wf-insp__section-eyebrow">Input</div>
+              <div className="wf-insp__section-eyebrow">{t('workflowRuns.runDrawerBody.input')}</div>
               {(() => {
                 // W27 Cycle D closure: read step input strictly from
                 // canonical `workflow_run_steps` projection (`input`,
@@ -849,8 +851,8 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
                     <div style={{ padding: '0 14px 12px' }}>
                       <StateView
                         kind="empty"
-                        title="No input captured"
-                        hint="This step has not saved any input details yet."
+                        title={t('workflowRuns.runDrawerBody.noInputCaptured')}
+                        hint={t('workflowRuns.runDrawerBody.thisStepHasNot')}
                       />
                     </div>
                   );
@@ -861,7 +863,7 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
                   </pre>
                 );
               })()}
-              <div className="wf-insp__section-eyebrow">Output</div>
+              <div className="wf-insp__section-eyebrow">{t('workflowRuns.runDrawerBody.output')}</div>
               {(() => {
                 // Cycle E (Workflows P2 #5) — read step output strictly
                 // from the canonical `workflow_run_steps` projection
@@ -881,8 +883,8 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
                     <div style={{ padding: '0 14px 12px' }}>
                       <StateView
                         kind="empty"
-                        title="No output captured"
-                        hint="This step has not saved any output details yet."
+                        title={t('workflowRuns.runDrawerBody.noOutputCaptured')}
+                        hint={t('workflowRuns.runDrawerBody.thisStepHasNot2')}
                       />
                     </div>
                   );
@@ -893,7 +895,7 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
                   </pre>
                 );
               })()}
-              <div className="wf-insp__section-eyebrow">Actions</div>
+              <div className="wf-insp__section-eyebrow">{t('workflowRuns.runDrawerBody.actions')}</div>
               <div
                 style={{
                   display: 'flex',
@@ -903,7 +905,7 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
                 }}
               >
                 <Button
-                  label="Replay from this step"
+                  label={t('workflowRuns.runDrawerBody.replayFromThisStep')}
                   iconName="rotate"
                   kind="primary"
                   // W37 — same gating as drawer-header "Replay run" Button.
@@ -912,15 +914,15 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
                   onClick={() => void replayFromStep(selectedIdx)}
                 />
                 <Button
-                  label="Open operation_template"
+                  label={t('workflowRuns.runDrawerBody.openOperationTemplate')}
                   iconName="right"
                   kind="ghost"
                   onClick={() =>
-                    pushToast(`Open op_template · ${selectedStep.op}`, 'info')
+                    pushToast(fill(t('workflowRuns.runDrawerBody.openOpTemplate'), { op: String(selectedStep.op) }), 'info')
                   }
                 />
                 <Button
-                  label="Decision trail"
+                  label={t('workflowRuns.runDrawerBody.decisionTrail')}
                   iconName="audit"
                   kind="ghost"
                   onClick={() => {
@@ -952,7 +954,7 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
                     via the existing canonical-row chip rendering. */}
                 {lookupRow('workflow_step_status', selectedStep.status)?.metadata?.allows_retry === true ? (
                   <Button
-                    label="Retry"
+                    label={t('workflowRuns.runDrawerBody.retry')}
                     iconName="refresh"
                     kind="ghost"
                     capability={CAP.WORKFLOWS_WRITE}
@@ -961,7 +963,7 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
                 ) : null}
                 {workflowRunAllowsAbort(run.status) ? (
                   <Button
-                    label="Abort run"
+                    label={t('workflowRuns.runDrawerBody.abortRun')}
                     iconName="x"
                     kind="ghost"
                     capability={CAP.WORKFLOWS_WRITE}
@@ -973,8 +975,8 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
           ) : (
             <StateView
               kind="empty"
-              title="No step selected"
-              hint="Click a step on the timeline to inspect."
+              title={t('workflowRuns.runDrawerBody.noStepSelected')}
+              hint={t('workflowRuns.runDrawerBody.clickAStepOn')}
             />
           )}
         </div>
@@ -991,11 +993,8 @@ function RunDrawerBody({ run, template, onNavigateRun, initialReplay }: RunDrawe
 // is persisted in the hash so deep links survive page reloads.
 type RunsTab = 'runs' | 'triggers' | 'schedules';
 
-const RUNS_TABS: Array<{ key: RunsTab; label: string; aria: string }> = [
-  { key: 'runs', label: 'Runs', aria: 'Workflow runs' },
-  { key: 'triggers', label: 'Triggers', aria: 'Workflow run triggers (workflow chaining)' },
-  { key: 'schedules', label: 'Schedules', aria: 'Workflow schedule triggers (cron)' },
-];
+// Labels come from the workflowRuns.tabs catalog entries.
+const RUNS_TABS: Array<{ key: RunsTab }> = [{ key: 'runs' }, { key: 'triggers' }, { key: 'schedules' }];
 
 // Cycle E2 (Workflows P1 #3) — `scheduleSummary` is canonical-driven
 // through the `workflow_schedule_type` lookup. Each row carries
@@ -1205,6 +1204,7 @@ function WorkflowRunTriggerComposer({
     notes: string | null;
   }) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [sourceTemplateId, setSourceTemplateId] = useState(
     initialTrigger?.source_workflow_template_id ?? templates[0]?.id ?? '',
   );
@@ -1273,7 +1273,7 @@ function WorkflowRunTriggerComposer({
         notes: notes.trim() || null,
       });
     } catch (err) {
-      setError((err as Error)?.message ?? 'Workflow trigger could not be created');
+      setError((err as Error)?.message ?? t('workflowRuns.workflowRunTriggerComposer.workflowTriggerCouldNot'));
       setSubmitting(false);
     }
   }
@@ -1289,13 +1289,13 @@ function WorkflowRunTriggerComposer({
           padding: '0 4px',
         }}
       >
-        <label className="mono" htmlFor="workflow-run-trigger-source">Source template</label>
+        <label className="mono" htmlFor="workflow-run-trigger-source">{t('workflowRuns.workflowRunTriggerComposer.sourceTemplate')}</label>
         <select
           id="workflow-run-trigger-source"
           className="dt-inline-input"
           value={sourceTemplateId}
           onChange={(event) => setSourceTemplateId(event.target.value)}
-          aria-label="Source workflow template"
+          aria-label={t('workflowRuns.workflowRunTriggerComposer.sourceWorkflowTemplate')}
         >
           {templates.map((template) => (
             <option key={template.id} value={template.id}>
@@ -1303,13 +1303,13 @@ function WorkflowRunTriggerComposer({
             </option>
           ))}
         </select>
-        <label className="mono" htmlFor="workflow-run-trigger-target">Target template</label>
+        <label className="mono" htmlFor="workflow-run-trigger-target">{t('workflowRuns.workflowRunTriggerComposer.targetTemplate')}</label>
         <select
           id="workflow-run-trigger-target"
           className="dt-inline-input"
           value={targetTemplateId}
           onChange={(event) => setTargetTemplateId(event.target.value)}
-          aria-label="Target workflow template"
+          aria-label={t('workflowRuns.workflowRunTriggerComposer.targetWorkflowTemplate')}
         >
           {templates
             .filter((template) => template.id !== sourceTemplateId)
@@ -1330,21 +1330,21 @@ function WorkflowRunTriggerComposer({
           flexWrap: 'wrap',
         }}
       >
-        <legend className="mono" style={{ padding: '0 4px' }}>Source status</legend>
+        <legend className="mono" style={{ padding: '0 4px' }}>{t('workflowRuns.workflowRunTriggerComposer.sourceStatus')}</legend>
         {statusOptions.map((option) => (
           <label key={option.value} className="chip chip--xs" style={{ cursor: 'pointer' }}>
             <input
               type="checkbox"
               checked={sourceStatuses.includes(option.value)}
               onChange={(event) => toggleStatus(option.value, event.target.checked)}
-              aria-label={`Trigger on ${option.label}`}
+              aria-label={fill(t('workflowRuns.workflowRunTriggerComposer.triggerOn'), { label: String(option.label) })}
             />{' '}
             {option.label}
           </label>
         ))}
       </fieldset>
       <label className="mono" htmlFor="workflow-run-trigger-context" style={{ padding: '0 4px' }}>
-        Context patch
+        {t('workflowRuns.workflowRunTriggerComposer.contextPatch')}
       </label>
       <textarea
         id="workflow-run-trigger-context"
@@ -1352,26 +1352,26 @@ function WorkflowRunTriggerComposer({
         rows={4}
         value={contextPatch}
         onChange={(event) => setContextPatch(event.target.value)}
-        aria-label="Trigger context patch JSON"
+        aria-label={t('workflowRuns.workflowRunTriggerComposer.triggerContextPatchJson')}
       />
       <label className="mono" htmlFor="workflow-run-trigger-notes" style={{ padding: '0 4px' }}>
-        Notes
+        {t('workflowRuns.workflowRunTriggerComposer.notes')}
       </label>
       <input
         id="workflow-run-trigger-notes"
         className="dt-inline-input"
         value={notes}
         onChange={(event) => setNotes(event.target.value)}
-        aria-label="Trigger notes"
+        aria-label={t('workflowRuns.workflowRunTriggerComposer.triggerNotes')}
       />
       <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '0 4px' }}>
         <input
           type="checkbox"
           checked={enabled}
           onChange={(event) => setEnabled(event.target.checked)}
-          aria-label="Trigger enabled"
+          aria-label={t('workflowRuns.workflowRunTriggerComposer.triggerEnabled')}
         />
-        <span>Enabled</span>
+        <span>{t('workflowRuns.workflowRunTriggerComposer.enabled')}</span>
       </label>
       {error ? (
         <div role="alert" className="state__hint" style={{ color: 'var(--danger)' }}>
@@ -1379,7 +1379,7 @@ function WorkflowRunTriggerComposer({
         </div>
       ) : null}
       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-        <Button label="Cancel" kind="ghost" onClick={onCancel} disabled={submitting} />
+        <Button label={t('workflowRuns.workflowRunTriggerComposer.cancel')} kind="ghost" onClick={onCancel} disabled={submitting} />
         <Button
           label={submitLabel}
           iconName="plus"
@@ -1410,6 +1410,7 @@ function WorkflowScheduleComposer({
     notes: string | null;
   }) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [templateId, setTemplateId] = useState(templates[0]?.id ?? '');
   const [scheduleType, setScheduleType] = useState(scheduleTypeOptions[0]?.value ?? '');
   const [intervalSeconds, setIntervalSeconds] = useState('3600');
@@ -1455,19 +1456,19 @@ function WorkflowScheduleComposer({
         notes: notes.trim() || null,
       });
     } catch (err) {
-      setError((err as Error)?.message ?? 'Schedule could not be created');
+      setError((err as Error)?.message ?? t('workflowRuns.workflowScheduleComposer.scheduleCouldNotBe'));
       setSubmitting(false);
     }
   }
 
   const dayOptions = [
-    { value: 0, label: 'Sun' },
-    { value: 1, label: 'Mon' },
-    { value: 2, label: 'Tue' },
-    { value: 3, label: 'Wed' },
-    { value: 4, label: 'Thu' },
-    { value: 5, label: 'Fri' },
-    { value: 6, label: 'Sat' },
+    { value: 0, label: t('workflowRuns.workflowScheduleComposer.sun') },
+    { value: 1, label: t('workflowRuns.workflowScheduleComposer.mon') },
+    { value: 2, label: t('workflowRuns.workflowScheduleComposer.tue') },
+    { value: 3, label: t('workflowRuns.workflowScheduleComposer.wed') },
+    { value: 4, label: t('workflowRuns.workflowScheduleComposer.thu') },
+    { value: 5, label: t('workflowRuns.workflowScheduleComposer.fri') },
+    { value: 6, label: t('workflowRuns.workflowScheduleComposer.sat') },
   ];
 
   return (
@@ -1481,13 +1482,13 @@ function WorkflowScheduleComposer({
           padding: '0 4px',
         }}
       >
-        <label className="mono" htmlFor="workflow-schedule-template">Template</label>
+        <label className="mono" htmlFor="workflow-schedule-template">{t('workflowRuns.workflowScheduleComposer.template')}</label>
         <select
           id="workflow-schedule-template"
           className="dt-inline-input"
           value={templateId}
           onChange={(event) => setTemplateId(event.target.value)}
-          aria-label="Workflow template"
+          aria-label={t('workflowRuns.workflowScheduleComposer.workflowTemplate')}
         >
           {templates.map((template) => (
             <option key={template.id} value={template.id}>
@@ -1495,13 +1496,13 @@ function WorkflowScheduleComposer({
             </option>
           ))}
         </select>
-        <label className="mono" htmlFor="workflow-schedule-type">Schedule type</label>
+        <label className="mono" htmlFor="workflow-schedule-type">{t('workflowRuns.workflowScheduleComposer.scheduleType')}</label>
         <select
           id="workflow-schedule-type"
           className="dt-inline-input"
           value={scheduleType}
           onChange={(event) => setScheduleType(event.target.value)}
-          aria-label="Schedule type"
+          aria-label={t('workflowRuns.workflowScheduleComposer.scheduleType')}
         >
           {scheduleTypeOptions.map((option) => (
             <option key={option.value} value={option.value}>
@@ -1511,7 +1512,7 @@ function WorkflowScheduleComposer({
         </select>
         {scheduleType === 'interval' ? (
           <>
-            <label className="mono" htmlFor="workflow-schedule-interval">Every seconds</label>
+            <label className="mono" htmlFor="workflow-schedule-interval">{t('workflowRuns.workflowScheduleComposer.everySeconds')}</label>
             <input
               id="workflow-schedule-interval"
               className="dt-inline-input"
@@ -1519,35 +1520,35 @@ function WorkflowScheduleComposer({
               min={1}
               value={intervalSeconds}
               onChange={(event) => setIntervalSeconds(event.target.value)}
-              aria-label="Interval seconds"
+              aria-label={t('workflowRuns.workflowScheduleComposer.intervalSeconds')}
             />
           </>
         ) : null}
         {scheduleType === 'daily' || scheduleType === 'weekly' ? (
           <>
-            <label className="mono" htmlFor="workflow-schedule-at-time">Run time</label>
+            <label className="mono" htmlFor="workflow-schedule-at-time">{t('workflowRuns.workflowScheduleComposer.runTime')}</label>
             <input
               id="workflow-schedule-at-time"
               className="dt-inline-input"
               type="time"
               value={atTime}
               onChange={(event) => setAtTime(event.target.value)}
-              aria-label="Run time"
+              aria-label={t('workflowRuns.workflowScheduleComposer.runTime')}
             />
-            <label className="mono" htmlFor="workflow-schedule-timezone">Timezone</label>
+            <label className="mono" htmlFor="workflow-schedule-timezone">{t('workflowRuns.workflowScheduleComposer.timezone')}</label>
             <input
               id="workflow-schedule-timezone"
               className="dt-inline-input mono"
               type="text"
               value={timezone}
               onChange={(event) => setTimezone(event.target.value)}
-              aria-label="Timezone"
+              aria-label={t('workflowRuns.workflowScheduleComposer.timezone')}
             />
           </>
         ) : null}
       </div>
       {scheduleType === 'weekly' ? (
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', padding: '0 4px' }} aria-label="Days of week">
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', padding: '0 4px' }} aria-label={t('workflowRuns.workflowScheduleComposer.daysOfWeek')}>
           {dayOptions.map((day) => (
             <label key={day.value} className="chip chip--xs" style={{ cursor: 'pointer' }}>
               <input
@@ -1560,7 +1561,7 @@ function WorkflowScheduleComposer({
                       : current.filter((value) => value !== day.value),
                   );
                 }}
-                aria-label={`Run on ${day.label}`}
+                aria-label={fill(t('workflowRuns.workflowScheduleComposer.runOn'), { label: String(day.label) })}
               />{' '}
               {day.label}
             </label>
@@ -1568,7 +1569,7 @@ function WorkflowScheduleComposer({
         </div>
       ) : null}
       <label className="mono" htmlFor="workflow-schedule-context" style={{ padding: '0 4px' }}>
-        Context patch
+        {t('workflowRuns.workflowScheduleComposer.contextPatch')}
       </label>
       <textarea
         id="workflow-schedule-context"
@@ -1576,26 +1577,26 @@ function WorkflowScheduleComposer({
         rows={4}
         value={contextPatch}
         onChange={(event) => setContextPatch(event.target.value)}
-        aria-label="Context patch JSON"
+        aria-label={t('workflowRuns.workflowScheduleComposer.contextPatchJson')}
       />
       <label className="mono" htmlFor="workflow-schedule-notes" style={{ padding: '0 4px' }}>
-        Notes
+        {t('workflowRuns.workflowScheduleComposer.notes')}
       </label>
       <input
         id="workflow-schedule-notes"
         className="dt-inline-input"
         value={notes}
         onChange={(event) => setNotes(event.target.value)}
-        aria-label="Schedule notes"
+        aria-label={t('workflowRuns.workflowScheduleComposer.scheduleNotes')}
       />
       <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '0 4px' }}>
         <input
           type="checkbox"
           checked={enabled}
           onChange={(event) => setEnabled(event.target.checked)}
-          aria-label="Enabled"
+          aria-label={t('workflowRuns.workflowScheduleComposer.enabled')}
         />
-        <span>Enabled</span>
+        <span>{t('workflowRuns.workflowScheduleComposer.enabled')}</span>
       </label>
       {error ? (
         <div role="alert" className="state__hint" style={{ color: 'var(--danger)' }}>
@@ -1603,9 +1604,9 @@ function WorkflowScheduleComposer({
         </div>
       ) : null}
       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-        <Button label="Cancel" kind="ghost" onClick={onCancel} disabled={submitting} />
+        <Button label={t('workflowRuns.workflowScheduleComposer.cancel')} kind="ghost" onClick={onCancel} disabled={submitting} />
         <Button
-          label="Create schedule"
+          label={t('workflowRuns.workflowScheduleComposer.createSchedule')}
           iconName="plus"
           kind="primary"
           capability={CAP.WORKFLOWS_WRITE}
@@ -1618,6 +1619,7 @@ function WorkflowScheduleComposer({
 }
 
 export function RunsModule() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const go = useConsoleNavigator();
   const drawer = useDrawer();
@@ -1675,7 +1677,7 @@ export function RunsModule() {
   );
   const tplById = useMemo(() => {
     const m = new Map<string, WorkflowTemplate>();
-    templates.forEach((t) => m.set(t.id, t));
+    templates.forEach((entry) => m.set(entry.id, entry));
     return m;
   }, [templates]);
   const allRuns = useMemo(
@@ -1844,17 +1846,17 @@ export function RunsModule() {
       if (result.workflow_run_id) queueScheduleRunNowReadbackRefetches(result.workflow_run_id);
       if (result.status === 'preflight_failed') {
         pushToast(
-          'Run-now setup check blocked.',
+          t('workflowRuns.runsModule.runNowSetupCheck'),
           'danger',
         );
       } else {
         pushToast(
-          'Queued - schedule run',
+          t('workflowRuns.runsModule.queuedScheduleRun'),
           'good',
         );
       }
     } catch (err) {
-      pushToast('Run now could not be started. Review the schedule and try again.', 'danger');
+      pushToast(t('workflowRuns.runsModule.runNowCouldNot'), 'danger');
     }
   }
 
@@ -1881,11 +1883,11 @@ export function RunsModule() {
       setScheduleRunNowRunReadback(null);
       await schedulesQuery.refetch();
       pushToast(
-        'Task details repaired.',
+        t('workflowRuns.runsModule.taskDetailsRepaired'),
         'good',
       );
     } catch (err) {
-      pushToast('Schedule repair could not be completed. Review the schedule and try again.', 'danger');
+      pushToast(t('workflowRuns.runsModule.scheduleRepairCouldNot'), 'danger');
     }
   }
 
@@ -1957,7 +1959,7 @@ export function RunsModule() {
     setTriggerLifecycleReadback(triggerReadbackFromRow(readbackRow, action));
     setActiveTab('triggers');
     pushToast(
-      `Workflow trigger ${action} - ${workflowTemplateOperatorLabel(readbackRow.source_template_name || readbackRow.source_workflow_template_id)}`,
+      fill(t('workflowRuns.runsModule.workflowTrigger'), { action: String(action), value: String(workflowTemplateOperatorLabel(readbackRow.source_template_name || readbackRow.source_workflow_template_id)) }),
       'good',
     );
     return result;
@@ -1966,14 +1968,14 @@ export function RunsModule() {
   function openEditRunTrigger(row: WorkflowRunTrigger) {
     if (!canWrite) return;
     modal.open({
-      title: 'Edit workflow trigger',
+      title: t('workflowRuns.runsModule.editWorkflowTrigger'),
       body: (
         <WorkflowRunTriggerComposer
           templates={templates}
           statusOptions={triggerStatusOptions}
           existingTriggers={activeTriggerRows}
           initialTrigger={row}
-          submitLabel="Save trigger"
+          submitLabel={t('workflowRuns.runsModule.saveTrigger')}
           onCancel={() => modal.close()}
           onSubmit={async (args) => {
             await updateWorkflowRunTrigger(
@@ -2004,7 +2006,7 @@ export function RunsModule() {
         row.enabled ? 'disabled' : 'enabled',
       );
     } catch (err) {
-      pushToast('Workflow trigger update could not be completed. Review the trigger and try again.', 'danger');
+      pushToast(t('workflowRuns.runsModule.workflowTriggerUpdateCould'), 'danger');
     }
   }
 
@@ -2013,22 +2015,22 @@ export function RunsModule() {
     const sourceLabel = workflowTemplateOperatorLabel(row.source_template_name || row.source_workflow_template_id);
     const targetLabel = workflowTemplateOperatorLabel(row.target_template_name || row.target_workflow_template_id);
     modal.open({
-      title: 'Delete workflow trigger',
+      title: t('workflowRuns.runsModule.deleteWorkflowTrigger'),
       body: (
         <div style={{ display: 'grid', gap: '10px' }}>
           <p style={{ margin: 0 }}>
-            Delete the trigger from <strong>{sourceLabel}</strong> to <strong>{targetLabel}</strong>.
+            {fill(t('workflowRuns.runsModule.deleteTheTriggerFrom'), { sourceLabel, targetLabel })}
           </p>
           <p style={{ margin: 0, color: 'var(--ink-3)' }}>
-            Existing activity history stays available, and this trigger will no longer run.
+            {t('workflowRuns.runsModule.existingActivityHistoryStays')}
           </p>
         </div>
       ),
       footer: (
         <>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('workflowRuns.runsModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Delete trigger"
+            label={t('workflowRuns.runsModule.deleteTrigger')}
             iconName="trash"
             kind="danger"
             capability={CAP.WORKFLOWS_WRITE}
@@ -2053,9 +2055,9 @@ export function RunsModule() {
                 });
                 modal.close();
                 setActiveTab('triggers');
-                pushToast(`Workflow trigger deleted - ${sourceLabel}`, 'good');
+                pushToast(fill(t('workflowRuns.runsModule.workflowTriggerDeleted'), { sourceLabel: String(sourceLabel) }), 'good');
               } catch (err) {
-                pushToast('Workflow trigger could not be deleted. Review the trigger and try again.', 'danger');
+                pushToast(t('workflowRuns.runsModule.workflowTriggerCouldNot'), 'danger');
               }
             }}
           />
@@ -2068,34 +2070,34 @@ export function RunsModule() {
     if (!canWrite) return;
     if (templates.length < 2) {
       modal.open({
-        title: 'New workflow trigger',
+        title: t('workflowRuns.runsModule.newWorkflowTrigger'),
         body: (
           <StateView
             kind="error"
-            title="Workflow trigger needs two templates"
-            hint="Create or sync another workflow template before chaining workflow runs."
+            title={t('workflowRuns.runsModule.workflowTriggerNeedsTwo')}
+            hint={t('workflowRuns.runsModule.createOrSyncAnother')}
           />
         ),
-        footer: <Button label="Close" kind="ghost" onClick={() => modal.close()} />,
+        footer: <Button label={t('workflowRuns.runsModule.close')} kind="ghost" onClick={() => modal.close()} />,
       });
       return;
     }
     if (triggerStatusOptions.length === 0) {
       modal.open({
-        title: 'New workflow trigger',
+        title: t('workflowRuns.runsModule.newWorkflowTrigger'),
         body: (
           <StateView
             kind="error"
-            title="Workflow run statuses are unavailable"
-            hint="Refresh after workflow status lookups finish syncing before creating a trigger."
+            title={t('workflowRuns.runsModule.workflowRunStatusesAre')}
+            hint={t('workflowRuns.runsModule.refreshAfterWorkflowStatus')}
           />
         ),
-        footer: <Button label="Close" kind="ghost" onClick={() => modal.close()} />,
+        footer: <Button label={t('workflowRuns.runsModule.close')} kind="ghost" onClick={() => modal.close()} />,
       });
       return;
     }
     modal.open({
-      title: 'New workflow trigger',
+      title: t('workflowRuns.runsModule.newWorkflowTrigger'),
       body: (
         <WorkflowRunTriggerComposer
           templates={templates}
@@ -2148,7 +2150,7 @@ export function RunsModule() {
             setScheduleTaskRepairReadback(null);
             modal.close();
             setActiveTab('triggers');
-            pushToast(`Workflow trigger created · ${sourceLabel} -> ${targetLabel}`, 'good');
+            pushToast(fill(t('workflowRuns.runsModule.workflowTriggerCreated'), { sourceLabel: String(sourceLabel), targetLabel: String(targetLabel) }), 'good');
           }}
         />
       ),
@@ -2159,34 +2161,34 @@ export function RunsModule() {
     if (!canWrite) return;
     if (templates.length === 0) {
       modal.open({
-        title: 'New schedule',
+        title: t('workflowRuns.runsModule.newSchedule'),
         body: (
           <StateView
             kind="error"
-            title="Workflow templates are unavailable"
-            hint="Refresh after workflow template sync completes before creating a schedule."
+            title={t('workflowRuns.runsModule.workflowTemplatesAreUnavailable')}
+            hint={t('workflowRuns.runsModule.refreshAfterWorkflowTemplate')}
           />
         ),
-        footer: <Button label="Close" kind="ghost" onClick={() => modal.close()} />,
+        footer: <Button label={t('workflowRuns.runsModule.close')} kind="ghost" onClick={() => modal.close()} />,
       });
       return;
     }
     if (scheduleTypeOptions.length === 0) {
       modal.open({
-        title: 'New schedule',
+        title: t('workflowRuns.runsModule.newSchedule'),
         body: (
           <StateView
             kind="error"
-            title="Schedule types are unavailable"
-            hint="The workflow schedule type catalog is still syncing."
+            title={t('workflowRuns.runsModule.scheduleTypesAreUnavailable')}
+            hint={t('workflowRuns.runsModule.theWorkflowScheduleType')}
           />
         ),
-        footer: <Button label="Close" kind="ghost" onClick={() => modal.close()} />,
+        footer: <Button label={t('workflowRuns.runsModule.close')} kind="ghost" onClick={() => modal.close()} />,
       });
       return;
     }
     modal.open({
-      title: 'New schedule',
+      title: t('workflowRuns.runsModule.newSchedule'),
       body: (
         <WorkflowScheduleComposer
           templates={templates}
@@ -2219,7 +2221,7 @@ export function RunsModule() {
             setTriggerLifecycleReadback(null);
             modal.close();
             setActiveTab('schedules');
-            pushToast(`Schedule created · ${workflowTemplateOperatorLabel(readbackRow.template_name || readbackRow.workflow_template_id)}`, 'good');
+            pushToast(fill(t('workflowRuns.runsModule.scheduleCreated'), { value: String(workflowTemplateOperatorLabel(readbackRow.template_name || readbackRow.workflow_template_id)) }), 'good');
           }}
         />
       ),
@@ -2263,18 +2265,18 @@ export function RunsModule() {
       openRunDrawer(r);
       return undefined;
     }
-    const t = setTimeout(() => openRunDrawer(r), drawerOpenDelayMs);
-    return () => clearTimeout(t);
+    const entry = setTimeout(() => openRunDrawer(r), drawerOpenDelayMs);
+    return () => clearTimeout(entry);
   }, [hashQ.focus, allRuns, drawerOpenDelayMs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const COLUMNS: Array<DataTableColumn<WorkflowRun>> = [
-    { key: 'run_id', label: 'Run', mono: true, sortable: true, filterable: true },
-    { key: 'template_name', label: 'Template', sortable: true, filterable: true },
-    { key: 'started_at', label: 'Started', format: 'datetime', sortable: true },
-    { key: 'duration_ms', label: 'Duration', align: 'right', format: 'ms', sortable: true, type: 'number' },
+    { key: 'run_id', label: t('workflowRuns.runsModule.run'), mono: true, sortable: true, filterable: true },
+    { key: 'template_name', label: t('workflowRuns.runsModule.template'), sortable: true, filterable: true },
+    { key: 'started_at', label: t('workflowRuns.runsModule.started'), format: 'datetime', sortable: true },
+    { key: 'duration_ms', label: t('workflowRuns.runsModule.duration'), align: 'right', format: 'ms', sortable: true, type: 'number' },
     {
       key: 'status',
-      label: 'Status',
+      label: t('workflowRuns.runsModule.status'),
       sortable: true,
       filterable: true,
       render: (raw) => {
@@ -2282,11 +2284,11 @@ export function RunsModule() {
         const r = statusTone('workflow_run_status', v);
         return r.tone && r.label
           ? <Chip label={r.label} kind={r.tone} size="xs" />
-          : <Chip label="Status label is not configured" kind="danger" size="xs" />;
+          : <Chip label={t('workflowRuns.runsModule.statusLabelIsNot')} kind="danger" size="xs" />;
       },
     },
-    { key: 'triggered_by', label: 'Triggered by', sortable: true, filterable: true, mono: true },
-    { key: 'correlation_id', label: 'Request trail', mono: true, sortable: true, filterable: true },
+    { key: 'triggered_by', label: t('workflowRuns.runsModule.triggeredBy'), sortable: true, filterable: true, mono: true },
+    { key: 'correlation_id', label: t('workflowRuns.runsModule.requestTrail'), mono: true, sortable: true, filterable: true },
   ];
 
   const cancelRunBulk = useCancelWorkflowRun();
@@ -2296,13 +2298,13 @@ export function RunsModule() {
       // `workflows.write` so the FE matches the canonical
       // `progress_workflow_run` (action='manual_override' / 'replay')
       // server-side capability assertion.
-      label: 'Replay',
+      label: t('workflowRuns.runsModule.replay'),
       icon: 'rotate',
       capability: CAP.WORKFLOWS_WRITE,
       onClick: (r) => openRunDrawer(r, { replay: true }),
     },
     {
-      label: 'View trace',
+      label: t('workflowRuns.runsModule.viewTrace'),
       icon: 'trace_tree',
       onClick: (r) =>
         navigate({
@@ -2311,17 +2313,17 @@ export function RunsModule() {
         }),
     },
     {
-      label: 'Filter by template',
+      label: t('workflowRuns.runsModule.filterByTemplate'),
       icon: 'right',
       onClick: (r) => filterByTemplate(r.template_id),
     },
     {
-      label: 'Drill into step',
+      label: t('workflowRuns.runsModule.drillIntoStep'),
       icon: 'right',
       onClick: (r) => openRunDrawer(r),
     },
     {
-      label: 'Cancel run',
+      label: t('workflowRuns.runsModule.cancelRun'),
       icon: 'x',
       kind: 'danger',
       capability: CAP.WORKFLOWS_WRITE,
@@ -2330,9 +2332,9 @@ export function RunsModule() {
       onClick: async (r) => {
         try {
           await cancelRunBulk.mutateAsync({ run_id: r.id });
-          pushToast(`Cancelled · ${r.run_id}`, 'warn');
+          pushToast(fill(t('workflowRuns.runsModule.cancelled'), { run_id: String(r.run_id) }), 'warn');
         } catch (err) {
-          pushToast('Cancellation could not be completed. Review the run and try again.', 'danger');
+          pushToast(t('workflowRuns.runsModule.cancellationCouldNotBe'), 'danger');
         }
       },
     },
@@ -2376,10 +2378,10 @@ export function RunsModule() {
         }),
       );
       setInspectionReadback({ inspectedAt, count: rows.length, rows });
-      pushToast(`Marked ${rows.length} runs inspected`, 'good');
+      pushToast(fill(t('workflowRuns.runsModule.markedRunsInspected'), { length: String(rows.length) }), 'good');
     } catch (err) {
       setInspectionReadback(null);
-      pushToast('Inspection confirmation could not be saved. Review the run and try again.', 'danger');
+      pushToast(t('workflowRuns.runsModule.inspectionConfirmationCouldNot'), 'danger');
     }
   }
 
@@ -2388,12 +2390,12 @@ export function RunsModule() {
   // failure does not cancel the rest of the batch.
   const BULK_ACTIONS: Array<DataTableBulkAction<WorkflowRun>> = [
     {
-      label: 'Replay selected',
+      label: t('workflowRuns.runsModule.replaySelected'),
       icon: 'rotate',
       kind: 'primary',
       capability: CAP.WORKFLOWS_WRITE,
       onClick: (rs) => {
-        pushToast(`Queued replay · ${rs.length} runs`, 'info');
+        pushToast(fill(t('workflowRuns.runsModule.queuedReplayRuns'), { length: String(rs.length) }), 'info');
         void Promise.allSettled(
           rs.map((r) =>
             replayRun.mutateAsync({ run_id: r.id, template_id: r.template_id, payload: { replay_of: r.id } }),
@@ -2402,7 +2404,7 @@ export function RunsModule() {
           const ok = results.filter((x) => x.status === 'fulfilled').length;
           const fail = results.length - ok;
           pushToast(
-            `Replay batch · ${ok} ok${fail ? ` · ${fail} failed` : ''}`,
+            fail ? fill(t('workflowRuns.runsModule.replayBatchOkFailed'), { ok: String(ok), fail: String(fail) }) : fill(t('workflowRuns.runsModule.replayBatchOk'), { ok: String(ok) }),
             fail ? 'warn' : 'good',
           );
         });
@@ -2413,7 +2415,7 @@ export function RunsModule() {
       // `workflows.write` so the FE matches the canonical
       // `ui_log_event_v1` server-side capability assertion (telemetry
       // mutation through `decision_log` ladder writes).
-      label: 'Mark inspected',
+      label: t('workflowRuns.runsModule.markInspected'),
       icon: 'check',
       kind: 'ghost',
       capability: CAP.WORKFLOWS_WRITE,
@@ -2428,14 +2430,14 @@ export function RunsModule() {
       <div className="page">
         <PageHeader
           moduleKey="wf-runs"
-          eyebrow="Workflows"
+          eyebrow={t('workflowRuns.runsModule.workflows')}
           titleAccent="Run"
           titlePlain="history"
         />
         <StateView
           kind="denied"
           capability={CAP.WORKFLOWS_READ}
-          hint="You do not have permission to view workflow runs."
+          hint={t('workflowRuns.runsModule.youDoNotHave')}
         />
       </div>
     );
@@ -2446,7 +2448,7 @@ export function RunsModule() {
       <div className="page">
         <PageHeader
           moduleKey="wf-runs"
-          eyebrow="Workflows"
+          eyebrow={t('workflowRuns.runsModule.workflows')}
           titleAccent="Run"
           titlePlain="history"
           pills={[]}
@@ -2461,7 +2463,7 @@ export function RunsModule() {
       <div className="page">
         <PageHeader
           moduleKey="wf-runs"
-          eyebrow="Workflows"
+          eyebrow={t('workflowRuns.runsModule.workflows')}
           titleAccent="Run"
           titlePlain="history"
           pills={[]}
@@ -2475,7 +2477,7 @@ export function RunsModule() {
   const TRIGGER_COLUMNS: Array<DataTableColumn<WorkflowRunTrigger>> = [
     {
       key: 'source_template_name',
-      label: 'Source template',
+      label: t('workflowRuns.runsModule.sourceTemplate'),
       sortable: true,
       filterable: true,
       render: (raw, row) => {
@@ -2495,14 +2497,14 @@ export function RunsModule() {
     },
     {
       key: 'target_template_name',
-      label: 'Target template',
+      label: t('workflowRuns.runsModule.targetTemplate'),
       sortable: true,
       filterable: true,
       render: (raw, row) => workflowTemplateOperatorLabel(raw ?? row?.target_workflow_template_id),
     },
     {
       key: 'source_statuses',
-      label: 'On status',
+      label: t('workflowRuns.runsModule.onStatus'),
       filterable: true,
       render: (raw) => {
         const arr = Array.isArray(raw)
@@ -2514,16 +2516,16 @@ export function RunsModule() {
               const r = statusTone('workflow_run_status', s);
               return r.tone && r.label
                 ? <Chip key={s} label={r.label} kind={r.tone} size="xs" />
-                : <Chip key={s} label="Status label is not configured" kind="danger" size="xs" />;
+                : <Chip key={s} label={t('workflowRuns.runsModule.statusLabelIsNot')} kind="danger" size="xs" />;
             })}
           </span>
         );
       },
     },
-    { key: 'scope_type', label: 'Scope', filterable: true, lookup: 'workflow_trigger_scope_type' },
+    { key: 'scope_type', label: t('workflowRuns.runsModule.scope'), filterable: true, lookup: 'workflow_trigger_scope_type' },
     {
       key: 'enabled',
-      label: 'Enabled',
+      label: t('workflowRuns.runsModule.enabled'),
       filterable: true,
       // W56-D (closure) — workflow_run_triggers canonical lookup category is
       // `workflow_binding_enabled_state` (enabled/disabled). Domain language
@@ -2535,7 +2537,7 @@ export function RunsModule() {
         if (!row) {
           return (
             <Chip
-              label="Status label is not configured"
+              label={t('workflowRuns.runsModule.statusLabelIsNot')}
               kind="danger"
               size="xs"
             />
@@ -2550,14 +2552,14 @@ export function RunsModule() {
         );
       },
     },
-    { key: 'last_scanned_completed_at', label: 'Last scan', format: 'datetime', sortable: true },
-    { key: 'updated_at', label: 'Updated', format: 'datetime', sortable: true },
+    { key: 'last_scanned_completed_at', label: t('workflowRuns.runsModule.lastScan'), format: 'datetime', sortable: true },
+    { key: 'updated_at', label: t('workflowRuns.runsModule.updated'), format: 'datetime', sortable: true },
   ];
 
   const SCHEDULE_COLUMNS: Array<DataTableColumn<WorkflowScheduleTrigger>> = [
     {
       key: 'template_name',
-      label: 'Template',
+      label: t('workflowRuns.runsModule.template'),
       sortable: true,
       filterable: true,
       render: (raw, row) => {
@@ -2577,15 +2579,15 @@ export function RunsModule() {
     },
     {
       key: 'schedule_summary',
-      label: 'Schedule',
+      label: t('workflowRuns.runsModule.schedule'),
       sortable: true,
       render: (raw, row) =>
         String(raw ?? scheduleSummary(row?.schedule as Record<string, unknown> | undefined)),
     },
-    { key: 'scope_type', label: 'Scope', filterable: true, lookup: 'workflow_trigger_scope_type' },
+    { key: 'scope_type', label: t('workflowRuns.runsModule.scope'), filterable: true, lookup: 'workflow_trigger_scope_type' },
     {
       key: 'enabled',
-      label: 'Enabled',
+      label: t('workflowRuns.runsModule.enabled'),
       filterable: true,
       // W56-D (closure) — workflow_schedule_triggers canonical lookup category
       // is `workflow_schedule_enabled_state` (enabled/paused). Schedule triggers
@@ -2597,7 +2599,7 @@ export function RunsModule() {
         if (!row) {
           return (
             <Chip
-              label="Status label is not configured"
+              label={t('workflowRuns.runsModule.statusLabelIsNot')}
               kind="danger"
               size="xs"
             />
@@ -2612,11 +2614,11 @@ export function RunsModule() {
         );
       },
     },
-    { key: 'next_run_at', label: 'Next run', format: 'datetime', sortable: true },
-    { key: 'last_run_at', label: 'Last run', format: 'datetime', sortable: true },
+    { key: 'next_run_at', label: t('workflowRuns.runsModule.nextRun'), format: 'datetime', sortable: true },
+    { key: 'last_run_at', label: t('workflowRuns.runsModule.lastRun'), format: 'datetime', sortable: true },
     {
       key: 'last_error',
-      label: 'Last error',
+      label: t('workflowRuns.runsModule.lastError'),
       render: (raw) => {
         const err = String(raw ?? '');
         if (!err) return <span style={{ color: 'var(--ink-3)' }}>—</span>;
@@ -2629,14 +2631,14 @@ export function RunsModule() {
   // ui_run_workflow_schedule_trigger_v1 RPC. Capability gate: workflows.write.
   const SCHEDULE_ROW_ACTIONS: Array<DataTableAction<WorkflowScheduleTrigger>> = [
     {
-      label: 'View runs',
+      label: t('workflowRuns.runsModule.viewRuns'),
       icon: 'right',
       onClick: (row) => {
         filterByTemplate(row.workflow_template_id);
       },
     },
     {
-      label: 'Run now',
+      label: t('workflowRuns.runsModule.runNow'),
       icon: 'play',
       capability: CAP.WORKFLOWS_WRITE,
       onClick: (row) => {
@@ -2644,7 +2646,7 @@ export function RunsModule() {
       },
     },
     {
-      label: 'Repair task details',
+      label: t('workflowRuns.runsModule.repairTaskDetails'),
       icon: 'settings',
       capability: CAP.WORKFLOWS_WRITE,
       onClick: (row) => {
@@ -2655,7 +2657,7 @@ export function RunsModule() {
 
   const TRIGGER_ROW_ACTIONS: Array<DataTableAction<WorkflowRunTrigger>> = [
     {
-      label: 'Edit trigger',
+      label: t('workflowRuns.runsModule.editTrigger'),
       icon: 'settings',
       capability: CAP.WORKFLOWS_WRITE,
       onClick: (row) => {
@@ -2663,7 +2665,7 @@ export function RunsModule() {
       },
     },
     {
-      label: 'Disable trigger',
+      label: t('workflowRuns.runsModule.disableTrigger'),
       icon: 'power',
       capability: CAP.WORKFLOWS_WRITE,
       hidden: (row) => !row.enabled,
@@ -2672,7 +2674,7 @@ export function RunsModule() {
       },
     },
     {
-      label: 'Enable trigger',
+      label: t('workflowRuns.runsModule.enableTrigger'),
       icon: 'power',
       capability: CAP.WORKFLOWS_WRITE,
       hidden: (row) => row.enabled,
@@ -2681,19 +2683,19 @@ export function RunsModule() {
       },
     },
     {
-      label: 'View source runs',
+      label: t('workflowRuns.runsModule.viewSourceRuns'),
       icon: 'right',
       onClick: (row) => {
         filterByTemplate(row.source_workflow_template_id);
       },
     },
     {
-      label: 'Filter by target template',
+      label: t('workflowRuns.runsModule.filterByTargetTemplate'),
       icon: 'right',
       onClick: (row) => filterByTemplate(row.target_workflow_template_id),
     },
     {
-      label: 'Delete trigger',
+      label: t('workflowRuns.runsModule.deleteTrigger'),
       icon: 'trash',
       capability: CAP.WORKFLOWS_WRITE,
       onClick: (row) => {
@@ -2707,7 +2709,7 @@ export function RunsModule() {
     const tpl = tplById.get(hashQ.template);
     filterBanner = (
       <div className="wf-runs-filter-banner">
-        <span>Filtered by template</span>
+        <span>{t('workflowRuns.runsModule.filteredByTemplate')}</span>
         <Chip label={tpl?.name || workflowTemplateOperatorLabel(hashQ.template)} kind="info" />
         <button
           type="button"
@@ -2717,7 +2719,7 @@ export function RunsModule() {
             updateRunsRoute({});
           }}
         >
-          Clear filter
+          {t('workflowRuns.runsModule.clearFilter')}
         </button>
       </div>
     );
@@ -2728,30 +2730,30 @@ export function RunsModule() {
     <div
       className="tabs"
       role="tablist"
-      aria-label="Workflow runs tabs"
+      aria-label={t('workflowRuns.runsModule.workflowRunsTabs')}
       data-testid="wf-runs-tabs"
     >
-      {RUNS_TABS.map((t) => {
+      {RUNS_TABS.map((entry) => {
         const countLabel =
-          t.key === 'runs'
+          entry.key === 'runs'
             ? hashQ.template
               ? `${filtered.length} / ${allRuns.length}`
               : String(allRuns.length)
-            : t.key === 'triggers'
+            : entry.key === 'triggers'
               ? String(activeTriggerRows.length)
               : String((schedulesQuery.data?.rows ?? []).length);
         return (
           <button
-            key={t.key}
+            key={entry.key}
             type="button"
             role="tab"
-            aria-selected={activeTab === t.key}
-            aria-label={t.aria}
-            data-testid={`wf-runs-tab-${t.key}`}
-            className={`tabs__tab ${activeTab === t.key ? 'is-active' : ''}`}
-            onClick={() => switchTab(t.key)}
+            aria-selected={activeTab === entry.key}
+            aria-label={t(`workflowRuns.tabs.${entry.key}.aria`)}
+            data-testid={`wf-runs-tab-${entry.key}`}
+            className={`tabs__tab ${activeTab === entry.key ? 'is-active' : ''}`}
+            onClick={() => switchTab(entry.key)}
           >
-            {t.label}{' '}
+            {t(`workflowRuns.tabs.${entry.key}.label`)}{' '}
             <span className="mono" style={{ color: 'var(--ink-3)', fontSize: '11px' }}>
               · {countLabel}
             </span>
@@ -2765,17 +2767,17 @@ export function RunsModule() {
     <div className="page">
       <PageHeader
         moduleKey="wf-runs"
-        eyebrow="Workflows"
+        eyebrow={t('workflowRuns.runsModule.workflows')}
         titleAccent="Run"
         titlePlain="history"
         pills={[
           <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
           <span key="src" className="chip chip--xs mono">
             {activeTab === 'runs'
-              ? 'Run history · step timeline'
+              ? t('workflowRuns.runsModule.runHistoryStepTimeline')
               : activeTab === 'triggers'
-                ? 'Workflow chaining'
-                : 'Scheduled runs'}
+                ? t('workflowRuns.runsModule.workflowChaining')
+                : t('workflowRuns.runsModule.scheduledRuns')}
           </span>,
         ]}
         actions={[
@@ -2783,7 +2785,7 @@ export function RunsModule() {
             ? [
                 <Button
                   key="new-trigger"
-                  label="New trigger"
+                  label={t('workflowRuns.runsModule.newTrigger')}
                   iconName="plus"
                   kind="primary"
                   capability={CAP.WORKFLOWS_WRITE}
@@ -2795,7 +2797,7 @@ export function RunsModule() {
             ? [
                 <Button
                   key="new-schedule"
-                  label="New schedule"
+                  label={t('workflowRuns.runsModule.newSchedule')}
                   iconName="plus"
                   kind="primary"
                   capability={CAP.WORKFLOWS_WRITE}
@@ -2805,14 +2807,14 @@ export function RunsModule() {
             : []),
           <Button
             key="refresh"
-            label="Refresh runs"
+            label={t('workflowRuns.runsModule.refreshRuns')}
             iconName="refresh"
             kind="ghost"
             onClick={() => {
               void runsQuery.refetch();
               void triggersQuery.refetch();
               void schedulesQuery.refetch();
-              pushToast('Workflow runs refreshed', 'info');
+              pushToast(t('workflowRuns.runsModule.workflowRunsRefreshed'), 'info');
             }}
           />,
         ]}
@@ -2824,7 +2826,7 @@ export function RunsModule() {
           {inspectionReadback ? (
             <section
               data-testid="workflow-run-inspection-readback"
-              aria-label="Workflow run inspection result"
+              aria-label={t('workflowRuns.runsModule.workflowRunInspectionResult')}
               style={{
                 border: '1px solid var(--line)',
                 borderRadius: '8px',
@@ -2837,10 +2839,10 @@ export function RunsModule() {
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
                 <div>
-                  <div style={{ fontSize: '12px', color: 'var(--ink-3)' }}>Inspection result</div>
-                  <strong>{`${inspectionReadback.count} workflow run${inspectionReadback.count === 1 ? '' : 's'} inspected`}</strong>
+                  <div style={{ fontSize: '12px', color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.inspectionResult')}</div>
+                  <strong>{fill(inspectionReadback.count === 1 ? t('workflowRuns.runsModule.workflowRunInspectedOne') : t('workflowRuns.runsModule.workflowRunInspectedOther'), { count: String(inspectionReadback.count) })}</strong>
                 </div>
-                <Chip label="Confirmed from saved data" kind="good" size="xs" />
+                <Chip label={t('workflowRuns.runsModule.confirmedFromSavedData')} kind="good" size="xs" />
               </div>
               <div style={{ display: 'grid', gap: '6px' }}>
                 {inspectionReadback.rows.map((row) => (
@@ -2849,17 +2851,17 @@ export function RunsModule() {
                     style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}
                   >
                     <span className="mono">{row.runDisplayId}</span>
-                    <span style={{ color: 'var(--ink-3)' }}>activity recorded</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.activityRecorded')}</span>
                     {row.correlationId ? (
                       <>
-                        <span style={{ color: 'var(--ink-3)' }}>reference recorded</span>
+                        <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.referenceRecorded')}</span>
                       </>
                     ) : null}
                   </div>
                 ))}
               </div>
               <div style={{ color: 'var(--ink-3)', fontSize: '12px' }}>
-                {`Checked at ${inspectionReadback.inspectedAt}`}
+                {fill(t('workflowRuns.runsModule.checkedAt'), { inspectedAt: String(inspectionReadback.inspectedAt) })}
               </div>
             </section>
           ) : null}
@@ -2885,7 +2887,7 @@ export function RunsModule() {
             {triggerCreateReadback ? (
               <section
                 data-testid="workflow-run-trigger-create-readback"
-                aria-label="Workflow run trigger create result"
+                aria-label={t('workflowRuns.runsModule.workflowRunTriggerCreate')}
                 style={{
                   border: '1px solid var(--line)',
                   borderRadius: '8px',
@@ -2898,12 +2900,12 @@ export function RunsModule() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
                   <div>
-                    <div style={{ fontSize: '12px', color: 'var(--ink-3)' }}>Trigger create result</div>
-                    <strong>{triggerCreateReadback.sourceLabel} to {triggerCreateReadback.targetLabel}</strong>
+                    <div style={{ fontSize: '12px', color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.triggerCreateResult')}</div>
+                    <strong>{fill(t('workflowRuns.runsModule.to'), { sourceLabel: String(triggerCreateReadback.sourceLabel), targetLabel: String(triggerCreateReadback.targetLabel) })}</strong>
                   </div>
                   <span style={{ display: 'inline-flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <Chip label={triggerCreateReadback.enabled ? 'Enabled' : 'Disabled'} kind={triggerCreateReadback.enabled ? 'good' : 'warn'} size="xs" />
-                    <Chip label="Confirmed from saved data" kind="good" size="xs" />
+                    <Chip label={triggerCreateReadback.enabled ? t('workflowRuns.runsModule.enabled') : t('workflowRuns.runsModule.disabled')} kind={triggerCreateReadback.enabled ? 'good' : 'warn'} size="xs" />
+                    <Chip label={t('workflowRuns.runsModule.confirmedFromSavedData')} kind="good" size="xs" />
                   </span>
                 </div>
                 <div
@@ -2915,32 +2917,32 @@ export function RunsModule() {
                   }}
                 >
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Trigger</span>
-                    <div>Created</div>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.trigger')}</span>
+                    <div>{t('workflowRuns.runsModule.created')}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Source status</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.sourceStatus')}</span>
                     <div style={{ display: 'inline-flex', gap: '4px', flexWrap: 'wrap' }}>
                       {triggerCreateReadback.sourceStatuses.map((status) => {
                         const resolved = statusTone('workflow_run_status', status);
                         return resolved.tone && resolved.label ? (
                           <Chip key={status} label={resolved.label} kind={resolved.tone} size="xs" />
                         ) : (
-                          <Chip key={status} label="Status label is not configured" kind="danger" size="xs" />
+                          <Chip key={status} label={t('workflowRuns.runsModule.statusLabelIsNot')} kind="danger" size="xs" />
                         );
                       })}
                     </div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Scope</span>
-                    <div>{triggerCreateReadback.scopeLabel ? 'Configured' : 'Default workflow scope'}</div>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.scope')}</span>
+                    <div>{triggerCreateReadback.scopeLabel ? t('workflowRuns.runsModule.configured') : t('workflowRuns.runsModule.defaultWorkflowScope')}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Requested</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.requested')}</span>
                     <div>{workflowRunDateLabel(triggerCreateReadback.requestedAt)}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Notes</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.notes')}</span>
                     <div>{triggerCreateReadback.notes ?? '-'}</div>
                   </div>
                 </div>
@@ -2949,7 +2951,7 @@ export function RunsModule() {
             {triggerLifecycleReadback ? (
               <section
                 data-testid="workflow-run-trigger-lifecycle-readback"
-                aria-label="Workflow run trigger lifecycle result"
+                aria-label={t('workflowRuns.runsModule.workflowRunTriggerLifecycle')}
                 style={{
                   border: '1px solid var(--line)',
                   borderRadius: '8px',
@@ -2962,8 +2964,8 @@ export function RunsModule() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
                   <div>
-                    <div style={{ fontSize: '12px', color: 'var(--ink-3)' }}>Trigger lifecycle result</div>
-                    <strong>{triggerLifecycleReadback.sourceLabel} to {triggerLifecycleReadback.targetLabel}</strong>
+                    <div style={{ fontSize: '12px', color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.triggerLifecycleResult')}</div>
+                    <strong>{fill(t('workflowRuns.runsModule.to'), { sourceLabel: String(triggerLifecycleReadback.sourceLabel), targetLabel: String(triggerLifecycleReadback.targetLabel) })}</strong>
                   </div>
                   <span style={{ display: 'inline-flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <Chip
@@ -2971,7 +2973,7 @@ export function RunsModule() {
                       kind={triggerLifecycleReadback.action === 'deleted' ? 'warn' : 'good'}
                       size="xs"
                     />
-                    <Chip label="Confirmed from saved data" kind="good" size="xs" />
+                    <Chip label={t('workflowRuns.runsModule.confirmedFromSavedData')} kind="good" size="xs" />
                   </span>
                 </div>
                 <div
@@ -2983,46 +2985,46 @@ export function RunsModule() {
                   }}
                 >
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Trigger</span>
-                    <div>Saved</div>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.trigger')}</span>
+                    <div>{t('workflowRuns.runsModule.saved')}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Current state</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.currentState')}</span>
                     <div>
                       {triggerLifecycleReadback.action === 'deleted'
-                        ? 'Deleted from trigger list'
-                        : triggerLifecycleReadback.enabled ? 'Enabled' : 'Disabled'}
+                        ? t('workflowRuns.runsModule.deletedFromTriggerList')
+                        : triggerLifecycleReadback.enabled ? t('workflowRuns.runsModule.enabled') : t('workflowRuns.runsModule.disabled')}
                     </div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Source status</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.sourceStatus')}</span>
                     <div style={{ display: 'inline-flex', gap: '4px', flexWrap: 'wrap' }}>
                       {triggerLifecycleReadback.sourceStatuses.map((status) => {
                         const resolved = statusTone('workflow_run_status', status);
                         return resolved.tone && resolved.label ? (
                           <Chip key={status} label={resolved.label} kind={resolved.tone} size="xs" />
                         ) : (
-                          <Chip key={status} label="Status label is not configured" kind="danger" size="xs" />
+                          <Chip key={status} label={t('workflowRuns.runsModule.statusLabelIsNot')} kind="danger" size="xs" />
                         );
                       })}
                     </div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Scope</span>
-                    <div>{triggerLifecycleReadback.scopeLabel ? 'Configured' : 'Default workflow scope'}</div>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.scope')}</span>
+                    <div>{triggerLifecycleReadback.scopeLabel ? t('workflowRuns.runsModule.configured') : t('workflowRuns.runsModule.defaultWorkflowScope')}</div>
                   </div>
                   {triggerLifecycleReadback.workflowTriggerFiresCount !== undefined ? (
                     <div>
-                      <span style={{ color: 'var(--ink-3)' }}>Fire lineage rows</span>
+                      <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.fireLineageRows')}</span>
                       <div>{triggerLifecycleReadback.workflowTriggerFiresCount}</div>
                     </div>
                   ) : null}
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Requested</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.requested')}</span>
                     <div>{workflowRunDateLabel(triggerLifecycleReadback.requestedAt)}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Notes</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.notes')}</span>
                     <div>{triggerLifecycleReadback.notes ?? '-'}</div>
                   </div>
                 </div>
@@ -3048,7 +3050,7 @@ export function RunsModule() {
             {scheduleCreateReadback ? (
               <section
                 data-testid="workflow-schedule-create-readback"
-                aria-label="Workflow schedule create result"
+                aria-label={t('workflowRuns.runsModule.workflowScheduleCreateResult')}
                 style={{
                   border: '1px solid var(--line)',
                   borderRadius: '8px',
@@ -3061,12 +3063,12 @@ export function RunsModule() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
                   <div>
-                    <div style={{ fontSize: '12px', color: 'var(--ink-3)' }}>Schedule create result</div>
+                    <div style={{ fontSize: '12px', color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.scheduleCreateResult')}</div>
                     <strong>{scheduleCreateReadback.templateLabel}</strong>
                   </div>
                   <span style={{ display: 'inline-flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <Chip label={scheduleCreateReadback.enabled ? 'Enabled' : 'Paused'} kind={scheduleCreateReadback.enabled ? 'good' : 'warn'} size="xs" />
-                    <Chip label="Confirmed from saved data" kind="good" size="xs" />
+                    <Chip label={scheduleCreateReadback.enabled ? t('workflowRuns.runsModule.enabled') : t('workflowRuns.runsModule.paused')} kind={scheduleCreateReadback.enabled ? 'good' : 'warn'} size="xs" />
+                    <Chip label={t('workflowRuns.runsModule.confirmedFromSavedData')} kind="good" size="xs" />
                   </span>
                 </div>
                 <div
@@ -3078,27 +3080,27 @@ export function RunsModule() {
                   }}
                 >
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Schedule</span>
-                    <div>Created</div>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.schedule')}</span>
+                    <div>{t('workflowRuns.runsModule.created')}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Cadence</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.cadence')}</span>
                     <div>{scheduleCreateReadback.scheduleLabel}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Next run</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.nextRun')}</span>
                     <div>{workflowRunDateLabel(scheduleCreateReadback.nextRunAt)}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Scope</span>
-                    <div>{scheduleCreateReadback.scopeLabel ? 'Configured' : 'Default workflow scope'}</div>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.scope')}</span>
+                    <div>{scheduleCreateReadback.scopeLabel ? t('workflowRuns.runsModule.configured') : t('workflowRuns.runsModule.defaultWorkflowScope')}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Requested</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.requested')}</span>
                     <div>{workflowRunDateLabel(scheduleCreateReadback.requestedAt)}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Notes</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.notes')}</span>
                     <div>{scheduleCreateReadback.notes ?? '—'}</div>
                   </div>
                 </div>
@@ -3107,7 +3109,7 @@ export function RunsModule() {
             {scheduleTaskRepairReadback ? (
               <section
                 data-testid="workflow-schedule-task-payload-repair-readback"
-                aria-label="Workflow schedule task setup result"
+                aria-label={t('workflowRuns.runsModule.workflowScheduleTaskSetup')}
                 style={{
                   border: '1px solid var(--line)',
                   borderRadius: '8px',
@@ -3120,13 +3122,13 @@ export function RunsModule() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
                   <div>
-                    <div style={{ fontSize: '12px', color: 'var(--ink-3)' }}>Task setup result</div>
+                    <div style={{ fontSize: '12px', color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.taskSetupResult')}</div>
                     <strong>{scheduleTaskRepairReadback.templateLabel}</strong>
                   </div>
                   <span style={{ display: 'inline-flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <Chip label="Task details repaired" kind="good" size="xs" />
+                    <Chip label={t('workflowRuns.runsModule.taskDetailsRepaired2')} kind="good" size="xs" />
                     <Button
-                      label="Run repaired schedule"
+                      label={t('workflowRuns.runsModule.runRepairedSchedule')}
                       iconName="play"
                       size="sm"
                       kind="primary"
@@ -3146,42 +3148,42 @@ export function RunsModule() {
                   }}
                 >
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Schedule</span>
-                    <div>Updated</div>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.schedule')}</span>
+                    <div>{t('workflowRuns.runsModule.updated')}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Task type</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.taskType')}</span>
                     <div>
                       {scheduleTaskRepairReadback.taskTypeKey
                         ? workflowTemplateOperatorLabel(scheduleTaskRepairReadback.taskTypeKey)
-                        : 'Task routing saved'}
+                        : t('workflowRuns.runsModule.taskRoutingSaved')}
                     </div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Queue</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.queue')}</span>
                     <div>
                       {scheduleTaskRepairReadback.queueKey
                         ? workflowTemplateOperatorLabel(scheduleTaskRepairReadback.queueKey)
-                        : 'Default routing'}
+                        : t('workflowRuns.runsModule.defaultRouting')}
                     </div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Priority / SLA</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.prioritySla')}</span>
                     <div>
-                      {scheduleTaskRepairReadback.priority ?? 'Default priority'} /{' '}
-                      {scheduleTaskRepairReadback.slaMinutes ?? 'Default SLA'}
+                      {scheduleTaskRepairReadback.priority ?? t('workflowRuns.runsModule.defaultPriority')} /{' '}
+                      {scheduleTaskRepairReadback.slaMinutes ?? t('workflowRuns.runsModule.defaultSla')}
                     </div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Operation</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.operation')}</span>
                     <div>
                       {scheduleTaskRepairReadback.operationName
                         ? workflowTemplateOperatorLabel(scheduleTaskRepairReadback.operationName)
-                        : 'Repair applied'}
+                        : t('workflowRuns.runsModule.repairApplied')}
                     </div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Updated</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.updated')}</span>
                     <div>{workflowRunDateLabel(scheduleTaskRepairReadback.updatedAt)}</div>
                   </div>
                 </div>
@@ -3195,14 +3197,14 @@ export function RunsModule() {
                     background: 'var(--success-bg, rgba(22, 163, 74, 0.08))',
                   }}
                 >
-                  Saved task details are present and the previous setup issue is cleared.
+                  {t('workflowRuns.runsModule.savedTaskDetailsAre')}
                 </div>
               </section>
             ) : null}
             {scheduleRunNowReadback ? (
               <section
                 data-testid="workflow-schedule-run-now-readback"
-                aria-label="Workflow schedule run-now result"
+                aria-label={t('workflowRuns.runsModule.workflowScheduleRunNow')}
                 style={{
                   border: '1px solid var(--line)',
                   borderRadius: '8px',
@@ -3215,20 +3217,20 @@ export function RunsModule() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
                   <div>
-                    <div style={{ fontSize: '12px', color: 'var(--ink-3)' }}>Run-now result</div>
+                    <div style={{ fontSize: '12px', color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.runNowResult')}</div>
                     <strong>{scheduleRunNowReadback.templateLabel}</strong>
                   </div>
                   {activeScheduleRunNowStatus === 'preflight_failed' ? (
-                    <Chip label="Setup check failed" kind="danger" size="xs" />
+                    <Chip label={t('workflowRuns.runsModule.setupCheckFailed')} kind="danger" size="xs" />
                   ) : activeScheduleRunNowStatus ? (() => {
                     const resolved = statusTone('workflow_run_status', activeScheduleRunNowStatus);
                     return resolved.tone && resolved.label ? (
                       <Chip label={resolved.label} kind={resolved.tone} size="xs" />
                     ) : (
-                      <Chip label="Status label is not configured" kind="danger" size="xs" />
+                      <Chip label={t('workflowRuns.runsModule.statusLabelIsNot')} kind="danger" size="xs" />
                     );
                   })() : (
-                    <Chip label="Waiting for saved data" kind="info" size="xs" />
+                    <Chip label={t('workflowRuns.runsModule.waitingForSavedData')} kind="info" size="xs" />
                   )}
                 </div>
                 <div
@@ -3240,19 +3242,19 @@ export function RunsModule() {
                   }}
                 >
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Schedule</span>
-                    <div>Queued</div>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.schedule')}</span>
+                    <div>{t('workflowRuns.runsModule.queued')}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Workflow run</span>
-                    <div>{scheduleRunNowReadback.workflowRunId ? 'Started' : 'Waiting for saved data'}</div>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.workflowRun')}</span>
+                    <div>{scheduleRunNowReadback.workflowRunId ? t('workflowRuns.runsModule.started') : t('workflowRuns.runsModule.waitingForSavedData')}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Last run</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.lastRun')}</span>
                     <div>{workflowRunDateLabel(activeScheduleRunNowLastRunAt)}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--ink-3)' }}>Requested</span>
+                    <span style={{ color: 'var(--ink-3)' }}>{t('workflowRuns.runsModule.requested')}</span>
                     <div>{workflowRunDateLabel(scheduleRunNowReadback.requestedAt)}</div>
                   </div>
                 </div>
@@ -3267,7 +3269,7 @@ export function RunsModule() {
                       background: 'var(--danger-bg, rgba(220, 38, 38, 0.08))',
                     }}
                   >
-                    <strong>Run outcome:</strong> The run needs attention before it can finish.
+                    <strong>{t('workflowRuns.runsModule.runOutcome')}</strong> {t('workflowRuns.runsModule.theRunNeedsAttention')}
                   </div>
                 ) : null}
               </section>
