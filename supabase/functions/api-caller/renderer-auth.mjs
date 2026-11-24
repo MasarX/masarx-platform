@@ -7,12 +7,12 @@ const encodeBase64Url = (value) => btoa(String.fromCharCode(...value))
 
 const utf8 = new TextEncoder();
 
-export async function authorizeRendererSend(dispatch, rendererEndpoint, signingSecret, gatewayJwt) {
+export async function authorizeRendererSend(dispatch, rendererEndpoint, signingSecret, gatewayJwt, allowLocalHttp = false) {
   const expected = new URL(rendererEndpoint);
   const destination = new URL(dispatch.url);
-  if (expected.protocol !== "https:" || !expected.pathname.endsWith("/functions/v1/label-renderer") ||
-      destination.href !== expected.href ||
-      destination.username || destination.password || destination.search || destination.hash) {
+  if ((expected.protocol !== "https:" && !(allowLocalHttp && expected.protocol === "http:")) ||
+      !expected.pathname.endsWith("/functions/v1/label-renderer") || destination.href !== expected.href ||
+      /[\s\\?#]/.test(dispatch.url) || destination.username || destination.password) {
     throw new Error("renderer_endpoint_not_authorized");
   }
   if (!signingSecret) throw new Error("renderer_signer_unavailable");
@@ -41,6 +41,7 @@ export async function authorizeRendererSend(dispatch, rendererEndpoint, signingS
 
   return {
     ...dispatch,
+    url: destination.href,
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${gatewayJwt}`,

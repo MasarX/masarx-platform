@@ -529,6 +529,7 @@ async function qualify(diagnostic) {
       'PGPASSWORD="$POSTGRES_PASSWORD" exec psql "$@"', 'sh', '--host=127.0.0.1', '--username=supabase_admin',
       `--dbname=${database}`, '--no-psqlrc', '--no-password', '--quiet', '--tuples-only', '--no-align', '--set=ON_ERROR_STOP=1',
       ...commands.flatMap(command => ['-c', command])], env, timeout, { quiet: true });
+    const stackAdmin = (...commands) => stackAdminFor('postgres', 15000, ...commands);
     await db.connect();
     try {
       const history = await db.query("select to_regclass('supabase_migrations.schema_migrations') as history");
@@ -536,7 +537,6 @@ async function qualify(diagnostic) {
         const before = await db.query('select count(*)::int as n from supabase_migrations.schema_migrations');
         if (before.rows[0].n !== 0) throw new Error('Database is not empty of application migrations');
       }
-      const stackAdmin = (...commands) => stackAdminFor('postgres', 15000, ...commands);
       // Disable background ANALYZE before exposing the application migrations to this stack.
       summary.autovacuum = await timed('autovacuum-off', () => disableHostedAutovacuum(status.DB_URL, dbPort, stackAdmin, db));
       // The disposable fixture uses the registered schedules without launching background jobs.
@@ -594,6 +594,15 @@ async function qualify(diagnostic) {
       console.log(`Migration cron isolation: ${JSON.stringify(summary.cron)}`);
     } finally { await db.end(); }
     if (shard) {
+      if (selected.includes('0zz_label_renderer_url_policy_v1.sql')) {
+        // Only the disposable stack administrator can persist custom database settings.
+        await stackAdmin(`DO $fixture$
+          BEGIN
+            EXECUTE format('ALTER DATABASE %I SET app.local_label_renderer_url = %L', current_database(),
+              concat('http', '://', concat_ws('.', 127, 0, 0, 1), ':54321/functions/v1/label-renderer'));
+          END
+        $fixture$`);
+      }
       const databasePin = pins.find(pin => pin.role === 'database');
       local.writePsqlWrapper(bin, databasePin.runtimeId);
       const testEnv = shardEnvironment(env, local.loadBackendLocalPgtapEnv(), project, dbPort, selected);
