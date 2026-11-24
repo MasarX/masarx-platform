@@ -227,14 +227,17 @@ export function useHeldRows<T>(
     const key = keyRef.current;
     setView((prev) => {
       const sig = signatures(rows, key);
+      // Unchanged rows keep the same view, so a caller's fresh `[]` per render cannot loop.
+      const sameSig = !!prev && sig.size === prev.sig.size && [...sig].every(([id, s]) => prev.sig.get(id) === s);
+      if (prev && sameSig && prev.resetKey === resetKey && (!pinnedId || !sig.has(pinnedId) || prev.order.includes(pinnedId))) {
+        return prev;
+      }
       if (!prev || prev.order.length === 0 || prev.resetKey !== resetKey) {
         return { resetKey, order: rows.map(key), sig, updated: new Set() };
       }
       const updated = new Set(prev.order.filter((id) => sig.has(id) && prev.sig.has(id) && prev.sig.get(id) !== sig.get(id)));
-      const sameSig = sig.size === prev.sig.size && [...sig].every(([id, s]) => prev.sig.get(id) === s);
       // Keep a pinned row on screen after it is no longer pinned.
       const pin = pinnedId && sig.has(pinnedId) && !prev.order.includes(pinnedId) ? [pinnedId] : [];
-      if (sameSig && pin.length === 0) return prev;
       return { resetKey, order: [...pin, ...prev.order], sig, updated };
     });
   }, [rows, resetKey, pinnedId]);

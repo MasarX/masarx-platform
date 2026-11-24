@@ -168,6 +168,16 @@ describe('useHeldRows', () => {
     expect(result.current.visible.map(keyOf)).toEqual(['b']);
   });
 
+  it('keeps a stable view when the caller passes a fresh empty list on every render', () => {
+    let renders = 0;
+    const { result } = renderHook(() => {
+      renders += 1;
+      return useHeldRows<Row>([], keyOf);
+    });
+    expect(result.current.visible).toEqual([]);
+    expect(renders).toBeLessThan(5);
+  });
+
   it('starts over when the filters change instead of holding the new result', () => {
     const { result, rerender } = renderHook(
       ({ rows, resetKey }: { rows: Row[]; resetKey: string }) => useHeldRows(rows, keyOf, { resetKey }),
