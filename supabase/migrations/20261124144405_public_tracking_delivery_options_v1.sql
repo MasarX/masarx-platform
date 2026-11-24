@@ -1,5 +1,18 @@
 BEGIN;
 
+UPDATE public.schema_registry
+SET schema = jsonb_set(schema, '{properties,actions,properties,delivery_option}', '{
+  "type":"object",
+  "additionalProperties":false,
+  "properties":{
+    "allowed_statuses":{"type":"array","items":{"type":"string"},"uniqueItems":true},
+    "branch_pickup_enabled":{"type":"boolean"},
+    "safe_place_enabled":{"type":"boolean"},
+    "consent_copy":{"type":"string"}
+  }
+}'::jsonb)
+WHERE category = 'public_tracking_policy' AND version = 1;
+
 -- Options use the existing tenant tracking policy and branch directory.
 CREATE FUNCTION public.public_tracking_delivery_option_choices_v1(p_shipment public.shipments, p_policy jsonb)
 RETURNS jsonb
@@ -7,11 +20,17 @@ LANGUAGE plpgsql STABLE
 SET search_path TO public, extensions, pg_temp
 AS $function$
 DECLARE
+  v_allowed_statuses jsonb := COALESCE(
+    p_policy #> '{actions,delivery_option,allowed_statuses}',
+    '["created","pending","pending_dispatch","in_transit"]'::jsonb
+  );
   v_current text := COALESCE(p_shipment.metadata #>> '{recipient_delivery_option,option}', 'home_delivery');
   v_choices jsonb := '[]'::jsonb;
   v_place boolean := false;
 BEGIN
-  IF p_shipment.status IN ('pending', 'in_transit', 'scheduled', 'assigned', 'at_hub')
+  IF jsonb_typeof(v_allowed_statuses) = 'array'
+    AND v_allowed_statuses ? p_shipment.status
+    AND public.is_active_lookup_value_v1('shipment_status', p_shipment.status)
     AND COALESCE(p_shipment.service_type, '') = 'delivery'
     AND p_shipment.metadata->'recipient_delivery_option_switched_back' IS DISTINCT FROM 'true'::jsonb
     AND NOT EXISTS (
@@ -180,7 +199,7 @@ BEGIN
     END IF;
     v_selection := v_selection || jsonb_build_object('branch_id', v_branch);
   ELSIF v_choice = 'safe_place' THEN
-    IF NOT COALESCE(v_place IN ('reception', 'neighbour', 'other'), false)
+    IF NOT COALESCE((v_options #> '{safe_place,places}') ? v_place, false)
       OR p_payload->'consent' IS DISTINCT FROM 'true'::jsonb
       OR (v_place = 'other' AND (v_instruction IS NULL OR length(v_instruction) > 120))
       OR (v_place <> 'other' AND v_instruction IS NOT NULL) THEN
