@@ -26,7 +26,7 @@ test('stages only the frozen Edge entry point and its verified digest', () => {
   const bundle = 'Deno.serve(() => new Response("fixture"));\n';
   const entry = 'supabase/functions/fixture-edge/index.ts';
   spawnSync.mockImplementation((_command, args) => {
-    fs.writeFileSync(args[args.indexOf('--output') + 1], bundle);
+    if (args[0] === 'bundle') fs.writeFileSync(args[args.indexOf('--output') + 1], bundle);
     return { status: 0 };
   });
 
@@ -38,6 +38,12 @@ test('stages only the frozen Edge entry point and its verified digest', () => {
     '--platform=deno', '--packages=bundle', '--output', path.join(workdir, entry), entry,
   ]);
   expect(options.env.DENO_DIR).not.toBe(process.env.DENO_DIR);
+  expect(spawnSync.mock.calls[1]).toEqual(['deno', [
+    'cache', '--no-config', '--no-lock', '--no-remote', '--no-npm', '--node-modules-dir=none', `./${entry}`,
+  ], expect.objectContaining({
+    cwd: workdir,
+    env: expect.objectContaining({ DENO_DIR: path.join(options.env.DENO_DIR, 'offline') }),
+  })]);
   expect(fs.readdirSync(path.join(workdir, 'supabase/functions/fixture-edge'))).toEqual(['index.ts']);
   expect(fs.readFileSync(path.join(workdir, entry), 'utf8')).toBe(bundle);
   const digest = createHash('sha256').update(bundle).digest('hex');
@@ -52,6 +58,16 @@ test('a rejected frozen build leaves no deployable Edge checksum manifest', () =
   expect(fs.existsSync(path.join(workdir, 'supabase/config.toml'))).toBe(false);
 });
 
+test('an unresolved dynamic import leaves no frozen Edge checksum manifest', () => {
+  spawnSync.mockImplementationOnce((_command, args) => {
+    fs.writeFileSync(args[args.indexOf('--output') + 1], 'void import("npm:fixture-package");\n');
+    return { status: 0 };
+  }).mockReturnValueOnce({ status: 1, stderr: 'error: npm imports are disabled' });
+
+  expect(verify(workdir)).toBe(1);
+  expect(fs.existsSync(path.join(workdir, 'SHA256SUMS'))).toBe(false);
+});
+
 test('DEV checks the bundle manifest before writes and limits the upload to that workdir', () => {
   const workflow = yaml.parse(fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/deploy.yml'), 'utf8'));
   const { database } = workflow.jobs;
@@ -61,5 +77,10 @@ test('DEV checks the bundle manifest before writes and limits the upload to that
   const verify = deploy.run.indexOf('sha256sum --strict --check SHA256SUMS');
   expect(verify).toBeGreaterThan(-1);
   expect(verify).toBeLessThan(deploy.run.indexOf(' db push '));
+  const manifest = deploy.run.indexOf('mapfile -t edge_deploy < edge-deploy.tsv');
+  const recheck = deploy.run.lastIndexOf('sha256sum --strict --check SHA256SUMS');
+  expect(manifest).toBeGreaterThan(verify);
+  expect(recheck).toBeGreaterThan(manifest);
+  expect(recheck).toBeLessThan(deploy.run.indexOf(' functions deploy '));
   expect(deploy.run).toMatch(/functions deploy[^\n]*--workdir "\$EDGE_FROZEN_WORKDIR"/);
 });

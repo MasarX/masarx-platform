@@ -8,6 +8,19 @@ const { functions } = require('../../config/edge/functions.json');
 const root = path.resolve(__dirname, '../..');
 const enabled = functions.filter(entry => entry.enabled === true).map(entry => entry.name);
 
+function runDeno(name, args, cwd, cache) {
+  const result = spawnSync('deno', args, {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, DENO_DIR: cache, NO_COLOR: '1' },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  if (result.status === 0) return 0;
+  const error = result.stderr?.replace(/^[\s\S]*?(?=^error:)/m, '').trimEnd();
+  console.error(`${name}: ${error || result.error?.message || `Deno exited with ${result.signal ?? result.status}`}`);
+  return result.status || 1;
+}
+
 function verify(workdir = process.env.EDGE_FROZEN_WORKDIR) {
   if (!enabled.length || new Set(enabled).size !== enabled.length
       || enabled.some(name => typeof name !== 'string' || !/^[a-z0-9-]+$/.test(name))) {
@@ -32,20 +45,15 @@ function verify(workdir = process.env.EDGE_FROZEN_WORKDIR) {
         fs.mkdirSync(path.join(workdir, dir), { recursive: true });
         args.push('--platform=deno', '--packages=bundle', '--output', path.join(workdir, entry));
       }
-      const result = spawnSync('deno', [...args, entry], {
-        cwd: root,
-        encoding: 'utf8',
-        env: { ...process.env, DENO_DIR: cache, NO_COLOR: '1' },
-        stdio: ['ignore', 'ignore', 'pipe'],
-      });
-      if (result.status !== 0) {
-        const error = result.stderr?.replace(/^[\s\S]*?(?=^error:)/m, '').trimEnd();
-        console.error(`${name}: ${error || result.error?.message || `Deno exited with ${result.signal ?? result.status}`}`);
-        return result.status || 1;
-      }
+      const status = runDeno(name, [...args, entry], root, cache);
+      if (status !== 0) return status;
       if (workdir) {
         const bundle = fs.readFileSync(path.join(workdir, entry));
         if (!bundle.length) throw new Error(`Empty frozen Edge bundle: ${name}`);
+        // Resolve the output without the build cache, import map or package registry.
+        const offline = runDeno(name, ['cache', '--no-config', '--no-lock', '--no-remote', '--no-npm',
+          '--node-modules-dir=none', `./${entry}`], workdir, path.join(cache, 'offline'));
+        if (offline !== 0) return offline;
         checksums.push(`${createHash('sha256').update(bundle).digest('hex')}  ${entry}`);
       }
     }
@@ -53,7 +61,7 @@ function verify(workdir = process.env.EDGE_FROZEN_WORKDIR) {
       fs.writeFileSync(path.join(workdir, 'supabase/config.toml'), 'project_id = "frozen-edge"\n');
       fs.writeFileSync(path.join(workdir, 'SHA256SUMS'), `${checksums.join('\n')}\n`);
     }
-    console.log(`${workdir ? 'Frozen Edge bundles built' : 'Edge frozen lock verified'}. Enabled functions: ${enabled.length}.`);
+    console.log(`${workdir ? 'Frozen Edge bundles built and resolved offline' : 'Edge frozen lock verified'}. Enabled functions: ${enabled.length}.`);
     return 0;
   } finally {
     fs.rmSync(cache, { recursive: true });

@@ -75,7 +75,7 @@ Use the synthetic tenant's read-only `dispatcher` account for Console `/operatio
 
 ## Deploys
 
-Build Edge Functions with the pinned Deno toolchain and root lock before any database apply or function upload. Upload the checksum-verified bundles from the frozen workdir. Use the same builder and checksum check for the production release artifact.
+Hosted lint builds affected Edge Functions with the pinned Deno toolchain and root lock, resolves the resulting bundles offline, and verifies their checksums. DEV applies the same build checks before database writes and verifies that every function on the deploy list has a valid bundle checksum immediately before upload. Use the same builder and checksum check for the production release artifact.
 
 The v0.2.0 production deploy plan uses the same renderer signing key derivation as DEV, HMAC-SHA256 of the production project JWT secret with the versioned `masarx-renderer-sign-v1` label. The operator runs the derivation on the operator machine and installs the key in the production Edge secret store. Production signing material stays on the server and never enters GitHub.
 
