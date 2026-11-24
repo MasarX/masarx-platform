@@ -37,11 +37,17 @@ function select(files, event = 'pull_request') {
     } else if (/^docs\/marketing\/(?:landing-v2|brand)\/|^scripts\/frontend\/(?:build|serve)-landing\.js$/.test(file)) {
       affected.unit = affected.build_landing = affected.e2e = true;
     } else if (/^(?:tests\/unit|docs)\//.test(file)) affected.unit = true;
-    else if (file.startsWith('tests/ui/')) affected.ui = true;
+    else if (/^tests\/(?:ui|preview-sweep)\//.test(file)) affected.ui = true;
     else if (/^tests\/landing-e2e\/|^playwright\.landing\.config\.ts$/.test(file)) affected.e2e = true;
     else if (!/^[^/]+\.md$/i.test(file)) return state(true);
   }
   return affected;
+}
+
+function selectPreviewSweep(files, event = 'pull_request') {
+  if (!files || event !== 'pull_request') return true;
+  return files.some(file => sharedInputs.some(pattern => pattern.test(file))
+    || (!/^(?:apps\/(?:fieldops|landing)|tests\/ui)\//.test(file) && select([file]).ui));
 }
 
 function changedPaths(base, read = execFileSync) {
@@ -61,5 +67,6 @@ if (require.main === module) {
   for (const [gate, enabled] of Object.entries(select(files, process.env.GITHUB_EVENT_NAME))) {
     console.log(`${gate}=${enabled}`);
   }
+  console.log('preview_sweep=' + selectPreviewSweep(files, process.env.GITHUB_EVENT_NAME));
 }
-module.exports = { changedPaths, select };
+module.exports = { changedPaths, select, selectPreviewSweep };
