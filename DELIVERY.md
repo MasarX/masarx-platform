@@ -88,6 +88,8 @@ Use the synthetic tenant's read-only `dispatcher` account for Console `/operatio
 
 Hosted lint builds affected Edge Functions with the pinned Deno toolchain and root lock, resolves the resulting bundles offline, and verifies their checksums. DEV applies the same build checks before database writes and verifies that every function on the deploy list has a valid bundle checksum immediately before upload. Use the same builder and checksum check for the production release artifact.
 
+Renderer jobs queued during the database-to-Edge rollout keep their request IDs. The database releases an older HTTP worker's lease before dispatch. If an upgraded worker reaches the v0.1.0 renderer during an interrupted upload or rollback, the worker recognizes the pre-dispatch role rejection and asks the database to defer the job until its lease deadline. Once both Edge functions are compatible, the worker resumes each queued render or print with a fresh lease.
+
 The v0.2.0 production deploy plan uses the same renderer signing key derivation as DEV, HMAC-SHA256 of the production project JWT secret with the versioned `masarx-renderer-sign-v1` label. The operator runs the derivation on the operator machine and installs the key in the production Edge secret store. Production signing material stays on the server and never enters GitHub.
 
 - DEV deploys run from `main` only. The database job serializes applies in one concurrency group with cancellation disabled. Its configuration guard checks whether deployment is configured. The database merge gate is hosted from-zero replay plus pgTAP. Verify the DEV apply after every migration merge and retain the merged SHA, deploy result and applied migration evidence.
