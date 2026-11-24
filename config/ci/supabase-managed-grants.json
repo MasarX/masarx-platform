@@ -283,6 +283,11 @@
       "file": "supabase/migrations/20261122043000_append_only_ledger_table_contracts_v1.sql",
       "sha256": "a22581e0a27af3de0a4cf724cc5b94acd8af5f655fcb91bf594db0a75a147388",
       "reason": "Reconciles row and truncate guards only on catalog-resolved public application tables. Preserves canonical ledger guards and drops only existing local table-contract guards when redundant or mutable. No privilege changes are dynamic."
+    },
+    {
+      "file": "supabase/migrations/20261124150146_console_live_broadcast_v1.sql",
+      "sha256": "f85f50db049eb64357339a61529675e71e7898082c04c7e7cc5393632e3c3cdc",
+      "reason": "Adds four tenant-bound Broadcast policies on realtime.messages for Console live invalidations. Preserves the managed schema, relation and role grants."
     }
   ]
 }
