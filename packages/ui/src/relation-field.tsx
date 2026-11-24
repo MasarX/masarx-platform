@@ -17,6 +17,8 @@ export type RelationFieldProps = {
   placeholder?: string;
   ariaLabel?: string;
   className?: string;
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
 };
 
 /**
@@ -35,6 +37,8 @@ export function RelationField({
   placeholder,
   ariaLabel,
   className,
+  "aria-describedby": ariaDescribedBy,
+  "aria-invalid": ariaInvalid,
 }: RelationFieldProps) {
   const serverSearch = useComboboxSearch({
     fetcher: fetcher ?? (async () => []),
@@ -72,6 +76,8 @@ export function RelationField({
       placeholder={placeholder}
       ariaLabel={ariaLabel}
       className={className}
+      aria-describedby={ariaDescribedBy}
+      aria-invalid={ariaInvalid}
     />
   );
 }
