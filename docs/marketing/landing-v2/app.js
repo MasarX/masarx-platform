@@ -2154,7 +2154,7 @@
     if (controller.map) return controller;
 
     const map = L.map(container, {
-      zoomControl: true,
+      zoomControl: false,
       attributionControl: true,
       scrollWheelZoom: true,
       keyboard: true,
@@ -2168,6 +2168,8 @@
       maxZoom: mapRuntime.maxZoom,
     }).addTo(map);
 
+    // Leaflet corners are physical; keep zoom at inline-start so the map toggle (inline-end) never covers it in RTL.
+    L.control.zoom({ position: root.dir === 'rtl' ? 'topright' : 'topleft' }).addTo(map);
     map.attributionControl.setPrefix(false);
     map.setView([mapRuntime.defaultLat, mapRuntime.defaultLng], mapRuntime.defaultZoom);
     map.on('click', (event) => {
