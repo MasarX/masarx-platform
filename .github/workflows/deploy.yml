@@ -967,11 +967,12 @@ jobs:
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_CONSOLE }}
           DEV_WEB_ORIGINS: ${{ vars.CORS_ALLOW_ORIGIN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           marker="_next/static/dev-build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.txt"
           printf '%s\n' "$GITHUB_SHA" > ".vercel/output/static/$marker"
-          url="$("$GITHUB_WORKSPACE/tooling/apps/deploy/node_modules/.bin/vercel" deploy --prebuilt --yes)"
+          url="$("$GITHUB_WORKSPACE/tooling/apps/deploy/node_modules/.bin/vercel" deploy --prebuilt --yes --meta "devCommitSha=$GITHUB_SHA")"
           [[ "$url" =~ ^https://[a-zA-Z0-9.-]+\.vercel\.app$ ]]
           node scripts/ops/vercel/validate-build.js dev-alias console "$url" "$marker"
           printf '%s' "$url" | node scripts/ci-hosted/dev-e2e-previews.cjs capture
@@ -1056,11 +1057,12 @@ jobs:
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_PORTAL }}
           DEV_WEB_ORIGINS: ${{ vars.CORS_ALLOW_ORIGIN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           marker="_next/static/dev-build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.txt"
           printf '%s\n' "$GITHUB_SHA" > ".vercel/output/static/$marker"
-          url="$("$GITHUB_WORKSPACE/tooling/apps/deploy/node_modules/.bin/vercel" deploy --prebuilt --yes)"
+          url="$("$GITHUB_WORKSPACE/tooling/apps/deploy/node_modules/.bin/vercel" deploy --prebuilt --yes --meta "devCommitSha=$GITHUB_SHA")"
           [[ "$url" =~ ^https://[a-zA-Z0-9.-]+\.vercel\.app$ ]]
           node scripts/ops/vercel/validate-build.js dev-alias portal "$url" "$marker"
           printf '%s' "$url" | node scripts/ci-hosted/dev-e2e-previews.cjs capture
