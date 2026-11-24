@@ -36,10 +36,10 @@ function select(files, event = 'pull_request') {
       } else return state(true);
     } else if (/^docs\/marketing\/(?:landing-v2|brand)\/|^scripts\/frontend\/(?:build|serve)-landing\.js$/.test(file)) {
       affected.unit = affected.build_landing = affected.e2e = true;
-    } else if (/^(?:tests\/unit|docs)\//.test(file) || /^(?:AGENTS|DELIVERY|DESIGN|CLAUDE)\.md$/.test(file)) affected.unit = true;
-    else if (file.startsWith('tests/ui/')) affected.ui = true;
-    else if (/^tests\/landing-e2e\/|^playwright\.landing\.config\.ts$/.test(file)) affected.e2e = true;
-    else if (!/^[^/]+\.md$/i.test(file)) return state(true);
+    } else if (/^(?:tests\/unit|docs)\//.test(file) || /^[^/]+\.md$/i.test(file)) affected.unit = true;
+    else if (file.startsWith('tests/ui/')) affected.unit = affected.ui = true;
+    else if (/^tests\/landing-e2e\/|^playwright\.landing\.config\.ts$/.test(file)) affected.unit = affected.e2e = true;
+    else return state(true);
   }
   return affected;
 }
