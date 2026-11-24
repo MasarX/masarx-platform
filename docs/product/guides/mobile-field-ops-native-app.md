@@ -122,6 +122,7 @@ Native tool routes (mobile `href`)
 ## Security model (enterprise)
 - No service-role secrets on device.
 - All reads/writes via authenticated user JWT + RLS + SECURITY DEFINER RPCs with least-privilege grants.
+- The outbox redactor handles accidental credential disclosure in supported diagnostic formats. Keep arbitrary ASCII rewrites of credential field names outside that contract. Treat messages from untrusted sources as untrusted data and use typed error codes for user-facing diagnostics.
 - Device registration via `register_user_device_v1` (store push token + versions + metadata; policy-gated).
 - Device attestation foundation is policy-driven (`mobile_attestation_policy`) and enforced server-side on mobile ingest ledgers:
   - Server issues one-time challenges (`issue_mobile_attestation_challenge_v1`) and validates challenge freshness/consumption.
