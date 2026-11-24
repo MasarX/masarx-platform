@@ -11,11 +11,12 @@ const SHARED_STYLES = path.join("packages", "ui", "src", "styles.css");
 const THEME_SELECTORS = [":root", ':root[data-theme="dark"]'];
 
 function sharedUiTokenCss(sharedCss) {
+  const css = `\n${sharedCss.replace(/\r\n/g, "\n")}`;
   return THEME_SELECTORS.map((selector) => {
-    const start = sharedCss.search(new RegExp(`(^|\\n)${selector.replace(/[[\]]/g, "\\$&")} \\{`));
+    const start = css.indexOf(`\n${selector} {`);
     if (start < 0) throw new Error(`${SHARED_STYLES}: no "${selector}" block`);
-    const open = sharedCss.indexOf("{", start);
-    const body = sharedCss.slice(open + 1, sharedCss.indexOf("}", open));
+    const open = css.indexOf("{", start);
+    const body = css.slice(open + 1, css.indexOf("}", open));
     const declarations = body
       .split(";")
       .map((declaration) => declaration.trim())
