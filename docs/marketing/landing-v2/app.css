@@ -2045,3 +2045,176 @@ body.track-map-overlay-open {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
   .reveal { opacity: 1; transform: none; }
 }
+
+/* --- Live delivery card (#406) --- */
+.track-courier-card {
+  --area-stroke: var(--brand);
+  display: grid;
+  gap: 1.1rem;
+  color: var(--muted);
+}
+
+/* --brand is about 2.8:1 on dark map land; --accent keeps the dashed cell at 3:1 or more. */
+[data-theme="dark"] .track-courier-card {
+  --area-stroke: var(--accent);
+}
+
+.track-courier-card .track-summary-grid {
+  gap: 0.75rem;
+}
+
+.track-courier-stops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-block-start: 0.35rem;
+}
+
+.track-courier-stops span {
+  inline-size: 14px;
+  block-size: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--muted);
+  opacity: 0.55;
+}
+
+.track-courier-stops span.is-you {
+  border-color: var(--brand);
+  background: var(--brand);
+  opacity: 1;
+}
+
+.track-courier-map {
+  position: relative;
+}
+
+.track-courier-map-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.track-courier-map-frame {
+  touch-action: auto;
+}
+
+.track-courier-area {
+  stroke: var(--area-stroke);
+  stroke-width: 2;
+  stroke-dasharray: 6 5;
+  fill: color-mix(in srgb, var(--brand) 16%, transparent);
+  fill-opacity: 1;
+}
+
+.track-courier-area-label {
+  position: absolute;
+  z-index: 500;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  translate: -50% -50%;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--surface-strong);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+}
+
+[dir="rtl"] .track-courier-area-label {
+  translate: 50% -50%;
+}
+
+.track-courier-attrib {
+  position: absolute;
+  z-index: 500;
+  inset-block-end: 6px;
+  inset-inline-end: 8px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface-strong) 80%, transparent);
+}
+
+.track-courier-attrib a {
+  color: inherit;
+}
+
+.track-courier-notice {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  border: 1px dashed var(--border);
+  background: var(--tint-1);
+}
+
+.track-courier-notice strong {
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.track-courier-notice p {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.track-courier-card .track-form-actions:not(:has(button:not([hidden]))) {
+  display: none;
+}
+
+.track-courier-status {
+  display: inline-flex;
+  align-items: center;
+}
+
+.track-courier-dot {
+  display: inline-block;
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  margin-inline-end: 6px;
+}
+
+.track-courier-status:not([data-status="live"]) .track-courier-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--muted);
+}
+
+.track-courier-privacy {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.track-courier-skel {
+  display: block;
+  block-size: 14px;
+  margin-block-start: 6px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--tint-2), color-mix(in srgb, var(--brand) 14%, transparent), var(--tint-2));
+  background-size: 200% 100%;
+  animation: track-courier-shimmer 2s linear infinite;
+}
+
+html[data-motion="off"] .track-courier-skel {
+  animation: none;
+}
+
+@keyframes track-courier-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+@media (max-width: 720px) {
+  .track-courier-map-frame {
+    min-height: 220px;
+  }
+}

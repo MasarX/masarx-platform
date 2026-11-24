@@ -244,6 +244,27 @@
   const trackRequestBannerBadge = document.querySelector('[data-track-request-banner-badge]');
   const trackRequestBannerText = document.querySelector('[data-track-request-banner-text]');
   const trackRequestBannerCase = document.querySelector('[data-track-request-banner-case]');
+  const trackCourierCard = document.querySelector('[data-track-courier]');
+  const trackCourierLock = document.querySelector('[data-track-courier-lock]');
+  const trackCourierFacts = document.querySelector('[data-track-courier-facts]');
+  const trackCourierEta = document.querySelector('[data-track-courier-eta]');
+  const trackCourierStops = document.querySelector('[data-track-courier-stops]');
+  const trackCourierUpdated = document.querySelector('[data-track-courier-updated]');
+  const trackCourierMapWrap = document.querySelector('[data-track-courier-map-wrap]');
+  const trackCourierMapFrame = document.querySelector('[data-track-courier-map-frame]');
+  const trackCourierMap = document.querySelector('[data-track-courier-map]');
+  const trackCourierAttrib = document.querySelector('[data-track-courier-attrib]');
+  const trackCourierNotice = document.querySelector('[data-track-courier-notice]');
+  const trackCourierNoticeTitle = document.querySelector('[data-track-courier-notice-title]');
+  const trackCourierNoticeText = document.querySelector('[data-track-courier-notice-text]');
+  const trackCourierRetry = document.querySelector('[data-track-courier-retry]');
+  const trackCourierReverify = document.querySelector('[data-track-courier-reverify]');
+  const trackCourierMeta = document.querySelector('[data-track-courier-meta]');
+  const trackCourierMetaText = document.querySelector('[data-track-courier-meta-text]');
+  const trackCourierStatus = document.querySelector('[data-track-courier-status]');
+  const trackCourierStatusText = document.querySelector('[data-track-courier-status-text]');
+  const trackCourierPrivacy = document.querySelector('[data-track-courier-privacy]');
+  const trackCourierFormStatus = document.querySelector('[data-track-courier-form-status]');
   const trackMapPicker = document.querySelector('[data-track-map-picker]');
   const trackMapDialogPicker = document.querySelector('[data-track-map-picker-expanded]');
   const trackMapValue = document.querySelector('[data-track-map-value]');
@@ -315,12 +336,14 @@
       verify: null,
       reschedule_date: null,
       location_change: null,
+      live: null,
     },
     mapPin: null,
     mapPinConfirmed: false,
     mapOverlayTrigger: null,
     mapLocateInFlight: false,
     mapLocateSeq: 0,
+    liveDelivery: { view: 'none', data: null, timer: null, lastFetchAt: 0, map: null, rect: null },
   };
 
   function getIntakeConfig(formKey) {
@@ -1655,6 +1678,7 @@
   function resetTrackingFlow({ clearReference = true, scroll = false } = {}) {
     if (hasTrackingMutationInFlight()) return false;
     invalidateTrackingRequests();
+    stopLiveDelivery();
     saveTrackingSession('');
     state.trackingReference = '';
     state.trackingPayload = null;
@@ -2004,6 +2028,274 @@
         if (draft.map_pin_confirmed) confirmMapPin();
       }
     }
+  }
+
+  // --- Live delivery card (#406): server-coarsened ETA, stops and area only ---
+
+  const LIVE_DELIVERY_POLL_MS = 60000;
+  const LIVE_DELIVERY_STATUSES = new Set(['live', 'too_far', 'hidden', 'paused']);
+
+  function readLiveDelivery(payload) {
+    const tracking = payload && typeof payload === 'object' ? payload.tracking || payload : null;
+    const live = tracking?.live_delivery;
+    return live && typeof live === 'object' && LIVE_DELIVERY_STATUSES.has(live.status) ? live : null;
+  }
+
+  function isLiveDeliveryArea(area) {
+    if (!area || typeof area !== 'object') return false;
+    const { south, west, north, east } = area;
+    return [south, west, north, east].every(Number.isFinite) && north > south && east > west;
+  }
+
+  function formatTrackingTimeRange(startAt, endAt, options = { hour: 'numeric', minute: '2-digit' }) {
+    const start = new Date(startAt);
+    const end = new Date(endAt);
+    if (!startAt || !endAt || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return '';
+    try {
+      const formatter = new Intl.DateTimeFormat(root.lang || 'en', options);
+      return typeof formatter.formatRange === 'function'
+        ? formatter.formatRange(start, end)
+        : `${formatter.format(start)} – ${formatter.format(end)}`;
+    } catch {
+      return '';
+    }
+  }
+
+  function formatMinutesAgo(value) {
+    const at = new Date(value).getTime();
+    if (!value || !Number.isFinite(at)) return '';
+    const minutes = Math.max(0, Math.round((Date.now() - at) / 60000));
+    try {
+      return new Intl.RelativeTimeFormat(root.lang || 'en', { numeric: 'auto' }).format(-minutes, 'minute');
+    } catch {
+      return '';
+    }
+  }
+
+  function formatAreaDistance(area) {
+    // The cell height is the grid size the tenant policy chose; 1 degree of latitude is about 111.32 km.
+    const meters = Math.max(100, Math.round(((area.north - area.south) * 111320) / 100) * 100);
+    return new Intl.NumberFormat(root.lang || 'en', { style: 'unit', unit: 'meter', maximumFractionDigits: 0 }).format(meters);
+  }
+
+  function setBdiText(el, text) {
+    if (!el) return;
+    const value = text || getText('track_not_available', root.lang || 'en') || '';
+    // Same text, same node: an unchanged ETA must not re-announce in its live region.
+    if (el.childNodes.length === 1 && el.firstChild.nodeName === 'BDI' && el.firstChild.textContent === value) return;
+    const bdi = document.createElement('bdi');
+    bdi.textContent = value;
+    el.replaceChildren(bdi);
+  }
+
+  function fillTextWithBdi(el, template, token, value) {
+    if (!el) return;
+    const [before, after = ''] = String(template || '').split(`{${token}}`);
+    const bdi = document.createElement('bdi');
+    bdi.textContent = value;
+    el.replaceChildren(before, bdi, after);
+  }
+
+  function renderLiveDeliveryStops(el, count) {
+    if (!el) return;
+    if (!Number.isFinite(count) || count < 0) {
+      el.textContent = getText('track_not_available', root.lang || 'en') || '';
+      return;
+    }
+    const ahead = Math.round(count);
+    el.textContent = new Intl.NumberFormat(root.lang || 'en').format(ahead);
+    if (ahead > 3) return;
+    const row = document.createElement('span');
+    row.className = 'track-courier-stops';
+    row.setAttribute('aria-hidden', 'true');
+    for (let i = 0; i <= ahead; i += 1) {
+      const dot = document.createElement('span');
+      if (i === ahead) dot.className = 'is-you';
+      row.appendChild(dot);
+    }
+    el.appendChild(row);
+  }
+
+  function renderLiveDeliveryArea(area) {
+    const L = getLeaflet();
+    if (!L || !trackCourierMap) return;
+    const bounds = [[area.south, area.west], [area.north, area.east]];
+    const live = state.liveDelivery;
+    if (!live.map) {
+      live.map = L.map(trackCourierMap, {
+        zoomControl: false,
+        attributionControl: false,
+        dragging: false,
+        touchZoom: false,
+        scrollWheelZoom: false,
+        doubleClickZoom: false,
+        boxZoom: false,
+        keyboard: false,
+      });
+      L.tileLayer(mapRuntime.tileUrl, { maxZoom: mapRuntime.maxZoom }).addTo(live.map);
+      live.rect = L.rectangle(bounds, { className: 'track-courier-area', interactive: false }).addTo(live.map);
+      if (trackCourierAttrib) trackCourierAttrib.innerHTML = mapRuntime.tileAttribution;
+    } else {
+      live.rect.setBounds(bounds);
+    }
+    live.map.invalidateSize();
+    live.map.fitBounds(bounds, { padding: [48, 48], maxZoom: 15, animate: false });
+  }
+
+  function renderLiveDeliveryCard() {
+    if (!trackCourierCard) return;
+    const lang = root.lang || 'en';
+    const { view, data } = state.liveDelivery;
+    trackCourierCard.hidden = view === 'none';
+    if (view === 'none') return;
+
+    const status = view === 'data' ? data.status : '';
+    const showArea = status === 'live' && isLiveDeliveryArea(data.area) && Boolean(getLeaflet());
+    trackCourierCard.setAttribute('aria-busy', String(view === 'loading'));
+    if (trackCourierLock) trackCourierLock.textContent = getText(view === 'expired' ? 'track_masked_pill' : 'track_courier_lock', lang) || '';
+
+    if (trackCourierFacts) trackCourierFacts.hidden = view !== 'data' && view !== 'loading';
+    if (view === 'loading') {
+      [trackCourierEta, trackCourierStops, trackCourierUpdated].forEach((el) => {
+        if (!el) return;
+        const skel = document.createElement('span');
+        skel.className = 'track-courier-skel';
+        el.replaceChildren(skel);
+      });
+    } else if (view === 'data') {
+      setBdiText(trackCourierEta, formatTrackingTimeRange(data.eta_window_start_at, data.eta_window_end_at));
+      renderLiveDeliveryStops(trackCourierStops, data.stops_ahead);
+      setBdiText(trackCourierUpdated, formatMinutesAgo(data.updated_at));
+    }
+
+    if (trackCourierMapWrap) trackCourierMapWrap.hidden = !showArea;
+    if (trackCourierPrivacy) trackCourierPrivacy.hidden = !showArea;
+    if (showArea) {
+      if (trackCourierMapFrame) {
+        trackCourierMapFrame.setAttribute('aria-label', (getText('track_courier_map_aria', lang) || '').replace('{distance}', formatAreaDistance(data.area)));
+      }
+      renderLiveDeliveryArea(data.area);
+    }
+
+    let notice = '';
+    if (view === 'data' && !showArea) notice = status === 'too_far' || status === 'paused' ? status : 'hidden';
+    else if (view === 'error' || view === 'expired') notice = view;
+    if (trackCourierNotice) trackCourierNotice.hidden = !notice;
+    if (notice) {
+      if (trackCourierNoticeTitle) trackCourierNoticeTitle.textContent = getText(`track_courier_${notice}_title`, lang) || '';
+      if (notice === 'error') {
+        const shipment = state.trackingPayload?.tracking?.shipment || {};
+        const promised = formatTrackingTimeRange(shipment.promised_window_start_at, shipment.promised_window_end_at, {
+          month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+        });
+        if (promised) fillTextWithBdi(trackCourierNoticeText, getText('track_courier_error_text', lang), 'window', promised);
+        else if (trackCourierNoticeText) trackCourierNoticeText.textContent = getText('track_courier_error_text_plain', lang) || '';
+      } else if (trackCourierNoticeText) {
+        trackCourierNoticeText.textContent = getText(`track_courier_${notice}_text`, lang) || '';
+      }
+    }
+
+    if (trackCourierRetry) trackCourierRetry.hidden = view !== 'error';
+    if (trackCourierReverify) trackCourierReverify.hidden = view !== 'expired';
+
+    const showMeta = view === 'data' || view === 'error';
+    if (trackCourierMeta) trackCourierMeta.hidden = !showMeta;
+    if (showMeta) {
+      let metaKey = '';
+      if (showArea) metaKey = 'track_courier_meta_live';
+      else if (status === 'paused') metaKey = 'track_courier_meta_paused';
+      else if (view === 'data') metaKey = 'track_courier_meta_poll';
+      if (metaKey === 'track_courier_meta_live') fillTextWithBdi(trackCourierMetaText, getText(metaKey, lang), 'distance', formatAreaDistance(data.area));
+      else if (trackCourierMetaText) trackCourierMetaText.textContent = metaKey ? getText(metaKey, lang) || '' : '';
+      let liveStatus = 'offline';
+      if (view === 'data') liveStatus = showArea || status === 'too_far' ? 'live' : status === 'paused' ? 'paused' : 'hidden';
+      if (trackCourierStatus) trackCourierStatus.dataset.status = liveStatus;
+      if (trackCourierStatusText) {
+        const text = getText(`track_courier_status_${liveStatus}`, lang) || '';
+        if (trackCourierStatusText.textContent !== text) trackCourierStatusText.textContent = text;
+      }
+    }
+
+    if (trackCourierFormStatus) {
+      setTrackingStatus(
+        trackCourierFormStatus,
+        view === 'loading' ? 'track_courier_loading' : view === 'error' ? 'track_courier_error_status' : '',
+        view === 'error' ? 'error' : undefined
+      );
+    }
+  }
+
+  function setLiveDeliveryView(view, data = null) {
+    state.liveDelivery.view = view;
+    state.liveDelivery.data = data;
+    renderLiveDeliveryCard();
+  }
+
+  function scheduleLiveDeliveryPoll(delay = LIVE_DELIVERY_POLL_MS) {
+    window.clearTimeout(state.liveDelivery.timer);
+    state.liveDelivery.timer = null;
+    if (state.trackingStage !== 'results' || !state.trackingSessionToken) return;
+    if (document.visibilityState === 'hidden') return;
+    state.liveDelivery.timer = window.setTimeout(fetchLiveDelivery, Math.max(0, delay));
+  }
+
+  function applyLiveDelivery(payload) {
+    const live = readLiveDelivery(payload);
+    setLiveDeliveryView(live ? 'data' : 'none', live);
+    scheduleLiveDeliveryPoll();
+  }
+
+  function startLiveDelivery(payload) {
+    const tracking = payload && typeof payload === 'object' ? payload.tracking || payload : null;
+    const status = String(tracking?.shipment?.status || '').trim().toLowerCase();
+    setLiveDeliveryView(status === 'out_for_delivery' ? 'loading' : 'none');
+    fetchLiveDelivery();
+  }
+
+  function stopLiveDelivery() {
+    window.clearTimeout(state.liveDelivery.timer);
+    state.liveDelivery.timer = null;
+    state.liveDelivery.lastFetchAt = 0;
+    setLiveDeliveryView('none');
+  }
+
+  async function fetchLiveDelivery() {
+    window.clearTimeout(state.liveDelivery.timer);
+    state.liveDelivery.timer = null;
+    const token = state.trackingSessionToken;
+    if (!token || state.trackingStage !== 'results') return;
+    const request = beginTrackingRequest('live');
+    state.liveDelivery.lastFetchAt = Date.now();
+    try {
+      const { response, data } = await postTracking('session', { session_token: token }, request.controller);
+      if (!isCurrentTrackingRequest(request)) return;
+      if (!response.ok || !data || data.ok === false) {
+        if (data?.error?.code === 'invalid_session') {
+          saveTrackingSession('');
+          setLiveDeliveryView('expired');
+        } else {
+          setLiveDeliveryView('error', state.liveDelivery.data);
+        }
+        return;
+      }
+      const live = readLiveDelivery(data);
+      setLiveDeliveryView(live ? 'data' : 'none', live);
+    } catch {
+      if (!isCurrentTrackingRequest(request)) return;
+      setLiveDeliveryView('error', state.liveDelivery.data);
+    } finally {
+      if (finishTrackingRequest(request)) scheduleLiveDeliveryPoll();
+    }
+  }
+
+  function handleLiveDeliveryVisibility() {
+    if (document.visibilityState === 'hidden') {
+      window.clearTimeout(state.liveDelivery.timer);
+      state.liveDelivery.timer = null;
+      return;
+    }
+    if (state.liveDelivery.view === 'expired') return;
+    scheduleLiveDeliveryPoll(LIVE_DELIVERY_POLL_MS - (Date.now() - state.liveDelivery.lastFetchAt));
   }
 
   async function postTracking(action, body, controller = new AbortController()) {
@@ -2396,6 +2688,7 @@
       trackMapDialogPicker.setAttribute('aria-label', getText('track_location_map_aria_expanded', lang) || 'Expanded shipment location map');
     }
     if (state.trackingPayload) renderTrackingPayload(state.trackingPayload);
+    renderLiveDeliveryCard();
     syncMapPinUi();
   }
 
@@ -2437,6 +2730,7 @@
       saveTrackingSession(token);
       renderTrackingPayload(data);
       setTrackingStage('results');
+      applyLiveDelivery(data);
     } catch {
       if (!isCurrentTrackingRequest(request)) return;
       saveTrackingSession('');
@@ -2549,6 +2843,7 @@
       renderTrackingPayload(data);
       setTrackingStage('results');
       setOwnedTrackingRequestStatus(request, '');
+      startLiveDelivery(data);
     } catch (error) {
       if (!isCurrentTrackingRequest(request)) return;
       setOwnedTrackingRequestStatus(
@@ -3038,6 +3333,11 @@
       });
     }
 
+    document.addEventListener('visibilitychange', handleLiveDeliveryVisibility);
+    if (trackCourierRetry) trackCourierRetry.addEventListener('click', () => fetchLiveDelivery());
+    if (trackCourierReverify) {
+      trackCourierReverify.addEventListener('click', () => resetTrackingFlow({ clearReference: false, scroll: true }));
+    }
     window.addEventListener('pagehide', () => invalidateTrackingRequests());
     hydrateTrackingSession();
     syncMapPinUi();

@@ -188,6 +188,48 @@
                 </div>
               </article>
 
+              <article class="card card-pad track-courier-card" data-track-courier aria-labelledby="track-courier-title" hidden>
+                <div class="track-panel-head">
+                  <h3 id="track-courier-title" data-i18n="track_courier_title">Your courier is on the way</h3>
+                  <span class="track-lock" data-track-courier-lock>Approximate</span>
+                </div>
+                <div class="track-summary-grid" data-track-courier-facts>
+                  <dl class="track-definition">
+                    <dt data-i18n="track_courier_eta">Estimated arrival</dt>
+                    <dd class="num" aria-live="polite" aria-atomic="true" data-track-courier-eta></dd>
+                  </dl>
+                  <dl class="track-definition">
+                    <dt data-i18n="track_courier_stops">Stops before yours</dt>
+                    <dd class="num" data-track-courier-stops></dd>
+                  </dl>
+                  <dl class="track-definition">
+                    <dt data-i18n="track_courier_updated">Last update</dt>
+                    <dd data-track-courier-updated></dd>
+                  </dl>
+                </div>
+                <div class="track-courier-map" data-track-courier-map-wrap hidden>
+                  <div class="track-map-picker track-courier-map-frame" role="img" data-track-courier-map-frame>
+                    <div class="track-courier-map-canvas" data-track-courier-map></div>
+                    <span class="track-courier-area-label" data-i18n="track_courier_area_label">Courier is in this area</span>
+                  </div>
+                  <span class="track-courier-attrib" data-track-courier-attrib></span>
+                </div>
+                <div class="track-courier-notice" data-track-courier-notice hidden>
+                  <strong data-track-courier-notice-title></strong>
+                  <p data-track-courier-notice-text></p>
+                </div>
+                <div class="track-form-actions" data-track-courier-actions>
+                  <button class="btn btn-secondary" type="button" data-track-courier-retry data-i18n="track_courier_retry" hidden>Try again</button>
+                  <button class="btn btn-primary" type="button" data-track-courier-reverify data-i18n="track_courier_reverify" hidden>Verify again</button>
+                </div>
+                <div class="track-map-meta" data-track-courier-meta hidden>
+                  <span data-track-courier-meta-text></span>
+                  <span class="track-map-status track-courier-status" role="status" data-track-courier-status><span class="track-courier-dot" aria-hidden="true"></span><span data-track-courier-status-text></span></span>
+                </div>
+                <p class="track-courier-privacy" data-track-courier-privacy hidden><span class="check" aria-hidden="true"></span><span data-i18n="track_courier_privacy">We never show the courier’s exact position, name, route or other deliveries.</span></p>
+                <p class="form-status" data-track-courier-form-status></p>
+              </article>
+
               <div class="track-request-banner" data-track-request-banner hidden>
                 <span class="track-request-banner-badge" data-track-request-banner-badge></span>
                 <p class="track-request-banner-text" data-track-request-banner-text></p>
@@ -334,6 +376,7 @@
                 <li><span class="check"></span><span data-i18n="track_help_item_1">No full phone number or full delivery line is exposed on the public page.</span></li>
                 <li><span class="check"></span><span data-i18n="track_help_item_2">Verification uses the last 3 mobile digits before results are shown.</span></li>
                 <li><span class="check"></span><span data-i18n="track_help_item_3">Reschedule and location changes are requests, not direct shipment edits.</span></li>
+                <li><span class="check"></span><span data-i18n="track_help_item_4">The courier’s area appears only when they are close, and only approximately.</span></li>
               </ul>
             </article>
 
