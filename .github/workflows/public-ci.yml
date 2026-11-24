@@ -446,11 +446,20 @@ jobs:
       - *restore_npm
       - *timing_install
       - *install_locked
+      - name: Install pinned Deno
+        if: steps.subject.outputs.present == 'true'
+        run: bash scripts/edge/install-pinned-deno.sh
       - *timing_work
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/base-guard.cjs jest.cjs unit
       - *timing_report
+      - name: Report frozen Edge lock cases
+        if: ${{ !cancelled() && hashFiles('ci-reports/jest-results.unit.*-of-*.json') != '' }}
+        run: |
+          jq -r '.suites[] | select(.file == "tests/unit/ops/edge-frozen-lock.test.js")
+            | .tests[] | select(.fullName | startswith("checks the frozen Edge lock with a "))
+            | "\(.status) \(.fullName)"' ci-reports/jest-results.unit.*-of-*.json
       - name: Check proposed test-result capture
         if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.subject.outputs.present == 'true' }}
         env:
