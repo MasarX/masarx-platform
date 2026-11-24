@@ -57,14 +57,7 @@ Push and let CI run tests, lint, typecheck and builds. Do not run them locally o
 
 ## Risk paths (high risk only: need one independent review before landing)
 
-A change needs the [independent review](DELIVERY.md#branching-and-merging) only when it touches one of these paths, because a mistake there is irreversible, silent or public. Nothing else gets the review: docs, `DESIGN.md`, `AGENTS.md` and `DELIVERY.md`, presentation-only UI, tests, refactors, dependency version bumps and lockfiles, `package.json` outside its `scripts`, and DEV or staging-only fixes. One review per change, with no repeat rounds: a fix to a finding, or any push after the verdict, is checked by tests and needs a new review only if it touches a path below.
-
-- Data loss: `/supabase/migrations/`, purge and retention functions, `scripts/ops/workspace/destroy.js`, `scripts/ops/workspace/delete-branch.js`, and the database-target selection in `/scripts/utils/pg-candidates.js` and `/scripts/utils/pg-hostaddr.js`.
-- Data exposure: `apps/console/app/auth/`, `apps/console/app/access-policy/`, `apps/portal/app/auth/`, `apps/portal/app/access-policy/`, `apps/console-v2/src/routes/auth/`, `apps/shared/security-middleware.ts`, `supabase/functions/`, SQL grants and row-level security, any UI or API change to which personal data is shown, and to whom, and any change that makes something public or opens network or access-control exposure.
-- Money rules: cash-on-delivery amounts, collections and payouts, wherever they live.
-- Secrets and logs: `/scripts/utils/load-env.js`, `/scripts/utils/env-file.js` and `/scripts/qa/qa-log.js`.
-- Merge gates: `/.github/`, `/scripts/ci-hosted/`, `/config/ci/` (including the quarantine and accepted-failure lists), `/scripts/ops/ci/`, `/scripts/tests/run-pgtap-cloud.js`, and the `scripts` entries of `package.json` files that CI runs.
-- Production configuration and deploys: `/scripts/deploy/`, `/supabase/config.toml` and `/config/edge/functions.json`.
+[Critical-path policy](config/ci/critical-paths.json) maps critical changes to this repository and lists the GitHub bot account IDs that can post the review verdict. Follow the [review and merge process](DELIVERY.md#branching-and-merging) for changes that affect production, secrets, real data, public access, hosts and networking, or release gates.
 
 ## Data safety
 
