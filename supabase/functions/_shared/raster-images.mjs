@@ -39,7 +39,7 @@ const scanJpeg = (bytes, onMetadata) => {
     const length = view.getUint16(offset);
     if (length < 2 || length > bytes.length - offset) return false;
     const end = offset + length;
-    if ((marker >= 0xe0 && marker <= 0xef) || marker === 0xfe) onMetadata?.(segmentStart, end);
+    if ((marker >= 0xe0 && marker <= 0xef) || marker === 0xfe) onMetadata?.(segmentStart, end, marker, offset + 2);
     if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
       if (length < 8 || !bytes[offset + 7] || length !== 8 + 3 * bytes[offset + 7]) return false;
       hasFrame = true;
@@ -185,7 +185,10 @@ export const stripProofImageMetadata = (bytes, mime) => {
     }
   } else if (mime === "image/jpeg") {
     let start = 0;
-    if (!scanJpeg(bytes, (offset, end) => {
+    if (!scanJpeg(bytes, (offset, end, marker, payload) => {
+      // A fixed-size Adobe APP14 segment supplies the JPEG color transform.
+      if (marker === 0xee && end - payload === 12 &&
+          String.fromCharCode(...bytes.subarray(payload, payload + 5)) === "Adobe") return;
       parts.push(bytes.subarray(start, offset));
       start = end;
     })) return null;

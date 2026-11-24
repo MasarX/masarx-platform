@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.119.0";
-import { stripProofImageMetadata } from "./_shared/raster-images.mjs";
+import { MAX_LOGO_BYTES, stripProofImageMetadata } from "./_shared/raster-images.mjs";
 
 type ProofArtifact = {
   id: string;
@@ -13,6 +13,7 @@ type ProofArtifact = {
 type ProofResponse = {
   ok: true;
   session_id: string;
+  organization_id: string;
   session_expires_at: string | null;
   proof: {
     state: "available" | "unavailable" | "expired";
@@ -22,9 +23,57 @@ type ProofResponse = {
   };
 } | { ok: false; error: { code: string } };
 
+const storageKeyShape = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}(\/[A-Za-z0-9._-]+)+$/;
 const encoder = new TextEncoder();
 const linkData = (sessionId: string, artifactId: string, expiry: number) =>
   encoder.encode(JSON.stringify(["public-tracking-proof-v1", sessionId, artifactId, expiry]));
+
+async function loadProofImage<Schema extends string>(
+  client: SupabaseClient<any, Schema>,
+  organizationId: string,
+  artifact: ProofArtifact,
+) {
+  const { storage_key: path, storage_bucket: bucket } = artifact;
+  if (bucket !== "fieldops-evidence" || typeof path !== "string" ||
+      !storageKeyShape.test(path) || !path.startsWith(organizationId + "/") ||
+      /(^|\/)\.{1,2}(\/|$)/.test(path)) return null;
+
+  try {
+    const { data, error } = await client.storage.from(bucket)
+      .download(path, {}, { signal: AbortSignal.timeout(5000) }).asStream();
+    if (error || !data) return null;
+
+    const reader = data.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.length;
+        if (size > MAX_LOGO_BYTES) {
+          await reader.cancel();
+          return null;
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    const raw = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      raw.set(chunk, offset);
+      offset += chunk.length;
+    }
+    const mime = artifact.mime_type === "image/jpg" ? "image/jpeg" : artifact.mime_type;
+    const bytes = stripProofImageMetadata(raw, mime);
+    return bytes ? { bytes, mime } : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function serveTrackingProof<Schema extends string>(
   client: SupabaseClient<any, Schema>,
@@ -83,20 +132,24 @@ export async function serveTrackingProof<Schema extends string>(
         !await crypto.subtle.verify("HMAC", key, signatureBytes, linkData(result.session_id, artifactId, expiry))) {
       return unavailable();
     }
-    const { data: file, error: downloadError } = await client.storage
-      .from(artifact.storage_bucket).download(artifact.storage_key);
-    if (downloadError || !file || file.size > 5 * 1024 * 1024) return unavailable();
-
-    const mime = artifact.mime_type === "image/jpg" ? "image/jpeg" : artifact.mime_type;
-    const bytes = stripProofImageMetadata(new Uint8Array(await file.arrayBuffer()), mime);
-    if (!bytes || Date.now() >= expiry * 1000) return unavailable();
-    headers.set("Content-Type", mime);
+    const image = await loadProofImage(client, result.organization_id, artifact);
+    if (!image || Date.now() >= expiry * 1000) return unavailable();
+    headers.set("Content-Type", image.mime);
     headers.set("Content-Security-Policy", "sandbox; default-src 'none'");
-    return new Response(bytes, { status: 200, headers });
+    return new Response(image.bytes, { status: 200, headers });
   }
 
-  const linkExpiry = Math.min(cap, now + 600);
-  const artifacts = await Promise.all(proof.artifacts.map(async (artifact) => {
+  // Artifact records do not store dimensions. Check the same bytes and limits as the file route.
+  const eligible = (await Promise.all(proof.artifacts.map(async (artifact) =>
+    await loadProofImage(client, result.organization_id, artifact) ? artifact : null
+  ))).filter((artifact) => artifact !== null);
+  if (!eligible.length) {
+    return reply(200, { ok: true, proof: { state: "unavailable", available_until: null, recipient_name: null, artifacts: [] } });
+  }
+  const listedAt = Math.floor(Date.now() / 1000);
+  if (cap <= listedAt) return unavailable();
+  const linkExpiry = Math.min(cap, listedAt + 600);
+  const artifacts = await Promise.all(eligible.map(async (artifact) => {
     const digest = await crypto.subtle.sign("HMAC", key, linkData(result.session_id, artifact.id, linkExpiry));
     const signature = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
     const query = new URLSearchParams({ artifact: artifact.id, expires: String(linkExpiry), signature });

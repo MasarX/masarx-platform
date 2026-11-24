@@ -665,8 +665,10 @@ jobs:
           const gatewayJwt = createEdgeDbJwt({ secret, role: 'edge_renderer_gateway_role' });
           if (!gatewayJwt) process.exit(1);
           console.log('::add-mask::' + gatewayJwt);
+          const proofKey = createHmac('sha256', secret).update('masarx-public-tracking-proof-sign-v1').digest('hex');
+          console.log('::add-mask::' + proofKey);
           appendFileSync(process.env.EDGE_SECRET_FILE,
-            `LABEL_RENDERER_SIGNING_KEY=${key}\nLABEL_RENDERER_GATEWAY_JWT=${gatewayJwt}\n`, { mode: 0o600 });
+            `LABEL_RENDERER_SIGNING_KEY=${key}\nLABEL_RENDERER_GATEWAY_JWT=${gatewayJwt}\nPUBLIC_TRACKING_PROOF_SIGNING_SECRET=${proofKey}\n`, { mode: 0o600 });
           RENDERER_MINT
           then
             echo '::error::Renderer credentials could not be written.'
@@ -717,7 +719,7 @@ jobs:
               const { createHash } = require("node:crypto");
               const listed = JSON.parse(readFileSync(0, "utf8"));
               const local = readFileSync(process.env.EDGE_SECRET_FILE, "utf8");
-              const names = ["LABEL_RENDERER_SIGNING_KEY", "LABEL_RENDERER_GATEWAY_JWT"];
+              const names = ["LABEL_RENDERER_SIGNING_KEY", "LABEL_RENDERER_GATEWAY_JWT", "PUBLIC_TRACKING_PROOF_SIGNING_SECRET"];
               if (process.env.DEPLOY_ENV === "dev") names.push("EDGE_ENVIRONMENT", "EDGE_INTERNAL_CALLER_ROLES");
               for (const name of names) {
                 const value = local.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1];
@@ -726,7 +728,7 @@ jobs:
                 }
               }
             ' 2>/dev/null; then
-            echo '::error::Renderer credential digest verification failed.'
+            echo '::error::Edge signing credential digest verification failed.'
             exit 1
           fi
           node scripts/deploy/guarded-egress.cjs < "$deploy_temp/edge-secret-metadata.json" | tee -a "$GITHUB_STEP_SUMMARY"

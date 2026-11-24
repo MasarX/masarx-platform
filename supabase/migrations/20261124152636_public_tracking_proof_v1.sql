@@ -85,9 +85,11 @@ BEGIN
           AND al.resource_type = 'shipment_action' AND al.resource_id = v_delivery.id
           AND al.relation_type = 'pod'
           AND a.storage_bucket = 'fieldops-evidence'
-          AND starts_with(a.storage_key, v_session.organization_id::text || '/')
+          AND a.storage_key COLLATE "C" ~
+            ('^' || v_session.organization_id::text || '/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$')
+          AND a.storage_key !~ '(^|/)\.{1,2}(/|$)'
           AND a.mime_type IN ('image/png', 'image/jpeg', 'image/jpg')
-          AND (a.size_bytes IS NULL OR a.size_bytes BETWEEN 1 AND 5 * 1024 * 1024)
+          AND a.size_bytes BETWEEN 1 AND 5 * 1024 * 1024
           AND a.metadata->'hide_from_public_tracking' IS DISTINCT FROM 'true'::jsonb
           AND al.metadata->'hide_from_public_tracking' IS DISTINCT FROM 'true'::jsonb
       ),
@@ -113,6 +115,7 @@ BEGIN
 
   RETURN jsonb_build_object(
     'ok', true, 'session_id', v_session.id, 'session_expires_at', v_session.expires_at,
+    'organization_id', v_session.organization_id,
     'proof', jsonb_build_object(
       'state', v_state,
       'available_until', CASE WHEN v_state <> 'unavailable' THEN v_until END,
