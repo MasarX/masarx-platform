@@ -136,13 +136,13 @@ export interface MobileV2StopScreenProps {
   readonly onCopyAddress?: () => void;
   readonly onShareAddress?: () => void;
   readonly onScanParcel?: () => void;
-  /** Tap a parcel to open its detail / toggle scan state manually. */
+  /** Tap a parcel to open its detail. Parcel status renders only from the stop read-back. */
   readonly onParcelPress?: (parcelId: string) => void;
   /** Open the damaged-parcel hold sheet for this stop. */
   readonly onDamageHold?: () => void;
   /** Open the delivery reschedule sheet for this stop. */
   readonly onReschedule?: () => void;
-  /** Tap a proof checklist item to mark it done (e.g. photo captured). */
+  /** Tap a proof checklist item to open proof capture. Done state renders only from the stop read-back. */
   readonly onProofPress?: (key: string) => void;
   readonly onPodSubmit?: () => void;
   readonly onFail?: () => void;
