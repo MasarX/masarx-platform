@@ -31,7 +31,7 @@ import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { Chip } from '@/components/Chip';
 import { pushToast } from '@/components/toastStore';
 import { useDrawer, useModal } from '@/hooks/useOverlay';
-import { useI18n } from '@/lib/i18n';
+import { englishT, fill, useI18n, type Translate } from '@/lib/i18n';
 import { useCapability, useIdentity } from '@/lib/identity';
 import { CAP } from '@/lib/capabilities';
 import {
@@ -109,6 +109,9 @@ interface WorkflowRunGuardRow extends Record<string, unknown> {
   } | null;
 }
 
+// Workflow handler named in the variance KPI; a code token, shown isolated.
+const VARIANCE_GATE_HANDLER = 'variance_gate_v3';
+
 // ─── W17-1 metadata helpers ──────────────────────────────────────────────
 function trackingOf(r: CodEntryRow): string {
   const v = r.metadata?.['tracking'];
@@ -144,9 +147,9 @@ function settlementBatchBlocksCodRestart(batch: SettlementBatchGuardRow): boolea
     | undefined;
   return metadata?.allows_cod_restart !== true;
 }
-function settlementBatchLabel(batch: SettlementBatchGuardRow): string {
+function settlementBatchLabel(batch: SettlementBatchGuardRow, t: Translate = englishT): string {
   const status = textOf(batch.status);
-  const label = status ? (api.lookupRow('settlement_status', status)?.label ?? status) : 'unknown status';
+  const label = status ? (api.lookupRow('settlement_status', status)?.label ?? status) : t('cod.unknownStatus');
   return `${label}${batch.id ? ` ${batch.id}` : ''}`;
 }
 function codSettlementWorkflowRunEntryId(run: WorkflowRunGuardRow): string {
@@ -163,9 +166,9 @@ function workflowRunBlocksCodRestart(run: WorkflowRunGuardRow): boolean {
     | undefined;
   return metadata?.blocks_cod_restart !== false;
 }
-function workflowRunLabel(run: WorkflowRunGuardRow): string {
+function workflowRunLabel(run: WorkflowRunGuardRow, t: Translate = englishT): string {
   const status = textOf(run.workflow_status);
-  const label = status ? (api.lookupRow('workflow_run_status', status)?.label ?? status) : 'unknown status';
+  const label = status ? (api.lookupRow('workflow_run_status', status)?.label ?? status) : t('cod.unknownStatus');
   return `${label}${run.id ? ` ${run.id}` : ''}`;
 }
 function statusOf(r: CodEntryRow): string {
@@ -176,13 +179,15 @@ function driverOf(r: CodEntryRow): string {
   const v = r.metadata?.['driver'];
   return typeof v === 'string' ? v : '';
 }
-function settlementContextDisabledReason(row: CodEntryRow): string | undefined {
+function settlementContextDisabledReason(row: CodEntryRow, t: Translate = englishT): string | undefined {
   const metadata = row.metadata ?? {};
   if (metadata.settlement_context_ready !== false) return undefined;
-  const missing: string[] = [];
-  if (!textOf(metadata.branch_id)) missing.push('branch');
-  if (!textOf(metadata.driver_user_id)) missing.push('driver');
-  return `COD settlement workflow requires shipment ${missing.join(' and ') || 'branch and driver'} context.`;
+  const branchMissing = !textOf(metadata.branch_id);
+  const driverMissing = !textOf(metadata.driver_user_id);
+  // Only one part missing names that part; both or neither keep the full phrase, as before.
+  if (branchMissing && !driverMissing) return t('cod.reasons.contextMissingBranch');
+  if (driverMissing && !branchMissing) return t('cod.reasons.contextMissingDriver');
+  return t('cod.reasons.contextMissingBoth');
 }
 function discrepancyOf(r: CodEntryRow): number | undefined {
   const v = r.metadata?.['discrepancy'];
@@ -219,7 +224,7 @@ function codEntryLifecycle(status: unknown): CodEntryLifecycleMetadata | null {
 export function CodModule() {
   // AGENTS.md §7 (CAPABILITY-GATED UI for reads): page-level fail-closed gate.
   const canRead = useCapability(CAP.COD_READ);
-  const { fmtCurrency } = useI18n();
+  const { t, fmtCurrency } = useI18n();
   const identity = useIdentity();
   const { scope } = identity;
   const activeTenantId = scope.tenant?.id ?? identity.currentTenantId();
@@ -314,16 +319,11 @@ export function CodModule() {
   if (!canRead) {
     return (
       <div className="page">
-        <PageHeader
-          moduleKey="cod"
-          eyebrow="Finance"
-          titleAccent="COD"
-          titlePlain="reconciliation"
-        />
+        <PageHeader moduleKey="cod" />
         <StateView
           kind="denied"
           capability={CAP.COD_READ}
-          hint="You do not have permission to view COD reports (cod.read)."
+          hint={t('cod.denied')}
         />
       </div>
     );
@@ -331,7 +331,7 @@ export function CodModule() {
   if (codPolicy.isLoading) {
     return (
       <div className="page">
-        <PageHeader moduleKey="cod" eyebrow="Finance" titleAccent="COD" titlePlain="reconciliation" />
+        <PageHeader moduleKey="cod" />
         <StateView kind="loading" />
       </div>
     );
@@ -339,11 +339,11 @@ export function CodModule() {
   if (handoverSlaHours == null || varianceToleranceSar == null) {
     return (
       <div className="page">
-        <PageHeader moduleKey="cod" eyebrow="Finance" titleAccent="COD" titlePlain="reconciliation" />
+        <PageHeader moduleKey="cod" />
         <StateView
           kind="error"
-          title="COD policy is not ready"
-          hint="Handover timing and variance limits are missing from finance settings. Sync the configuration before reconciling COD."
+          title={t('cod.policy.notReadyTitle')}
+          hint={t('cod.policy.notReadyHint')}
         />
       </div>
     );
@@ -351,19 +351,19 @@ export function CodModule() {
   if (codSummaryQuery.isLoading) {
     return (
       <div className="page">
-        <PageHeader moduleKey="cod" eyebrow="Finance" titleAccent="COD" titlePlain="reconciliation" />
-        <StateView kind="loading" title="Loading COD summary" hint="Reading delivery payment collection totals." />
+        <PageHeader moduleKey="cod" />
+        <StateView kind="loading" title={t('cod.summary.loadingTitle')} hint={t('cod.summary.loadingHint')} />
       </div>
     );
   }
   if (codSummaryQuery.error) {
     return (
       <div className="page">
-        <PageHeader moduleKey="cod" eyebrow="Finance" titleAccent="COD" titlePlain="reconciliation" />
+        <PageHeader moduleKey="cod" />
         <StateView
           kind="error"
-          title="COD summary unavailable"
-          hint={(codSummaryQuery.error as Error).message || 'COD closeout totals could not be read.'}
+          title={t('cod.summary.unavailableTitle')}
+          hint={(codSummaryQuery.error as Error).message || t('cod.summary.unreadable')}
         />
       </div>
     );
@@ -382,11 +382,11 @@ export function CodModule() {
   ) {
     return (
       <div className="page">
-        <PageHeader moduleKey="cod" eyebrow="Finance" titleAccent="COD" titlePlain="reconciliation" />
+        <PageHeader moduleKey="cod" />
         <StateView
           kind="error"
-          title="COD summary unavailable"
-          hint="COD closeout totals are incomplete. Sync payment totals before reconciling."
+          title={t('cod.summary.unavailableTitle')}
+          hint={t('cod.summary.incomplete')}
         />
       </div>
     );
@@ -394,10 +394,10 @@ export function CodModule() {
   if (codEntriesQuery.isError) {
     return (
       <div className="page">
-        <PageHeader moduleKey="cod" eyebrow="Finance" titleAccent="COD" titlePlain="reconciliation" />
+        <PageHeader moduleKey="cod" />
         <StateView
           kind="error"
-          title="COD entries unavailable"
+          title={t('cod.entriesUnavailable')}
           hint={(codEntriesQuery.error as Error).message}
         />
       </div>
@@ -438,7 +438,7 @@ export function CodModule() {
     const rowTenantId = textOf(row.organization_id);
     const scopedTenantId = textOf(activeTenantId);
     if (rowTenantId && (!scopedTenantId || rowTenantId !== scopedTenantId)) {
-      return "Switch to this COD row's tenant before changing COD lifecycle.";
+      return t('cod.reasons.switchTenant');
     }
     return undefined;
   }
@@ -446,9 +446,9 @@ export function CodModule() {
   function cashierCountDisabledReason(row: CodEntryRow): string | undefined {
     const tenantReason = codTenantActionDisabledReason(row);
     if (tenantReason) return tenantReason;
-    if (!row.id) return 'This COD row is missing its finance event reference.';
+    if (!row.id) return t('cod.reasons.missingEventRef');
     if (outstandingRemittanceOf(row) <= 0) {
-      return 'No outstanding COD handover amount remains for this row.';
+      return t('cod.reasons.noOutstanding');
     }
     return undefined;
   }
@@ -456,30 +456,30 @@ export function CodModule() {
   function adjustCollectedDisabledReason(row: CodEntryRow): string | undefined {
     const tenantReason = codTenantActionDisabledReason(row);
     if (tenantReason) return tenantReason;
-    if (!row.id) return 'This COD row is missing its finance event reference.';
+    if (!row.id) return t('cod.reasons.missingEventRef');
     return undefined;
   }
 
   function settlementWorkflowDisabledReason(row: CodEntryRow): string | undefined {
     const tenantReason = codTenantActionDisabledReason(row);
     if (tenantReason) return tenantReason;
-    if (!row.id) return 'This COD row is missing its finance event reference.';
+    if (!row.id) return t('cod.reasons.missingEventRef');
     const existingSettlement = blockingSettlementByCodEntryId.get(codEntryIdOf(row));
     if (existingSettlement) {
-      return `COD settlement already exists for this row (${settlementBatchLabel(existingSettlement)}). Open Settlements to continue the existing batch.`;
+      return fill(t('cod.reasons.settlementExists'), { label: settlementBatchLabel(existingSettlement, t) });
     }
     const existingRun = blockingWorkflowRunByCodEntryId.get(codEntryIdOf(row));
     if (existingRun) {
-      return `COD settlement workflow is already active for this row (${workflowRunLabel(existingRun)}). Open Workflows to continue the existing run.`;
+      return fill(t('cod.reasons.runActive'), { label: workflowRunLabel(existingRun, t) });
     }
     if (!textOf(row.subject_id ?? row.shipment_id)) {
-      return 'COD settlement workflow requires the shipment reference.';
+      return t('cod.reasons.needsShipment');
     }
-    const contextReason = settlementContextDisabledReason(row);
+    const contextReason = settlementContextDisabledReason(row, t);
     if (contextReason) return contextReason;
     const varianceAmount = collectedOf(row) - expectedOf(row);
     if (outstandingRemittanceOf(row) <= 0 && Math.abs(varianceAmount) < 0.01) {
-      return 'This COD row is already balanced and fully remitted.';
+      return t('cod.reasons.balanced');
     }
     return undefined;
   }
@@ -488,27 +488,27 @@ export function CodModule() {
     const outstanding = outstandingRemittanceOf(row);
     const variance = collectedOf(row) - expectedOf(row);
     const parts: string[] = [];
-    if (outstanding > 0) parts.push(`${fmtCurrency(outstanding)} outstanding`);
-    if (Math.abs(variance) >= 0.01) parts.push(`${fmtCurrency(variance)} variance`);
-    return parts.join(' · ') || 'needs settlement';
+    if (outstanding > 0) parts.push(fill(t('cod.trigger.outstanding'), { amount: fmtCurrency(outstanding) }));
+    if (Math.abs(variance) >= 0.01) parts.push(fill(t('cod.trigger.variance'), { amount: fmtCurrency(variance) }));
+    return parts.join(' · ') || t('cod.trigger.needsSettlement');
   }
 
   function bulkCashierCountDisabledReason(rows: CodEntryRow[]): string | undefined {
     if (rows.some((row) => Boolean(codTenantActionDisabledReason(row)))) {
-      return "Switch to each selected COD row's tenant before recording cashier counts.";
+      return t('cod.reasons.bulkSwitchTenantCount');
     }
     if (rows.every((row) => Boolean(cashierCountDisabledReason(row)))) {
-      return 'No selected COD rows have outstanding handover amounts.';
+      return t('cod.reasons.bulkNoOutstanding');
     }
     return undefined;
   }
 
   function bulkSettlementWorkflowDisabledReason(rows: CodEntryRow[]): string | undefined {
     if (rows.some((row) => Boolean(codTenantActionDisabledReason(row)))) {
-      return "Switch to each selected COD row's tenant before starting settlement.";
+      return t('cod.reasons.bulkSwitchTenantSettlement');
     }
     if (rows.every((row) => Boolean(settlementWorkflowDisabledReason(row)))) {
-      return 'No selected COD rows need a settlement workflow.';
+      return t('cod.reasons.bulkNoSettlement');
     }
     return undefined;
   }
@@ -516,13 +516,13 @@ export function CodModule() {
   async function buildSettlementWorkflowPayload(row: CodEntryRow): Promise<Record<string, unknown>> {
     const shipmentId = textOf(row.subject_id ?? row.shipment_id);
     if (!shipmentId) {
-      throw new Error('COD settlement workflow requires the shipment reference.');
+      throw new Error(t('cod.reasons.needsShipment'));
     }
     const shipment = await api.ui_get_resource_v1<Record<string, unknown>>('shipments', shipmentId);
     const branchId = textOf(shipment?.branch_id) || textOf(row.metadata?.branch_id);
     const driverUserId = textOf(shipment?.driver_user_id) || textOf(row.metadata?.driver_user_id);
     if (!branchId || !driverUserId) {
-      throw new Error('COD settlement workflow requires shipment branch and driver context.');
+      throw new Error(t('cod.reasons.contextMissingBoth'));
     }
     const anchor = row.collected_at ?? row.created_at ?? new Date().toISOString();
     const periodDate = anchor.slice(0, 10);
@@ -532,7 +532,7 @@ export function CodModule() {
     const remittedAmount = remittedOf(row);
     const currency = row.currency || textOf(shipment?.cod_currency);
     if (!activeTenantId || !currency) {
-      throw new Error('COD settlement workflow requires organization and currency context.');
+      throw new Error(t('cod.reasons.needsOrgCurrency'));
     }
     return {
       organization_id: activeTenantId,
@@ -591,7 +591,7 @@ export function CodModule() {
       latestRun = (runReadback.rows?.[0] ?? latestRun) as WorkflowRunContextRecord | null;
       latestEvents = eventReadback.rows ?? [];
     } catch (err) {
-      pushToast((err as Error)?.message ?? 'Workflow context unavailable.', 'warn');
+      pushToast((err as Error)?.message ?? t('cod.toast.contextUnavailable'), 'warn');
     }
     const settlement = payload.settlement as Record<string, unknown> | undefined;
     openWorkflowRunContextDrawer(drawer, {
@@ -599,14 +599,18 @@ export function CodModule() {
       run: latestRun,
       events: latestEvents,
       contextRows: [
-        { label: 'COD entry', value: <span className="mono">{row.id}</span> },
-        { label: 'Tracking', value: <span className="mono">{textOf(payload.tracking) || trackingOf(row)}</span> },
-        { label: 'Scope', value: 'Driver shift COD settlement' },
-        { label: 'Driver', value: <span className="mono">{textOf(payload.subject_id)}</span> },
-        { label: 'Branch', value: <span className="mono">{textOf(payload.branch_id)}</span> },
+        { label: t('cod.context.codEntry'), value: <bdi className="mono">{row.id}</bdi> },
+        { label: t('cod.context.tracking'), value: <bdi className="mono">{textOf(payload.tracking) || trackingOf(row)}</bdi> },
+        { label: t('cod.context.scope'), value: t('cod.context.scopeValue') },
+        { label: t('cod.context.driver'), value: <bdi className="mono">{textOf(payload.subject_id)}</bdi> },
+        { label: t('cod.context.branch'), value: <bdi className="mono">{textOf(payload.branch_id)}</bdi> },
         {
-          label: 'Amounts',
-          value: `${fmtCurrency(Number(settlement?.expected_amount ?? expectedOf(row)))} expected - ${fmtCurrency(Number(settlement?.collected_amount ?? collectedOf(row)))} collected - ${fmtCurrency(Number(settlement?.remitted_amount ?? remittedOf(row)))} remitted`,
+          label: t('cod.context.amounts'),
+          value: fill(t('cod.context.amountsValue'), {
+            expected: fmtCurrency(Number(settlement?.expected_amount ?? expectedOf(row))),
+            collected: fmtCurrency(Number(settlement?.collected_amount ?? collectedOf(row))),
+            remitted: fmtCurrency(Number(settlement?.remitted_amount ?? remittedOf(row))),
+          }),
         },
       ],
       deepLink: `/workflows/runs?focus=${encodeURIComponent(runId)}`,
@@ -632,7 +636,7 @@ export function CodModule() {
     if (!tplId) {
       if (showToast) {
         pushToast(
-          'COD settlement workflow is not configured.',
+          t('cod.toast.notConfigured'),
           'danger',
         );
       }
@@ -670,14 +674,14 @@ export function CodModule() {
           );
         } catch (err) {
           pushToast(
-            `COD settlement workflow started, but automatic workflow advance failed - ${(err as Error)?.message ?? 'unknown error'}`,
+            fill(t('cod.toast.advanceFailed'), { error: (err as Error)?.message ?? t('cod.toast.unknownError') }),
             'danger',
           );
         }
       }
       if (showToast) {
         pushToast(
-          `COD settlement workflow started for ${trackingOf(row)} - ${res.workflow_run_id ?? '(pending)'}`,
+          fill(t('cod.toast.started'), { tracking: trackingOf(row), runId: res.workflow_run_id ?? t('cod.toast.pending') }),
           'good',
         );
       }
@@ -686,7 +690,7 @@ export function CodModule() {
     } catch (err) {
       if (showToast) {
         pushToast(
-          `Failed to start COD settlement workflow - ${(err as Error)?.message ?? 'unknown error'}`,
+          fill(t('cod.toast.startFailed'), { error: (err as Error)?.message ?? t('cod.toast.unknownError') }),
           'danger',
         );
       }
@@ -705,7 +709,7 @@ export function CodModule() {
       .map((row) => ({ row, reason: settlementWorkflowDisabledReason(row) }))
       .filter((entry): entry is { row: CodEntryRow; reason: string } => Boolean(entry.reason));
     if (eligible.length === 0) {
-      pushToast('No selected COD rows need a settlement workflow.', 'warn');
+      pushToast(t('cod.reasons.bulkNoSettlement'), 'warn');
       return;
     }
 
@@ -713,26 +717,28 @@ export function CodModule() {
       return (
         <div>
           <p className="state__hint">
-            Start COD settlement workflows for {eligible.length} eligible row{eligible.length === 1 ? '' : 's'}.
-            {skipped.length ? ` ${skipped.length} selected row${skipped.length === 1 ? '' : 's'} will be skipped.` : ''}
+            {fill(t(eligible.length === 1 ? 'cod.bulkSettlement.introOne' : 'cod.bulkSettlement.introOther'), { n: eligible.length })}
+            {skipped.length
+              ? ` ${fill(t(skipped.length === 1 ? 'cod.bulkSettlement.skippedOne' : 'cod.bulkSettlement.skippedOther'), { n: skipped.length })}`
+              : ''}
           </p>
           <div className="card mono" style={{ fontSize: '11px', lineHeight: 1.6, marginTop: 10 }}>
             {eligible.slice(0, 5).map((row) => (
               <SeamLine
                 key={row.id}
-                k="Eligible"
+                k={t('cod.bulkSettlement.eligible')}
                 v={`${trackingOf(row)} - ${settlementWorkflowTriggerSummary(row)}`}
               />
             ))}
-            {eligible.length > 5 ? <SeamLine k="More eligible" v={String(eligible.length - 5)} /> : null}
+            {eligible.length > 5 ? <SeamLine k={t('cod.bulkSettlement.moreEligible')} v={String(eligible.length - 5)} /> : null}
             {skipped.slice(0, 3).map(({ row, reason }) => (
-              <SeamLine key={row.id} k="Skipped" v={`${trackingOf(row)} - ${reason}`} />
+              <SeamLine key={row.id} k={t('cod.bulkSettlement.skipped')} v={`${trackingOf(row)} - ${reason}`} />
             ))}
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Start COD settlements"
+              label={t('cod.bulkSettlement.confirm')}
               iconName="alert"
               kind="primary"
               capability={CAP.FINANCE_WRITE}
@@ -749,7 +755,10 @@ export function CodModule() {
                 );
                 const succeeded = results.filter(Boolean).length;
                 pushToast(
-                  `COD settlement workflows started - ${succeeded} of ${eligible.length} eligible run${eligible.length === 1 ? '' : 's'} queued`,
+                  fill(t(eligible.length === 1 ? 'cod.toast.bulkStartedOne' : 'cod.toast.bulkStartedOther'), {
+                    n: succeeded,
+                    total: eligible.length,
+                  }),
                   succeeded === eligible.length ? 'good' : 'warn',
                 );
               }}
@@ -760,7 +769,7 @@ export function CodModule() {
     }
 
     modal.open({
-      title: `Start COD settlements - ${eligible.length} eligible`,
+      title: fill(t('cod.bulkSettlement.title'), { n: eligible.length }),
       body: <BulkSettlementWorkflowForm />,
     });
   }
@@ -782,16 +791,16 @@ export function CodModule() {
     try {
       const enteredAmount = Number(amount);
       if (!Number.isFinite(enteredAmount) || enteredAmount <= 0) {
-        pushToast('Enter a positive COD remittance amount', 'warn');
+        pushToast(t('cod.toast.enterPositive'), 'warn');
         return false;
       }
       if (enteredAmount > outstandingRemittanceOf(row)) {
-        pushToast('Cashier amount cannot exceed the outstanding COD handover amount', 'warn');
+        pushToast(t('cod.toast.exceedsOutstanding'), 'warn');
         return false;
       }
       const trimmedReason = reason.trim();
       if (!trimmedReason) {
-        pushToast('COD remittance reason is required', 'warn');
+        pushToast(t('cod.toast.remittanceReasonRequired'), 'warn');
         return false;
       }
       const res = await remittanceMutation.mutateAsync({
@@ -801,12 +810,12 @@ export function CodModule() {
         reason: trimmedReason,
       });
       pushToast(
-        `COD remittance recorded - ${res.transfer_id ?? res.to_finance_event_id ?? '(pending)'}`,
+        fill(t('cod.toast.remittanceRecorded'), { ref: res.transfer_id ?? res.to_finance_event_id ?? t('cod.toast.pending') }),
         'good',
       );
       return true;
     } catch (err) {
-      pushToast(`COD remittance failed - ${(err as Error)?.message ?? 'unknown error'}`, 'danger');
+      pushToast(fill(t('cod.toast.remittanceFailed'), { error: (err as Error)?.message ?? t('cod.toast.unknownError') }), 'danger');
       return false;
     } finally {
       actionLocks.current.delete(lockKey);
@@ -830,12 +839,12 @@ export function CodModule() {
     try {
       const enteredAmount = Number(adjustmentAmount);
       if (!Number.isFinite(enteredAmount) || enteredAmount === 0) {
-        pushToast('Enter a non-zero COD adjustment amount', 'warn');
+        pushToast(t('cod.toast.enterNonZero'), 'warn');
         return false;
       }
       const trimmedReason = reason.trim();
       if (!trimmedReason) {
-        pushToast('Collected adjustment reason is required', 'warn');
+        pushToast(t('cod.toast.adjustmentReasonRequired'), 'warn');
         return false;
       }
       const res = await adjustmentMutation.mutateAsync({
@@ -844,10 +853,10 @@ export function CodModule() {
         currency: row.currency,
         reason: trimmedReason,
       });
-      pushToast(`COD adjustment recorded - ${res.finance_event_id ?? '(pending)'}`, 'good');
+      pushToast(fill(t('cod.toast.adjustmentRecorded'), { ref: res.finance_event_id ?? t('cod.toast.pending') }), 'good');
       return true;
     } catch (err) {
-      pushToast(`COD adjustment failed - ${(err as Error)?.message ?? 'unknown error'}`, 'danger');
+      pushToast(fill(t('cod.toast.adjustmentFailed'), { error: (err as Error)?.message ?? t('cod.toast.unknownError') }), 'danger');
       return false;
     } finally {
       actionLocks.current.delete(lockKey);
@@ -861,7 +870,7 @@ export function CodModule() {
       return;
     }
     const suggested = outstandingRemittanceOf(row);
-    const reference = trackingOf(row) || row.id || 'COD row';
+    const reference = trackingOf(row) || row.id || t('cod.form.codRow');
 
     function CashierCountForm() {
       const [draft, setDraft] = useState({
@@ -886,7 +895,7 @@ export function CodModule() {
           }}
         >
           <p className="state__hint">
-            Record the cashier count for this driver-shift COD handover.
+            {t('cod.cashier.intro')}
           </p>
           <div
             style={{
@@ -898,21 +907,21 @@ export function CodModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="cod-cashier-count-ref">COD row</label>
+            <label className="mono" htmlFor="cod-cashier-count-ref">{t('cod.form.codRow')}</label>
             <input
               id="cod-cashier-count-ref"
               className="dt-inline-input"
               value={reference}
               readOnly
             />
-            <label className="mono" htmlFor="cod-cashier-count-expected">Outstanding</label>
+            <label className="mono" htmlFor="cod-cashier-count-expected">{t('cod.form.outstanding')}</label>
             <input
               id="cod-cashier-count-expected"
               className="dt-inline-input"
               value={fmtCurrency(suggested)}
               readOnly
             />
-            <label className="mono" htmlFor="cod-cashier-count-amount">Cashier amount</label>
+            <label className="mono" htmlFor="cod-cashier-count-amount">{t('cod.cashier.amount')}</label>
             <input
               id="cod-cashier-count-amount"
               data-testid="cod-cashier-count-amount"
@@ -924,20 +933,20 @@ export function CodModule() {
               value={draft.amount}
               onChange={(e) => setDraft((s) => ({ ...s, amount: e.target.value }))}
             />
-            <label className="mono" htmlFor="cod-cashier-count-reason">Reason</label>
+            <label className="mono" htmlFor="cod-cashier-count-reason">{t('cod.form.reason')}</label>
             <input
               id="cod-cashier-count-reason"
               data-testid="cod-cashier-count-reason"
               className="dt-inline-input"
-              placeholder="e.g. Cashier counted driver handover"
+              placeholder={t('cod.cashier.reasonPlaceholder')}
               value={draft.reason}
               onChange={(e) => setDraft((s) => ({ ...s, reason: e.target.value }))}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Record cashier count"
+              label={t('cod.actions.recordCashierCount')}
               kind="primary"
               capability={CAP.FINANCE_WRITE}
               type="submit"
@@ -951,7 +960,7 @@ export function CodModule() {
       );
     }
 
-    modal.open({ title: `Cashier count - ${reference}`, body: <CashierCountForm /> });
+    modal.open({ title: fill(t('cod.cashier.title'), { ref: reference }), body: <CashierCountForm /> });
   }
 
   function openAdjustmentModal(row: CodEntryRow) {
@@ -960,7 +969,7 @@ export function CodModule() {
       pushToast(disabledReason, 'warn');
       return;
     }
-    const reference = trackingOf(row) || row.id || 'COD row';
+    const reference = trackingOf(row) || row.id || t('cod.form.codRow');
 
     function AdjustmentForm() {
       const [draft, setDraft] = useState({ amount: '', reason: '' });
@@ -981,7 +990,7 @@ export function CodModule() {
           }}
         >
           <p className="state__hint">
-            Correct a cashier-count variance with a signed adjustment.
+            {t('cod.adjust.intro')}
           </p>
           <div
             style={{
@@ -993,9 +1002,9 @@ export function CodModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="cod-adjust-ref">COD row</label>
+            <label className="mono" htmlFor="cod-adjust-ref">{t('cod.form.codRow')}</label>
             <input id="cod-adjust-ref" className="dt-inline-input" value={reference} readOnly />
-            <label className="mono" htmlFor="cod-adjust-amount">Adjustment amount (+/-)</label>
+            <label className="mono" htmlFor="cod-adjust-amount">{t('cod.adjust.amount')}</label>
             <input
               id="cod-adjust-amount"
               data-testid="cod-adjust-amount"
@@ -1005,20 +1014,20 @@ export function CodModule() {
               value={draft.amount}
               onChange={(e) => setDraft((s) => ({ ...s, amount: e.target.value }))}
             />
-            <label className="mono" htmlFor="cod-adjust-reason">Reason</label>
+            <label className="mono" htmlFor="cod-adjust-reason">{t('cod.form.reason')}</label>
             <input
               id="cod-adjust-reason"
               data-testid="cod-adjust-reason"
               className="dt-inline-input"
-              placeholder="e.g. Cashier correction after recount"
+              placeholder={t('cod.adjust.reasonPlaceholder')}
               value={draft.reason}
               onChange={(e) => setDraft((s) => ({ ...s, reason: e.target.value }))}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Record adjustment"
+              label={t('cod.adjust.submit')}
               kind="primary"
               capability={CAP.FINANCE_WRITE}
               type="submit"
@@ -1032,7 +1041,7 @@ export function CodModule() {
       );
     }
 
-    modal.open({ title: `Adjust cashier count - ${reference}`, body: <AdjustmentForm /> });
+    modal.open({ title: fill(t('cod.adjust.title'), { ref: reference }), body: <AdjustmentForm /> });
   }
 
   function openBulkCashierCountModal(selectedRows: CodEntryRow[]) {
@@ -1055,11 +1064,11 @@ export function CodModule() {
           <div>
             <StateView
               kind="empty"
-              title="No outstanding COD cash"
-              hint="Selected COD rows are already fully remitted or have no collected amount to count."
+              title={t('cod.bulkCount.emptyTitle')}
+              hint={t('cod.bulkCount.emptyHint')}
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-              <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+              <Button label={t('cod.form.close')} kind="ghost" onClick={() => modal.close()} />
             </div>
           </div>
         );
@@ -1068,7 +1077,7 @@ export function CodModule() {
       return (
         <div>
           <p className="state__hint">
-            Record cashier-count handover for {remittable.length} selected COD rows.
+            {fill(t('cod.bulkCount.intro'), { n: remittable.length })}
           </p>
           <div
             style={{
@@ -1080,27 +1089,27 @@ export function CodModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="cod-bulk-count-total">Total count</label>
+            <label className="mono" htmlFor="cod-bulk-count-total">{t('cod.bulkCount.total')}</label>
             <input
               id="cod-bulk-count-total"
               className="dt-inline-input"
               value={fmtCurrency(totalAmount)}
               readOnly
             />
-            <label className="mono" htmlFor="cod-bulk-count-reason">Reason</label>
+            <label className="mono" htmlFor="cod-bulk-count-reason">{t('cod.form.reason')}</label>
             <input
               id="cod-bulk-count-reason"
               data-testid="cod-bulk-count-reason"
               className="dt-inline-input"
-              placeholder="e.g. End-of-shift cashier count"
+              placeholder={t('cod.bulkCount.reasonPlaceholder')}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Record selected counts"
+              label={t('cod.bulkCount.submit')}
               kind="primary"
               capability={CAP.FINANCE_WRITE}
               disabled={!canSubmit || remittanceMutation.isPending}
@@ -1116,7 +1125,7 @@ export function CodModule() {
       );
     }
 
-    modal.open({ title: 'Bulk cashier count', body: <BulkCashierCountForm /> });
+    modal.open({ title: t('cod.bulkCount.title'), body: <BulkCashierCountForm /> });
   }
 
   // W17-1 — every derived column reads through metadata helpers; per-projection
@@ -1124,46 +1133,46 @@ export function CodModule() {
   const columns: Array<DataTableColumn<CodEntryRow>> = [
     {
       key: 'metadata.tracking',
-      label: 'Tracking',
+      label: t('cod.columns.tracking'),
       mono: true,
       sortable: false,
       filterable: false,
       render: (_raw, row) => {
-        const t = trackingOf(row);
-        return t ? <span className="mono">{t}</span> : <span>—</span>;
+        const tracking = trackingOf(row);
+        return tracking ? <span className="mono">{tracking}</span> : <span>—</span>;
       },
     },
     {
       key: 'metadata.driver',
-      label: 'Driver',
+      label: t('cod.columns.driver'),
       sortable: false,
       filterable: false,
       render: (_raw, row) => driverOf(row) || '—',
     },
     {
       key: 'metadata.expected',
-      label: 'Expected',
+      label: t('cod.columns.expected'),
       align: 'right',
       sortable: false,
       render: (_raw, row) => fmtCurrency(expectedOf(row)),
     },
     {
       key: 'metadata.collected',
-      label: 'Collected',
+      label: t('cod.columns.collected'),
       align: 'right',
       sortable: false,
       render: (_raw, row) => fmtCurrency(collectedOf(row)),
     },
     {
       key: 'metadata.remitted',
-      label: 'Remitted',
+      label: t('cod.columns.remitted'),
       align: 'right',
       sortable: false,
       render: (_raw, row) => fmtCurrency(remittedOf(row)),
     },
     {
       key: 'metadata.discrepancy',
-      label: 'Discrepancy',
+      label: t('cod.columns.discrepancy'),
       align: 'right',
       sortable: false,
       render: (_raw, row) => {
@@ -1173,7 +1182,7 @@ export function CodModule() {
     },
     {
       key: 'metadata.status',
-      label: 'Status',
+      label: t('cod.columns.status'),
       sortable: false,
       filterable: false,
       lookup: 'cod_entry_status',
@@ -1181,7 +1190,7 @@ export function CodModule() {
     },
     {
       key: 'aging',
-      label: 'Aging',
+      label: t('cod.columns.aging'),
       sortable: false,
       render: (_raw: unknown, row: CodEntryRow): ReactNode => {
         // W58-Finance+Support REDO closure: aging-chip suppression resolves
@@ -1198,25 +1207,25 @@ export function CodModule() {
             label={a.label}
             kind={a.tone}
             size="xs"
-            title={`Age ${a.label} · handover SLA ${handoverSlaHours}h`}
+            title={fill(t('cod.agingTitle'), { age: a.label, hours: String(handoverSlaHours) })}
           />
         );
       },
     },
-    { key: 'collected_at', label: 'Collected at', format: 'datetime', sortable: true },
+    { key: 'collected_at', label: t('cod.columns.collectedAt'), format: 'datetime', sortable: true },
   ];
 
   const pills: ReactNode[] = [
     <ScopePill key="scope" scopeType="tenant" scopeId={activeTenantId ?? ''} />,
     <span key="seam" className="chip chip--xs mono">
-      Delivery payment collection
+      {t('cod.pills.seam')}
     </span>,
     <Chip
       key="policy"
-      label={`Handover SLA ${handoverSlaHours}h · variance ${fmtCurrency(varianceToleranceSar)}`}
+      label={fill(t('cod.pills.policy'), { hours: String(handoverSlaHours), amount: fmtCurrency(varianceToleranceSar) })}
       kind="neutral"
       size="xs"
-      title="Resolved through finance policy settings"
+      title={t('cod.pills.policyTitle')}
     />,
   ];
 
@@ -1224,33 +1233,30 @@ export function CodModule() {
     <div className="page">
       <PageHeader
         moduleKey="cod"
-        eyebrow="Finance"
-        titleAccent="COD"
-        titlePlain="reconciliation"
         pills={pills}
       />
 
       <div className="kpi-strip">
         <KPICard
-          label="Expected"
+          label={t('cod.columns.expected')}
           value={fmtCurrency(expected)}
           tone="neutral"
-          delta="From delivery collections"
+          delta={t('cod.kpi.expectedDelta')}
         />
         <KPICard
-          label="Collected"
+          label={t('cod.columns.collected')}
           value={fmtCurrency(collected)}
           tone="good"
           delta={`${collectedPct}%`}
         />
         <KPICard
-          label="Remitted"
+          label={t('cod.columns.remitted')}
           value={fmtCurrency(remitted)}
           tone="info"
           delta={`${remittedPct}%`}
         />
         <KPICard
-          label="Variance"
+          label={t('cod.kpi.variance')}
           value={fmtCurrency(variance)}
           tone={
             aggregateVariance.tone === 'warn'
@@ -1260,9 +1266,13 @@ export function CodModule() {
                 : 'good'
           }
           delta={
-            aggregateVariance.exceeds_threshold
-              ? 'gate triggers variance_gate_v3'
-              : `tolerance ${fmtCurrency(varianceToleranceSar)}`
+            aggregateVariance.exceeds_threshold ? (
+              <>
+                {t('cod.kpi.gateTriggers')} <bdi className="mono">{VARIANCE_GATE_HANDLER}</bdi>
+              </>
+            ) : (
+              fill(t('cod.kpi.tolerance'), { amount: fmtCurrency(varianceToleranceSar) })
+            )
           }
         />
       </div>
@@ -1290,7 +1300,7 @@ export function CodModule() {
           // absent.
           rowActions={[
             {
-              label: 'Record cashier count',
+              label: t('cod.actions.recordCashierCount'),
               icon: 'check',
               capability: CAP.FINANCE_WRITE,
               disabled: (r) => Boolean(cashierCountDisabledReason(r)),
@@ -1298,7 +1308,7 @@ export function CodModule() {
               onClick: (r) => openCashierCountModal(r),
             },
             {
-              label: 'Adjust collected',
+              label: t('cod.actions.adjustCollected'),
               icon: 'edit',
               capability: CAP.FINANCE_WRITE,
               disabled: (r) => Boolean(adjustCollectedDisabledReason(r)),
@@ -1306,7 +1316,7 @@ export function CodModule() {
               onClick: (r) => openAdjustmentModal(r),
             },
             {
-              label: 'Start COD settlement',
+              label: t('cod.actions.startSettlement'),
               icon: 'alert',
               capability: CAP.FINANCE_WRITE,
               disabled: (r) => Boolean(settlementWorkflowDisabledReason(r)),
@@ -1314,14 +1324,14 @@ export function CodModule() {
               onClick: (r) => startCodSettlementWorkflow(r),
             },
             {
-              label: 'Open shipment',
+              label: t('cod.actions.openShipment'),
               icon: 'right',
               onClick: (r) => openShipment(r),
             },
           ]}
           bulkActions={[
             {
-              label: 'Record cashier counts',
+              label: t('cod.actions.recordCashierCounts'),
               icon: 'check',
               capability: CAP.FINANCE_WRITE,
               disabled: (rs) => Boolean(bulkCashierCountDisabledReason(rs)),
@@ -1329,7 +1339,7 @@ export function CodModule() {
               onClick: (rs) => openBulkCashierCountModal(rs),
             },
             {
-              label: 'Start COD settlement',
+              label: t('cod.actions.startSettlement'),
               icon: 'alert',
               capability: CAP.FINANCE_WRITE,
               disabled: (rs) => Boolean(bulkSettlementWorkflowDisabledReason(rs)),
