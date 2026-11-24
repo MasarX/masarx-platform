@@ -1,5 +1,6 @@
 'use strict';
 const fs = require('node:fs');
+const path = require('node:path');
 
 const statuses = ['green', 'red', 'error'];
 const shaPattern = /^[0-9a-f]{40}$/;
@@ -12,7 +13,9 @@ function validExclusion(row) {
 
 function configuredExclusions(rows = exclusions) {
   if (!Array.isArray(rows) || !rows.every(row => validExclusion(row)
-      && (row.flags === undefined || Array.isArray(row.flags) && row.flags.every(flag => /^RUN_LIVE_[A-Z0-9_]+$/.test(flag))))
+      && (row.flags === undefined || Array.isArray(row.flags) && row.flags.every(flag => /^RUN_[A-Z0-9_]+$/.test(flag)))
+      && ['suites', 'files'].every(key => row[key] === undefined ||
+        Array.isArray(row[key]) && row[key].every(value => typeof value === 'string' && /^[\w.\/:-]+$/.test(value))))
       || new Set(rows.map(row => row.name)).size !== rows.length) throw new Error('Invalid nightly exclusions');
   return rows;
 }
@@ -38,28 +41,42 @@ function validResult(result) {
     && result.suites.every(suite => suite != null && (suite.status === 'out-of-scope' ? validExclusion(suite)
       : typeof suite.name === 'string' && suite.name.length > 0 && suite.name.length <= 120
       && statuses.includes(suite.status) && Array.isArray(suite.failed_tests) && suite.failed_tests.length <= 100
+      && (suite.skipped === undefined || Number.isSafeInteger(suite.skipped) && suite.skipped >= 0)
       && suite.failed_tests.every(name => typeof name === 'string' && name.length <= 200)))
     && (result.status !== 'green' || result.suites.some(suite => suite.status === 'green')
       && result.suites.every(suite => suite.status === 'green' || suite.status === 'out-of-scope'));
 }
 
-function browserFailures(suites) {
+function browserTests(suites) {
   return suites.flatMap(suite => [
-    ...(suite.specs || []).filter(spec => spec.tests?.some(test => test.status === 'unexpected')).map(spec => spec.title),
-    ...browserFailures(suite.suites || []),
+    ...(suite.specs || []).flatMap(spec => (spec.tests || []).map(test =>
+      ({ file: spec.file || suite.file, name: spec.title, status: test.status }))),
+    ...browserTests(suite.suites || []),
   ]);
 }
 
-function failedTests(file) {
-  if (!file || !fs.existsSync(file)) return [];
+function readSuiteReport(file, excluded = configuredExclusions()) {
+  if (!file) return { failedTests: [], skipped: 0, unexplained: 0 };
   const report = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const names = Array.isArray(report)
-    ? report.filter(row => row.status === 'failed').map(row => row.file)
-    : [...browserFailures(report.suites || []), ...(report.suites || report.testResults || []).flatMap(suite =>
-      (suite.tests || suite.assertionResults || []).filter(test => test.status === 'failed')
-        .map(test => test.fullName))];
-  return [...new Set(names.filter(name => typeof name === 'string').map(name => name.slice(0, 200)))].slice(0, 100);
+  if (!Array.isArray(report) && !Array.isArray(report.suites) && !Array.isArray(report.testResults)) {
+    throw new Error('Invalid nightly test report');
+  }
+  const tests = Array.isArray(report) ? report.map(row => ({ ...row, name: row.file }))
+    : [...browserTests(report.suites || []), ...(report.suites || report.testResults || []).flatMap(suite =>
+      (suite.tests || suite.assertionResults || []).map(test =>
+        ({ file: suite.file || suite.name, name: test.fullName, status: test.status })))];
+  const names = tests.filter(test => test.status === 'failed' || test.status === 'unexpected').map(test => test.name);
+  const skippedTests = tests.filter(test => ['pending', 'skipped', 'todo', 'disabled'].includes(test.status));
+  const allowed = new Set(excluded.flatMap(row => row.files || []));
+  const explained = skippedTests.filter(test => typeof test.file === 'string'
+    && allowed.has((path.isAbsolute(test.file) ? path.relative(process.cwd(), test.file) : test.file).replaceAll('\\', '/'))).length;
+  const pending = (report.numPendingTests || 0) + (report.numTodoTests || 0);
+  const skipped = Math.max(skippedTests.length, report.skipped || 0, report.stats?.skipped || 0, pending);
+  return { failedTests: [...new Set(names.filter(name => typeof name === 'string').map(name => name.slice(0, 200)))].slice(0, 100),
+    skipped, unexplained: skipped - explained };
 }
+
+const failedTests = file => readSuiteReport(file).failedTests;
 
 function writeResult(file, { sha, started, finished, code, suites }) {
   const status = !sha || suites.some(suite => suite.status === 'error') ? 'error'
@@ -75,11 +92,22 @@ function writeResult(file, { sha, started, finished, code, suites }) {
 if (require.main === module) {
   const [command, journal, ...args] = process.argv.slice(2);
   if (command === 'record') {
-    const [name, status, report] = args;
-    const failed_tests = status === 'green' ? [] : failedTests(report);
-    fs.appendFileSync(journal, JSON.stringify({ name, status, failed_tests }) + '\n');
-  } else if (command === 'flags') {
-    console.log(configuredExclusions().flatMap(row => row.flags || []).join('\n'));
+    const [name, initial, report] = args;
+    let status = initial;
+    let failed_tests = [];
+    let skipped = 0;
+    try {
+      const counts = readSuiteReport(report);
+      failed_tests = counts.failedTests;
+      skipped = counts.skipped;
+      if (status === 'green' && (counts.unexplained || failed_tests.length)) status = 'red';
+      if (counts.unexplained) failed_tests = [...failed_tests.slice(0, 99), 'Unexplained skips: ' + counts.unexplained];
+    } catch {
+      status = 'error';
+      failed_tests = ['Missing or invalid test report'];
+    }
+    fs.appendFileSync(journal, JSON.stringify({ name, status, failed_tests, skipped }) + '\n');
+    console.log(status);
   } else if (command === 'finish') {
     const [sha, started, code] = args;
     const suites = fs.readFileSync(journal, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
@@ -91,4 +119,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { configuredExclusions, failedTests, isDay, validResult, writeResult };
+module.exports = { configuredExclusions, failedTests, isDay, readSuiteReport, validResult, writeResult };
