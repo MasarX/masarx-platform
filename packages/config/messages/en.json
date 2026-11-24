@@ -1052,7 +1052,12 @@
     },
     "routeOperations": {
       "unknown": "unknown",
-      "scopeLabel": "{scopeType}: {scopeLabel}",
+      "scopeTypes": {
+        "global": "Global",
+        "tenant": "Tenant",
+        "client": "Client",
+        "sender": "Sender"
+      },
       "title": "Route operations workspace",
       "description": "Route-first operations shell driven by ui_navigation and ui_read_registry.",
       "errors": {
@@ -1191,7 +1196,12 @@
     },
     "exceptionInbox": {
       "unknown": "unknown",
-      "scopeLabel": "{scopeType}: {scopeLabel}",
+      "scopeTypes": {
+        "global": "Global",
+        "tenant": "Tenant",
+        "client": "Client",
+        "sender": "Sender"
+      },
       "title": "Exception inbox",
       "description": "Workflow exception inbox built from navigation + registry rows.",
       "errors": {
