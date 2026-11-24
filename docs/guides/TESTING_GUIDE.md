@@ -59,6 +59,7 @@ ENV_FILE=config/env/.env.cloud npm run test:integration -- --runInBand
 ```
 
 Live external calls are guarded by env toggles (for example: `RUN_LIVE_*` flags).
+The cloud integration runner keeps caller-provided `RUN_*` values when loading an environment file, including in override mode. Its child processes inherit the resolved environment.
 
 ---
 
