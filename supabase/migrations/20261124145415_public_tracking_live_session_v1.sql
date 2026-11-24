@@ -13,6 +13,7 @@ CREATE TABLE public.public_tracking_live_cells (
 );
 
 CREATE INDEX idx_public_tracking_live_cells_run ON public.public_tracking_live_cells (route_run_id);
+CREATE INDEX idx_public_tracking_live_cells_shipment ON public.public_tracking_live_cells (shipment_id, client_id);
 
 ALTER TABLE public.public_tracking_live_cells ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.public_tracking_live_cells FROM PUBLIC, anon, authenticated;
@@ -20,14 +21,30 @@ GRANT SELECT, INSERT, UPDATE ON TABLE public.public_tracking_live_cells TO servi
 CREATE POLICY public_tracking_live_cells_service
   ON public.public_tracking_live_cells FOR ALL TO service_role USING (true) WITH CHECK (true);
 
-CREATE FUNCTION api.courier_location_stale_after_seconds_v1()
-RETURNS integer
-LANGUAGE sql IMMUTABLE
-SET search_path TO pg_catalog
-AS $$ SELECT 300 $$;
+INSERT INTO public.table_contracts (
+  table_schema, table_name, created_at_required, updated_at_required, audit_enabled, notes
+)
+VALUES (
+  'public', 'public_tracking_live_cells', false, false, false,
+  'Service-only tracking cell cache with explicit capture and sample timestamps.'
+);
 
-REVOKE ALL ON FUNCTION api.courier_location_stale_after_seconds_v1() FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION api.courier_location_stale_after_seconds_v1() TO authenticated, service_role;
+UPDATE public.schema_registry
+SET schema = jsonb_set(schema, '{properties,live_delivery}', '{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "eta_enabled": {"type": "boolean"},
+    "area_enabled": {"type": "boolean"},
+    "partner_area_enabled": {"type": "boolean"},
+    "minutes_per_stop": {"type": "integer", "minimum": 1, "maximum": 60},
+    "max_stops_ahead": {"type": "integer", "minimum": 0, "maximum": 20},
+    "grid_m": {"type": "integer", "minimum": 300, "maximum": 2000},
+    "stale_after_seconds": {"type": "integer", "minimum": 60, "maximum": 300},
+    "eta_window_minutes": {"type": "integer", "minimum": 1, "maximum": 60}
+  }
+}'::jsonb)
+WHERE category = 'public_tracking_policy' AND version = 1;
 
 CREATE FUNCTION public.public_tracking_live_payload_v1(p_session_id uuid, p_policy jsonb)
 RETURNS jsonb
@@ -51,7 +68,9 @@ DECLARE
   v_eta_end timestamptz;
   v_status text;
   v_now timestamptz := workflow_now();
-  v_stale_before timestamptz := v_now - make_interval(secs => api.courier_location_stale_after_seconds_v1());
+  v_stale_before timestamptz := v_now - make_interval(secs =>
+    public.public_tracking_int_v1(p_policy, '{live_delivery,stale_after_seconds}', 300, 60, 300)
+  );
 BEGIN
   IF NOT public.public_tracking_bool_v1(p_policy, '{live_delivery,eta_enabled}', true) THEN
     RETURN NULL;
@@ -71,12 +90,14 @@ BEGIN
   END IF;
 
   SELECT rs.*, rr.driver_user_id, rr.started_at,
-         COALESCE(assignment.assignment_mode = 'partner_fleet', false) AS partner_run
+         COALESCE(assignment.is_partner, false) AS partner_run
   INTO v_stop
   FROM public.route_stops rs
   JOIN public.route_runs rr ON rr.id = rs.route_run_id AND rr.organization_id = rs.organization_id
   LEFT JOIN LATERAL (
-    SELECT rra.assignment_mode
+    SELECT COALESCE(public.lookup_value_meta_bool(
+      'route_assignment_mode', rra.assignment_mode, 'is_partner', true
+    ), true) AS is_partner
     FROM public.route_run_assignments rra
     WHERE rra.route_run_id = rr.id AND rra.organization_id = rr.organization_id
       AND rra.assignment_status IN ('assigned', 'acknowledged', 'accepted')
@@ -148,7 +169,9 @@ BEGIN
     v_eta_start := date_trunc('minute', v_ping.captured_at) + make_interval(mins =>
       v_stops_ahead * public.public_tracking_int_v1(p_policy, '{live_delivery,minutes_per_stop}', 8, 1, 60)
     );
-    v_eta_end := v_eta_start + interval '15 minutes';
+    v_eta_end := v_eta_start + make_interval(mins =>
+      public.public_tracking_int_v1(p_policy, '{live_delivery,eta_window_minutes}', 15, 1, 60)
+    );
     v_status := 'hidden';
 
     IF public.public_tracking_bool_v1(p_policy, '{live_delivery,area_enabled}', false)
