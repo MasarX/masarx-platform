@@ -16,7 +16,8 @@ describe('TemplatesModule in Arabic', () => {
     renderWithProviders(<TemplatesModule />, { locale: 'ar', capabilities: ['all'] });
 
     await waitFor(() => expect(screen.getByText(ar.workflowTemplates.topbar.title)).toBeInTheDocument());
-    expect(screen.getByRole('tab', { name: ar.workflowTemplates.palette.operations })).toBeInTheDocument();
+    // The palette renders once the templates load.
+    expect(await screen.findByRole('tab', { name: ar.workflowTemplates.palette.operations })).toBeInTheDocument();
 
     const chrome = [...document.querySelectorAll('.wf-topbar__brand, .wf-palette__tabs')];
     expect(chrome.length).toBe(2);
