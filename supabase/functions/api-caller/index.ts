@@ -12,7 +12,7 @@ import {
   mergeServerDispatch,
   validateInvocationPayload,
 } from "./invocation.mjs";
-import { readEnv, normaliseHeaders, toResponseBody } from "./_shared/mod.mjs";
+import { logStructured, readEnv, normaliseHeaders, toResponseBody } from "./_shared/mod.mjs";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -90,7 +90,7 @@ const EDGE_DB_JWT = RAW_EDGE_DB_JWT && RAW_EDGE_DB_JWT.split(".").length === 3
   ? RAW_EDGE_DB_JWT
   : "";
 if (RAW_EDGE_DB_JWT && !EDGE_DB_JWT) {
-  console.warn("[api-caller] ignoring invalid API_CALLER_DB_JWT shape; expected JWT with 3 segments");
+  logStructured("warn", "api_caller.invalid_database_jwt_shape", { service: "api-caller" });
 }
 const EDGE_REQUIRE_DB_JWT = readEnv("EDGE_REQUIRE_DB_JWT", []) === "1";
 const GUARDED_EGRESS_PROXY_ENV = {
@@ -112,11 +112,10 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY && EDGE_DB_JWT) {
   });
 }
 if (!supabase) {
-  console.error(
-    EDGE_REQUIRE_DB_JWT
-      ? "api-caller missing API_CALLER_DB_JWT while EDGE_REQUIRE_DB_JWT=1"
-      : "api-caller missing API_CALLER_DB_JWT; DB JWT is required for edge DB access",
-  );
+  logStructured("error", "api_caller.database_jwt_missing", {
+    service: "api-caller",
+    enforcement_enabled: EDGE_REQUIRE_DB_JWT,
+  });
 }
 
 const parseRequest = async (req: Request): Promise<unknown> => {
@@ -452,7 +451,12 @@ const executeClaimedJob = async (
 
   if (isRenderer && (callResult.status === 401 || callResult.status === 403)) {
     callResult = { ...callResult, error: "renderer_gateway_rejected" };
-    console.error("[api-caller] renderer_gateway_rejected");
+    logStructured("error", "api_caller.renderer_gateway_rejected", {
+      service: "api-caller",
+      code: "renderer_gateway_rejected",
+      job_id: jobId,
+      status: callResult.status,
+    });
   }
 
   // Refresh again after the bounded network operation so even a near-600-second
