@@ -8,6 +8,8 @@ const body = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows
 const workflow = yaml.parse(body);
 const { verify, build } = workflow.jobs;
 const gate = verify.steps.find(step => step.id === 'verify').run;
+const sharedPath = 'scripts/deploy/require-ci-gate.sh';
+const sharedGate = fs.readFileSync(path.resolve(__dirname, '../../../', sharedPath), 'utf8');
 
 function git(repo, ...args) {
   const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8', timeout: 10000, windowsHide: true });
@@ -44,8 +46,10 @@ describe('release workflow contract', () => {
   test('binds the build and public CI queries to the verified tag commit', () => {
     expect(gate).toContain('git rev-parse --verify "$GITHUB_REF^{commit}"');
     expect(gate).toContain('"$sha" != "$(git rev-parse HEAD)"');
-    expect(gate).toContain('actions/workflows/public-ci.yml/runs?head_sha=$sha');
-    expect(gate).toContain('commits/$sha/check-runs?check_name=ci-gate&filter=all');
+    expect(gate).toContain(`bash ${sharedPath} "$GITHUB_REPOSITORY" "$sha"`);
+    expect(verify.steps[0].with['sparse-checkout'].split('\n')).toContain(sharedPath);
+    expect(sharedGate).toContain('actions/workflows/public-ci.yml/runs?head_sha=$sha');
+    expect(sharedGate).toContain('commits/$sha/check-runs?check_name=ci-gate&filter=all');
     expect(build.needs).toBe('verify');
     expect(build.steps[0].with.ref).toBe('${{ needs.verify.outputs.sha }}');
   });
@@ -74,7 +78,8 @@ describe('release workflow contract', () => {
   });
 
   test('avoids deployment, environment bindings and repository secrets', () => {
-    expect(body).not.toMatch(/\b(?:deploy(?:ment)?|npm\s+publish|gh-pages|pages\s+deploy|vercel|cloudflare|wrangler|secrets)\b|^\s*environment:/im);
+    expect(body.replaceAll(sharedPath, 'require-ci-gate.sh'))
+      .not.toMatch(/\b(?:deploy(?:ment)?|npm\s+publish|gh-pages|pages\s+deploy|vercel|cloudflare|wrangler|secrets)\b|^\s*environment:/im);
     const tokenBindings = [verify, build].flatMap(job => job.steps.map(step => step.env?.GH_TOKEN).filter(Boolean));
     expect(tokenBindings).toEqual(['${{ github.token }}', '${{ github.token }}']);
   });
@@ -146,17 +151,34 @@ describe('release admission behavior', () => {
     ['push to a different branch', [{ ...mergeGroup, event: 'push', head_branch: 'dev' }], [success], false],
     ['wrong GitHub App', [mergeGroup], [{ ...success, app: { slug: 'fixture' } }], false],
     ['newer PR failure alongside trusted success', [pullRequest, mergeGroup], [newerFailure, success], true],
-  ])('evaluates %s with the workflow jq filters', (_label, runs, checks, accepted) => {
-    const suiteFilter = gate.match(/\| jq -c '([\s\S]*?)'/)?.[1];
-    const checkFilter = gate.match(/if ! jq -e [^'\n]*'([\s\S]*?)'/)?.[1];
-    expect(suiteFilter).toBeDefined();
-    expect(checkFilter).toBeDefined();
-
-    const suites = jq(['-c', suiteFilter], JSON.stringify([{ workflow_runs: runs }]));
-    expect(suites).toMatchObject({ status: 0, stderr: '' });
-    const result = jq(['-e', '--arg', 'sha', sha, '--argjson', 'suites', suites.stdout.trim(), checkFilter],
-      JSON.stringify([{ check_runs: checks }]));
-    expect(result).toMatchObject({ status: accepted ? 0 : 1, stderr: '' });
-    expect(JSON.parse(result.stdout)).toBe(accepted);
+  ])('evaluates %s through the shared CI gate', (_label, runs, checks, accepted) => {
+    const bash = process.platform === 'win32' ? path.join(process.env.ProgramFiles, 'Git', 'bin', 'bash.exe') : 'bash';
+    const fixture = `
+      fake_gh() {
+        case "\${*: -1}" in
+          "repos/example/platform/actions/workflows/public-ci.yml/runs?head_sha=$FIXTURE_SHA&per_page=100")
+            printf '%s' "$FIXTURE_RUNS" ;;
+          "repos/example/platform/commits/$FIXTURE_SHA/check-runs?check_name=ci-gate&filter=all&per_page=100")
+            printf '%s' "$FIXTURE_CHECKS" ;;
+          *) return 2 ;;
+        esac
+      }
+      source "$1" example/platform "$FIXTURE_SHA" fake_gh
+    `;
+    const result = spawnSync(bash, ['-c', fixture, 'ci-gate-fixture', sharedPath], {
+      cwd: path.resolve(__dirname, '../../..'),
+      env: {
+        ...process.env,
+        FIXTURE_SHA: sha,
+        FIXTURE_RUNS: JSON.stringify([{ workflow_runs: runs }]),
+        FIXTURE_CHECKS: JSON.stringify([{ check_runs: checks }]),
+      },
+      encoding: 'utf8', timeout: 10000, windowsHide: true,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(accepted ? 0 : 1);
+    expect(result.stdout).toBe('');
+    if (accepted) expect(result.stderr).toBe('');
+    else expect(result.stderr).toContain('Release requires a successful ci-gate');
   });
 });

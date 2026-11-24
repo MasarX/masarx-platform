@@ -61,6 +61,20 @@ test('runs the configuration readout only on manual dispatch in dev with read ac
   expect(rendererClaims.run).toContain('renderer_unreadable "psql-exit-$psql_status"');
 });
 
+test('limits the dedicated DEV diagnostics credential to schema and Edge log reads', () => {
+  const steps = workflow.jobs['api-schemas'].steps;
+  const diagnosticSecret = '${{ secrets.SUPABASE_DIAGNOSTICS_ACCESS_TOKEN }}';
+  const diagnostics = ['Read configured API schemas', 'Read outbound wake HTTP diagnostics'];
+  for (const name of diagnostics) {
+    const step = steps.find(candidate => candidate.name === name);
+    expect(step.env.SUPABASE_ACCESS_TOKEN).toBe(diagnosticSecret);
+    expect(step.run).toContain('[[ -z "$SUPABASE_ACCESS_TOKEN" ]]');
+    expect(step.run).toMatch(/unreadable no-token\b/);
+  }
+  expect(rendererClaims.env.SUPABASE_ACCESS_TOKEN).toBe('${{ secrets.SUPABASE_ACCESS_TOKEN }}');
+  expect(workflowSource.match(/\bSUPABASE_DIAGNOSTICS_ACCESS_TOKEN\b/g)).toHaveLength(2);
+});
+
 test('runs the outbound wake readout as one fixed read-only query', () => {
   const [, sql] = rendererClaims.run.match(/wake_metrics="\$\(renderer_psql <<'SQL'\n([\s\S]+?)\nSQL\n\)" \|\| renderer_query_failed "\$\?" outbound_wake\n/);
   const statements = sql.replace(/--[^\n]*|'(?:''|[^'])*'/g, '').split(';').slice(0, -1);
