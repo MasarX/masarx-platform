@@ -461,6 +461,7 @@ import {
   type MobileV2IntentResult,
 } from "./mobile-v2-intents";
 import { composeMobileV2AddressText } from "./mobile-v2-intent-helpers";
+import { getStrings, resolveLocaleCode } from "./i18n";
 
 // PREVIEW/DEV FIXTURES — single import line is the production cutover
 // gate. Delete `./fixtures/` (and this import) to force the preview to
@@ -633,6 +634,7 @@ interface PreviewBodyProps {
 
 function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
   const ctx = useMobileV2Theme();
+  const strings = getStrings(resolveLocaleCode(ctx.locale));
   const mobileRpc = useMobileV2Rpc();
   // `?v2=preview` showcase runs with a null supabase client; the native
   // shell runs with a live one. Used to keep optimistic showcase paths
@@ -960,6 +962,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
           group: routeGroupKey,
         },
         routeSearch,
+        strings,
       ),
     [
       routeRows,
@@ -970,6 +973,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
       routeSortKey,
       routeGroupKey,
       routeSearch,
+      strings,
     ],
   );
   // F13 — operator-note sheet for the hold-queue destroy decision.
@@ -998,7 +1002,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
       tasksViewMode === "board" && tasksGroupKey === "none"
         ? "urgency"
         : tasksGroupKey;
-    const groups = applyMobileV2TaskGroups(sorted, groupKey).map((g) =>
+    const groups = applyMobileV2TaskGroups(sorted, groupKey, strings).map((g) =>
       Object.freeze({
         key: g.key,
         label: g.label,
@@ -1007,7 +1011,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
       }),
     );
     return Object.freeze({ rows: sorted, groups: Object.freeze(groups) });
-  }, [tasksRpcState, tasksQuery, tasksFilters, tasksSortKey, tasksGroupKey, tasksViewMode]);
+  }, [tasksRpcState, tasksQuery, tasksFilters, tasksSortKey, tasksGroupKey, tasksViewMode, strings]);
   // Dynamic Area filter options resolved from the live task set.
   const tasksAreaOptions = React.useMemo(
     () =>
@@ -4649,6 +4653,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
               >
               <MobileV2EorScreen
                 theme={ctx.theme}
+                locale={ctx.locale}
                 summary={liveEor.summary}
                 checklist={liveEor.checklist}
                 checked={eorChecked}
@@ -5551,6 +5556,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
             return (
               <MobileV2TripDetailScreen
                 theme={ctx.theme}
+                locale={ctx.locale}
                 trip={tr}
                 isAdvancingStage={tripStageReadbackPending}
                 onAdvanceStage={(next) => {
@@ -5638,6 +5644,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
           >
             <MobileV2TripsScreen
               theme={ctx.theme}
+              locale={ctx.locale}
               trips={liveTrips}
               tab={tripsTab}
               onTabChange={setTripsTab}
@@ -5663,6 +5670,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
             return (
               <MobileV2PickupDetailScreen
                 theme={ctx.theme}
+                locale={ctx.locale}
                 pickup={p}
                 onGo={() =>
                   // B1 fix: real maps navigation intent to the pickup
@@ -5796,6 +5804,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
         ) : activeTabId === "mobile-loader-scan" || activeTabId === "mobile-scan" ? (
           <MobileV2LoaderScanScreen
             theme={ctx.theme}
+            locale={ctx.locale}
             policy={loaderPolicy}
             mode={loaderMode}
             onChangeMode={setLoaderMode}
@@ -6103,6 +6112,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
         ) : activeTabId === "mobile-pod" ? (
           <MobileV2PodScreen
             theme={ctx.theme}
+            locale={ctx.locale}
             policy={activePodPolicy}
             hasCod={(liveStop.cod?.amount ?? 0) > 0}
             customerName={liveStop.customerName}
@@ -6199,6 +6209,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
           >
           <MobileV2StopScreen
             theme={ctx.theme}
+            locale={ctx.locale}
             stop={liveStop}
             locationReadback={activeStopLocationReadback}
             terminalState={activeStopTerminalState}
@@ -6390,8 +6401,8 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
               totalStops={routeTotalStops}
               searchValue={routeSearch}
               density={routeDensity}
-              sortLabel={getMobileV2RouteSortLabel(routeSortKey)}
-              groupLabel={getMobileV2RouteGroupLabel(routeGroupKey)}
+              sortLabel={getMobileV2RouteSortLabel(routeSortKey, strings)}
+              groupLabel={getMobileV2RouteGroupLabel(routeGroupKey, strings)}
               filterCount={routeFilterCount}
               dirty={false}
               manifestSummary={routeManifestSummary}
@@ -6519,6 +6530,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
         ) : activeTabId === "mobile-tasks" ? (
           <MobileV2TasksScreen
             theme={ctx.theme}
+            locale={ctx.locale}
             state={tasksRpcState}
             query={tasksQuery}
             onQueryChange={setTasksQuery}
@@ -6531,11 +6543,11 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
             precomputedGroups={tasksViewResult.groups}
             precomputedTasks={tasksViewResult.rows}
             filterLabel={
-              tasksFilterCount > 0 ? `Filters · ${tasksFilterCount}` : "Filters"
+              tasksFilterCount > 0 ? `${strings.tasksScreen.filters} · ${tasksFilterCount}` : strings.tasksScreen.filters
             }
             filterActive={tasksFilterCount > 0}
-            groupLabel={`Group: ${getMobileV2TaskGroupLabel(tasksGroupKey)}`}
-            sortLabel={getMobileV2TaskSortLabel(tasksSortKey)}
+            groupLabel={`${strings.taskControls.group}: ${getMobileV2TaskGroupLabel(tasksGroupKey, strings)}`}
+            sortLabel={getMobileV2TaskSortLabel(tasksSortKey, strings)}
             onTaskPress={(task) => {
               if (task.type === "pickup" || task.action === "pickup" || task.task_id.startsWith("pickup:")) {
                 const routeStopId = task.task_id.startsWith("pickup:")
@@ -6827,6 +6839,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
 
       <MobileV2DamageHoldSheet
         theme={ctx.theme}
+        locale={ctx.locale}
         visible={damageHoldSheetOpen}
         onClose={() => {
           setDamageHoldSheetOpen(false);

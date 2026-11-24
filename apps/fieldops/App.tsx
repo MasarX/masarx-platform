@@ -239,7 +239,7 @@ import {
 } from "./src/mobile-theme";
 import { ThemeProvider, useTheme, type ThemeContextValue } from "./src/mobile-theme-context";
 import { FieldOpsDrawerCloseButton } from "./src/mobile-drawer-close-button";
-import { getFieldOpsStrings, type FieldOpsStrings } from "./src/i18n";
+import { EN_STRINGS, getFieldOpsStrings, type FieldOpsStrings } from "./src/i18n";
 import { mobileActionAccessibility, mobileSyncAccessibility } from "./src/mobile-action-accessibility";
 import { buildSignaturePdf } from "./src/mobile-signature-pdf";
 import { resolveComposerEvidence, composerRetryArgs, buildComposerEvidenceMap, normalizeSelfKycFields, validateSelfKycFields } from "./src/mobile-composer-evidence";
@@ -922,7 +922,8 @@ function coerceCommandInputSchema(value: unknown): UiCommandInputSchema | null {
 
 function resolveCommandInputFields(
   command: UiCommandDefinition,
-  stopSnapshot?: ReturnType<typeof extractOperationalStopSnapshot> | null
+  stopSnapshot?: ReturnType<typeof extractOperationalStopSnapshot> | null,
+  strings: FieldOpsStrings = EN_STRINGS
 ): CommandInputFieldRuntime[] {
   const schema = coerceCommandInputSchema(command.execution?.input_schema);
   const rawFields = Array.isArray(schema?.fields) ? schema.fields : [];
@@ -965,24 +966,24 @@ function resolveCommandInputFields(
 
     if (!isPickupStop && command.key === "tasks.complete") {
       if (key === "payment_outcome") {
-        resolvedLabel = "Payment outcome";
-        resolvedPlaceholder = resolvedPlaceholder ?? "Collected, shortfall, refused, or discrepancy.";
+        resolvedLabel = strings.composer.paymentOutcome;
+        resolvedPlaceholder = resolvedPlaceholder ?? strings.composer.paymentOutcomePlaceholder;
       } else if (key === "payment_method") {
-        resolvedLabel = "Payment method";
-        resolvedPlaceholder = resolvedPlaceholder ?? (allowedMethodsLabel ? `Accepted methods: ${allowedMethodsLabel}` : "Cash, card, or approved method.");
+        resolvedLabel = strings.composer.paymentMethod;
+        resolvedPlaceholder = resolvedPlaceholder ?? (allowedMethodsLabel ? strings.composer.acceptedMethods.replace("{methods}", () => String(allowedMethodsLabel)) : strings.composer.paymentMethodPlaceholder);
       } else if (key === "payment_amount") {
-        resolvedLabel = "Collected amount";
+        resolvedLabel = strings.composer.collectedAmount;
         resolvedType = "number";
         resolvedPlaceholder =
           resolvedPlaceholder ??
           (stopSnapshot?.expectedAmount != null
-            ? `Expected ${stopSnapshot.currency ?? "SAR"} ${stopSnapshot.expectedAmount}`
-            : "Enter the collected COD amount.");
+            ? strings.composer.expectedAmountPlaceholder.replace("{currency}", () => String(stopSnapshot?.currency ?? "SAR")).replace("{amount}", () => String(stopSnapshot?.expectedAmount))
+            : strings.composer.collectedAmountPlaceholder);
       } else if (key === "payment_receipt_context") {
-        resolvedLabel = "Receipt context";
+        resolvedLabel = strings.composer.receiptContext;
         resolvedType = "textarea";
         resolvedPlaceholder =
-          resolvedPlaceholder ?? "Receipt number, card slip, or customer acknowledgement details.";
+          resolvedPlaceholder ?? strings.composer.receiptContextPlaceholder;
       }
     }
 
@@ -990,13 +991,13 @@ function resolveCommandInputFields(
       key,
       label:
         isPickupStop && command.key === "tasks.complete" && key === "recipient_name"
-          ? "Handover contact name"
+          ? strings.composer.handoverContactName
           : isPickupStop && command.key === "tasks.complete" && key === "completion_notes"
-            ? "Handover notes"
+            ? strings.composer.handoverNotes
             : isPickupStop && command.key === "tasks.exception" && key === "exception_reason"
-            ? "Pickup failure reason"
+            ? strings.composer.pickupFailureReason
               : isPickupStop && command.key === "tasks.exception" && key === "exception_notes"
-                ? "Pickup failure notes"
+                ? strings.composer.pickupFailureNotes
                 : resolvedLabel,
       type:
         isPickupStop && command.key === "tasks.complete" && key === "recipient_name"
@@ -1022,37 +1023,37 @@ function resolveCommandInputFields(
     return [
       {
         key: "confirmed_quantity",
-        label: "Confirmed quantity",
+        label: strings.composer.confirmedQuantity,
         type: "number",
         required: true,
-        placeholder: "Enter the confirmed pickup quantity",
+        placeholder: strings.composer.confirmedQuantityPlaceholder,
         lookupCategory: null,
         defaultValue: pickupDefaults.confirmed_quantity,
       },
       {
         key: "handover_contact_name",
-        label: "Handover contact name",
+        label: strings.composer.handoverContactName,
         type: "text",
         required: true,
-        placeholder: "Who received the pickup?",
+        placeholder: strings.composer.handoverContactPlaceholder,
         lookupCategory: null,
         defaultValue: pickupDefaults.handover_contact_name,
       },
       {
         key: "handover_notes",
-        label: "Handover notes",
+        label: strings.composer.handoverNotes,
         type: "textarea",
         required: false,
-        placeholder: "Add handover notes, condition notes, or receipt details.",
+        placeholder: strings.composer.handoverNotesPlaceholder,
         lookupCategory: null,
         defaultValue: pickupDefaults.handover_notes,
       },
       {
         key: "receipt_context",
-        label: "Receipt context",
+        label: strings.composer.receiptContext,
         type: "textarea",
         required: false,
-        placeholder: "Receipt number, counter, or handover context.",
+        placeholder: strings.composer.pickupReceiptPlaceholder,
         lookupCategory: null,
         defaultValue: pickupDefaults.receipt_context,
       },
@@ -1064,16 +1065,16 @@ function resolveCommandInputFields(
       if (field.key === "exception_reason") {
         return {
           ...field,
-          label: "Pickup failure reason",
+          label: strings.composer.pickupFailureReason,
           required: true,
-          placeholder: field.placeholder ?? "Choose the pickup failure reason.",
+          placeholder: field.placeholder ?? strings.composer.pickupFailureReasonPlaceholder,
         };
       }
       if (field.key === "exception_notes") {
         return {
           ...field,
-          label: "Pickup failure notes",
-          placeholder: field.placeholder ?? "Describe the failed pickup and recovery context.",
+          label: strings.composer.pickupFailureNotes,
+          placeholder: field.placeholder ?? strings.composer.pickupFailureNotesPlaceholder,
         };
       }
       return field;
@@ -1089,58 +1090,59 @@ function isPickupStopSnapshot(stopSnapshot: ReturnType<typeof extractOperational
 
 function resolveComposerCommandCopy(
   command: UiCommandDefinition,
-  stopSnapshot: ReturnType<typeof extractOperationalStopSnapshot> | null
+  stopSnapshot: ReturnType<typeof extractOperationalStopSnapshot> | null,
+  strings: FieldOpsStrings = EN_STRINGS
 ) {
   if (command.key === "tasks.close_route") {
     return {
-      label: "Route closeout",
-      title: "Route closeout",
+      label: strings.composer.routeCloseout,
+      title: strings.composer.routeCloseout,
       description:
-        "Confirm the route-end checklist, leftover stop count, and closeout notes before queueing route closeout.",
+        strings.composer.routeCloseoutDescription,
     };
   }
 
   if (!isPickupStopSnapshot(stopSnapshot)) {
     if (command.key === "tasks.complete") {
       return {
-        label: "Delivery completion",
-        title: "Delivery completion",
+        label: strings.composer.deliveryCompletion,
+        title: strings.composer.deliveryCompletion,
         description:
           (stopSnapshot?.codAmount ?? 0) > 0
-            ? "Capture the handover details, COD collection details, and any partial-delivery box numbers before queueing completion."
-            : "Capture the handover details and, when only some pieces were handed over, record the delivered box numbers before queueing completion.",
+            ? strings.composer.deliveryCompletionCodDescription
+            : strings.composer.deliveryCompletionDescription,
       };
     }
 
     return {
       label: command.label,
-      title: command.label ?? "Action input",
-      description: "Provide required details before queueing this action.",
+      title: command.label ?? strings.composer.actionInput,
+      description: strings.composer.actionInputDescription,
     };
   }
 
   if (command.key === "tasks.complete") {
     return {
-      label: "Pickup handoff",
-      title: "Pickup handoff",
+      label: strings.composer.pickupHandoff,
+      title: strings.composer.pickupHandoff,
       description:
-        "Confirm the pickup quantity and handover receipt details before queueing the completion.",
+        strings.composer.pickupHandoffDescription,
     };
   }
 
   if (command.key === "tasks.exception") {
     return {
-      label: "Pickup failure",
-      title: "Pickup failure",
+      label: strings.composer.pickupFailure,
+      title: strings.composer.pickupFailure,
       description:
-        "Capture the failure reason, notes, and evidence before queueing the exception.",
+        strings.composer.pickupFailureDescription,
     };
   }
 
   return {
     label: command.label,
-    title: command.label ?? "Action input",
-    description: "Provide required details before queueing this action.",
+    title: command.label ?? strings.composer.actionInput,
+    description: strings.composer.actionInputDescription,
   };
 }
 
@@ -3742,15 +3744,15 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     null
   );
   const composerFields = React.useMemo(
-    () => (composerCommand ? resolveCommandInputFields(composerCommand, selectedStopSnapshot) : []),
-    [composerCommand, selectedStopSnapshot]
+    () => (composerCommand ? resolveCommandInputFields(composerCommand, selectedStopSnapshot, strings) : []),
+    [composerCommand, selectedStopSnapshot, strings]
   );
   const composerCopy = React.useMemo(
     () =>
       composerIsFinancial ? { label: composerCommand?.label ?? "", title: composerCommand?.execution?.input_schema?.title ?? "",
         description: composerCommand?.execution?.input_schema?.description ?? "" }
-        : composerCommand ? resolveComposerCommandCopy(composerCommand, selectedStopSnapshot) : null,
-    [composerCommand, selectedStopSnapshot, composerIsFinancial]
+        : composerCommand ? resolveComposerCommandCopy(composerCommand, selectedStopSnapshot, strings) : null,
+    [composerCommand, selectedStopSnapshot, composerIsFinancial, strings]
   );
   const composerLookupCategories = React.useMemo(
     () =>
@@ -4291,14 +4293,14 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     const captureEpoch = composerCaptureEpoch.current;
     if (!composerCameraPermission?.granted) {
       if (composerCameraPermission?.canAskAgain === false) {
-        Alert.alert("Camera permission required", "Open settings to allow proof capture.");
+        Alert.alert(strings.composer.cameraPermissionTitle, strings.composer.cameraPermissionSettings);
         void openSystemSettingsSafe();
         return;
       }
       const granted = await requestComposerCameraPermission();
       if (captureEpoch !== composerCaptureEpoch.current) return;
       if (!granted.granted) {
-        setComposerError("Camera permission is required to capture proof.");
+        setComposerError(strings.composer.cameraPermissionNeeded);
         return;
       }
     }
@@ -4307,7 +4309,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       takePictureAsync?: (options?: Record<string, unknown>) => Promise<Record<string, unknown>>;
     } | null;
     if (!camera?.takePictureAsync) {
-      setComposerError("Camera is not ready yet.");
+      setComposerError(strings.composer.cameraNotReady);
       return;
     }
 
@@ -4346,6 +4348,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     composerCameraPermission,
     composerIsSelfKyc,
     selectedLocaleMode,
+    strings,
     composerSupportsEvidence,
     isCapturingComposerArtifact,
     registerComposerArtifact,
@@ -4356,7 +4359,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     if (!composerSupportsPod || isCapturingComposerSignature) return;
     const captureEpoch = composerCaptureEpoch.current;
     if (!composerSignaturePresent) {
-      setComposerError("Add a signature before capturing it.");
+      setComposerError(strings.composer.signatureMissing);
       return;
     }
     try {
@@ -4389,6 +4392,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   }, [
     clearComposerSignature,
     selectedLocaleMode,
+    strings,
     composerSignatureLayout,
     composerSignaturePresent,
     composerSignatureStrokes,
@@ -4609,7 +4613,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         setComposerFinancialAdmission(admission);
         setComposerFinancialSession(context.sessions.length === 1 ? context.sessions[0].id : "");
       }
-      const inputFields = resolveCommandInputFields(command, selectedStopSnapshot);
+      const inputFields = resolveCommandInputFields(command, selectedStopSnapshot, strings);
       if (inputFields.length > 0) {
         const initial: Record<string, string> = {};
         for (const field of inputFields) {
@@ -4628,10 +4632,10 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       const confirm = command.execution?.confirm ?? null;
       if (confirm) {
         const confirmed = await confirmMobileAction({
-          title: confirm.title ?? "Confirm",
+          title: confirm.title ?? strings.composer.confirm,
           message: confirm.description ?? "",
-          confirmLabel: confirm.confirm_label ?? "Confirm",
-          cancelLabel: confirm.cancel_label ?? "Cancel",
+          confirmLabel: confirm.confirm_label ?? strings.composer.confirm,
+          cancelLabel: confirm.cancel_label ?? strings.confirm.cancelButton,
           danger: confirm.tone === "danger",
         });
         if (!confirmed) return;
@@ -4661,7 +4665,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     if (composerIsFinancial) {
       for (const key of COMPOSER_READINESS_STAGES) if (key !== "fields") optional.add(key);
       stage = 1;
-      fields = resolveCommandInputFields(composerCommand, selectedStopSnapshot);
+      fields = resolveCommandInputFields(composerCommand, selectedStopSnapshot, strings);
       if (!composerFinancialContext || composerFinancialContext.task_id !== selectedResourceId ||
           composerFinancialAdmission !== financialAdmission.current) return finish(strings.financialTasks.unavailable);
       try { financialTaskPayload(composerValues.amount ?? "", composerFinancialSession, composerFinancialContext, {
@@ -4685,7 +4689,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     }
     if (!composerSupportsEvidence) optional.add("evidence");
     stage = 1;
-    fields = resolveCommandInputFields(composerCommand, selectedStopSnapshot);
+    fields = resolveCommandInputFields(composerCommand, selectedStopSnapshot, strings);
     if (!fields.length) {
       return finish(null, true);
     }
@@ -4693,10 +4697,10 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     for (const field of fields) {
       const value = String(composerValues[field.key] ?? "").trim();
       if (field.required && !value) {
-        return finish(composerIsSelfKyc ? `${strings.selfKyc[field.key as keyof typeof strings.selfKyc] ?? field.label}: ${strings.selfKyc.required}` : `${field.label} is required.`);
+        return finish(composerIsSelfKyc ? `${strings.selfKyc[field.key as keyof typeof strings.selfKyc] ?? field.label}: ${strings.selfKyc.required}` : strings.composer.fieldRequired.replace("{field}", () => String(field.label)));
       }
       if (field.type === "number" && value && !Number.isFinite(Number(value))) {
-        return finish(`${field.label} must be a valid number.`);
+        return finish(strings.composer.fieldNumber.replace("{field}", () => String(field.label)));
       }
     }
 
@@ -4708,7 +4712,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       String(composerValues.exception_reason || "").trim().toLowerCase() === "other" &&
       !String(composerValues.exception_notes || "").trim()
     ) {
-      return finish("Notes are required when exception reason is Other.");
+      return finish(strings.composer.notesRequiredOther);
     }
 
     if (!(composerCommand.key === "tasks.exception" &&
@@ -4721,18 +4725,18 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     if (!composerSupportsPod) optional.add("policy");
     stage = 4;
     if (composerSignatureRequired && !composerSignatureArtifact) {
-      return finish("Capture and save the recipient signature before queueing.");
+      return finish(strings.composer.signatureRequiredToQueue);
     }
 
     if (!composerSignatureRequired) optional.add("signature");
     stage = 5;
     if (composerPhotoRequired && composerArtifacts.length === 0) {
-      return finish("At least one proof photo is required.");
+      return finish(strings.composer.photoRequired);
     }
 
     if (composerArtifacts.length < composerMinArtifactCount) {
       return finish(
-        `At least ${composerMinArtifactCount} proof item${composerMinArtifactCount === 1 ? "" : "s"} are required.`
+        (composerMinArtifactCount === 1 ? strings.composer.minProofItemsOne : strings.composer.minProofItemsOther).replace("{count}", () => String(composerMinArtifactCount))
       );
     }
 
@@ -4745,20 +4749,20 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       const identityLast4 = sanitizeIdentityLast4(composerValues.recipient_identity_last4);
 
       if (composerOtpRequired && !otpCode) {
-        return finish("Recipient OTP is required before queueing this delivery.");
+        return finish(strings.composer.otpRequired);
       }
       if (otpCode && otpCode.length < 4) {
-        return finish("Recipient OTP must contain at least 4 digits.");
+        return finish(strings.composer.otpTooShort);
       }
 
       if (composerIdentityRequired && (!identityKind || !identityLast4)) {
-        return finish("Identity type and identity last 4 are required before queueing this delivery.");
+        return finish(strings.composer.identityRequired);
       }
       if ((identityKind && !identityLast4) || (!identityKind && identityLast4)) {
-        return finish("Provide both identity type and identity last 4 for recipient confirmation.");
+        return finish(strings.composer.identityIncomplete);
       }
       if (identityLast4 && identityLast4.length < 4) {
-        return finish("Identity last 4 must contain at least 4 letters or digits.");
+        return finish(strings.composer.identityTooShort);
       }
       if (!composerOtpRequired && !composerIdentityRequired && !otpCode && !identityKind && !identityLast4) optional.add("recipient");
     } else {
@@ -4780,10 +4784,10 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         reasonKey.includes("access") ||
         reasonKey.includes("restrict");
       if (reasonNeedsPhoto && composerArtifacts.length === 0) {
-        return finish("This exception reason requires photo evidence.");
+        return finish(strings.composer.exceptionPhotoRequired);
       }
       if (reasonNeedsNotes && !hasNotes) {
-        return finish("Add notes for this exception reason before queueing.");
+        return finish(strings.composer.exceptionNotesRequired);
       }
       if (!reasonNeedsPhoto && !reasonNeedsNotes) optional.add("exception");
     } else {
@@ -4804,7 +4808,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       } catch (error) {
         return finish(redactDisplayErrorText(
           error instanceof Error && String(error.message || "").trim() ? error.message : undefined,
-          "Partial delivery box numbers are invalid.",
+          strings.composer.partialBoxesInvalid,
         ));
       }
     } else {
@@ -4900,10 +4904,10 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     const confirm = composerCommand.execution?.confirm ?? null;
     if (confirm) {
       const confirmed = await confirmMobileAction({
-        title: confirm.title ?? "Confirm",
+        title: confirm.title ?? strings.composer.confirm,
         message: confirm.description ?? "",
-        confirmLabel: confirm.confirm_label ?? "Confirm",
-        cancelLabel: confirm.cancel_label ?? "Cancel",
+        confirmLabel: confirm.confirm_label ?? strings.composer.confirm,
+        cancelLabel: confirm.cancel_label ?? strings.confirm.cancelButton,
         danger: confirm.tone === "danger",
       });
       if (!confirmed) return;
@@ -5095,14 +5099,11 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         try {
           await runCommand(command);
         } catch {
-          Alert.alert(
-            "Unable to queue action",
-            "The selected action could not be queued right now. Retry when online."
-          );
+          Alert.alert(strings.composer.queueFailedTitle, strings.composer.queueFailedMessage);
         }
       });
     },
-    [isActionLocked, runCommand, resolveActionLockKey, withActionLock]
+    [isActionLocked, runCommand, resolveActionLockKey, withActionLock, strings]
   );
 
   const enqueueUiEvents = React.useCallback(
@@ -5719,9 +5720,9 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     >
       <View style={styles.navModalHeader}>
         <View style={styles.screenHeaderText}>
-          <Text style={styles.navModalTitle}>{composerIsSelfKyc ? (strings.selfKyc[String(composerCommand?.execution?.params?.category) as keyof typeof strings.selfKyc] ?? strings.selfKyc.title) : composerCopy?.title ?? composerCommand?.label ?? "Action input"}</Text>
+          <Text style={styles.navModalTitle}>{composerIsSelfKyc ? (strings.selfKyc[String(composerCommand?.execution?.params?.category) as keyof typeof strings.selfKyc] ?? strings.selfKyc.title) : composerCopy?.title ?? composerCommand?.label ?? strings.composer.actionInput}</Text>
           <Text style={styles.noticeSubtext}>
-            {composerCopy?.description ?? "Provide required details before queueing this action."}
+            {composerCopy?.description ?? strings.composer.actionInputDescription}
           </Text>
         </View>
         <Pressable
@@ -5735,7 +5736,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
             pressed && styles.navClosePressed,
           ]}
         >
-          <Text style={styles.navCloseText}>Close</Text>
+          <Text style={styles.navCloseText}>{strings.composer.close}</Text>
         </Pressable>
       </View>
       <ScrollView
@@ -5744,7 +5745,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       >
         {composerLookupQuery.isError ? (
           <View style={styles.noticeCard}>
-            <Text style={styles.error}>Unable to load lookup values.</Text>
+            <Text style={styles.error}>{strings.composer.lookupFailed}</Text>
             <Text style={styles.mono}>{formatUnknownError(composerLookupQuery.error)}</Text>
           </View>
         ) : null}
@@ -5801,7 +5802,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                   {loadingLookup ? (
                     <View style={styles.loadingRow}>
                       <ActivityIndicator size="small" />
-                      <Text style={styles.noticeSubtext}>Loading options...</Text>
+                      <Text style={styles.noticeSubtext}>{strings.composer.loadingOptions}</Text>
                     </View>
                   ) : options.length ? (
                     <View style={styles.screenActionsRow}>
@@ -5824,12 +5825,11 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                       ))}
                     </View>
                   ) : (
-                    <Text style={styles.noticeSubtext}>No options are available.</Text>
+                    <Text style={styles.noticeSubtext}>{strings.composer.noOptions}</Text>
                   )}
                   {value ? (
                     <Text style={styles.noticeSubtext}>
-                      Selected:{" "}
-                      {options.find((entry) => entry.value === value)?.label ?? value}
+                      {strings.composer.selected.replace("{value}", () => String(options.find((entry) => entry.value === value)?.label ?? value))}
                     </Text>
                   ) : null}
                 </>
@@ -5897,10 +5897,10 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
 
         {composerSupportsPod || composerFinancialEvidence || composerIsIncident ? (
           <View style={styles.noticeCard}>
-            <Text style={styles.noticeText}>{composerFinancialEvidence ? strings.financialTasks.optionalPhoto : "Proof and evidence"}</Text>
+            <Text style={styles.noticeText}>{composerFinancialEvidence ? strings.financialTasks.optionalPhoto : strings.composer.proofTitle}</Text>
             {composerSupportsPod ? <>
             {composerPodPolicyState.pending ? (
-              <Text style={styles.noticeSubtext}>Loading proof policy...</Text>
+              <Text style={styles.noticeSubtext}>{strings.composer.loadingProofPolicy}</Text>
             ) : composerPodPolicyState.unavailable ? (
               <Text style={styles.noticeSubtext}>
                 {POD_POLICY_UNAVAILABLE_MESSAGE}
@@ -5908,29 +5908,27 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
             ) : (
               <>
                 <Text style={styles.noticeSubtext}>
-                  Required photos: {composerPhotoRequired ? "yes" : "no"} - Minimum items:{" "}
-                  {composerMinArtifactCount}
+                  {strings.composer.proofRequirements.replace("{required}", () => String(composerPhotoRequired ? strings.composer.yes : strings.composer.no)).replace("{count}", () => String(composerMinArtifactCount))}
                 </Text>
                 <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-                  Captured: {composerArtifacts.length} / {composerArtifactMaxItems}
+                  {strings.composer.capturedCount.replace("{count}", () => String(composerArtifacts.length)).replace("{max}", () => String(composerArtifactMaxItems))}
                 </Text>
                 {composerSignatureRequired ? (
                   <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-                    Signature required: {composerSignatureArtifact ? "saved" : "capture and save"}
+                    {strings.composer.signatureStatus.replace("{status}", () => String(composerSignatureArtifact ? strings.composer.signatureSaved : strings.composer.signatureToCapture))}
                   </Text>
                 ) : null}
                 {composerOtpRequired ? (
                   <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-                    Recipient OTP: {sanitizeOtpCode(composerValues.otp_code) ? "entered" : "required"}
+                    {strings.composer.otpStatus.replace("{status}", () => String(sanitizeOtpCode(composerValues.otp_code) ? strings.composer.otpEntered : strings.composer.otpNeeded))}
                   </Text>
                 ) : null}
                 {composerIdentityRequired ? (
                   <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-                    Recipient identity:{" "}
-                    {coerceValueText(composerValues.recipient_identity_kind) &&
+                    {strings.composer.identityStatus.replace("{status}", () => String(coerceValueText(composerValues.recipient_identity_kind) &&
                     sanitizeIdentityLast4(composerValues.recipient_identity_last4)
-                      ? "captured"
-                      : "type and last 4 required"}
+                      ? strings.composer.identityCaptured
+                      : strings.composer.identityNeeded))}
                   </Text>
                 ) : null}
               </>
@@ -5977,13 +5975,13 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
               </Pressable>
             </View>
             {composerSupportsPod ? <View style={[styles.noticeCard, { marginTop: 10 }]}>
-              <Text style={styles.noticeText}>Recipient signature</Text>
+              <Text style={styles.noticeText}>{strings.composer.signatureTitle}</Text>
               <Text style={styles.noticeSubtext}>
                 {composerSignatureArtifact
-                  ? `Saved signature: ${composerSignatureArtifact.storageKey}`
+                  ? strings.composer.savedSignature.replace("{key}", () => String(composerSignatureArtifact.storageKey))
                   : composerSignatureRequired
-                    ? "Signature is required for this action."
-                    : "Signature is optional for this action."}
+                    ? strings.composer.signatureRequired
+                    : strings.composer.signatureOptional}
               </Text>
               <View
                 style={[styles.signatureCanvas, { marginTop: 10 }]}
@@ -5997,7 +5995,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                 {...composerSignatureResponder.panHandlers}
               >
                 {composerSignatureSegments.length ? null : (
-                  <Text style={styles.signaturePlaceholder}>Sign here</Text>
+                  <Text style={styles.signaturePlaceholder}>{strings.composer.signHere}</Text>
                 )}
                 {composerSignatureSegments.map((segment) => (
                   <View
@@ -6026,7 +6024,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                     pressed && styles.navItemPressed,
                   ]}
                 >
-                  <Text style={styles.secondaryButtonText}>Clear pad</Text>
+                  <Text style={styles.secondaryButtonText}>{strings.composer.clearPad}</Text>
                 </Pressable>
                 <Pressable
                   testID="mobile-action-composer-capture-signature"
@@ -6046,7 +6044,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                   ]}
                 >
                   <Text style={styles.primaryButtonText}>
-                    {isCapturingComposerSignature ? "Saving..." : "Save signature"}
+                    {isCapturingComposerSignature ? strings.composer.saving : strings.composer.saveSignature}
                   </Text>
                 </Pressable>
               </View>
@@ -6057,11 +6055,11 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                   <CameraView ref={composerCameraRef} style={styles.camera} />
                 ) : (
                   <View style={styles.noticeCard}>
-                    <Text style={styles.noticeText}>Camera permission required.</Text>
+                    <Text style={styles.noticeText}>{strings.scan.permissionRequired}</Text>
                     <Text style={styles.noticeSubtext}>
                       {composerCameraPermission?.canAskAgain === false
-                        ? "Camera permission was denied. Open settings to grant proof capture access."
-                        : "Grant camera access to capture proof photos."}
+                        ? strings.composer.cameraDenied
+                        : strings.composer.cameraGrantHint}
                     </Text>
                     <Pressable
                       accessibilityRole="button"
@@ -6076,7 +6074,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                       style={({ pressed }) => [styles.secondaryButton, pressed && styles.navItemPressed]}
                     >
                       <Text style={styles.secondaryButtonText}>
-                        {composerCameraPermission?.canAskAgain === false ? "Open settings" : "Grant permission"}
+                        {composerCameraPermission?.canAskAgain === false ? strings.scan.openSettings : strings.scan.grantPermission}
                       </Text>
                     </Pressable>
                   </View>
@@ -6085,7 +6083,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
             ) : null}
             {composerArtifacts.length ? (
               <View style={{ marginTop: 10 }}>
-                <Text style={styles.noticeSubtext}>Captured evidence</Text>
+                <Text style={styles.noticeSubtext}>{strings.composer.capturedEvidence}</Text>
                 {composerArtifacts.map((artifact, index) => (
                   <View
                     key={artifact.artifactId}
@@ -6096,7 +6094,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                   >
                     <View style={{ flex: 1, paddingRight: 12 }}>
                       <Text style={styles.detailKey}>
-                        {artifact.kind === "signature" ? "Signature" : `Photo ${index + 1}`}
+                        {artifact.kind === "signature" ? strings.pendingEvidence.signature : strings.composer.photoNumber.replace("{n}", () => String(index + 1))}
                       </Text>
                       <Text style={styles.noticeSubtext} numberOfLines={1}>
                         {artifact.storageKey}
@@ -6106,7 +6104,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                       onPress={() => removeComposerArtifact(artifact.artifactId)}
                       style={({ pressed }) => [styles.secondaryButton, pressed && styles.navItemPressed]}
                     >
-                      <Text style={styles.secondaryButtonText}>Remove</Text>
+                      <Text style={styles.secondaryButtonText}>{strings.selfKyc.remove}</Text>
                     </Pressable>
                   </View>
                 ))}
@@ -6150,7 +6148,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
               pressed && styles.navItemPressed,
             ]}
           >
-            <Text style={styles.secondaryButtonText}>Cancel</Text>
+            <Text style={styles.secondaryButtonText}>{strings.confirm.cancelButton}</Text>
           </Pressable>
           <Pressable
             testID="mobile-action-composer-queue"
@@ -6177,7 +6175,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
             ]}
           >
             <Text style={styles.primaryButtonText}>
-              {composerSubmitting ? strings.scan.queueing : "Queue action"}
+              {composerSubmitting ? strings.scan.queueing : strings.composer.queueAction}
             </Text>
           </Pressable>
         </View>
@@ -6368,9 +6366,9 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                   {availableActions.filter(command => command.selection?.mode === "none" || Boolean(selectedResourceId)).map((command) => {
                     const actionKey = resolveActionLockKey(command);
                     const actionLocked = isActionLocked(actionKey);
-                    const commandCopy = resolveComposerCommandCopy(command, selectedStopSnapshot);
+                    const commandCopy = resolveComposerCommandCopy(command, selectedStopSnapshot, strings);
                     const commandLabel = command.execution?.input_schema?.normalization === "self_kyc_v1" ? (strings.selfKyc[String(command.execution?.params?.category) as keyof typeof strings.selfKyc] ?? command.label) : commandCopy?.label ?? command.label;
-                    const needsInput = resolveCommandInputFields(command, selectedStopSnapshot).length > 0;
+                    const needsInput = resolveCommandInputFields(command, selectedStopSnapshot, strings).length > 0;
 
                     return (
                       <Pressable
@@ -6422,7 +6420,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
               </View>
               {routeExecutionManifestQuery.data ? (
                 <View style={styles.noticeCard}>
-                  <RouteManifestReadback manifest={routeExecutionManifestQuery.data} />
+                  <RouteManifestReadback manifest={routeExecutionManifestQuery.data} strings={strings} />
                 </View>
               ) : null}
             </>
@@ -6480,17 +6478,16 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
               </View>
 
               {detailQuery.isLoading ? (
-                <Text style={styles.subtitle}>Loading details...</Text>
+                <Text style={styles.subtitle}>{strings.routeStopDetail.loading}</Text>
               ) : detailQuery.isError ? (
                 <View>
-                  <Text style={styles.error}>Failed to load details.</Text>
+                  <Text style={styles.error}>{strings.routeStopDetail.loadFailed}</Text>
                   <Text style={styles.mono}>{formatUnknownError(detailQuery.error)}</Text>
                 </View>
               ) : detailQuery.data?.detail ? (
                 <ScrollView contentContainerStyle={styles.detailContent}>
                   <Text style={styles.listMetaText}>
-                    Source:{" "}
-                    {detailQuery.data.source === "cache" ? "cached" : "network"}
+                    {detailQuery.data.source === "cache" ? strings.routeStopDetail.sourceCache : strings.routeStopDetail.sourceNetwork}
                   </Text>
                   {(isRouteSurface || isTasksSurface) && selectedRouteRunId && detailResource && selectedResourceId ? (
                     <Pressable
@@ -6545,7 +6542,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                             selectedResourceTitle ??
                             selectedStopSnapshot?.reference ??
                             selectedStopSnapshot?.customerName ??
-                            "Route load scan",
+                            strings.routeStopDetail.routeLoadScan,
                           resourceId: selectedRouteRunId,
                           taskId: null,
                           routeRunId: selectedRouteRunId,
@@ -6618,16 +6615,16 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                   ))}
                   {lastActionReceipt && lastActionReceipt.resourceId === selectedResourceId ? (
                     <View style={[styles.noticeCard, { marginTop: 12 }]}>
-                      <Text style={styles.noticeText}>Last action receipt</Text>
+                      <Text style={styles.noticeText}>{strings.routeStopDetail.lastReceipt}</Text>
                       <Text style={styles.noticeSubtext}>{formatMobileActionReceipt(lastActionReceipt, strings)}</Text>
                       <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-                        Recorded: {lastActionReceipt.recordedAt}
+                        {strings.routeStopDetail.recorded.replace("{time}", () => String(lastActionReceipt.recordedAt))}
                       </Text>
                     </View>
                   ) : null}
                 </ScrollView>
               ) : (
-                <Text style={styles.subtitle}>No details are available.</Text>
+                <Text style={styles.subtitle}>{strings.routeStopDetail.noDetails}</Text>
               )}
 
 
@@ -6775,7 +6772,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                     onRefresh={() => listQuery.refetch()}
                     onSelectItem={(item) => {
                       if (drivingModeLocked) {
-                        Alert.alert(strings.alerts.drivingLockedTitle, "Stop moving to open item details.");
+                        Alert.alert(strings.alerts.drivingLockedTitle, strings.routeStopDetail.stopMovingToOpen);
                         return;
                       }
                       const id = pickResourceId(item, listQuery.data?.list.keys);
@@ -9565,40 +9562,40 @@ function routeManifestSnapshot(manifest: unknown) {
   return { expectedStopCount, scannedStopCount, missingStopCount, unexpectedScanCount, duplicateScanCount, isRouteDepartureReady, routeDepartureConfirmedAt, routeDepartureConfirmedBy, routeLoadScannedAt, unexpectedBarcodeSummary };
 }
 
-function RouteManifestReadback({ manifest }: { manifest: unknown }) {
+function RouteManifestReadback({ manifest, strings }: { manifest: unknown; strings: FieldOpsStrings }) {
   const styles = useFieldOpsStyles();
   const { expectedStopCount, scannedStopCount, missingStopCount, unexpectedScanCount, duplicateScanCount, isRouteDepartureReady, routeDepartureConfirmedAt, routeDepartureConfirmedBy, routeLoadScannedAt, unexpectedBarcodeSummary } = routeManifestSnapshot(manifest);
   return (
     <>
-      <Text style={styles.noticeText}>Route load scan-out</Text>
+      <Text style={styles.noticeText}>{strings.routeStopDetail.scanOutTitle}</Text>
           <Text style={styles.noticeSubtext}>
             {routeDepartureConfirmedAt
-              ? "Departure confirmed"
+              ? strings.route.departureConfirmed
               : isRouteDepartureReady
-                ? "Ready for departure"
-                : "Scan route loads before departure"}
+                ? strings.routeStopDetail.readyForDeparture
+                : strings.routeStopDetail.scanBeforeDeparture}
           </Text>
           <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-            Scanned stops: {scannedStopCount ?? 0}
+            {strings.routeStopDetail.scannedStops.replace("{count}", () => String(scannedStopCount ?? 0))}
             {expectedStopCount != null ? ` / ${expectedStopCount}` : ""}
           </Text>
           <Text style={styles.noticeSubtext}>
-            Missing: {missingStopCount ?? 0} - Unexpected: {unexpectedScanCount} - Duplicate scans: {duplicateScanCount}
+            {strings.routeStopDetail.scanCounts.replace("{missing}", () => String(missingStopCount ?? 0)).replace("{unexpected}", () => String(unexpectedScanCount)).replace("{duplicate}", () => String(duplicateScanCount))}
           </Text>
           {routeLoadScannedAt ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Last route load scan: {routeLoadScannedAt}
+              {strings.routeStopDetail.lastScan.replace("{time}", () => String(routeLoadScannedAt))}
             </Text>
           ) : null}
           {unexpectedBarcodeSummary ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Unexpected barcodes: {unexpectedBarcodeSummary}
+              {strings.routeStopDetail.unexpectedBarcodes.replace("{barcodes}", () => String(unexpectedBarcodeSummary))}
             </Text>
           ) : null}
           {routeDepartureConfirmedAt ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Confirmed at {routeDepartureConfirmedAt}
-              {routeDepartureConfirmedBy ? ` by ${routeDepartureConfirmedBy}` : ""}
+              {strings.routeStopDetail.confirmedAt.replace("{time}", () => String(routeDepartureConfirmedAt))}
+              {routeDepartureConfirmedBy ? strings.routeStopDetail.confirmedBy.replace("{user}", () => String(routeDepartureConfirmedBy)) : ""}
             </Text>
           ) : null}
     </>
@@ -9735,11 +9732,11 @@ function RouteSurfaceDetailExtensions({
     }) => {
       await withRouteActionLock(async () => {
         if (interactionLocked) {
-          Alert.alert(strings.alerts.drivingLockedTitle, "Stop moving before running route actions.");
+          Alert.alert(strings.alerts.drivingLockedTitle, strings.routeStopDetail.stopMovingForRouteActions);
           return;
         }
         if (!input.url) {
-          Alert.alert("Unavailable", input.unavailableMessage);
+          Alert.alert(strings.shell.unavailable, input.unavailableMessage);
           return;
         }
 
@@ -9750,7 +9747,7 @@ function RouteSurfaceDetailExtensions({
           await Linking.openURL(input.url);
           opened = true;
         } catch {
-          Alert.alert("Action unavailable", input.unavailableMessage);
+          Alert.alert(strings.addressActions.unavailable, input.unavailableMessage);
         }
 
         await onEnqueueUiEvents([
@@ -9823,10 +9820,10 @@ function RouteSurfaceDetailExtensions({
               route_stop_id: routeContext.routeStopId,
               task_id: routeContext.taskId,
             },
-            unavailableMessage: "Navigation coordinates are unavailable for this record.",
+            unavailableMessage: strings.routeStopDetail.navigationUnavailable,
           });
         } catch {
-          Alert.alert("Action failed", "Unable to launch navigation at this time.");
+          Alert.alert(strings.routeStopDetail.actionFailed, strings.routeStopDetail.navigationFailed);
         }
       })();
   }, [
@@ -9838,6 +9835,7 @@ function RouteSurfaceDetailExtensions({
     routeContext.routeRunId,
     routeContext.routeStopId,
     routeContext.taskId,
+    strings,
   ]);
 
   const handleChannel = React.useCallback(
@@ -9856,7 +9854,7 @@ function RouteSurfaceDetailExtensions({
       templateId?: string
     ) => {
       if (!contact?.phone) {
-        Alert.alert("Unavailable", `${contact?.label ?? "Contact"} phone number is missing.`);
+        Alert.alert(strings.shell.unavailable, strings.routeStopDetail.phoneMissing.replace("{contact}", () => String(contact?.label ?? strings.routeStopDetail.contactFallback)));
         return;
       }
       const url = buildChannelUrl({ channel, phone: contact.phone, message });
@@ -9877,14 +9875,14 @@ function RouteSurfaceDetailExtensions({
               route_stop_id: routeContext.routeStopId,
               task_id: routeContext.taskId,
             },
-            unavailableMessage: `Unable to open ${channel} for ${contact.label}.`,
+            unavailableMessage: strings.routeStopDetail.channelUnavailable.replace("{channel}", () => String(channel)).replace("{contact}", () => String(contact.label)),
           });
         } catch {
-          Alert.alert("Action failed", "Unable to launch communication action at this time.");
+          Alert.alert(strings.routeStopDetail.actionFailed, strings.routeStopDetail.communicationFailed);
         }
       })();
     },
-    [customerName, openExternalAndLog, routeContext.routeRunId, routeContext.routeStopId, routeContext.taskId]
+    [customerName, openExternalAndLog, routeContext.routeRunId, routeContext.routeStopId, routeContext.taskId, strings]
   );
   const contactChannels = ["call", "sms", "whatsapp"] as const;
 
@@ -9920,7 +9918,7 @@ function RouteSurfaceDetailExtensions({
         ) : null}
         {stop.notes ? (
           <View style={[styles.detailRow, { marginTop: 10, borderBottomWidth: 0, paddingVertical: 0 }]}>
-            <Text style={styles.detailKey}>Instructions</Text>
+            <Text style={styles.detailKey}>{strings.routeStopDetail.instructions}</Text>
             <Text style={styles.detailValue}>{stop.notes}</Text>
           </View>
         ) : (
@@ -9943,7 +9941,7 @@ function RouteSurfaceDetailExtensions({
               </Text>
             </View>
           </View>
-          <RouteManifestReadback manifest={routeExecutionManifest} />
+          <RouteManifestReadback manifest={routeExecutionManifest} strings={strings} />
           <View style={[styles.screenActionsRow, { marginTop: 10 }]}>
             <Pressable
               onPress={onOpenRouteScan}
@@ -9955,7 +9953,7 @@ function RouteSurfaceDetailExtensions({
                 pressed && styles.navItemPressed,
               ]}
             >
-              <Text style={styles.actionButtonText}>Scan route load</Text>
+              <Text style={styles.actionButtonText}>{strings.routeStopDetail.scanRouteLoad}</Text>
             </Pressable>
             <Pressable
               onPress={onConfirmRouteDeparture}
@@ -9998,7 +9996,7 @@ function RouteSurfaceDetailExtensions({
           {!parcelManifest ? <Text style={styles.noticeSubtext}>{routeLoadStrings.unavailable}</Text> : (
             <>
               <Text style={styles.noticeSubtext}>
-                {routeLoadStrings.cold}: {parcelManifest.totals.cold} · {routeLoadStrings.weight}: {parcelManifest.totals.weightKg.toFixed(1)} kg
+                {routeLoadStrings.cold}: {parcelManifest.totals.cold} · {routeLoadStrings.weight}: {parcelManifest.totals.weightKg.toFixed(1)} {strings.routeStopDetail.kg}
               </Text>
               {parcelManifest.totals.unknownCold || parcelManifest.totals.unknownWeight ? (
                 <Text style={styles.noticeSubtext}>
@@ -10015,14 +10013,14 @@ function RouteSurfaceDetailExtensions({
                     {group.routeStopId ? `${routeLoadStrings.destination}: ${group.routeStopId}` : routeLoadStrings.extra}
                   </Text>
                   <Text style={styles.noticeSubtext}>
-                    {group.parcels.filter((parcel) => parcel.status === "scanned").length} / {group.parcels.length} · {group.parcels.reduce((total, parcel) => total + (parcel.weightKg ?? 0), 0).toFixed(1)} kg
+                    {group.parcels.filter((parcel) => parcel.status === "scanned").length} / {group.parcels.length} · {group.parcels.reduce((total, parcel) => total + (parcel.weightKg ?? 0), 0).toFixed(1)} {strings.routeStopDetail.kg}
                     {group.parcels.some((parcel) => parcel.weightKg === null) ? ` · ${routeLoadStrings.partial}` : ""}
                   </Text>
                   {group.parcels.map((parcel) => (
                     <View key={parcel.key} style={[styles.detailRow, { flexDirection: "column", alignItems: "stretch", gap: 8 }]}>
                       <Text style={styles.noticeText}>{parcel.barcode}</Text>
                       <Text style={styles.noticeSubtext}>
-                        {routeLoadStrings[parcel.status]} · {parcel.weightKg === null ? routeLoadStrings.weightUnknown : `${parcel.weightKg} kg`}
+                        {routeLoadStrings[parcel.status]} · {parcel.weightKg === null ? routeLoadStrings.weightUnknown : `${parcel.weightKg} ${strings.routeStopDetail.kg}`}
                         {parcel.cold === true ? ` · ${routeLoadStrings.cold}` : parcel.cold === null ? ` · ${routeLoadStrings.handlingUnknown}` : ""}
                       </Text>
                       {parcel.reason ? <Text style={styles.noticeSubtext}>{parcel.reason}</Text> : null}
@@ -10088,62 +10086,62 @@ function RouteSurfaceDetailExtensions({
 
       {showPaymentCollectionCard ? (
         <View style={[styles.noticeCard, { marginTop: 12 }]}>
-          <Text style={styles.noticeText}>COD collection</Text>
+          <Text style={styles.noticeText}>{strings.routeStopDetail.codTitle}</Text>
           {stop.collectionRequired === false ? (
-            <Text style={styles.noticeSubtext}>Collection is not required for this stop.</Text>
+            <Text style={styles.noticeSubtext}>{strings.routeStopDetail.collectionNotRequired}</Text>
           ) : (
             <Text style={styles.noticeSubtext}>
-              {expectedCodLabel ? `Expected amount: ${expectedCodLabel}` : "Collection details are available."}
+              {expectedCodLabel ? strings.routeStopDetail.expectedAmount.replace("{amount}", () => String(expectedCodLabel)) : strings.routeStopDetail.collectionDetails}
             </Text>
           )}
           {stop.paymentModeLabel ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Payment mode: {stop.paymentModeLabel}
+              {strings.routeStopDetail.paymentMode.replace("{mode}", () => String(stop.paymentModeLabel))}
             </Text>
           ) : null}
           {stop.collectionOutcome ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Collection outcome: {formatKeyLabel(stop.collectionOutcome)}
+              {strings.routeStopDetail.collectionOutcome.replace("{outcome}", () => String(formatKeyLabel(stop.collectionOutcome)))}
             </Text>
           ) : null}
           {collectedCodLabel ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Collected amount: {collectedCodLabel}
+              {strings.routeStopDetail.collectedAmount.replace("{amount}", () => String(collectedCodLabel))}
             </Text>
           ) : null}
           {varianceCodLabel ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Variance amount: {varianceCodLabel}
+              {strings.routeStopDetail.varianceAmount.replace("{amount}", () => String(varianceCodLabel))}
             </Text>
           ) : null}
           {stop.discrepancyKind ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Discrepancy: {formatKeyLabel(stop.discrepancyKind)}
+              {strings.routeStopDetail.discrepancy.replace("{kind}", () => String(formatKeyLabel(stop.discrepancyKind)))}
             </Text>
           ) : null}
           {stop.hasDiscrepancy === false ? (
-            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>No COD discrepancy recorded.</Text>
+            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>{strings.routeStopDetail.noDiscrepancy}</Text>
           ) : null}
           {stop.receiptContext ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Receipt: {stop.receiptContext}
+              {strings.routeStopDetail.receipt.replace("{receipt}", () => String(stop.receiptContext))}
             </Text>
           ) : null}
           {proofArtifactLabel ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Proof artifacts: {proofArtifactLabel}
+              {strings.routeStopDetail.proofArtifacts.replace("{count}", () => String(proofArtifactLabel))}
             </Text>
           ) : null}
           {stop.signatureArtifactId ? (
-            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>Signature proof recorded</Text>
+            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>{strings.routeStopDetail.signatureRecorded}</Text>
           ) : null}
           {allowedMethodsLabel ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Accepted methods: {allowedMethodsLabel}
+              {strings.routeStopDetail.acceptedMethods.replace("{methods}", () => String(allowedMethodsLabel))}
             </Text>
           ) : null}
           <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>
-            Use the same captured proof photos and saved signature for COD handover evidence.
+            {strings.routeStopDetail.codEvidenceHint}
           </Text>
         </View>
       ) : null}
@@ -10154,17 +10152,16 @@ function RouteSurfaceDetailExtensions({
           {strings.detail.recipient(customerName || strings.detail.noRecipient)}
         </Text>
         <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-          Phone: {phone ?? strings.detail.noPhoneOnFile}
+          {strings.routeStopDetail.phone.replace("{phone}", () => String(phone ?? strings.detail.noPhoneOnFile))}
         </Text>
         <Text style={styles.noticeSubtext}>
-          Provider: {navigationProvider}
           {coordinates
-            ? ` - lat ${coordinates.latitude.toFixed(6)} - lng ${coordinates.longitude.toFixed(6)}`
-            : " - no coordinates"}
+            ? strings.routeStopDetail.providerCoordinates.replace("{provider}", () => String(navigationProvider)).replace("{lat}", () => String(coordinates.latitude.toFixed(6))).replace("{lng}", () => String(coordinates.longitude.toFixed(6)))
+            : strings.routeStopDetail.providerNoCoordinates.replace("{provider}", () => String(navigationProvider))}
         </Text>
         {interactionLocked ? (
           <Text style={[styles.noticeSubtext, { marginTop: 6 }]}>
-            Driving lock is active. Stop moving to run actions.
+            {strings.routeStopDetail.drivingLockActive}
           </Text>
         ) : null}
         <View style={[styles.screenActionsRow, { marginTop: 10 }]}>
@@ -10231,16 +10228,16 @@ function RouteSurfaceDetailExtensions({
         </View>
         {!customerContact?.phone ? (
           <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>
-            No phone on file. Use stop notes or dispatch for escalation.
+            {strings.routeStopDetail.noPhoneEscalation}
           </Text>
         ) : null}
       </View>
 
       {supportContacts.length > 0 ? (
         <View style={[styles.noticeCard, { marginTop: 12 }]}>
-          <Text style={styles.noticeText}>Support contacts</Text>
+          <Text style={styles.noticeText}>{strings.routeStopDetail.supportContacts}</Text>
           <Text style={styles.noticeSubtext}>
-            Policy and assignment contacts from the active route context.
+            {strings.routeStopDetail.supportContactsHint}
           </Text>
           {supportContacts.map((contact) => {
             return (
@@ -10303,8 +10300,8 @@ function RouteSurfaceDetailExtensions({
 
       {communicationPolicy.templates.length > 0 ? (
         <View style={[styles.noticeCard, { marginTop: 12 }]}>
-          <Text style={styles.noticeText}>Quick templates</Text>
-          <Text style={styles.noticeSubtext}>Send policy-approved customer messages.</Text>
+          <Text style={styles.noticeText}>{strings.routeStopDetail.quickTemplates}</Text>
+          <Text style={styles.noticeSubtext}>{strings.routeStopDetail.quickTemplatesHint}</Text>
           <View style={[styles.screenActionsRow, { marginTop: 10 }]}>
             {communicationPolicy.templates.slice(0, 4).map((template) => (
               <Pressable
@@ -10386,7 +10383,7 @@ function RouteSurfaceDetailExtensions({
         ) : null}
         {diagnosticsEnabled ? (
           <Text style={[styles.mono, { textAlign: "left", marginTop: 8 }]}>
-            contact:{customerName || "-"} - phone:{phone ?? "-"} - Route reference: {routeContext.routeRunId ?? "-"}
+            {strings.routeStopDetail.diagnostics.replace("{contact}", () => String(customerName || "-")).replace("{phone}", () => String(phone ?? "-")).replace("{route}", () => String(routeContext.routeRunId ?? "-"))}
           </Text>
         ) : null}
       </View>
