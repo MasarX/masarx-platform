@@ -209,7 +209,7 @@ for (const file of ['unknown/path.ts', 'unknown/path.md', 'synthetic.mdx', 'apps
   assert.deepEqual(select(['README.md', file]), select());
 }
 assert.equal(affected().length, 8);
-const cdWorkflows = ['.github/workflows/deploy.yml', '.github/workflows/provenance-on-tag.yml'];
+const cdWorkflows = ['.github/workflows/deploy.yml', '.github/workflows/release-on-tag.yml'];
 const cdTests = ['tests/unit/ops/dev-db-dry-run-workflow.test.js', 'tests/unit/ops/release-workflow.test.js'];
 const cdChanges = [...cdWorkflows, ...cdTests];
 assert.deepEqual(select(cdChanges, 'pull_request'), { ...select(), database: false });
