@@ -44,7 +44,7 @@ import {
   ui_list_resource_v1,
 } from '@/lib/api';
 import { useIdentity, useCapability } from '@/lib/identity';
-import { useI18n } from '@/lib/i18n';
+import { fill, useI18n, useT } from '@/lib/i18n';
 import { CAP } from '@/lib/capabilities';
 import { useDrawer, useModal } from '@/hooks/useOverlay';
 import { pushToast } from '@/components/toastStore';
@@ -230,6 +230,7 @@ function CanonicalChip({
   labelOverride?: string;
   rows?: LookupValueRow[];
 }) {
+  const t = useT();
   const row =
     category === 'marketplace_participant_request_status' && rows
       ? resolveStatusLookupRow(rows, value)
@@ -237,7 +238,7 @@ function CanonicalChip({
   if (!row) {
     return (
       <Chip
-        label={`${category}/${value} (missing)`}
+        label={fill(t('participantApplications.chip.missing'), { category, value })}
         kind="danger"
         size="xs"
         className={className}
@@ -267,6 +268,7 @@ function RequestParticipantDocsModalBody({
   const [documents, setDocuments] = useState<string[]>(defaultDocKind ? [defaultDocKind] : []);
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const t = useT();
 
   useEffect(() => {
     if (documents.length === 0 && defaultDocKind) setDocuments([defaultDocKind]);
@@ -283,8 +285,8 @@ function RequestParticipantDocsModalBody({
       <div style={{ padding: 14 }}>
         <StateView
           kind="error"
-          title="Document request options are not available"
-          hint="Request-docs review actions require configured document options before they can be used."
+          title={t('participantApplications.docs.unavailableTitle')}
+          hint={t('participantApplications.docs.unavailableHint')}
         />
       </div>
     );
@@ -293,12 +295,11 @@ function RequestParticipantDocsModalBody({
   return (
     <div style={{ padding: 14 }}>
       <p className="state__hint" style={{ marginTop: 0 }}>
-        Request additional documents from the applicant. The application stays pending while the
-        requested document list is recorded on the canonical participant request.
+        {t('participantApplications.docs.intro')}
       </p>
 
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Documents to request</label>
+        <label className="field__label">{t('participantApplications.docs.documents')}</label>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {docKinds.map((doc) => {
             const selected = documents.includes(doc.value);
@@ -323,29 +324,29 @@ function RequestParticipantDocsModalBody({
       </div>
 
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Note to applicant</label>
+        <label className="field__label">{t('participantApplications.docs.note')}</label>
         <textarea
           value={note}
           onChange={(event) => setNote(event.target.value)}
           rows={3}
-          placeholder="Optional context for the applicant"
+          placeholder={t('participantApplications.docs.notePlaceholder')}
         />
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onCancel} disabled={submitting} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onCancel} disabled={submitting} />
         <Button
-          label={submitting ? 'Sending' : 'Send request'}
+          label={submitting ? t('participantApplications.docs.sending') : t('participantApplications.docs.send')}
           iconName="file"
           kind="primary"
           capability={CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW}
           disabled={documents.length === 0 || submitting}
-          title={documents.length === 0 ? 'Select at least one document' : undefined}
+          title={documents.length === 0 ? t('participantApplications.docs.selectOne') : undefined}
           onClick={() => {
             setSubmitting(true);
             void onSubmit(documents, note.trim())
               .catch(() => {
-                pushToast('Document request could not be sent. Review the documents and try again.', 'danger');
+                pushToast(t('participantApplications.toast.docsSendFailed'), 'danger');
               })
               .finally(() => setSubmitting(false));
           }}
@@ -380,7 +381,7 @@ type StatusFilter = string | typeof STATUS_FILTER_ALL;
 export function ParticipantApplicationsModule() {
   const identity = useIdentity();
   const { scope } = identity;
-  const { fmtNumber, fmtDateTime } = useI18n();
+  const { t, fmtNumber, fmtDateTime } = useI18n();
   const drawer = useDrawer();
   const modal = useModal();
   const queryClient = useQueryClient();
@@ -553,28 +554,32 @@ export function ParticipantApplicationsModule() {
     (row: ParticipantRequestRow, action: ReviewDecision) => {
       if (!canApplyReviewInScope) {
         return !canReview
-          ? 'Participant application review permission is required'
-          : 'Participant application review requires platform scope';
+          ? t('participantApplications.reason.permission')
+          : t('participantApplications.reason.platformScope');
       }
       if (canApplyReviewAction(row, action)) return undefined;
-      return `Status ${row.status || 'unknown'} does not allow ${action}`;
+      return fill(t('participantApplications.reason.statusBlocks'), { status: row.status || t('participantApplications.value.unknown'), action });
     },
-    [canApplyReviewAction, canApplyReviewInScope, canReview],
+    [canApplyReviewAction, canApplyReviewInScope, canReview, t],
   );
 
   const bulkReviewDisabledReason = useCallback(
     (rowsToReview: ParticipantRequestRow[], action: Extract<ReviewDecision, 'approve' | 'reject'>) => {
       if (!canApplyReviewInScope) {
         return !canReview
-          ? 'Participant application review permission is required'
-          : 'Participant application review requires platform scope';
+          ? t('participantApplications.reason.permission')
+          : t('participantApplications.reason.platformScope');
       }
       const blocked = rowsToReview.find((row) => !canApplyReviewAction(row, action));
       return blocked
-        ? `Application ${blocked.id} is ${blocked.status || 'unknown'} and cannot ${action}`
+        ? fill(t('participantApplications.reason.bulkBlocked'), {
+            id: blocked.id,
+            status: blocked.status || t('participantApplications.value.unknown'),
+            action,
+          })
         : undefined;
     },
-    [canApplyReviewAction, canApplyReviewInScope, canReview],
+    [canApplyReviewAction, canApplyReviewInScope, canReview, t],
   );
 
   const readRequestAfterReview = useCallback(
@@ -704,30 +709,30 @@ export function ParticipantApplicationsModule() {
       applyReviewDecision(row, 'approve', reason)
         .then(() =>
           pushToast(
-            `Participant application approved · ${row.organization_name || row.full_name || 'Application'}`,
+            fill(t('participantApplications.toast.approved'), { name: row.organization_name || row.full_name || t('participantApplications.value.application') }),
             'good'
           )
         )
         .catch((err: Error) => {
           pushToast(
-            'Participant review could not be completed. Review the application and try again.',
+            t('participantApplications.toast.reviewFailed'),
             'danger'
           );
           throw err;
         });
     },
-    [applyReviewDecision]
+    [applyReviewDecision, t]
   );
 
   // ── Bulk handlers (operator queue parity with /platform/organizations) ─
   const onBulkApprove = useCallback(
     (rs: ParticipantRequestRow[]) => {
       if (!canReview) {
-        pushToast('Approval requires partner application review permission', 'danger');
+        pushToast(t('participantApplications.toast.approvePermission'), 'danger');
         return;
       }
       if (!hasPlatformReviewScope) {
-        pushToast('Approval requires platform scope', 'danger');
+        pushToast(t('participantApplications.toast.approveScope'), 'danger');
         return;
       }
       const blockedReason = bulkReviewDisabledReason(rs, 'approve');
@@ -744,29 +749,29 @@ export function ParticipantApplicationsModule() {
             })
             .catch((err: Error) => {
               pushToast(
-                'Participant approval could not be completed. Review the selected applications and try again.',
+                t('participantApplications.toast.bulkApproveFailed'),
                 'danger'
               );
             })
         )
       ).then(() => {
         pushToast(
-          `Participant applications approved · ${okCount}/${rs.length}`,
+          fill(t('participantApplications.toast.bulkApproved'), { ok: okCount, total: rs.length }),
           okCount === rs.length ? 'good' : 'warn'
         );
       });
     },
-    [applyReviewDecision, bulkReviewDisabledReason, canReview, hasPlatformReviewScope]
+    [applyReviewDecision, bulkReviewDisabledReason, canReview, hasPlatformReviewScope, t]
   );
 
   const onBulkReject = useCallback(
     (rs: ParticipantRequestRow[]) => {
       if (!canReview) {
-        pushToast('Rejection requires partner application review permission', 'danger');
+        pushToast(t('participantApplications.toast.rejectPermission'), 'danger');
         return;
       }
       if (!hasPlatformReviewScope) {
-        pushToast('Rejection requires platform scope', 'danger');
+        pushToast(t('participantApplications.toast.rejectScope'), 'danger');
         return;
       }
       const blockedReason = bulkReviewDisabledReason(rs, 'reject');
@@ -783,19 +788,19 @@ export function ParticipantApplicationsModule() {
             })
             .catch((err: Error) => {
               pushToast(
-                'Document request could not be saved. Review the selected applications and try again.',
+                t('participantApplications.toast.bulkRejectFailed'),
                 'danger'
               );
             })
         )
       ).then(() => {
         pushToast(
-          `Participant applications rejected · ${okCount}/${rs.length}`,
+          fill(t('participantApplications.toast.bulkRejected'), { ok: okCount, total: rs.length }),
           'warn'
         );
       });
     },
-    [applyReviewDecision, bulkReviewDisabledReason, canReview, hasPlatformReviewScope]
+    [applyReviewDecision, bulkReviewDisabledReason, canReview, hasPlatformReviewScope, t]
   );
 
   // ── Reject modal: capture a reason ───────────────────────────────────
@@ -806,7 +811,7 @@ export function ParticipantApplicationsModule() {
         const readback = await applyReviewDecision(row, 'reject', reason || 'no reason supplied');
         modal.close();
         pushToast(
-          `Participant application rejected · ${row.organization_name || row.full_name || 'Application'}`,
+          fill(t('participantApplications.toast.rejected'), { name: row.organization_name || row.full_name || t('participantApplications.value.application') }),
           'warn'
         );
         setActiveDrawerRow(readback);
@@ -817,18 +822,18 @@ export function ParticipantApplicationsModule() {
             className="state__hint"
             style={{ margin: 0, fontSize: 12, lineHeight: 1.4 }}
           >
-            Provide a rejection reason. The applicant ({row.email}) will be
-            notified and the saved decision writes{' '}
-            <span className="mono">decision_metadata.reason</span> alongside the
-            decision row.
+            {t('participantApplications.reject.hintBefore')}<bdi>{row.email}</bdi>
+            {t('participantApplications.reject.hintMiddle')}{' '}
+            <code className="mono">decision_metadata.reason</code>{/* i18n-literal-ok: metadata field path */}
+            {t('participantApplications.reject.hintAfter')}
           </p>
           <label
             style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}
           >
-            <span style={{ color: 'var(--ink-2)' }}>Rejection reason</span>
+            <span style={{ color: 'var(--ink-2)' }}>{t('participantApplications.reject.reason')}</span>
             <textarea
               data-testid="reject-reason"
-              placeholder="Incomplete commercial registration, …"
+              placeholder={t('participantApplications.reject.placeholder')}
               rows={3}
               style={{
                 padding: '8px 10px',
@@ -848,20 +853,20 @@ export function ParticipantApplicationsModule() {
       );
 
       modal.open({
-        title: `Reject application · ${row.organization_name || row.full_name || 'Application'}`,
+        title: fill(t('participantApplications.reject.title'), { name: row.organization_name || row.full_name || t('participantApplications.value.application') }),
         body,
         footer: (
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Confirm rejection"
+              label={t('participantApplications.reject.confirm')}
               iconName="alert"
               kind="danger"
               capability={CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW}
               onClick={() => {
                 void confirmReject().catch((err: Error) => {
                   pushToast(
-                    'Participant rejection could not be completed. Review the application and try again.',
+                    t('participantApplications.toast.rejectFailed'),
                     'danger'
                   );
                 });
@@ -871,13 +876,13 @@ export function ParticipantApplicationsModule() {
         ),
       });
     },
-    [applyReviewDecision, modal.open, modal.close]
+    [applyReviewDecision, modal.open, modal.close, t]
   );
 
   const openRequestDocsModal = useCallback(
     (row: ParticipantRequestRow) => {
       modal.open({
-        title: `Request additional documents · ${row.organization_name || row.full_name || 'Application'}`,
+        title: fill(t('participantApplications.docs.title'), { name: row.organization_name || row.full_name || t('participantApplications.value.application') }),
         body: (
           <RequestParticipantDocsModalBody
             docKinds={participantDocKindRows}
@@ -889,7 +894,7 @@ export function ParticipantApplicationsModule() {
               });
               modal.close();
               pushToast(
-                `Documents requested · ${row.organization_name || row.full_name || 'Application'}`,
+                fill(t('participantApplications.toast.docsRequested'), { name: row.organization_name || row.full_name || t('participantApplications.value.application') }),
                 'good',
               );
               setActiveDrawerRow(readback);
@@ -898,7 +903,7 @@ export function ParticipantApplicationsModule() {
         ),
       });
     },
-    [applyReviewDecision, modal.open, modal.close, participantDocKindRows],
+    [applyReviewDecision, modal.open, modal.close, participantDocKindRows, t],
   );
 
   // ── Drawer ───────────────────────────────────────────────────────────
@@ -910,52 +915,52 @@ export function ParticipantApplicationsModule() {
         lookupLabel(participantDocKindRows, doc),
       );
       const kvRows: KvRow[] = [
-        { key: 'id', label: 'Request #', value: row.id, mono: true },
+        { key: 'id', label: t('participantApplications.field.requestNo'), value: row.id, mono: true },
         {
           key: 'requested_participant_type_key',
-          label: 'Type',
+          label: t('participantApplications.field.type'),
           value: row.requested_participant_type_key,
           mono: true,
         },
-        { key: 'organization_name', label: 'Organization', value: row.organization_name },
+        { key: 'organization_name', label: t('participantApplications.field.organization'), value: row.organization_name },
         {
           key: 'organization_slug',
-          label: 'Slug',
+          label: t('participantApplications.field.slug'),
           value: row.organization_slug ?? '—',
           mono: true,
         },
-        { key: 'full_name', label: 'Applicant', value: row.full_name },
-        { key: 'email', label: 'Email', value: row.email, mono: true },
-        { key: 'status', label: 'Status', value: row.status ?? '—', mono: true },
+        { key: 'full_name', label: t('participantApplications.field.applicant'), value: row.full_name },
+        { key: 'email', label: t('participantApplications.field.email'), value: row.email, mono: true },
+        { key: 'status', label: t('participantApplications.field.status'), value: row.status ?? '—', mono: true },
         {
           key: 'created_at',
-          label: 'Submitted',
+          label: t('participantApplications.field.submitted'),
           value: row.created_at ? fmtDateTime(row.created_at) : '—',
           mono: true,
         },
         {
           key: 'reviewed_at',
-          label: 'Reviewed',
+          label: t('participantApplications.field.reviewed'),
           value: row.reviewed_at ? fmtDateTime(row.reviewed_at) : '—',
           mono: true,
         },
-        { key: 'reviewed_by', label: 'Reviewed by', value: row.reviewed_by ?? '—', mono: true },
-        { key: 'review_reason', label: 'Review reason', value: row.review_reason ?? '—' },
+        { key: 'reviewed_by', label: t('participantApplications.field.reviewedBy'), value: row.reviewed_by ?? '—', mono: true },
+        { key: 'review_reason', label: t('participantApplications.field.reviewReason'), value: row.review_reason ?? '—' },
         {
           key: 'invite_redirect_to',
-          label: 'Invite redirect',
+          label: t('participantApplications.field.inviteRedirect'),
           value: row.invite_redirect_to ?? '—',
           mono: true,
         },
         {
           key: 'approved_organization_id',
-          label: 'Approved organization',
+          label: t('participantApplications.field.approvedOrganization'),
           value: row.approved_organization_id ?? '—',
           mono: true,
         },
         {
           key: 'approved_participant_profile_id',
-          label: 'Approved profile',
+          label: t('participantApplications.field.approvedProfile'),
           value: row.approved_participant_profile_id ?? '—',
           mono: true,
         },
@@ -965,24 +970,24 @@ export function ParticipantApplicationsModule() {
         kvRows.push(
           {
             key: 'request_additional_docs',
-            label: 'Additional docs requested',
-            value: 'Yes',
+            label: t('participantApplications.field.additionalDocs'),
+            value: t('common.yes'),
           },
           {
             key: 'requested_documents',
-            label: 'Requested docs',
+            label: t('participantApplications.field.requestedDocs'),
             value: requestedDocumentLabels.length > 0 ? requestedDocumentLabels.join(', ') : '—',
           },
           {
             key: 'request_docs_note',
-            label: 'Request note',
+            label: t('participantApplications.field.requestNote'),
             value:
               row.review_reason ??
               String(decisionMetadata.note ?? decisionMetadata.reason ?? '—'),
           },
           {
             key: 'request_docs_applied_at',
-            label: 'Requested at',
+            label: t('participantApplications.field.requestedAt'),
             value: decisionMetadata.review_applied_at
               ? fmtDateTime(String(decisionMetadata.review_applied_at))
               : '—',
@@ -994,13 +999,13 @@ export function ParticipantApplicationsModule() {
       if (row.last_error_code) {
         kvRows.push({
           key: 'last_error_code',
-          label: 'Last error code',
+          label: t('participantApplications.field.lastErrorCode'),
           value: row.last_error_code,
           mono: true,
         });
         kvRows.push({
           key: 'last_error_message',
-          label: 'Last error message',
+          label: t('participantApplications.field.lastErrorMessage'),
           value: row.last_error_message ?? '—',
         });
       }
@@ -1022,42 +1027,42 @@ export function ParticipantApplicationsModule() {
         ? [
             {
               key: 'approved_partner_name',
-              label: 'Partner',
+              label: t('participantApplications.field.partner'),
               value: approvedPartnerName(approvedPartner) || '—',
             },
             {
               key: 'approved_partner_id',
-              label: 'Profile',
+              label: t('participantApplications.field.profile'),
               value: approvedPartner.id,
               mono: true,
             },
             {
               key: 'approved_partner_org',
-              label: 'Organization',
+              label: t('participantApplications.field.organization'),
               value: approvedPartner.organization_id ?? '—',
               mono: true,
             },
             {
               key: 'approved_partner_type',
-              label: 'Type',
+              label: t('participantApplications.field.type'),
               value: approvedPartnerType(approvedPartner) || '—',
               mono: true,
             },
             {
               key: 'approved_partner_listing',
-              label: 'Listing',
+              label: t('participantApplications.field.listing'),
               value: approvedPartner.listing_status ?? '—',
               mono: true,
             },
             {
               key: 'approved_partner_compliance',
-              label: 'Compliance',
+              label: t('participantApplications.field.compliance'),
               value: approvedPartnerCompliance(approvedPartner) || '—',
               mono: true,
             },
             {
               key: 'approved_partner_contact',
-              label: 'Contact',
+              label: t('participantApplications.field.contact'),
               value: approvedPartner.contact_email ?? row.email ?? '—',
               mono: true,
             },
@@ -1080,7 +1085,7 @@ export function ParticipantApplicationsModule() {
               <CanonicalChip
                 category="marketplace_participant_request_status"
                 value={row.status}
-                labelOverride={`status: ${row.status}`}
+                labelOverride={fill(t('participantApplications.chip.status'), { status: row.status })}
                 rows={statusLookupRows}
               />
             ) : null}
@@ -1094,23 +1099,23 @@ export function ParticipantApplicationsModule() {
           <KvGrid rows={kvRows} />
 
           <div className="section-eyebrow">
-            {approvedPartner ? 'Approved partner readback' : 'Approved partner profile'}
+            {approvedPartner ? t('participantApplications.partner.readback') : t('participantApplications.partner.profile')}
           </div>
           {!approvedProfileId ? (
             <StateView
               kind="empty"
-              hint="Approve this application to materialize the partner profile."
+              hint={t('participantApplications.partner.approveFirst')}
             />
           ) : !canViewApprovedPartner ? (
             <StateView
               kind="denied"
               capability={CAP.MARKETPLACE_READ}
-              hint="Approved partner profile details require marketplace access."
+              hint={t('participantApplications.partner.denied')}
             />
           ) : approvedPartnersQuery.isLoading ? (
-            <StateView kind="loading" hint="Loading approved partner profile..." />
+            <StateView kind="loading" hint={t('participantApplications.partner.loading')} />
           ) : approvedPartnersQuery.isError ? (
-            <StateView kind="error" hint="Could not load the approved partner profile." />
+            <StateView kind="error" hint={t('participantApplications.partner.error')} />
           ) : approvedPartner ? (
             <div>
               <div
@@ -1131,14 +1136,14 @@ export function ParticipantApplicationsModule() {
                   <CanonicalChip
                     category="partner_listing_status"
                     value={approvedPartner.listing_status}
-                    labelOverride={`listing: ${approvedPartner.listing_status}`}
+                    labelOverride={fill(t('participantApplications.chip.listing'), { status: String(approvedPartner.listing_status) })}
                   />
                 ) : null}
                 {approvedPartnerCompliance(approvedPartner) ? (
                   <CanonicalChip
                     category="partner_compliance_status"
                     value={approvedPartnerCompliance(approvedPartner)}
-                    labelOverride={`compliance: ${approvedPartnerCompliance(approvedPartner)}`}
+                    labelOverride={fill(t('participantApplications.chip.compliance'), { status: approvedPartnerCompliance(approvedPartner) })}
                   />
                 ) : null}
               </div>
@@ -1147,17 +1152,17 @@ export function ParticipantApplicationsModule() {
           ) : (
             <StateView
               kind="empty"
-              hint="The approved partner profile is not visible yet."
+              hint={t('participantApplications.partner.notVisible')}
             />
           )}
 
-          <div className="section-eyebrow">Review actions</div>
+          <div className="section-eyebrow">{t('participantApplications.section.reviewActions')}</div>
           {!hasPlatformReviewScope ? (
             <StateView
               kind="denied"
-              title="Platform scope required"
+              title={t('participantApplications.scope.title')}
               capability={CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW}
-              hint="Participant application review materializes organizations and partner profiles, so it must run from platform scope."
+              hint={t('participantApplications.scope.hint')}
             />
           ) : null}
           <div
@@ -1169,7 +1174,7 @@ export function ParticipantApplicationsModule() {
             }}
           >
             <Button
-              label="Approve"
+              label={t('common.approve')}
               iconName="check"
               kind="primary"
               capability={CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW}
@@ -1178,7 +1183,7 @@ export function ParticipantApplicationsModule() {
               onClick={() => onApprove(row)}
             />
             <Button
-              label="Reject"
+              label={t('common.reject')}
               iconName="close"
               kind="danger"
               capability={CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW}
@@ -1187,7 +1192,7 @@ export function ParticipantApplicationsModule() {
               onClick={() => openRejectModal(row)}
             />
             <Button
-              label="Request docs"
+              label={t('participantApplications.action.requestDocs')}
               iconName="file"
               kind="ghost"
               capability={CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW}
@@ -1200,7 +1205,7 @@ export function ParticipantApplicationsModule() {
       );
 
       drawer.open({
-        title: `Application · ${row.id}`,
+        title: fill(t('participantApplications.drawer.title'), { id: row.id }),
         size: 'lg',
         deepLink: `/network/participant-applications?focus=${encodeURIComponent(row.id)}`,
         body,
@@ -1222,6 +1227,7 @@ export function ParticipantApplicationsModule() {
       canApplyReviewAction,
       participantDocKindRows,
       statusLookupRows,
+      t,
     ]
   );
 
@@ -1233,10 +1239,10 @@ export function ParticipantApplicationsModule() {
   // ── Columns ──────────────────────────────────────────────────────────
   const columns = useMemo<Array<DataTableColumn<ParticipantRequestRow>>>(
     () => [
-      { key: 'id', label: 'Request #', mono: true, sortable: true },
+      { key: 'id', label: t('participantApplications.field.requestNo'), mono: true, sortable: true },
       {
         key: 'requested_participant_type_key',
-        label: 'Type',
+        label: t('participantApplications.field.type'),
         sortable: true,
         filterable: true,
         render: (raw) => {
@@ -1244,12 +1250,12 @@ export function ParticipantApplicationsModule() {
           return v ? <Chip label={v} kind="info" size="xs" className="mono" /> : <span>—</span>;
         },
       },
-      { key: 'organization_name', label: 'Organization', sortable: true, filterable: true },
-      { key: 'full_name', label: 'Applicant', sortable: true, filterable: true },
-      { key: 'email', label: 'Email', mono: true, sortable: true, filterable: true },
+      { key: 'organization_name', label: t('participantApplications.field.organization'), sortable: true, filterable: true },
+      { key: 'full_name', label: t('participantApplications.field.applicant'), sortable: true, filterable: true },
+      { key: 'email', label: t('participantApplications.field.email'), mono: true, sortable: true, filterable: true },
       {
         key: 'status',
-        label: 'Status',
+        label: t('participantApplications.field.status'),
         sortable: true,
         filterable: true,
         render: (raw) => {
@@ -1266,10 +1272,10 @@ export function ParticipantApplicationsModule() {
           );
         },
       },
-      { key: 'created_at', label: 'Submitted', format: 'datetime', sortable: true },
-      { key: 'reviewed_at', label: 'Reviewed', format: 'datetime', sortable: true },
+      { key: 'created_at', label: t('participantApplications.field.submitted'), format: 'datetime', sortable: true },
+      { key: 'reviewed_at', label: t('participantApplications.field.reviewed'), format: 'datetime', sortable: true },
     ],
-    [statusLookupRows]
+    [statusLookupRows, t]
   );
 
   if (!canRead) {
@@ -1277,8 +1283,8 @@ export function ParticipantApplicationsModule() {
       <div className="page">
         <PageHeader
           moduleKey="participant-applications"
-          eyebrow="Network"
-          titleAccent="Participant applications"
+          eyebrow={t('participantApplications.header.eyebrow')}
+          titleAccent={t('participantApplications.header.accent')}
           titlePlain=""
           pills={[
             <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
@@ -1287,7 +1293,7 @@ export function ParticipantApplicationsModule() {
         <StateView
           kind="denied"
           capability={CAP.MARKETPLACE_PARTICIPANT_REQUESTS_READ}
-          hint="Participant application review queue requires partner application permission."
+          hint={t('participantApplications.state.denied')}
         />
       </div>
     );
@@ -1297,14 +1303,14 @@ export function ParticipantApplicationsModule() {
     <div className="page">
       <PageHeader
         moduleKey="participant-applications"
-        eyebrow="Network"
-        titleAccent="Participant applications"
-        titlePlain="— marketplace participant pre-approval queue"
+        eyebrow={t('participantApplications.header.eyebrow')}
+        titleAccent={t('participantApplications.header.accent')}
+        titlePlain={t('participantApplications.header.plain')}
         pills={[
           <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
           <Chip
             key="src"
-            label="marketplace_participant_requests"
+            label="marketplace_participant_requests" // i18n-literal-ok: resource key
             kind="neutral"
             size="xs"
             className="mono"
@@ -1313,34 +1319,34 @@ export function ParticipantApplicationsModule() {
       />
 
       {requestsQuery.isError ? (
-        <StateView kind="error" hint="Could not load participant applications." />
+        <StateView kind="error" hint={t('participantApplications.state.error')} />
       ) : requestsQuery.isLoading ? (
-        <StateView kind="loading" hint="Loading applications…" />
+        <StateView kind="loading" hint={t('participantApplications.state.loading')} />
       ) : (
         <>
           <div className="kpi-strip" data-testid="participant-applications-kpi-strip">
             <KPICard
-              label="Pending"
+              label={t('participantApplications.kpi.pending')}
               value={fmtNumber(pendingCount)}
-              delta={`of ${fmtNumber(rows.length)} total`}
+              delta={fill(t('participantApplications.kpi.ofTotal'), { n: fmtNumber(rows.length) })}
               tone={pendingCount > 0 ? 'warn' : 'good'}
             />
             <KPICard
-              label="Approved"
+              label={t('participantApplications.kpi.approved')}
               value={fmtNumber(approvedCount)}
-              delta="cleared to onboard"
+              delta={t('participantApplications.kpi.cleared')}
               tone="good"
             />
             <KPICard
-              label="Rejected"
+              label={t('participantApplications.kpi.rejected')}
               value={fmtNumber(rejectedCount)}
-              delta="declined applications"
+              delta={t('participantApplications.kpi.declined')}
               tone={rejectedCount > 0 ? 'danger' : 'neutral'}
             />
             <KPICard
-              label="Distinct types"
+              label={t('participantApplications.kpi.distinctTypes')}
               value={fmtNumber(distinctTypes)}
-              delta="participant types in queue"
+              delta={t('participantApplications.kpi.typesInQueue')}
               tone="info"
             />
           </div>
@@ -1348,17 +1354,17 @@ export function ParticipantApplicationsModule() {
           {statusLookupRows.length === 0 ? (
             <StateView
               kind="error"
-              title="Participant status options are not configured"
-              hint="Add participant request status options before using this filter."
+              title={t('participantApplications.state.noStatusTitle')}
+              hint={t('participantApplications.state.noStatusHint')}
             />
           ) : (
             <div
               className="dt-toolbar"
               style={{ borderBottom: '1px solid var(--line)' }}
               role="tablist"
-              aria-label="Participant applications status filter"
+              aria-label={t('participantApplications.filter.aria')}
             >
-              <span className="eyebrow">Status</span>
+              <span className="eyebrow">{t('participantApplications.field.status')}</span>
               {statusFilterValues.map((f) => (
                 <button
                   key={f}
@@ -1369,7 +1375,7 @@ export function ParticipantApplicationsModule() {
                   onClick={() => setStatusFilter(f)}
                   data-testid={`participant-applications-status-${f}`}
                 >
-                  {f}
+                  {f === STATUS_FILTER_ALL ? t('participantApplications.filter.all') : <bdi>{f}</bdi>}
                 </button>
               ))}
               <span className="dt-tb-spacer" />
@@ -1390,7 +1396,7 @@ export function ParticipantApplicationsModule() {
             }
             rowActions={[
               {
-                label: 'Approve',
+                label: t('common.approve'),
                 icon: 'check',
                 kind: 'primary',
                 capability: CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW,
@@ -1399,7 +1405,7 @@ export function ParticipantApplicationsModule() {
                 onClick: (row) => onApprove(row),
               },
               {
-                label: 'Reject',
+                label: t('common.reject'),
                 icon: 'close',
                 kind: 'danger',
                 capability: CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW,
@@ -1408,7 +1414,7 @@ export function ParticipantApplicationsModule() {
                 onClick: (row) => openRejectModal(row),
               },
               {
-                label: 'Request additional documents',
+                label: t('participantApplications.action.requestAdditionalDocs'),
                 icon: 'file',
                 kind: 'ghost',
                 capability: CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW,
@@ -1420,7 +1426,7 @@ export function ParticipantApplicationsModule() {
             ]}
             bulkActions={[
               {
-                label: 'Approve',
+                label: t('common.approve'),
                 icon: 'check',
                 kind: 'primary',
                 capability: CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW,
@@ -1431,7 +1437,7 @@ export function ParticipantApplicationsModule() {
                 onClick: onBulkApprove,
               },
               {
-                label: 'Reject',
+                label: t('common.reject'),
                 icon: 'close',
                 kind: 'danger',
                 capability: CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW,
