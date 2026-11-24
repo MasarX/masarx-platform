@@ -110,8 +110,8 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6]
     env:
       PGTAP_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
-      # Shard 1 exceeded the template clone budget. One worker runs the same shard without cloning.
-      PGTAP_WORKERS: ${{ matrix.shard == 1 && '1' || vars.PGTAP_WORKERS || 'nproc' }}
+      # Template clones can exhaust the command budget before a shard runs its tests.
+      PGTAP_WORKERS: '1'
     steps:
       - name: Record database job start
         run: echo "JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
