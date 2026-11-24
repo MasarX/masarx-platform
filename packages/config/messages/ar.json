@@ -1051,8 +1051,13 @@
       "metricsVsPrior": "‏مقابل السابق"
     },
     "routeOperations": {
-      "unknown": "‏unknown",
-      "scopeLabel": "‏{scopeType}: {scopeLabel}",
+      "unknown": "غير معروف",
+      "scopeTypes": {
+        "global": "عام",
+        "tenant": "مستأجر",
+        "client": "عميل",
+        "sender": "مرسِل"
+      },
       "title": "‏مساحة عمليات المسارات",
       "description": "‏واجهة تشغيل المسارات المبنية على ui_navigation و ui_read_registry.",
       "errors": {
@@ -1190,8 +1195,13 @@
       }
     },
     "exceptionInbox": {
-      "unknown": "‏unknown",
-      "scopeLabel": "‏{scopeType}: {scopeLabel}",
+      "unknown": "غير معروف",
+      "scopeTypes": {
+        "global": "عام",
+        "tenant": "مستأجر",
+        "client": "عميل",
+        "sender": "مرسِل"
+      },
       "title": "‏صندوق الاستثناءات",
       "description": "‏صندوق استثناءات سير العمل المبني على صفوف الملاحة والسجل.",
       "errors": {

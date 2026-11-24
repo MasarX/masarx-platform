@@ -14,7 +14,7 @@ jest.mock("next-intl", () => ({
 
 import { randomUUID } from "node:crypto";
 import type { ReactElement } from "react";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { axe } from "jest-axe";
 import { renderWithIntl } from "./test-utils";
 import { RouteOperationsWorkspacePage } from "../../packages/ui/src/route-operations-workspace-page";
@@ -347,7 +347,22 @@ describe("RouteOperationsWorkspacePage", () => {
     });
     renderWithIntl(node as ReactElement);
 
-    expect(screen.getByText(`ui.routeOperations.scopeLabel:Tenant REF-${maskedId}`)).toBeInTheDocument();
+    // EN and AR: render with the catalog-backed translator, not this file's key-echo mock.
+    const intl = jest.requireMock<{ createTranslator: (options: object) => unknown }>("next-intl");
+    const catalogTranslator = jest.spyOn(intl, "createTranslator")
+      .mockImplementation(jest.requireActual("next-intl").createTranslator);
+    for (const [locale, expected] of [["en", "Tenant"], ["ar", "مستأجر"]] as const) {
+      process.env.NEXT_PUBLIC_LOCALE = locale;
+      const view = renderWithIntl(await RouteOperationsWorkspacePage({
+        appBasePath: "/console", appKey: "console", testIdPrefix: "console-route-operations",
+      }) as ReactElement);
+      const reference = within(view.container).getByText(`REF-${maskedId}`);
+      expect(reference.tagName).toBe("BDI");
+      expect(reference.parentElement).toHaveTextContent(`${expected}: REF-${maskedId}`);
+      view.unmount();
+    }
+    delete process.env.NEXT_PUBLIC_LOCALE;
+    catalogTranslator.mockRestore();
     expect(screen.queryByText(tenantId)).not.toBeInTheDocument();
   });
 
