@@ -12,7 +12,8 @@ type ThemeContextValue = {
   toggleTheme: () => void;
 };
 
-const THEME_STORAGE_KEY = "masarx-ui-theme";
+/** The one theme storage key every surface reads and writes. */
+export const THEME_STORAGE_KEY = "masarx-ui-theme";
 const THEME_ATTRIBUTE = "data-theme";
 
 const ThemeContext = React.createContext<ThemeContextValue | null>(null);
@@ -81,7 +82,9 @@ export function ThemeProvider({ children }: { children?: React.ReactNode }) {
   }, [theme]);
 
   React.useEffect(() => {
-    if (theme !== "system" || typeof window === "undefined") return;
+    if (theme !== "system" || typeof window === "undefined" || !window.matchMedia) {
+      return;
+    }
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const handleChange = () => {
       const resolved = resolveSystemTheme();
