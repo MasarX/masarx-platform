@@ -522,6 +522,8 @@ jobs:
   database:
     if: github.event_name == 'push' || inputs.mode == 'deploy'
     runs-on: ubuntu-24.04
+    env:
+      EDGE_FROZEN_WORKDIR: &edge-frozen-workdir .edge-frozen
     permissions:
       actions: read
       contents: read
@@ -627,6 +629,7 @@ jobs:
           PUBLIC_TRACKING_CORS_ALLOW_ORIGINS: ${{ vars.PUBLIC_TRACKING_CORS_ALLOW_ORIGINS }}
         run: |
           set -euo pipefail
+          (cd "$EDGE_FROZEN_WORKDIR" && sha256sum --strict --check SHA256SUMS)
           printf '::add-mask::%s\n' "$SUPABASE_PROJECT_REF"
           umask 077
           deploy_temp="$(mktemp -d)"
@@ -733,7 +736,7 @@ jobs:
           while IFS=$'\t' read -r function_name auth_mode; do
             flags=()
             if [[ "$auth_mode" == public_no_jwt ]]; then flags+=(--no-verify-jwt); fi
-            "$cli" functions deploy "$function_name" --project-ref "$SUPABASE_PROJECT_REF" --use-api "${flags[@]}"
+            "$cli" functions deploy "$function_name" --project-ref "$SUPABASE_PROJECT_REF" --use-api --workdir "$EDGE_FROZEN_WORKDIR" "${flags[@]}"
           done < edge-deploy.tsv
       - name: Record database push attempt
         if: ${{ always() && steps.deploy.outputs.attempted == 'true' }}
@@ -746,6 +749,7 @@ jobs:
     timeout-minutes: 90
     env:
       DEV_DB_DEPLOY_TIMEOUT_MINUTES: *dev-db-deploy-timeout-minutes
+      EDGE_FROZEN_WORKDIR: *edge-frozen-workdir
     concurrency:
       group: dev-db-dry-run
       cancel-in-progress: false

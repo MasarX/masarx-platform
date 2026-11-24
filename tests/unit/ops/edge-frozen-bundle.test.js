@@ -1,0 +1,65 @@
+jest.mock('node:child_process', () => ({ spawnSync: jest.fn() }));
+jest.mock('../../../config/edge/functions.json', () => ({
+  functions: [{ name: 'fixture-edge', enabled: true }],
+}));
+
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { createHash } = require('node:crypto');
+const { spawnSync } = require('node:child_process');
+const yaml = require('yaml');
+const { verify } = require('../../../scripts/edge/verify-frozen-lock.cjs');
+
+let temp;
+let workdir;
+
+beforeEach(() => {
+  temp = fs.mkdtempSync(path.join(os.tmpdir(), 'edge-bundle-test-'));
+  workdir = path.join(temp, 'build');
+  spawnSync.mockReset();
+});
+
+afterEach(() => fs.rmSync(temp, { recursive: true }));
+
+test('stages only the frozen Edge entry point and its verified digest', () => {
+  const bundle = 'Deno.serve(() => new Response("fixture"));\n';
+  const entry = 'supabase/functions/fixture-edge/index.ts';
+  spawnSync.mockImplementation((_command, args) => {
+    fs.writeFileSync(args[args.indexOf('--output') + 1], bundle);
+    return { status: 0 };
+  });
+
+  expect(verify(workdir)).toBe(0);
+  const [command, args, options] = spawnSync.mock.calls[0];
+  expect(command).toBe('deno');
+  expect(args).toEqual([
+    'bundle', '--frozen', '--lock=deno.lock', '--no-config', '--node-modules-dir=none',
+    '--platform=deno', '--packages=bundle', '--output', path.join(workdir, entry), entry,
+  ]);
+  expect(options.env.DENO_DIR).not.toBe(process.env.DENO_DIR);
+  expect(fs.readdirSync(path.join(workdir, 'supabase/functions/fixture-edge'))).toEqual(['index.ts']);
+  expect(fs.readFileSync(path.join(workdir, entry), 'utf8')).toBe(bundle);
+  const digest = createHash('sha256').update(bundle).digest('hex');
+  expect(fs.readFileSync(path.join(workdir, 'SHA256SUMS'), 'utf8')).toBe(`${digest}  ${entry}\n`);
+});
+
+test('a rejected frozen build leaves no deployable Edge checksum manifest', () => {
+  spawnSync.mockReturnValue({ status: 1, stderr: 'error: fixture integrity mismatch' });
+
+  expect(verify(workdir)).toBe(1);
+  expect(fs.existsSync(path.join(workdir, 'SHA256SUMS'))).toBe(false);
+  expect(fs.existsSync(path.join(workdir, 'supabase/config.toml'))).toBe(false);
+});
+
+test('DEV checks the bundle manifest before writes and limits the upload to that workdir', () => {
+  const workflow = yaml.parse(fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/deploy.yml'), 'utf8'));
+  const { database } = workflow.jobs;
+  const deploy = database.steps.find(step => step.id === 'deploy');
+  expect(database.env.EDGE_FROZEN_WORKDIR).toBeTruthy();
+  expect(deploy.if).toContain("steps.edge_lock.outcome == 'success'");
+  const verify = deploy.run.indexOf('sha256sum --strict --check SHA256SUMS');
+  expect(verify).toBeGreaterThan(-1);
+  expect(verify).toBeLessThan(deploy.run.indexOf(' db push '));
+  expect(deploy.run).toMatch(/functions deploy[^\n]*--workdir "\$EDGE_FROZEN_WORKDIR"/);
+});
