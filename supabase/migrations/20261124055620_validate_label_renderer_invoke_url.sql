@@ -33,16 +33,16 @@ DECLARE
   definition text;
   anchor text;
 BEGIN
-  definition := pg_get_functiondef('public.label_provider_request_value_v1(jsonb,text,uuid)'::regprocedure);
-  anchor := '    provider := entry.value;';
+  definition := pg_get_functiondef('public.label_provider_seal_value_v1(jsonb,text,uuid,jsonb)'::regprocedure);
+  anchor := $anchor$    v_invoke_secret := NULLIF(provider->>'invoke_secret', '');$anchor$;
   IF cardinality(string_to_array(definition, anchor)) <> 2 THEN
-    RAISE EXCEPTION 'label provider request validation anchor missing';
+    RAISE EXCEPTION 'label provider seal validation anchor missing';
   END IF;
-  EXECUTE replace(definition, anchor, anchor || $validation$
-    IF NULLIF(provider->>'invoke_url', '') IS NOT NULL
+  EXECUTE replace(definition, anchor, $validation$    IF NULLIF(provider->>'invoke_url', '') IS NOT NULL
        AND NOT public.label_renderer_url_allowed_v1(provider->>'invoke_url') THEN
       RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'outbound_url_invalid';
-    END IF;$validation$);
+    END IF;
+$validation$ || anchor);
 
   definition := pg_get_functiondef('public.resolve_label_renderer_edge_config_v1(uuid)'::regprocedure);
   anchor := 'IF v_url IS NULL OR NOT public.outbound_url_allowed_v1(v_url, NULL) THEN';
