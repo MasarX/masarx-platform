@@ -8,3 +8,16 @@ export function toDateInputValue(date: Date): string {
 export function todayDateInputValue(now = new Date()): string {
   return toDateInputValue(now);
 }
+
+export function toDateTimeInputValue(date: Date): string {
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${toDateInputValue(date)}T${hours}:${minutes}`;
+}
+
+export function localDateTimeInputToUtc(value: string): string | null {
+  const date = new Date(value);
+  // A local time skipped at a clock change can otherwise silently move forward.
+  if (Number.isNaN(date.getTime()) || toDateTimeInputValue(date) !== value) return null;
+  return date.toISOString();
+}
