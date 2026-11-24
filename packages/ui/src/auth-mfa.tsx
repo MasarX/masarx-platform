@@ -2,11 +2,10 @@
 
 import * as React from "react";
 import { useLocale } from "next-intl";
-import en from "@masarx/config/messages/en.json";
-import ar from "@masarx/config/messages/ar.json";
 import type { createBrowserClient } from "@masarx/auth/browser";
 import { Button } from "./button";
 import { Input } from "./input";
+import { createUiTranslator } from "./i18n";
 
 type MfaApi = ReturnType<typeof createBrowserClient>["auth"]["mfa"];
 type Factor = { id: string; friendly_name?: string };
@@ -20,7 +19,7 @@ type AuthMfaProps = {
 
 export function AuthMfa({ mfa, onVerified, onSignOut }: AuthMfaProps) {
   const locale = useLocale();
-  const t = (locale.split("-")[0] === "ar" ? ar : en).ui.auth.mfa;
+  const t = React.useMemo(() => createUiTranslator("ui.auth.mfa", { locale }), [locale]);
   const codeId = React.useId();
   const factorInputId = React.useId();
   const [factors, setFactors] = React.useState<Factor[] | null>(null);
@@ -28,7 +27,7 @@ export function AuthMfa({ mfa, onVerified, onSignOut }: AuthMfaProps) {
   const [factorId, setFactorId] = React.useState("");
   const [code, setCode] = React.useState("");
   const [pending, setPending] = React.useState(false);
-  const [error, setError] = React.useState<keyof typeof t | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
   const busy = React.useRef(false);
   const codeInput = React.useRef<HTMLInputElement>(null);
   const hasFactor = Boolean(factorId);
@@ -37,7 +36,7 @@ export function AuthMfa({ mfa, onVerified, onSignOut }: AuthMfaProps) {
     if (hasFactor) codeInput.current?.focus();
   }, [hasFactor]);
 
-  async function run(action: () => Promise<void>, errorKey: keyof typeof t) {
+  async function run(action: () => Promise<void>, errorKey: string) {
     if (busy.current) return;
     busy.current = true;
     setPending(true);
@@ -55,9 +54,10 @@ export function AuthMfa({ mfa, onVerified, onSignOut }: AuthMfaProps) {
   async function prepare() {
     const { data, error: listError } = await mfa.listFactors();
     if (listError) throw listError;
-    if (data.totp.length) {
+    const firstFactor = data.totp[0];
+    if (firstFactor) {
       setFactors(data.totp);
-      setFactorId(data.totp[0].id);
+      setFactorId(firstFactor.id);
       return;
     }
 
@@ -92,28 +92,28 @@ export function AuthMfa({ mfa, onVerified, onSignOut }: AuthMfaProps) {
 
   return (
     <div className="space-y-4" data-testid="auth-mfa">
-      <h1 className="text-xl font-semibold">{t.title}</h1>
+      <h1 className="text-xl font-semibold">{t("title")}</h1>
       {!factorId ? (
         <div className="space-y-3">
-          <p>{t.description}</p>
+          <p>{t("description")}</p>
           <Button type="button" loading={pending} onClick={() => void run(prepare, "setupFailed")}>
-            {t.continue}
+            {t("continue")}
           </Button>
         </div>
       ) : (
         <form onSubmit={verify} className="space-y-3">
           {enrollment ? (
             <div className="space-y-2">
-              <p>{t.setupInstructions}</p>
+              <p>{t("setupInstructions")}</p>
               {/* The authenticator service supplies this in-memory QR image. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={enrollment.qrCode} alt={t.qrLabel} width={160} height={160} />
-              <p>{t.manualKey} <code dir="ltr" className="break-all">{enrollment.secret}</code></p>
+              <img src={enrollment.qrCode} alt={t("qrLabel")} width={160} height={160} />
+              <p>{t("manualKey")} <code dir="ltr" className="break-all">{enrollment.secret}</code></p>
             </div>
           ) : null}
           {factors && factors.length > 1 ? (
             <label htmlFor={factorInputId} className="block">
-              {t.factorLabel}
+              {t("factorLabel")}
               <select id={factorInputId} className="ms-2" value={factorId} disabled={pending}
                 onChange={(event) => { setFactorId(event.target.value); setCode(""); }}>
                 {factors.map((factor, index) => (
@@ -122,7 +122,7 @@ export function AuthMfa({ mfa, onVerified, onSignOut }: AuthMfaProps) {
               </select>
             </label>
           ) : null}
-          <label htmlFor={codeId} className="block">{t.codeLabel}</label>
+          <label htmlFor={codeId} className="block">{t("codeLabel")}</label>
           <Input
             ref={codeInput}
             id={codeId}
@@ -136,12 +136,12 @@ export function AuthMfa({ mfa, onVerified, onSignOut }: AuthMfaProps) {
             value={code}
             onChange={(event) => setCode(event.target.value)}
           />
-          <Button type="submit" loading={pending}>{t.verify}</Button>
+          <Button type="submit" loading={pending}>{t("verify")}</Button>
         </form>
       )}
-      {error ? <p role="alert">{t[error]}</p> : null}
+      {error ? <p role="alert">{t(error)}</p> : null}
       <Button type="button" variant="ghost" disabled={pending} onClick={() => void run(onSignOut, "signOutFailed")}>
-        {t.signOut}
+        {t("signOut")}
       </Button>
     </div>
   );
