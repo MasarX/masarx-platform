@@ -22,6 +22,8 @@ export type ComboboxProps = {
   className?: string;
   "aria-label"?: string;
   "aria-labelledby"?: string;
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
 };
 
 export function Combobox({
@@ -41,6 +43,8 @@ export function Combobox({
   className,
   "aria-label": ariaLabelProp,
   "aria-labelledby": ariaLabelledBy,
+  "aria-describedby": ariaDescribedBy,
+  "aria-invalid": ariaInvalid,
 }: ComboboxProps) {
   const {
     open,
@@ -165,10 +169,12 @@ export function Combobox({
         aria-haspopup="listbox"
         aria-disabled={disabled}
         aria-labelledby={ariaLabelledBy}
+        aria-describedby={ariaDescribedBy}
+        aria-invalid={ariaInvalid || undefined}
         aria-controls={open ? listboxId : undefined}
         aria-activedescendant={open ? activeOptionId : undefined}
         className={cn(
-          "flex min-h-[44px] w-full cursor-pointer flex-wrap items-center gap-1 rounded-lg border border-ui-border bg-ui-surface px-3 py-2 text-sm text-ui-ink transition",
+          "flex min-h-[44px] w-full cursor-pointer flex-wrap items-center gap-1 rounded-lg border border-ui-border bg-ui-surface px-3 py-2 text-sm text-ui-ink transition aria-invalid:border-ui-danger aria-invalid:ring-ui-danger/40",
           "focus-within:ring-2 focus-within:ring-ui-accent/40 focus-within:ring-offset-2 focus-within:ring-offset-ui-paper",
           disabled && "cursor-not-allowed opacity-60",
           className

@@ -53,16 +53,72 @@ function verifyPrebuilt(root = process.cwd()) {
   return { functions: configs.length, files: sources.size };
 }
 
-if (require.main === module) {
+async function assignAndVerifyDevAlias(surface, deploymentUrl, marker, env, request = fetch) {
+  const { DEV_WEB_ORIGINS = '', VERCEL_ORG_ID, VERCEL_PROJECT_ID, VERCEL_TOKEN, GITHUB_SHA } = env;
+  const aliases = new Set(DEV_WEB_ORIGINS.split(',').map(origin =>
+    origin.trim().match(/^https:\/\/([a-z0-9-]+(?:\.[a-z0-9-]+)+)$/)?.[1],
+  ).filter(host => host?.startsWith(`${surface}-dev.`)));
+  if (!['console', 'portal'].includes(surface) || aliases.size !== 1 ||
+      !VERCEL_ORG_ID || !VERCEL_PROJECT_ID || !VERCEL_TOKEN || !/^[a-f0-9]{40}$/.test(GITHUB_SHA) ||
+      !/^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(deploymentUrl) ||
+      !/^_next\/static\/dev-build-\d+-\d+\.txt$/.test(marker)) {
+    throw new Error('Invalid DEV web alias configuration');
+  }
+  const [alias] = aliases;
+  const options = () => ({ redirect: 'error', signal: AbortSignal.timeout(20_000) });
+  async function vercel(endpoint, operation, body) {
+    const url = new URL(endpoint, 'https://api.vercel.com');
+    url.searchParams.set('teamId', VERCEL_ORG_ID);
+    try {
+      const response = await request(url, {
+        ...options(),
+        headers: { authorization: `Bearer ${VERCEL_TOKEN}`, 'content-type': 'application/json' },
+        method: body ? 'POST' : 'GET',
+        body: JSON.stringify(body),
+      });
+      if (response.ok) return await response.json();
+    } catch {
+      // Provider errors can contain private domain and deployment details.
+    }
+    throw new Error(`DEV web ${operation} failed`);
+  }
+
+  const domain = await vercel(`/v9/projects/${encodeURIComponent(VERCEL_PROJECT_ID)}/domains/${alias}`, 'domain lookup');
+  if (domain.name !== alias || domain.projectId !== VERCEL_PROJECT_ID || !domain.verified || domain.redirect) {
+    throw new Error('DEV web domain binding failed');
+  }
+  const host = new URL(deploymentUrl).hostname;
+  const deployment = await vercel(`/v13/deployments/${host}`, 'deployment lookup');
+  if (deployment.url !== host || deployment.projectId !== VERCEL_PROJECT_ID ||
+      deployment.readyState !== 'READY' || (deployment.target != null && deployment.target !== 'preview') || !deployment.id) {
+    throw new Error('DEV web deployment binding failed');
+  }
+  await vercel(`/v2/deployments/${encodeURIComponent(deployment.id)}/aliases`, 'alias assignment', { alias });
+
+  try {
+    const response = await request(new URL(`/${marker}`, `https://${alias}`), options());
+    if (response.status === 200 && await response.text() === `${GITHUB_SHA}\n`) return;
+  } catch {
+    // The stable alias must serve the uploaded marker without credentials or redirects.
+  }
+  throw new Error('DEV web alias did not serve the new build');
+}
+
+async function main() {
   try {
     if (process.argv[2] === 'public-key') validatePublicKey(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
     else if (process.argv[2] === 'prebuilt') {
       const result = verifyPrebuilt();
       console.log(`Verified ${result.files} mapped files across ${result.functions} prebuilt functions`);
-    } else throw new Error('Usage: validate-build.js public-key|prebuilt');
+    } else if (process.argv[2] === 'dev-alias') {
+      await assignAndVerifyDevAlias(...process.argv.slice(3, 6), process.env);
+      console.log('Verified stable DEV alias serves the new build');
+    } else throw new Error('Usage: validate-build.js public-key|prebuilt|dev-alias <surface> <deployment-url> <build-marker>');
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;
   }
 }
-module.exports = { validatePublicKey, verifyPrebuilt };
+
+if (require.main === module) main();
+module.exports = { validatePublicKey, verifyPrebuilt, assignAndVerifyDevAlias };
