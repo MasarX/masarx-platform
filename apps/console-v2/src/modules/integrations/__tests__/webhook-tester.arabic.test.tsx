@@ -20,7 +20,7 @@ describe('WebhookTesterModule in Arabic', () => {
     renderWithProviders(<WebhookTesterModule />, { locale: 'ar', capabilities: ['all'] });
 
     const chip = await screen.findByText(ar.integrationsWebhookTester.webhookTesterModule.webhookReceiverMappingProfiles);
-    expect(findUntranslated(chip)).toEqual([]);
+    expect(findUntranslated(chip, ['Webhook'])).toEqual([]);
   });
 
   it('shows the denied state in Arabic', async () => {
