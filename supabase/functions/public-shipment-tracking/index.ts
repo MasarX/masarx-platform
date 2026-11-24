@@ -49,6 +49,8 @@ const mapRpcErrorToStatus = (code: string): number => {
   switch (code) {
     case "rate_limited":
       return 429;
+    case "changes_closed":
+      return 409;
     case "disabled":
       return 503;
     case "invalid_session":
@@ -173,12 +175,13 @@ const createServiceClient = () => {
   });
 };
 
-const pathAction = (pathname: string): "lookup" | "verify" | "session" | "request" | "" => {
+const pathAction = (pathname: string): "lookup" | "verify" | "session" | "request" | "options" | "" => {
   const normalized = pathname.replace(/\/+$/g, "");
   if (normalized.endsWith("/lookup")) return "lookup";
   if (normalized.endsWith("/verify")) return "verify";
   if (normalized.endsWith("/session")) return "session";
   if (normalized.endsWith("/request")) return "request";
+  if (normalized.endsWith("/options")) return "options";
   return "";
 };
 
@@ -188,6 +191,7 @@ const TRACKING_RPC_BY_ACTION: Record<string, string> = {
   verify: "public_tracking_verify_v1",
   session: "public_tracking_session_v1",
   request: "public_tracking_submit_request_v2",
+  options: "public_tracking_delivery_options_v1",
 };
 
 Deno.serve(async (req: Request): Promise<Response> => {
