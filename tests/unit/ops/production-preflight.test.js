@@ -106,6 +106,8 @@ test('refuses production apply when preflight evidence cannot be read', () => {
 
 const runbook = readFileSync(resolve(__dirname, '../../../docs/ops/production-release.md'), 'utf8');
 const commands = [...runbook.matchAll(/```bash\r?\n([\s\S]*?)\r?\n```/g)].map(([, block]) => block.split(/\r?\n/));
+const providerCommand = /\$(SUPABASE|VERCEL|WRANGLER)_CLI/;
+const applyBlocks = commands.filter(lines => lines.some(line => providerCommand.test(line)));
 
 test('requires the shared exact-SHA CI check before creating the tag', () => {
   const block = commands.find(lines => lines.some(line => line.startsWith('git tag -a ')));
@@ -116,7 +118,6 @@ test('requires the shared exact-SHA CI check before creating the tag', () => {
 });
 
 test('gates all production apply blocks and stops on command failure', () => {
-  const applyBlocks = commands.filter(lines => lines.some(line => /\$(SUPABASE|VERCEL|WRANGLER)_CLI/.test(line)));
   expect(applyBlocks).toHaveLength(3);
   for (const lines of applyBlocks) {
     expect(lines[0]).toBe('set -euo pipefail');
@@ -125,11 +126,45 @@ test('gates all production apply blocks and stops on command failure', () => {
     }
     const approval = lines.findIndex(line => line.includes('require-production-preflight.cjs'));
     const backupCheck = lines.findIndex(line => line.includes('check-supabase-backup.cjs'));
-    const provider = lines.findIndex(line => /\$(SUPABASE|VERCEL|WRANGLER)_CLI/.test(line));
+    const provider = lines.findIndex(line => providerCommand.test(line));
     expect(approval).toBeGreaterThanOrEqual(0);
     expect(lines[approval]).toContain('"$APP_RUN" "$repo" "$tag" "$RELEASE_SHA" || exit 1');
     expect(approval).toBeLessThan(backupCheck);
     expect(backupCheck).toBeLessThan(provider);
+  }
+});
+
+test('checks the exact commit and a clean checkout before each apply block', () => {
+  expect(applyBlocks).toHaveLength(3);
+  for (const lines of applyBlocks) {
+    expect(lines.slice(2, 6)).toEqual([
+      'release_head=$(git rev-parse --verify HEAD)',
+      '[[ "$release_head" == "$RELEASE_SHA" ]]',
+      'release_status=$(git status --porcelain --untracked-files=all)',
+      '[[ -z "$release_status" ]]',
+    ]);
+    expect(lines.findIndex(line => providerCommand.test(line))).toBeGreaterThan(5);
+  }
+});
+
+test('checks credential files and reads their values before exporting them', () => {
+  const scopes = applyBlocks.flatMap(lines => lines.join('\n').split(/\n\(\n/).slice(1));
+  expect(scopes).toHaveLength(4);
+  for (const [index, scope] of scopes.entries()) {
+    const names = [
+      ['SUPABASE_ACCESS_TOKEN', 'SUPABASE_DB_PASSWORD'],
+      ['SUPABASE_ACCESS_TOKEN', 'SUPABASE_DB_PASSWORD'],
+      ['VERCEL_TOKEN'],
+      ['CLOUDFLARE_API_TOKEN'],
+    ][index];
+    const lines = scope.split('\n').map(line => line.trim());
+    expect(lines.slice(2, 5 + names.length)).toEqual([
+      `[[ ${names.map(name => `-s "$${name}_FILE"`).join(' && ')} ]]`,
+      ...names.map(name => `${name}=$(< "$${name}_FILE")`),
+      `[[ ${names.map(name => `-n "$${name}"`).join(' && ')} ]]`,
+      `export ${names.join(' ')}`,
+    ]);
+    expect(lines.findIndex(line => providerCommand.test(line))).toBeGreaterThan(4 + names.length);
   }
 });
 

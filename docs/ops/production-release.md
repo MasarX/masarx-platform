@@ -55,20 +55,26 @@ For each deployable, take `ARTIFACT`, `ARTIFACT_SHA256` and `MAIN_BUILD_WORKFLOW
 
 ## Check the backup and apply
 
-Before each production deployment, use the tagged checkout and the production project binding from the private target configuration. The apply checks require the latest Production preflight for the exact tag and SHA to have completed successfully. Record the emitted `production_preflight_run` ID with the release evidence. `BACKUP_MAX_AGE_HOURS` is the approved recovery-point age limit. The token on stdin needs Supabase Management API `backups_read` access to the selected project. The checker requires a completed provider backup younger than the age limit. Retain its UTC timestamp with the release audit evidence and check the separately recorded restore rehearsal before continuing. [Backup listing API](https://supabase.com/docs/reference/api/v1-list-all-backups)
+Before running the apply blocks, use `git checkout --detach "$RELEASE_SHA"` in the dedicated production checkout and verify the production project binding from the private target configuration. Save each block as a Bash script outside the checkout, export the inputs it uses, and run it with Bash from the checkout root. Each block requires a clean checkout at the approved SHA and a successful latest Production preflight for the exact tag and SHA. Record the emitted `production_preflight_run` ID with the release evidence. `BACKUP_MAX_AGE_HOURS` is the approved recovery-point age limit. The token on stdin needs Supabase Management API `backups_read` access to the selected project. The checker requires a completed provider backup younger than the age limit. Retain its UTC timestamp with the release audit evidence and check the separately recorded restore rehearsal before continuing. [Backup listing API](https://supabase.com/docs/reference/api/v1-list-all-backups)
 
 ```bash
 set -euo pipefail
 set +x
-git checkout --detach "$RELEASE_SHA"
+release_head=$(git rev-parse --verify HEAD)
+[[ "$release_head" == "$RELEASE_SHA" ]]
+release_status=$(git status --porcelain --untracked-files=all)
+[[ -z "$release_status" ]]
 export SUPABASE_PROJECT_REF BACKUP_MAX_AGE_HOURS
 node scripts/deploy/require-production-preflight.cjs "$APP_RUN" "$repo" "$tag" "$RELEASE_SHA" || exit 1
 node scripts/deploy/check-supabase-backup.cjs < "$BACKUP_READ_TOKEN_FILE" || exit 1
 (
   set -euo pipefail
   set +x
-  export SUPABASE_ACCESS_TOKEN="$(< "$SUPABASE_ACCESS_TOKEN_FILE")"
-  export SUPABASE_DB_PASSWORD="$(< "$SUPABASE_DB_PASSWORD_FILE")"
+  [[ -s "$SUPABASE_ACCESS_TOKEN_FILE" && -s "$SUPABASE_DB_PASSWORD_FILE" ]]
+  SUPABASE_ACCESS_TOKEN=$(< "$SUPABASE_ACCESS_TOKEN_FILE")
+  SUPABASE_DB_PASSWORD=$(< "$SUPABASE_DB_PASSWORD_FILE")
+  [[ -n "$SUPABASE_ACCESS_TOKEN" && -n "$SUPABASE_DB_PASSWORD" ]]
+  export SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD
   "$SUPABASE_CLI" link --project-ref "$SUPABASE_PROJECT_REF" --yes
   "$SUPABASE_CLI" db push --linked --dry-run
 )
@@ -79,13 +85,20 @@ node scripts/deploy/check-supabase-backup.cjs < "$BACKUP_READ_TOKEN_FILE" || exi
 ```bash
 set -euo pipefail
 set +x
+release_head=$(git rev-parse --verify HEAD)
+[[ "$release_head" == "$RELEASE_SHA" ]]
+release_status=$(git status --porcelain --untracked-files=all)
+[[ -z "$release_status" ]]
 node scripts/deploy/require-production-preflight.cjs "$APP_RUN" "$repo" "$tag" "$RELEASE_SHA" || exit 1
 node scripts/deploy/check-supabase-backup.cjs < "$BACKUP_READ_TOKEN_FILE" || exit 1
 (
   set -euo pipefail
   set +x
-  export SUPABASE_ACCESS_TOKEN="$(< "$SUPABASE_ACCESS_TOKEN_FILE")"
-  export SUPABASE_DB_PASSWORD="$(< "$SUPABASE_DB_PASSWORD_FILE")"
+  [[ -s "$SUPABASE_ACCESS_TOKEN_FILE" && -s "$SUPABASE_DB_PASSWORD_FILE" ]]
+  SUPABASE_ACCESS_TOKEN=$(< "$SUPABASE_ACCESS_TOKEN_FILE")
+  SUPABASE_DB_PASSWORD=$(< "$SUPABASE_DB_PASSWORD_FILE")
+  [[ -n "$SUPABASE_ACCESS_TOKEN" && -n "$SUPABASE_DB_PASSWORD" ]]
+  export SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD
   "$SUPABASE_CLI" link --project-ref "$SUPABASE_PROJECT_REF" --yes
   "$SUPABASE_CLI" db push --linked --yes
   "$SUPABASE_CLI" secrets set --project-ref "$SUPABASE_PROJECT_REF" --env-file "$EDGE_SECRET_FILE"
@@ -97,20 +110,30 @@ Recheck production admission and the backup before promoting the verified Edge, 
 ```bash
 set -euo pipefail
 set +x
+release_head=$(git rev-parse --verify HEAD)
+[[ "$release_head" == "$RELEASE_SHA" ]]
+release_status=$(git status --porcelain --untracked-files=all)
+[[ -z "$release_status" ]]
 node scripts/deploy/require-production-preflight.cjs "$APP_RUN" "$repo" "$tag" "$RELEASE_SHA" || exit 1
 node scripts/deploy/check-supabase-backup.cjs < "$BACKUP_READ_TOKEN_FILE" || exit 1
 export VERCEL_ORG_ID VERCEL_TELEMETRY_DISABLED=1 CLOUDFLARE_ACCOUNT_ID
 (
   set -euo pipefail
   set +x
-  export VERCEL_TOKEN="$(< "$VERCEL_TOKEN_FILE")"
+  [[ -s "$VERCEL_TOKEN_FILE" ]]
+  VERCEL_TOKEN=$(< "$VERCEL_TOKEN_FILE")
+  [[ -n "$VERCEL_TOKEN" ]]
+  export VERCEL_TOKEN
   VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID_CONSOLE" "$VERCEL_CLI" deploy --cwd "$CONSOLE_PREBUILT_DIR" --prebuilt --prod --yes
   VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID_PORTAL" "$VERCEL_CLI" deploy --cwd "$PORTAL_PREBUILT_DIR" --prebuilt --prod --yes
 )
 (
   set -euo pipefail
   set +x
-  export CLOUDFLARE_API_TOKEN="$(< "$CLOUDFLARE_API_TOKEN_FILE")"
+  [[ -s "$CLOUDFLARE_API_TOKEN_FILE" ]]
+  CLOUDFLARE_API_TOKEN=$(< "$CLOUDFLARE_API_TOKEN_FILE")
+  [[ -n "$CLOUDFLARE_API_TOKEN" ]]
+  export CLOUDFLARE_API_TOKEN
   "$WRANGLER_CLI" pages deploy "$LANDING_PREBUILT_DIR" \
     --project-name "$CLOUDFLARE_PAGES_PROJECT_LANDING" --branch "$LANDING_PRODUCTION_BRANCH"
 )
