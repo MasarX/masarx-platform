@@ -10101,7 +10101,7 @@ function RouteSurfaceDetailExtensions({
           ) : null}
           {stop.collectionOutcome ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              {strings.routeStopDetail.collectionOutcome.replace("{outcome}", () => String(formatKeyLabel(stop.collectionOutcome)))}
+              {strings.routeStopDetail.collectionOutcome.replace("{outcome}", () => String(formatKeyLabel(stop.collectionOutcome ?? "")))}
             </Text>
           ) : null}
           {collectedCodLabel ? (
@@ -10116,7 +10116,7 @@ function RouteSurfaceDetailExtensions({
           ) : null}
           {stop.discrepancyKind ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              {strings.routeStopDetail.discrepancy.replace("{kind}", () => String(formatKeyLabel(stop.discrepancyKind)))}
+              {strings.routeStopDetail.discrepancy.replace("{kind}", () => String(formatKeyLabel(stop.discrepancyKind ?? "")))}
             </Text>
           ) : null}
           {stop.hasDiscrepancy === false ? (
