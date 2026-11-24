@@ -103,8 +103,6 @@ export default defineConfig(({ mode }) => {
     build: {
       target: 'es2022',
       sourcemap: true,
-      minify: 'terser',
-      terserOptions: { compress: { passes: 2 } },
       rollupOptions: {
         // @sentry/react is an opt-in runtime dep: it's only dynamically imported when
         // VITE_SENTRY_DSN is set, and is intentionally NOT in package.json. Externalise so

@@ -1,3 +1,4 @@
+import { translateAdapterMessage } from '../i18n';
 import {
   assertLabelDesignScope,
   backendOutcomeError,
@@ -38,25 +39,25 @@ import { asNonEmptyString } from './shared';
 
 function localValidateLabelDesign(value: unknown): Array<Record<string, unknown>> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return [{ code: 'label_design_invalid', message: 'label_design must be an object' }];
+    return [{ code: 'label_design_invalid', message: translateAdapterMessage('adapter.labelDesignInvalid') }];
   }
   const rec = value as Record<string, unknown>;
   const templates = rec.templates;
   if (!templates || typeof templates !== 'object' || Array.isArray(templates)) {
-    return [{ code: 'templates_missing', message: 'label_design.templates missing' }];
+    return [{ code: 'templates_missing', message: translateAdapterMessage('adapter.labelTemplatesMissing') }];
   }
   const errors: Array<Record<string, unknown>> = [];
   for (const [templateKey, template] of Object.entries(templates as Record<string, unknown>)) {
     if (!template || typeof template !== 'object' || Array.isArray(template)) {
-      errors.push({ code: 'template_invalid', message: 'template must be an object', template_key: templateKey });
+      errors.push({ code: 'template_invalid', message: translateAdapterMessage('adapter.labelTemplateInvalid'), template_key: templateKey });
       continue;
     }
     const t = template as Record<string, unknown>;
     if (!t.page || typeof t.page !== 'object' || Array.isArray(t.page)) {
-      errors.push({ code: 'page_missing', message: 'renderer_config.page missing', template_key: templateKey });
+      errors.push({ code: 'page_missing', message: translateAdapterMessage('adapter.labelPageMissing'), template_key: templateKey });
     }
     if (!Array.isArray(t.blocks)) {
-      errors.push({ code: 'blocks_missing', message: 'renderer_config.blocks missing', template_key: templateKey });
+      errors.push({ code: 'blocks_missing', message: translateAdapterMessage('adapter.labelBlocksMissing'), template_key: templateKey });
     }
   }
   return errors;
@@ -384,8 +385,8 @@ export async function label_designer_update_draft(args: {
 
   await sleep(40);
   const draft = localLabelDesignDrafts.find((row) => row.id === args.draft_id);
-  if (!draft) return { ok: false, error: { code: 'draft_not_found', message: 'Draft not found' } };
-  if (draft.status !== 'draft') return { ok: false, error: { code: 'draft_not_editable', message: 'Only draft rows are editable' } };
+  if (!draft) return { ok: false, error: { code: 'draft_not_found', message: translateAdapterMessage('adapter.labelDraftNotFound') } };
+  if (draft.status !== 'draft') return { ok: false, error: { code: 'draft_not_editable', message: translateAdapterMessage('adapter.labelDraftNotEditable') } };
   draft.label_type = args.label_type ?? draft.label_type;
   draft.draft_name = args.draft_name ?? draft.draft_name;
   draft.draft_value = args.draft_value ?? draft.draft_value;
@@ -414,9 +415,9 @@ export async function label_designer_archive_draft(args: {
 
   await sleep(40);
   const draft = localLabelDesignDrafts.find((row) => row.id === args.draft_id);
-  if (!draft) return { ok: false, error: { code: 'draft_not_found', message: 'Draft not found' } };
+  if (!draft) return { ok: false, error: { code: 'draft_not_found', message: translateAdapterMessage('adapter.labelDraftNotFound') } };
   if (draft.status !== 'draft') {
-    return { ok: false, error: { code: 'draft_not_archivable', message: 'Only draft rows can be archived' } };
+    return { ok: false, error: { code: 'draft_not_archivable', message: translateAdapterMessage('adapter.labelDraftNotArchivable') } };
   }
   const now = new Date().toISOString();
   draft.status = 'archived';
@@ -441,7 +442,7 @@ export async function label_designer_validate_label_design_draft(
     return {
       ok: false,
       errors: [],
-      error: { code: 'draft_not_found', message: 'Draft not found' },
+      error: { code: 'draft_not_found', message: translateAdapterMessage('adapter.labelDraftNotFound') },
     };
   }
   const errors = localValidateLabelDesign(draft.draft_value);
@@ -467,12 +468,12 @@ export async function label_designer_publish_label_design_draft(
 
   await sleep(50);
   const draft = localLabelDesignDrafts.find((row) => row.id === draftId);
-  if (!draft) return { ok: false, error: { code: 'draft_not_found', message: 'Draft not found' } };
+  if (!draft) return { ok: false, error: { code: 'draft_not_found', message: translateAdapterMessage('adapter.labelDraftNotFound') } };
   const errors = localValidateLabelDesign(draft.draft_value);
   if (errors.length > 0) {
     return {
       ok: false,
-      error: { code: 'validation_failed', message: 'Draft validation failed' },
+      error: { code: 'validation_failed', message: translateAdapterMessage('adapter.labelDraftValidationFailed') },
       validation_errors: errors,
     };
   }

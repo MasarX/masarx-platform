@@ -1,3 +1,4 @@
+import { translateAdapterMessage } from '../i18n';
 import {
   backendOutcomeError,
   type BasketCreateMutationResult,
@@ -1597,7 +1598,7 @@ async function attachConsoleDispatchScanDevice(
     p_device: {
       device_platform: 'web',
       device_identifier_sha256: identifier,
-      device_label: 'Console V2 Dispatch scanner',
+      device_label: translateAdapterMessage('adapter.dispatchScanner', 'en'),
       metadata: {
         source: 'console_v2_dispatch',
         surface: 'dispatch_scan_out',

@@ -1,5 +1,19 @@
 // ar.js — Arabic message catalog (full coverage; RTL with logic-reversed flow)
 export const ar = {
+  adapter: {
+    dispatchScanner: 'ماسح الإرسال في لوحة التحكم',
+    pluginBlockingDiagnostic: 'تشخيص تجريبي مانع للمتابعة.',
+    workflowStep: 'الخطوة',
+    labelDesignInvalid: 'يجب أن يكون label_design كائنًا',
+    labelTemplatesMissing: 'لا يوجد label_design.templates',
+    labelTemplateInvalid: 'يجب أن يكون القالب كائنًا',
+    labelPageMissing: 'لا يوجد renderer_config.page',
+    labelBlocksMissing: 'لا يوجد renderer_config.blocks',
+    labelDraftNotFound: 'لم يتم العثور على المسودة',
+    labelDraftNotEditable: 'يمكن تعديل المسودات فقط',
+    labelDraftNotArchivable: 'يمكن أرشفة المسودات فقط',
+    labelDraftValidationFailed: 'فشل التحقق من المسودة',
+  },
   app: {
     name: 'مَسار إكس',
     role: 'مشرف',

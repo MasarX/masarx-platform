@@ -1,3 +1,4 @@
+import { translateAdapterMessage } from '../i18n';
 import {
   _runStepCache,
   firstRpcRow,
@@ -636,7 +637,7 @@ function _materializeRunSteps(runId: string): SyntheticRunStep[] {
       return {
         id: (r.id as string) ?? `wfs_${runId}_${i}`,
         step_id: (r.step_id as string) ?? `st_${i + 1}`,
-        label: (r.label as string) ?? `Step ${i + 1}`,
+        label: (r.label as string) ?? `${translateAdapterMessage('adapter.workflowStep')} ${i + 1}`,
         status: ((r.status as SyntheticRunStep['status']) ?? 'succeeded'),
         duration_ms: (r.duration_ms as number | null | undefined) ?? null,
         enqueued_at: enq,
@@ -686,7 +687,7 @@ function _materializeRunSteps(runId: string): SyntheticRunStep[] {
     return {
       id: `wfs_${runId}_${i}`,
       step_id: (r.id as string) ?? `st_${i + 1}`,
-      label: (r.label as string) ?? `Step ${i + 1}`,
+      label: (r.label as string) ?? `${translateAdapterMessage('adapter.workflowStep')} ${i + 1}`,
       kind: (r.kind as string) ?? 'action',
       status: stepStatus,
       duration_ms: dur,
@@ -773,7 +774,7 @@ export async function start_workflow_run(
     return {
       id: `wfs_${runId}_${i}`,
       step_id: (r.id as string) ?? `st_${i + 1}`,
-      label: (r.label as string) ?? `Step ${i + 1}`,
+      label: (r.label as string) ?? `${translateAdapterMessage('adapter.workflowStep')} ${i + 1}`,
       kind: (r.kind as string) ?? 'action',
       status: 'succeeded',
       duration_ms: dur,

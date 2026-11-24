@@ -1,3 +1,4 @@
+import { translateAdapterMessage } from '../i18n';
 import {
   backendOutcomeError,
   type EdgeStudioErrorEnvelope,
@@ -203,7 +204,7 @@ function buildSyntheticReview(coerciveBlocking = 0): PluginStudioReview {
           blocking: true,
           code: 'demo_blocking',
           fieldPath: null,
-          message: 'Synthetic blocking diagnostic (demo branch).',
+          message: translateAdapterMessage('adapter.pluginBlockingDiagnostic'),
           why: 'In-memory mode; live mode returns real diagnostics from edge fn.',
           recommended_fix: 'Run against a live Supabase project to see real diagnostics.',
         }]

@@ -1,3 +1,4 @@
+import { translateAdapterMessage } from '../i18n';
 import { CAP } from '../capabilities';
 import {
   backendOutcomeError,
@@ -48,7 +49,7 @@ export async function dashboardKpis(): Promise<
   const tasks = seed.tasks as Array<{ task_type: string; status: string }>;
   return [
     {
-      label: 'Active runs',
+      label: translateAdapterMessage('dashboard.kpi.activeRuns'),
       key: 'active_runs',
       value: runs.filter((r) => r.status !== 'completed' && r.status !== 'cancelled').length,
       delta: '+12 vs avg',
@@ -56,7 +57,7 @@ export async function dashboardKpis(): Promise<
       spark: [4, 8, 6, 9, 12, 11, 14],
     },
     {
-      label: 'Stops in flight',
+      label: translateAdapterMessage('dashboard.kpi.stops'),
       key: 'stops',
       value: runs.reduce((s, r) => s + r.stops, 0),
       delta: '94% on-time',
@@ -64,7 +65,7 @@ export async function dashboardKpis(): Promise<
       spark: [22, 28, 30, 27, 35, 32, 38],
     },
     {
-      label: 'At-risk SLA',
+      label: translateAdapterMessage('dashboard.kpi.atRisk'),
       key: 'at_risk',
       value:
         runs.filter((r) => r.risk).length +
@@ -73,9 +74,9 @@ export async function dashboardKpis(): Promise<
       tone: 'warn',
       spark: [2, 1, 3, 4, 3, 5, 6],
     },
-    { label: 'Failed attempts', key: 'failed', value: 14, delta: 'NDR queue · 6', tone: 'danger', spark: [1, 0, 2, 1, 2, 3, 1] },
-    { label: 'Unassigned', key: 'unassigned', value: 23, delta: '4 partner-eligible', tone: 'info', spark: [5, 4, 6, 5, 7, 6, 8] },
-    { label: 'Avg solve', key: 'avg_solve', value: '1.4s', delta: 'p95 · 3.8s', tone: 'neutral', spark: [1.2, 1.4, 1.3, 1.5, 1.2, 1.4, 1.4] },
+    { label: translateAdapterMessage('dashboard.kpi.failed'), key: 'failed', value: 14, delta: 'NDR queue · 6', tone: 'danger', spark: [1, 0, 2, 1, 2, 3, 1] },
+    { label: translateAdapterMessage('dashboard.kpi.unassigned'), key: 'unassigned', value: 23, delta: '4 partner-eligible', tone: 'info', spark: [5, 4, 6, 5, 7, 6, 8] },
+    { label: translateAdapterMessage('dashboard.kpi.avgSolve'), key: 'avg_solve', value: '1.4s', delta: 'p95 · 3.8s', tone: 'neutral', spark: [1.2, 1.4, 1.3, 1.5, 1.2, 1.4, 1.4] },
   ];
 }
 
@@ -324,34 +325,6 @@ export async function compute_bank_account_balance_v1(
     correlation_id: `cor_demo_${args.bank_account_id}`,
     settings_resolution_id: `srlv_demo_${args.bank_account_id}`,
   };
-}
-
-export async function listDecisionLog(filters: LogFilter = {}): Promise<Record<string, unknown>[]> {
-  const pageSize = filters.limit ?? 50;
-  const liveFilters: Record<string, unknown> = {};
-  if (filters.category) liveFilters.decision_category = filters.category;
-  if (filters.id) liveFilters.id = filters.id;
-  if (filters.resource_id) liveFilters.resource_id = filters.resource_id;
-  if (filters.resource_type) liveFilters.resource_type = filters.resource_type;
-  const live = await liveRpc<Record<string, unknown>>('ui_list_resource_v1', {
-    p_resource: 'decision_log',
-    p_filters: liveFilters,
-    p_limit: pageSize,
-    p_offset: 0,
-    p_sort: { key: 'timestamp', direction: 'desc' },
-  });
-  if (live) {
-    return normalizeLiveListResult<Record<string, unknown>>(live.data, 0, pageSize).rows;
-  }
-
-  await sleep(30);
-  let rows = [...((seed.decision_log as Record<string, unknown>[]) ?? [])];
-  if (filters.category) rows = rows.filter((r) => (r as { decision_category?: string }).decision_category === filters.category);
-  if (filters.id) rows = rows.filter((r) => String((r as { id?: unknown }).id ?? '') === filters.id);
-  if (filters.resource_id) rows = rows.filter((r) => String((r as { resource_id?: unknown }).resource_id ?? '') === filters.resource_id);
-  if (filters.resource_type) rows = rows.filter((r) => String((r as { resource_type?: unknown }).resource_type ?? '') === filters.resource_type);
-  if (filters.limit) rows = rows.slice(0, filters.limit);
-  return rows;
 }
 
 export async function listResolutionLog(filters: LogFilter = {}): Promise<Record<string, unknown>[]> {

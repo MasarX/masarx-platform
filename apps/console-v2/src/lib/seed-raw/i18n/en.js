@@ -1,5 +1,19 @@
 // en.js — English message catalog (full coverage)
 export const en = {
+  adapter: {
+    dispatchScanner: 'Console V2 Dispatch scanner',
+    pluginBlockingDiagnostic: 'Synthetic blocking diagnostic (demo branch).',
+    workflowStep: 'Step',
+    labelDesignInvalid: 'label_design must be an object',
+    labelTemplatesMissing: 'label_design.templates missing',
+    labelTemplateInvalid: 'template must be an object',
+    labelPageMissing: 'renderer_config.page missing',
+    labelBlocksMissing: 'renderer_config.blocks missing',
+    labelDraftNotFound: 'Draft not found',
+    labelDraftNotEditable: 'Only draft rows are editable',
+    labelDraftNotArchivable: 'Only draft rows can be archived',
+    labelDraftValidationFailed: 'Draft validation failed',
+  },
   app: {
     name: 'MasarX',
     role: 'admin',
