@@ -11,6 +11,9 @@ name: Production preflight
 permissions:
   contents: read
 
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
 jobs:
   verify:
     runs-on: ubuntu-24.04
@@ -43,6 +46,7 @@ jobs:
 
   preflight:
     needs: verify
+    permissions: {}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     environment:
