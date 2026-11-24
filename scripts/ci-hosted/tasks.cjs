@@ -6,6 +6,10 @@ const crypto = require('node:crypto');
 const { run: checked, retry } = require('./process.cjs');
 
 const root = process.cwd();
+const browserSuites = {
+  'landing-e2e': 'scripts/ci-hosted/playwright.landing.config.cjs',
+  'console-a11y': 'scripts/ci-hosted/playwright.console-a11y.config.cjs',
+};
 const exists = file => fs.existsSync(path.join(root, file));
 const read = file => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
 const nextApps = () => !exists('apps') ? [] : fs.readdirSync('apps').filter(name => {
@@ -87,10 +91,9 @@ async function main() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = crypto.randomBytes(32).toString('hex');
     return npmScript('build', subject);
   }
-  const suites = { 'landing-e2e': 'landing', 'console-a11y': 'console-a11y' };
-  if (command === 'browser-install' || suites[command]) {
+  if (command === 'browser-install' || browserSuites[command]) {
     const args = command === 'browser-install' ? ['install', '--with-deps', 'chromium']
-      : ['test', '-c', `scripts/ci-hosted/playwright.${suites[command]}.config.cjs`];
+      : ['test', '-c', browserSuites[command]];
     return run(process.execPath, [require.resolve('@playwright/test/cli'), ...args]);
   }
   if (command === 'visual' || command === 'visual-preflight') {
@@ -113,4 +116,4 @@ async function main() {
   throw new Error('Unknown command');
 }
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { nextApps, detect, install };
+module.exports = { nextApps, detect, install, browserSuites };

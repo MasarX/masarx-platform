@@ -294,7 +294,7 @@ jobs:
           node scripts/ci-hosted/selfcheck.cjs
           node scripts/ci-hosted/shard-selfcheck.cjs
           node scripts/ci-hosted/database-selfcheck.cjs
-          node --test scripts/ci-hosted/images.test.cjs
+          node --test scripts/ci-hosted/images.test.cjs scripts/tests/bootstrap/online-index-fixtures.test.js
       - name: Check deploy branch references
         timeout-minutes: 1
         run: node scripts/ci-hosted/deploy-branch-refs.cjs
@@ -363,6 +363,8 @@ jobs:
           NPM_CONFIG_CACHE: ${{ runner.temp }}/npm-cache
         run: node scripts/ci-hosted/tasks.cjs install
       - *timing_work
+      - name: Require CI coverage or an active quarantine for every test suite
+        run: node scripts/ci-hosted/suite-coverage.cjs
       - name: Verify Edge npm import lock
         run: |
           if [[ "$GITHUB_EVENT_NAME" == 'pull_request' ]] &&
@@ -512,6 +514,9 @@ jobs:
         env:
           CONSOLE_V2_CI_DEFER_CAPABILITY_LINT: '1'
         run: npm run test --workspace @masarx/console-v2
+      - name: Run FieldOps UI tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run test:ui:fieldops -- --runInBand
       - *timing_report
       - name: Check proposed test-result capture
         if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.jest.outputs.present == 'true' }}
