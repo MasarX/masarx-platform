@@ -172,7 +172,7 @@ export function Topbar({
           className="icon-btn"
           type="button"
           aria-label="Toggle theme"
-          title={`Theme: ${theme} (click to cycle)`}
+          title={t(`app.themeCycle.${theme}`)}
           onClick={cycleTheme}
         >
           <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

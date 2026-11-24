@@ -10,6 +10,11 @@ export const ar = {
     // Starts with the visible label of the language button (WCAG 2.5.3).
     switchLanguage: 'EN, التبديل إلى الإنجليزية',
     userMenu: 'قائمة المستخدم',
+    themeCycle: {
+      system: 'السمة: النظام (انقر للتبديل)',
+      light: 'السمة: فاتحة (انقر للتبديل)',
+      dark: 'السمة: داكنة (انقر للتبديل)',
+    },
   },
   nav: {
     today: 'اليوم',
