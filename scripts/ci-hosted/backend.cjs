@@ -11,7 +11,7 @@ const { sanitize, environmentSecrets } = require('./diagnostics.cjs');
 const { run, stage, writeReport } = require('./process.cjs');
 const { captureDatabaseLog, collectStackDiagnostics, isHostedPgtap, needsHostedDatabaseInit } = require('./stack-diagnostics.cjs');
 const { shardFiles, shardEnvironment, shardResults, hostedBatches } = require('./pgtap.cjs');
-const { integrationEdgeEnvironment, runIntegration } = require('./integration.cjs');
+const { integrationEdgeEnvironment, restoreIntegrationDatabase, runIntegration } = require('./integration.cjs');
 const { isJwtSignedWithSecret } = require('../ops/workspace/edge-db-jwt.js');
 
 const { prepareImages } = require('./images.cjs');
@@ -350,7 +350,7 @@ function completePins(pins, integration = false) {
   return Array.isArray(pins) && pins.length === Object.keys(expected).length && Object.entries(expected).every(([role, image]) =>
     pins.filter(pin => pin.role === role && pin.image === image && /^[a-zA-Z0-9_.-]+$/.test(pin.tag)
       && /^sha256:[a-f0-9]{64}$/.test(pin.digest) && /^sha256:[a-f0-9]{64}$/.test(pin.image_id)
-      && pin.mirror === (Object.hasOwn(integrationImages, role) ? 'public.ecr.aws' : 'ghcr.io')
+      && pin.mirror === 'ghcr.io'
       && /^[a-zA-Z0-9_.-]+$/.test(pin.cli_tag)).length === 1);
 }
 function mainSwitch(env = process.env, read = git, file = targetFile) {
@@ -670,7 +670,9 @@ async function qualify(diagnostic) {
           if (milliseconds < 1) throw new Error('Integration shard exceeded the database job deadline');
           return milliseconds;
         };
-        await stackAdminFor('postgres', Math.min(15000, remaining()), "NOTIFY pgrst, 'reload schema'");
+        const integrationAdmin = (...commands) => stackAdminFor('postgres', Math.min(15000, remaining()), ...commands);
+        summary.integrationDatabase = await timed('integration-database-restore', () => restoreIntegrationDatabase(integrationAdmin));
+        await integrationAdmin("NOTIFY pgrst, 'reload schema'");
         await timed(`integration:${shard}`, async () => {
           const { files, failure } = await runIntegration(shard, env, checked, remaining, path.join(temp, 'integration-jest.json'));
           summary.integrationFiles = files;

@@ -48,7 +48,7 @@ Follows engineering standard v1.10.
 - Only `npm run verify:cloud:e2e-gate` reads the [UI flake quarantine](config/ci/ui-flake-quarantine.json) for its cloud E2E summary outside hosted CI. Each entry carries an owner and expiry (`burn_down_by`).
 - [database-result.cjs](scripts/ci-hosted/database-result.cjs) requires all six pgTAP shards and an exact count and name match against the SQL test inventory. [database-selfcheck.cjs](scripts/ci-hosted/database-selfcheck.cjs) probes missing and incorrect coverage.
 - The digest-pinned Docker guard enables and verifies `docker-init` for the from-zero database build and pgTAP shards on GitHub-hosted runners.
-- The same six hosted shards run integration tests against isolated databases. The database result requires one report for every integration file. A fully skipped file needs an exact [runner exception](config/ci/hosted-integration-exceptions.json) with a reason and numbered issue. Shards share the database job's existing deadline.
+- The same six hosted shards run integration tests against isolated databases. The database result requires one report for every integration file. Skips need an exact [runner exception](config/ci/hosted-integration-exceptions.json) with a reason and numbered issue. A partially skipped file also needs a skip limit. Remove the exception when all its tests pass. The shards restore database maintenance after pgTAP and share the existing job deadline.
 
 ## Environments
 

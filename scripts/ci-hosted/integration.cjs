@@ -2,6 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomBytes } = require('node:crypto');
+const { setTimeout: delay } = require('node:timers/promises');
 const { shardOption } = require('./jest.cjs');
 const inventoryRoot = 'tests/integration';
 const exceptionFile = 'config/ci/hosted-integration-exceptions.json';
@@ -75,8 +76,10 @@ function integrationCoverage(shards, inventory, entries) {
         errors.push(`Failed or malformed integration result: ${row.file}`);
       } else if (row.passed > 0) {
         ran++;
-        if (exception?.maxSkipped !== undefined && row.skipped > exception.maxSkipped) {
-          errors.push(`Additional skipped assertions: ${row.file}`);
+        if (row.skipped === 0 && exception) {
+          errors.push(`Stale integration exception: ${row.file}`);
+        } else if (row.skipped > 0 && (exception?.maxSkipped === undefined || row.skipped > exception.maxSkipped)) {
+          errors.push(`Unexpected skipped assertions: ${row.file} (${row.skipped})`);
         }
       } else if (exception && exception.maxSkipped === undefined) {
         skipped.push(`${row.file} (${exception.issue})`);
@@ -87,6 +90,18 @@ function integrationCoverage(shards, inventory, entries) {
   }
   for (const file of expected) if (!seen.has(file)) errors.push(`Missing integration file: ${file}`);
   return { ok: expected.size > 0 && errors.length === 0, expected: expected.size, seen: seen.size, ran, skipped, errors };
+}
+
+async function restoreIntegrationDatabase(admin, wait = delay) {
+  const reloaded = await admin('ALTER SYSTEM RESET autovacuum', 'ALTER SYSTEM RESET cron.launch_active_jobs', 'SELECT pg_reload_conf()');
+  if (reloaded.trim() !== 't') throw new Error('Could not reload the integration database configuration');
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const settings = JSON.parse(await admin(`SELECT json_build_object(
+      'autovacuum', current_setting('autovacuum'), 'cron', current_setting('cron.launch_active_jobs'))`));
+    if (settings.autovacuum === 'on' && settings.cron === 'on') return settings;
+    if (attempt < 19) await wait(250);
+  }
+  throw new Error('Integration database did not restore autovacuum and pg_cron launches');
 }
 
 async function runIntegration(shard, env, checked, remaining, raw) {
@@ -139,4 +154,4 @@ async function runIntegration(shard, env, checked, remaining, raw) {
   }
 }
 
-module.exports = { integrationEdgeEnvironment, integrationInventory, integrationCoverage, exceptionFile, runIntegration };
+module.exports = { integrationEdgeEnvironment, integrationInventory, integrationCoverage, exceptionFile, restoreIntegrationDatabase, runIntegration };

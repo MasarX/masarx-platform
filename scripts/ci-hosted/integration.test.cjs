@@ -5,7 +5,15 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
-const { integrationCoverage, runIntegration } = require('./integration.cjs');
+const { integrationCoverage, restoreIntegrationDatabase, runIntegration } = require('./integration.cjs');
+
+test('the required database workflow checks integration coverage by default', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '../../.github/workflows/public-ci.yml'), 'utf8');
+  const gate = /^      - name: Require database build and complete shard coverage\r?\n((?: {8}[^\r\n]*\r?\n)+)/m.exec(workflow)?.[1];
+  assert.ok(gate, 'Missing the required database result step');
+  assert.match(gate, /^          HOSTED_INTEGRATION_REQUIRED: 'true'\r?$/m);
+  assert.match(gate, /^        run: node scripts\/ci-hosted\/database-result\.cjs\r?$/m);
+});
 
 test('accounts for exactly one result per integration file and requires a numbered skip exception', () => {
   const fixture = randomUUID();
@@ -25,11 +33,30 @@ test('accounts for exactly one result per integration file and requires a number
   const partial = { ...accepted, maxSkipped: 1 };
   assert.equal(integrationCoverage(shards, inventory, [partial]).ok, false);
   shards[0].integrationFiles[0].passed = 1;
+  assert.match(integrationCoverage(shards, inventory, []).errors[0], /Unexpected skipped assertions/);
   assert.equal(integrationCoverage(shards, inventory, [partial]).ok, true);
+  shards[0].integrationFiles[0].skipped = 0;
+  assert.match(integrationCoverage(shards, inventory, [partial]).errors[0], /Stale integration exception/);
   shards[0].integrationFiles[0].skipped = 2;
   assert.equal(integrationCoverage(shards, inventory, [partial]).ok, false);
   shards[0].integrationFiles[0].failed = 1;
   assert.equal(integrationCoverage(shards, inventory, [accepted]).ok, false);
+});
+
+test('releases the pgTAP database maintenance holds before integration', async () => {
+  const reads = [{ autovacuum: 'on', cron: 'off' }, { autovacuum: 'on', cron: 'on' }];
+  const admin = async (...commands) => {
+    if (commands.length > 1) {
+      assert.deepEqual(commands, ['ALTER SYSTEM RESET autovacuum', 'ALTER SYSTEM RESET cron.launch_active_jobs', 'SELECT pg_reload_conf()']);
+      return 't';
+    }
+    assert.match(commands[0], /current_setting\('autovacuum'\).*current_setting\('cron\.launch_active_jobs'\)/);
+    return JSON.stringify(reads.shift());
+  };
+  const waits = [];
+  assert.deepEqual(await restoreIntegrationDatabase(admin, ms => waits.push(ms)), { autovacuum: 'on', cron: 'on' });
+  assert.deepEqual(waits, [250]);
+  await assert.rejects(restoreIntegrationDatabase(async () => 'f'), /Could not reload/);
 });
 
 test('retains file results from the single cloud wrapper attempt', async t => {
