@@ -2690,59 +2690,49 @@ export function PerformanceTab({
           marginBottom: 12,
         }}
       >
-        {deliveriesToday == null ? (
-          <KPICard label="Deliveries today" value="—" tone="neutral" delta={notAvailable} />
-        ) : (
-          <KPICard
-            label="Deliveries today"
-            value={deliveriesToday}
-            tone="info"
-            spark={sparkSeed}
-          />
-        )}
-        {deliveriesWeek == null ? (
-          <KPICard label="Deliveries (7d)" value="—" tone="neutral" delta={notAvailable} />
-        ) : (
-          <KPICard
-            label="Deliveries (7d)"
-            value={deliveriesWeek}
-            tone="neutral"
-            delta={`avg ${(deliveriesWeek / 7).toFixed(1)}/day`}
-            spark={sparkSeed}
-          />
-        )}
-        {onTimePct == null ? (
-          <KPICard label="On-time %" value="—" tone="neutral" delta={notAvailable} />
-        ) : (
-          <KPICard
-            label="On-time %"
-            value={`${Math.round(onTimePct * 100)}%`}
-            tone={
-              onTimePct >= kpiThresholds.on_time_pct_good
+        <KPICard
+          label="Deliveries today"
+          value={deliveriesToday ?? '—'}
+          tone={deliveriesToday == null ? 'neutral' : 'info'}
+          delta={deliveriesToday == null ? notAvailable : undefined}
+          spark={deliveriesToday == null ? undefined : sparkSeed}
+        />
+        <KPICard
+          label="Deliveries (7d)"
+          value={deliveriesWeek ?? '—'}
+          tone="neutral"
+          delta={deliveriesWeek == null ? notAvailable : `avg ${(deliveriesWeek / 7).toFixed(1)}/day`}
+          spark={deliveriesWeek == null ? undefined : sparkSeed}
+        />
+        <KPICard
+          label="On-time %"
+          value={onTimePct == null ? '—' : `${Math.round(onTimePct * 100)}%`}
+          tone={
+            onTimePct == null
+              ? 'neutral'
+              : onTimePct >= kpiThresholds.on_time_pct_good
                 ? 'good'
                 : onTimePct >= kpiThresholds.on_time_pct_warn
                   ? 'warn'
                   : 'danger'
-            }
-            spark={onTimeSpark.map((v) => v * 100)}
-          />
-        )}
-        {customerRating == null ? (
-          <KPICard label="Customer rating" value="—" tone="neutral" delta={notAvailable} />
-        ) : (
-          <KPICard
-            label="Customer rating"
-            value={customerRating.toFixed(1)}
-            tone={
-              customerRating >= kpiThresholds.rating_good
+          }
+          delta={onTimePct == null ? notAvailable : undefined}
+          spark={onTimePct == null ? undefined : onTimeSpark.map((v) => v * 100)}
+        />
+        <KPICard
+          label="Customer rating"
+          value={customerRating == null ? '—' : customerRating.toFixed(1)}
+          tone={
+            customerRating == null
+              ? 'neutral'
+              : customerRating >= kpiThresholds.rating_good
                 ? 'good'
                 : customerRating >= kpiThresholds.rating_warn
                   ? 'warn'
                   : 'danger'
-            }
-            delta="out of 5.0"
-          />
-        )}
+          }
+          delta={customerRating == null ? notAvailable : 'out of 5.0'}
+        />
       </div>
 
       <div
