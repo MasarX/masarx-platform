@@ -111,7 +111,8 @@ describe('DispatchModule', () => {
   it('disables `Confirm departure` when routes.write exists without tasks.complete', async () => {
     const { container } = renderWithProviders(<DispatchModule />, { capabilities: ['routes.read', 'routes.write'] });
     await waitFor(() => {
-      expect(document.querySelector('.run-row.is-active')).not.toBeNull();
+      expect(container.querySelector('.run-row.is-active')).not.toBeNull();
+      expect(container.querySelector('.dnd-stop')).not.toBeNull();
     });
     const actions = pageActions(container);
     const reconcile = actions.getByRole('button', { name: /Reconcile scan-out/ });
