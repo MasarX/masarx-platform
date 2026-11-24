@@ -66,6 +66,15 @@ function selfCheck() {
   assert.deepEqual(coverageErrors([file], new Set(), [row], '2000-01-02'), []);
   assert.deepEqual(coverageErrors([file], new Set(), [row], '2000-01-03'), ['Expired quarantine (2000-01-02): ' + row.match[0]]);
   assert.deepEqual(coverageErrors([file], new Set([file]), [row], '2000-01-02'), ['Quarantine selector no longer covers a suite: ' + row.match[0]]);
+  assert.deepEqual(coverageErrors([file], new Set(), [row, { ...row, match: [file] }], '2000-01-02'), ['Overlapping quarantine selectors: ' + file]);
+  assert.deepEqual(coverageErrors([], new Set([file]), [], '2000-01-02'), ['CI coverage entry has no tracked suite: ' + file]);
+  assert.throws(() => addFiles(new Set(), []), /CI suite has no test files/);
+
+  const producer = { run: 'npm test', 'continue-on-error': true };
+  const ci = { jobs: { test: { steps: [producer] }, gate: { needs: ['test'] } } };
+  assert.throws(() => ciStep(ci, 'test', 'npm run missing', 'gate'), /Missing CI producer/);
+  assert.throws(() => ciStep(ci, 'test', 'npm test', 'missing-gate'), /Missing CI producer/);
+  assert.throws(() => ciStep(ci, 'test', 'npm test', 'gate'), /continues on error/);
 }
 
 function workflow(name) {
@@ -73,11 +82,15 @@ function workflow(name) {
 }
 
 function ciStep(workflow, job, command, gate) {
-  const steps = workflow.jobs[job]?.steps.filter(step => step.run?.split('\n').some(line => line.trim() === command));
-  if (steps?.length !== 1 || (gate && !workflow.jobs[gate]?.needs.includes(job))) {
+  const steps = workflow.jobs[job]?.steps?.filter(step => step.run?.split('\n').some(line => line.trim() === command));
+  if (steps?.length !== 1 || (gate && ![workflow.jobs[gate]?.needs].flat().includes(job))) {
     throw new Error('Missing CI producer ' + job + ' for ' + command);
   }
-  return steps[0];
+  const [step] = steps;
+  if (step['continue-on-error'] !== undefined && step['continue-on-error'] !== false) {
+    throw new Error('CI producer ' + job + ' continues on error for ' + command);
+  }
+  return step;
 }
 
 function listJson(command, args, options) {
@@ -92,14 +105,15 @@ function playwrightFiles(config, env) {
   return report.suites.map(suite => path.resolve(report.config.rootDir, suite.file));
 }
 
+function addFiles(covered, paths) {
+  if (!paths.length) throw new Error('CI suite has no test files');
+  for (const file of paths) covered.add(path.relative(process.cwd(), file).split(path.sep).join('/'));
+}
+
 function ciCoverage(files) {
   const ci = workflow('public-ci');
   const deploy = workflow('deploy');
   const covered = new Set();
-  function addFiles(paths) {
-    if (!paths.length) throw new Error('CI suite has no test files');
-    for (const file of paths) covered.add(path.relative(process.cwd(), file).split(path.sep).join('/'));
-  }
   const step = (job, command) => ciStep(ci, job, command, 'ci-gate');
   const addScripts = (manifest, scripts) => scripts.forEach(name => covered.add(manifest + '#' + name));
 
@@ -109,7 +123,7 @@ function ciCoverage(files) {
     ['ui', 'ui:fieldops', 'jest.config.ui.fieldops.js', 'npm run test:ui:fieldops -- --runInBand'],
   ]) {
     step(job, command);
-    addFiles(listJson('npm', ['run', '--silent', 'test:' + kind, '--', '--listTests', '--json', '--runInBand']));
+    addFiles(covered, listJson('npm', ['run', '--silent', 'test:' + kind, '--', '--listTests', '--json', '--runInBand']));
     covered.add('config/tooling/' + config);
     addScripts('package.json', ['test:' + kind]);
   }
@@ -117,7 +131,7 @@ function ciCoverage(files) {
   const workspace = 'apps/console-v2';
   const vitest = step('ui', 'npm run test --workspace @masarx/console-v2');
   const vitestBin = path.join(path.dirname(require.resolve('vitest/package.json', { paths: [path.resolve(workspace)] })), 'vitest.mjs');
-  addFiles(listJson(process.execPath, [vitestBin, 'list', '--filesOnly', '--json'], {
+  addFiles(covered, listJson(process.execPath, [vitestBin, 'list', '--filesOnly', '--json'], {
     cwd: workspace, env: { ...process.env, ...vitest.env },
   }).map(row => row.file));
   covered.add(workspace + '/vitest.config.ts');
@@ -125,7 +139,7 @@ function ciCoverage(files) {
 
   for (const [suite, config] of Object.entries(browserSuites)) {
     const browser = step('e2e', 'node scripts/ci-hosted/tasks.cjs ' + suite);
-    addFiles(playwrightFiles(config, { ...process.env, ...browser.env }));
+    addFiles(covered, playwrightFiles(config, { ...process.env, ...browser.env }));
     covered.add(config);
   }
   covered.add('playwright.landing.config.ts');
@@ -136,7 +150,7 @@ function ciCoverage(files) {
 
   const devConfig = 'playwright.dev-report.config.ts';
   ciStep(deploy, 'e2e-report', 'node node_modules/@playwright/test/cli.js test --config ' + devConfig + ' > /dev/null 2>&1');
-  addFiles(playwrightFiles(devConfig, {
+  addFiles(covered, playwrightFiles(devConfig, {
     ...process.env, CONSOLE_BASE_URL: 'https://console.example.invalid', PORTAL_BASE_URL: 'https://portal.example.invalid',
     E2E_REQUIRE_BASE_URLS: 'true', ENV_FILE: os.devNull, ENV_FILE_APPEND: '0',
   }));
@@ -145,16 +159,17 @@ function ciCoverage(files) {
   step('database-pgtap', 'node scripts/ci-hosted/backend.cjs');
   const tapDir = 'supabase/tests/pgtap';
   const shards = ci.jobs['database-pgtap'].strategy.matrix.shard;
-  for (const shard of shards) addFiles(shardFiles(fs.readdirSync(tapDir), shard + '/' + shards.length).map(file => path.join(tapDir, file)));
+  for (const shard of shards) addFiles(covered, shardFiles(fs.readdirSync(tapDir), shard + '/' + shards.length).map(file => path.join(tapDir, file)));
   addScripts('package.json', ['test:pgtap', 'test:pgtap:local', 'test:pgtap:cloud']);
 
   for (const { run } of ci.jobs['append-only'].steps) {
     for (const line of (run || '').split('\n')) {
       const match = line.trim().match(/^(?:node --test |bash )(.+)$/);
       if (!match) continue;
-      for (const file of match[1].split(/\s+/)) {
-        if (files.includes(file) && testFile.test(file)) covered.add(file);
-      }
+      const testFiles = match[1].split(/\s+/).filter(file => files.includes(file) && testFile.test(file));
+      if (!testFiles.length) continue;
+      step('append-only', line.trim());
+      for (const file of testFiles) covered.add(file);
     }
   }
   return covered;
