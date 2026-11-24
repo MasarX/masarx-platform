@@ -286,8 +286,8 @@
     },
     {
       "file": "supabase/migrations/20261124130000_privileged_session_assurance.sql",
-      "sha256": "04c7f301de46278ca28e82686bf5133717ad9dabfe652e4fcd4ed770da34cd58",
-      "reason": "Sets only pgrst.db_pre_request on authenticator to the schema-qualified application request guard. The guard's assurance policy starts disabled and the migration names every caller grant."
+      "sha256": "fe0bdf347c837105f0125e81ed44dc557d5bc545d4e7bab699d1ca23e2ebe699",
+      "reason": "Sets pgrst.db_pre_request on authenticator to the invoker hook in an unexposed application schema. Every impersonated role can invoke the hook and the separate assurance predicate has specific executor grants."
     }
   ]
 }

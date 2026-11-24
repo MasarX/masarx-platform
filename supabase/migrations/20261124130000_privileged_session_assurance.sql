@@ -1,12 +1,10 @@
 BEGIN;
 SET LOCAL lock_timeout = '10s';
 
--- Anonymous requests can run the hook without acquiring access to public.
+-- PostgREST invokes the same guard under every request role.
 CREATE SCHEMA request_guard;
 REVOKE ALL ON SCHEMA request_guard FROM PUBLIC;
-GRANT USAGE ON SCHEMA request_guard TO anon, authenticated, service_role,
-  edge_webhook_role, edge_api_caller_role, edge_api_gateway_role,
-  edge_label_renderer_role, edge_marketing_role;
+GRANT USAGE ON SCHEMA request_guard TO PUBLIC;
 
 INSERT INTO public.feature_flags (name, description, scope_type, enabled)
 VALUES ('privileged_session_assurance', 'Require authenticator verification on privileged Data API sessions', 'global', false);
@@ -16,7 +14,7 @@ RETURNS boolean
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $$
   SELECT CASE
     WHEN claims->>'role' = 'service_role' THEN true
@@ -63,9 +61,8 @@ END;
 $$;
 
 REVOKE EXECUTE ON FUNCTION request_guard.enforce_privileged_session_v1() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION request_guard.enforce_privileged_session_v1() TO anon, authenticated, service_role,
-  edge_webhook_role, edge_api_caller_role, edge_api_gateway_role,
-  edge_label_renderer_role, edge_marketing_role;
+-- The invoker hook has no writes or return data. Its schema is outside the exposed API.
+GRANT EXECUTE ON FUNCTION request_guard.enforce_privileged_session_v1() TO PUBLIC;
 
 -- Restrictive checks also apply when these tables are queried outside PostgREST.
 CREATE POLICY privileged_session_assurance ON public.bank_accounts

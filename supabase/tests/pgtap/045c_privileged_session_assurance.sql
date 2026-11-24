@@ -1,7 +1,7 @@
 BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(20);
+SELECT plan(21);
 
 SELECT ok(
   (SELECT 'pgrst.db_pre_request=request_guard.enforce_privileged_session_v1' = ANY(rolconfig)
@@ -20,6 +20,13 @@ SELECT is_empty(
           OR NOT has_function_privilege(db_role.oid, 'request_guard.enforce_privileged_session_v1()', 'EXECUTE')
         )$$,
   'every role assumable by authenticator can enter the request hook'
+);
+
+SELECT ok(
+  NOT has_function_privilege('public', 'request_guard.privileged_session_allowed_v1()', 'EXECUTE')
+  AND NOT has_function_privilege('edge_marketing_role', 'request_guard.privileged_session_allowed_v1()', 'EXECUTE')
+  AND NOT (SELECT prosecdef FROM pg_proc WHERE oid = 'request_guard.enforce_privileged_session_v1()'::regprocedure),
+  'request roles can enter the invoker hook and the definer predicate stays restricted'
 );
 
 CREATE FUNCTION pg_temp.test_privileged_session_assurance()
