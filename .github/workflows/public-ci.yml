@@ -394,11 +394,11 @@ jobs:
             --config config/tooling/jest.config.unit.js --runInBand --runTestsByPath tests/unit/ops/edge-frozen-lock.test.js
           EDGE_FROZEN_WORKDIR=.edge-frozen node scripts/edge/check-bundle-lock-drift.cjs
           printf 'void import("npm:qrcode-generator@1.5.2");\n' > "$RUNNER_TEMP/leak.ts"
-          if (cd "$RUNNER_TEMP" && DENO_DIR="$RUNNER_TEMP/leak-cache" deno cache --no-config --no-lock --no-remote --no-npm --node-modules-dir=none ./leak.ts) > "$RUNNER_TEMP/leak.log" 2>&1; then
+          if node scripts/edge/check-frozen-bundle-imports.cjs "$RUNNER_TEMP/leak.ts" > "$RUNNER_TEMP/leak.log" 2>&1; then
             echo '::error::The offline Edge check accepted a dynamic npm import.'
             exit 1
           fi
-          grep -F 'npm:qrcode-generator@1.5.2' "$RUNNER_TEMP/leak.log"
+          grep -F "Unbundled Edge import in $RUNNER_TEMP/leak.ts:1" "$RUNNER_TEMP/leak.log"
           touch "$EDGE_FROZEN_WORKDIR/supabase/unexpected.ts"
           if bash scripts/edge/verify-frozen-manifest.sh "$EDGE_FROZEN_WORKDIR"; then
             echo '::error::The frozen Edge manifest accepted an unexpected file.'
