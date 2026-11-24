@@ -3431,6 +3431,27 @@
       "eta": "ETA",
       "noJobsDropHere": "No jobs — drop here to assign"
     },
+    "pickupStatus": {
+      "unknown": "Unknown",
+      "statuses": {
+        "pending": "Pending",
+        "pickup_requested": "Pickup requested",
+        "scheduled": "Scheduled",
+        "pickup_scheduled": "Pickup scheduled",
+        "planned": "Planned",
+        "assigned": "Assigned",
+        "in_progress": "In progress",
+        "completed": "Completed",
+        "failed": "Failed",
+        "pickup_failed": "Pickup failed",
+        "cancelled": "Cancelled"
+      },
+      "assignmentModes": {
+        "internal_driver": "Internal driver",
+        "partner": "Partner",
+        "unassigned": "Unassigned"
+      }
+    },
     "commentThread": {
       "noComments": "No comments yet",
       "unknownUser": "Unknown",

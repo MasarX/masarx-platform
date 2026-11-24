@@ -2,6 +2,8 @@
 // missing keys return the path so they're easy to spot in screenshots.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { NextIntlClientProvider } from 'next-intl';
+import { useIdentity } from './identity';
+import { useResolveSettings } from './queries';
 // @ts-expect-error JS catalogs without types
 import { en } from './seed-raw/i18n/en.js';
 // @ts-expect-error JS catalogs without types
@@ -16,6 +18,8 @@ interface I18nCtx {
   setLocale: (l: Locale) => void;
   toggleLocale: () => void;
   t: (path: string, fallback?: string) => string;
+  /** IANA zone used for date/time display; see TenantTimeZoneSync. */
+  timeZone: string;
   fmtDateTime: (iso: string | number | Date) => string;
   /** Clock time (hours, minutes, seconds) in the app locale. */
   fmtTime: (iso: string | number | Date) => string;
@@ -54,9 +58,20 @@ function buildCatalog(base: Catalog, locale: Locale): Catalog {
 
 const CATALOGS: Record<Locale, Catalog> = { en: buildCatalog(en as Catalog, 'en'), ar: buildCatalog(ar as Catalog, 'ar') };
 
-// The console has no session-wide tenant display zone, so dates show in the
-// user's own zone. This is the single place to change that default.
+// Display zone, decided here only: the tenant's `tenant_default_timezone.iana`
+// once identity has loaded (TenantTimeZoneSync), else the user's own zone below.
 export const DISPLAY_TIME_ZONE = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+/** True for a zone name Intl accepts; a bad settings row must not break date display. */
+export function isValidTimeZone(zone: unknown): zone is string {
+  if (typeof zone !== 'string' || !zone.trim()) return false;
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // The user's preferred regional variant of the active language (en-GB, ar-EG),
 // else the bare language tag.
@@ -64,6 +79,7 @@ export function resolveIntlLocale(locale: Locale, preferred: readonly string[] =
   return preferred.find((tag) => tag.toLowerCase().split('-')[0] === locale) ?? locale;
 }
 const Ctx = createContext<I18nCtx | null>(null);
+const TenantTimeZoneCtx = createContext<((zone: string | null) => void) | null>(null);
 
 function lookup(catalog: Catalog, path: string): string | undefined {
   const parts = path.split('.');
@@ -82,6 +98,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(() => (localStorage.getItem('console-v2.locale') as Locale) || 'en');
   const dir = locale === 'ar' ? 'rtl' : 'ltr';
   const intlLocale = useMemo(() => resolveIntlLocale(locale), [locale]);
+  const [tenantTimeZone, setTenantTimeZone] = useState<string | null>(null);
+  const timeZone = tenantTimeZone ?? DISPLAY_TIME_ZONE;
 
   useEffect(() => {
     document.documentElement.lang = locale;
@@ -105,10 +123,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       if (Number.isNaN(d.getTime())) return '—';
       return new Intl.DateTimeFormat(intlLocale, {
         month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
-        timeZone: DISPLAY_TIME_ZONE,
+        timeZone,
       }).format(d);
     },
-    [intlLocale]
+    [intlLocale, timeZone]
   );
   const fmtTime = useCallback(
     (iso: string | number | Date) => {
@@ -116,10 +134,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       if (Number.isNaN(d.getTime())) return '—';
       return new Intl.DateTimeFormat(intlLocale, {
         hour: '2-digit', minute: '2-digit', second: '2-digit',
-        timeZone: DISPLAY_TIME_ZONE,
+        timeZone,
       }).format(d);
     },
-    [intlLocale]
+    [intlLocale, timeZone]
   );
   const fmtCurrency = useCallback(
     (amount: number, currency?: string) => {
@@ -158,17 +176,20 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       setLocale: setLocaleState,
       toggleLocale: () => setLocaleState((l) => (l === 'en' ? 'ar' : 'en')),
       t,
+      timeZone,
       fmtDateTime,
       fmtTime,
       fmtCurrency,
       fmtNumber,
     }),
-    [locale, dir, t, fmtDateTime, fmtTime, fmtCurrency, fmtNumber]
+    [locale, dir, t, timeZone, fmtDateTime, fmtTime, fmtCurrency, fmtNumber]
   );
 
   return (
     <Ctx.Provider value={value}>
-      <NextIntlClientProvider locale={locale}>{children}</NextIntlClientProvider>
+      <TenantTimeZoneCtx.Provider value={setTenantTimeZone}>
+        <NextIntlClientProvider locale={locale}>{children}</NextIntlClientProvider>
+      </TenantTimeZoneCtx.Provider>
     </Ctx.Provider>
   );
 }
@@ -193,4 +214,22 @@ export function useT(): I18nCtx['t'] {
 /** Fills `{name}` placeholders in a catalog string; unknown names stay visible. */
 export function fill(template: string, values: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in values ? String(values[name]) : match));
+}
+
+/**
+ * Mount inside IdentityProvider. Once identity has loaded, resolves the active
+ * tenant's `tenant_default_timezone` and makes it the display zone. A missing or
+ * invalid row, or signing out, falls back to DISPLAY_TIME_ZONE.
+ */
+export function TenantTimeZoneSync() {
+  const setTenantTimeZone = useContext(TenantTimeZoneCtx);
+  const { isAuthenticated, scope, currentTenantId } = useIdentity();
+  const tenantId = scope.tenant?.id ?? currentTenantId() ?? null;
+  const settingsScope = useMemo(() => (tenantId ? { organization_id: tenantId } : undefined), [tenantId]);
+  const policy = useResolveSettings('tenant_default_timezone', settingsScope, { enabled: isAuthenticated });
+  const iana = isAuthenticated ? (policy.data?.value as { iana?: unknown } | undefined)?.iana : undefined;
+  useEffect(() => {
+    setTenantTimeZone?.(isValidTimeZone(iana) ? iana : null);
+  }, [iana, setTenantTimeZone]);
+  return null;
 }
