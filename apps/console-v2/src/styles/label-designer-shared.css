@@ -73,7 +73,7 @@
 .label-designer-studio .py-1\.5 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
 .label-designer-studio .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
 .label-designer-studio .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
-.label-designer-studio .text-left { text-align: left; } /* physical: shim for the physical Tailwind text-left utility */
+.label-designer-studio .text-left { text-align: left; } /* physical: shim for the physical Tailwind text-left utility */
 .label-designer-studio .text-center { text-align: center; }
 .label-designer-studio .text-xs { font-size: 0.75rem; line-height: 1rem; }
 .label-designer-studio .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
@@ -91,7 +91,7 @@
 .label-designer-studio .border-dashed { border-style: dashed; }
 .label-designer-studio .border-transparent { border-color: transparent; }
 .label-designer-studio .border-current { border-color: currentColor; }
-.label-designer-studio .border-r-transparent { border-right-color: transparent; } /* physical: shim for the physical Tailwind border-r utility */
+.label-designer-studio .border-r-transparent { border-right-color: transparent; } /* physical: shim for the physical Tailwind border-r utility */
 .label-designer-studio .bg-white { background: #fff; }
 .label-designer-studio .bg-transparent { background: transparent; }
 .label-designer-studio .bg-ui-surface { background: rgb(var(--ui-surface)); }

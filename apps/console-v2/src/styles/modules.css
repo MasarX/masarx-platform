@@ -911,7 +911,7 @@
 .wf-edges {
   position: absolute;
   top: 24px;
-  left: 24px; /* physical: matches node coordinates set as left/top in JS */
+  left: 24px; /* physical: matches node coordinates set as left/top in JS */
   pointer-events: none;
   overflow: visible;
 }
