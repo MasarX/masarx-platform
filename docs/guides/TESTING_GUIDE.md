@@ -27,6 +27,9 @@ runners, the post-DEV browser report and the
 [suite quarantine](../../config/ci/test-suite-quarantine.json). The inventory step
 uses the runners' file-listing mode.
 
+Console V2 seed mode uses the app's fallback fonts so browser tests can run with
+external requests blocked.
+
 Wire new suites into an existing CI job where their dependencies are available.
 For a suite that needs unavailable infrastructure, record its scope, owning lead,
 reason and last active UTC date in the quarantine. CI fails on uncovered entries,
