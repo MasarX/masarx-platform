@@ -9,6 +9,7 @@ import {
   sleep,
   type RunPluginTestResult,
 } from '../data-source';
+import { asNonEmptyString } from './shared';
 
 export async function runPluginTest(
   pluginId: string,
