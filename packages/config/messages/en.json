@@ -491,7 +491,8 @@
       "removeAria": "Remove {label}",
       "createOption": "Create \"{query}\"",
       "empty": "No results",
-      "loading": "Loading…"
+      "loading": "Loading…",
+      "listAria": "Options"
     },
     "timePicker": {
       "ariaLabel": "Select time"

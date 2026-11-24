@@ -459,7 +459,8 @@
       "removeAria": "‏إزالة {label}",
       "createOption": "‏إنشاء \"{query}\"",
       "empty": "‏لا توجد نتائج",
-      "loading": "‏جاري التحميل…"
+      "loading": "‏جاري التحميل…",
+      "listAria": "‏الخيارات"
     },
     "timePicker": {
       "ariaLabel": "‏اختر الوقت"
