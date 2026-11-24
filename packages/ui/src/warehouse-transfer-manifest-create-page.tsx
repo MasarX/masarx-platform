@@ -5,6 +5,7 @@ import { PageHeader } from "./page-header";
 import { Section } from "./section";
 import { WarehouseTransferManifestCreateForm } from "./warehouse-transfer-manifest-create-form";
 import { findRegistryResource } from "./ui-registry-utils";
+import { createUiTranslator } from "./i18n";
 
 type WarehouseTransferManifestCreatePageProps = {
   appBasePath: string;
@@ -23,16 +24,17 @@ export async function WarehouseTransferManifestCreatePage({
   const registry = registryResult.status === "fulfilled" ? registryResult.value : null;
   const transfersResource = findRegistryResource(registry, "warehouse_transfers");
   const resolvedTestIdPrefix = testIdPrefix?.trim() || "warehouse-transfer-manifest-create";
+  const t = createUiTranslator("ui.transferManifestCreate.page");
 
   return (
     <div className="space-y-6" data-testid={`${resolvedTestIdPrefix}-ready`}>
       <PageHeader
-        title="Create transfer manifest"
-        description="Create draft warehouse transfer manifests through the canonical transfer-manifest contract."
+        title={t("title")}
+        description={t("description")}
       />
       <Section
-        title="Manifest details"
-        description="A manifest creates the draft warehouse_transfers row and its warehouse_transfer_items membership in one authoritative step."
+        title={t("sectionTitle")}
+        description={t("sectionDescription")}
         collapsible={false}
       >
         <WarehouseTransferManifestCreateForm

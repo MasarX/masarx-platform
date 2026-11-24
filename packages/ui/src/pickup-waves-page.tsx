@@ -34,6 +34,7 @@ import {
 import { buildTestId } from "./test-ids";
 import { extractCapabilityDeniedKey, formatUiError } from "./utils";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
+import { createUiTranslator } from "./i18n";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 type PickupWaveRow = Record<string, unknown>;
@@ -48,10 +49,13 @@ type PickupUserContext = {
   timezone?: string | null;
 };
 
-function resolveDeniedMessage(message: string) {
+// Server actions cannot close over a translator function, so each one creates its own.
+const wavesTranslator = () => createUiTranslator("ui.pickupWaves");
+
+function resolveDeniedMessage(message: string, t: ReturnType<typeof wavesTranslator>) {
   const capability = extractCapabilityDeniedKey(message);
   if (capability) {
-    return `Capability denied: ${capability}`;
+    return t("blocked.capabilityDenied", { capability });
   }
   return message;
 }
@@ -67,6 +71,7 @@ export async function PickupWavesPage({
   searchParams: SearchParams;
   testIdPrefix: string;
 }) {
+  const t = wavesTranslator();
   const ui = createUiServerClient();
   const meResult = await ui.me().catch(() => null);
   const me = normalizeObject(meResult) as PickupUserContext | null;
@@ -93,10 +98,11 @@ export async function PickupWavesPage({
     formData: FormData,
   ): Promise<PickupMutationFormState> {
     "use server";
+    const t = wavesTranslator();
     const ui = createUiServerClient();
     const shipmentIds = parsePickupIdList(formData.getAll("shipment_ids").map(String).join(","));
     if (shipmentIds.length === 0) {
-      return { status: "error", message: "Provide at least one shipment id." };
+      return { status: "error", message: t("messages.shipmentRequired") };
     }
 
     const metadataResult = parseJsonValue(String(formData.get("metadata_json") ?? "{}"), {});
@@ -124,14 +130,15 @@ export async function PickupWavesPage({
       });
       revalidatePath(activePath);
       revalidatePath(`${appBasePath}/operations/pickups/requests`);
+      const routeRunId = stringValue((result as PickupWaveRow)?.route_run_id);
       return {
         status: "success",
-        message: `Pickup wave ${stringValue((result as PickupWaveRow)?.route_run_id) ?? "created"}.`,
+        message: routeRunId ? t("messages.created", { routeRunId }) : t("messages.createdFallback"),
       };
     } catch (error) {
       return {
         status: "error",
-        message: formatUiError(error, "Pickup wave creation failed."),
+        message: formatUiError(error, t("messages.createFailed")),
       };
     }
   }
@@ -141,6 +148,7 @@ export async function PickupWavesPage({
     formData: FormData,
   ): Promise<PickupMutationFormState> {
     "use server";
+    const t = wavesTranslator();
     const ui = createUiServerClient();
     const metadataResult = parseJsonValue(String(formData.get("metadata_json") ?? "{}"), {});
     if (!metadataResult.ok) {
@@ -164,11 +172,11 @@ export async function PickupWavesPage({
       revalidatePath(activePath);
       revalidatePath(`${appBasePath}/operations/pickups/requests`);
       revalidatePath(`${appBasePath}/operations/pickups/failures`);
-      return { status: "success", message: "Pickup wave assignment updated." };
+      return { status: "success", message: t("messages.assignmentUpdated") };
     } catch (error) {
       return {
         status: "error",
-        message: formatUiError(error, "Pickup wave assignment failed."),
+        message: formatUiError(error, t("messages.assignmentFailed")),
       };
     }
   }
@@ -178,6 +186,7 @@ export async function PickupWavesPage({
     formData: FormData,
   ): Promise<PickupMutationFormState> {
     "use server";
+    const t = wavesTranslator();
     const ui = createUiServerClient();
     const partnerResult = parseJsonValue(String(formData.get("partner_json") ?? "{}"), {});
     if (!partnerResult.ok) {
@@ -212,11 +221,11 @@ export async function PickupWavesPage({
       revalidatePath(activePath);
       revalidatePath(`${appBasePath}/operations/pickups/requests`);
       revalidatePath(`${appBasePath}/operations/pickups/failures`);
-      return { status: "success", message: "Pickup partner assignment updated." };
+      return { status: "success", message: t("messages.partnerAssignmentUpdated") };
     } catch (error) {
       return {
         status: "error",
-        message: formatUiError(error, "Pickup wave assignment failed."),
+        message: formatUiError(error, t("messages.assignmentFailed")),
       };
     }
   }
@@ -225,9 +234,9 @@ export async function PickupWavesPage({
     return (
       <PageContainer className="space-y-6" data-testid={`${testIdPrefix}-ready`}>
         <PageHeader
-          eyebrow="Operations / Pickup"
-          title="Pickup waves"
-          description="Plan pickup waves and assign them to drivers, vehicles, or partners."
+          eyebrow={t("eyebrow")}
+          title={t("title")}
+          description={t("unavailable.description")}
           actions={
             <div className="flex flex-wrap gap-2">
               <PickupPageNavigation appBasePath={appBasePath} activePath={activePath} />
@@ -235,9 +244,9 @@ export async function PickupWavesPage({
           }
         />
         <ContextNotice
-          title="Pickup waves unavailable"
-          action="Check the pickup wave view and database read permissions."
-          detail={pickupErrorMessage(wavesResult.error, "Unable to load pickup waves.")}
+          title={t("unavailable.title")}
+          action={t("unavailable.action")}
+          detail={pickupErrorMessage(wavesResult.error, t("unavailable.fallback"))}
           testId={buildTestId(testIdPrefix, "error")}
         />
       </PageContainer>
@@ -247,9 +256,9 @@ export async function PickupWavesPage({
   return (
     <PageContainer className="space-y-6" data-testid={`${testIdPrefix}-ready`}>
       <PageHeader
-        eyebrow="Operations / Pickup"
-        title="Pickup waves"
-        description="Group pickup requests into waves, then assign the wave to a driver, vehicle, or partner using the pickup_waves projection."
+        eyebrow={t("eyebrow")}
+        title={t("title")}
+        description={t("description")}
         actions={
           <div className="flex flex-wrap gap-2">
             <PickupPageNavigation appBasePath={appBasePath} activePath={activePath} />
@@ -257,53 +266,54 @@ export async function PickupWavesPage({
         }
       />
 
-      <Section title="Create pickup wave" collapsible={false}>
+      <Section title={t("create.title")} collapsible={false}>
         {assignmentChoices.error || lookups.error ? (
-          <ContextNotice title="Pickup choices unavailable" action="Reload to retry; existing assignments are unchanged."
+          <ContextNotice title={t("choicesUnavailable.title")} action={t("choicesUnavailable.action")}
             detail={assignmentChoices.error || lookups.error || ""} testId={`${testIdPrefix}-lookup-error`} />
         ) : null}
         {!canWrite ? (
           <ContextNotice
-            title="Pickup wave creation is blocked"
-            action="You can still review the pickup wave ledger below."
+            title={t("blocked.title")}
+            action={t("blocked.action")}
             detail={resolveDeniedMessage(
-              me ? "Capability denied: fleet.write" : "Your session could not be loaded.",
+              me ? "Capability denied: fleet.write" : t("blocked.sessionUnavailable"),
+              t,
             )}
             testId={`${testIdPrefix}-blocked`}
           />
         ) : (
           <PickupMutationForm
             action={submitPickupWave}
-            submitLabel="Create pickup wave"
-            pendingLabel="Creating..."
+            submitLabel={t("create.submit")}
+            pendingLabel={t("create.pending")}
             testIdPrefix={`${testIdPrefix}-create`}
-            helperText="Select pickup requests from the ledger or enter authorized shipment IDs directly."
+            helperText={t("create.helper")}
             fields={[
               {
                 name: "organization_id",
-                label: "Organization ID",
+                label: t("fields.organizationId"),
                 kind: "text",
                 defaultValue: stringValue(me?.org?.id) ?? "",
                 required: true,
               },
-              { name: "branch_id", label: "Branch", kind: "relation", options: lookups.options.branches.length ? lookups.options.branches : assignmentChoices.options.branches },
-              { name: "planned_date", label: "Planned date", kind: "date" },
-              { name: "planned_start_at", label: "Planned start", kind: "datetime-local" },
-              { name: "planned_end_at", label: "Planned end", kind: "datetime-local" },
+              { name: "branch_id", label: t("fields.branch"), kind: "relation", options: lookups.options.branches.length ? lookups.options.branches : assignmentChoices.options.branches },
+              { name: "planned_date", label: t("fields.plannedDate"), kind: "date" },
+              { name: "planned_start_at", label: t("fields.plannedStart"), kind: "datetime-local" },
+              { name: "planned_end_at", label: t("fields.plannedEnd"), kind: "datetime-local" },
               {
                 name: "shipment_ids",
-                label: "Pickup shipments",
+                label: t("fields.pickupShipments"),
                 kind: "relation",
                 mode: "multi",
                 options: shipmentOptions,
                 layout: "full",
                 required: true,
-                placeholder: "Search tracking number or reference",
+                placeholder: t("fields.shipmentsPlaceholder"),
               },
-              { name: "idempotency_key", label: "Idempotency key", kind: "text", placeholder: "Optional retry key" },
+              { name: "idempotency_key", label: t("fields.idempotencyKey"), kind: "text", placeholder: t("fields.idempotencyPlaceholder") },
               {
                 name: "metadata_json",
-                label: "Metadata JSON",
+                label: t("fields.metadataJson"),
                 kind: "textarea",
                 layout: "full",
                 rows: 4,
@@ -315,15 +325,15 @@ export async function PickupWavesPage({
       </Section>
 
       <Section
-        title="Pickup wave ledger"
-        description={`Loaded from pickup_waves. ${wavesResult.rows.length} row(s) on this page.`}
+        title={t("ledger.title")}
+        description={t("ledger.description", { count: wavesResult.rows.length })}
         collapsible={false}
       >
         {wavesResult.rows.length === 0 ? (
           <EmptyState
             variant="card"
-            title="No pickup waves yet"
-            description="Create the first pickup wave to start sequencing requests into a route run."
+            title={t("ledger.emptyTitle")}
+            description={t("ledger.emptyDescription")}
           />
         ) : (
           <div className="grid gap-4">
@@ -349,10 +359,10 @@ export async function PickupWavesPage({
                     {stringValue(pickupAssignment?.assignment_mode) ? (
                       <Badge>{stringValue(pickupAssignment?.assignment_mode) ?? ""}</Badge>
                     ) : null}
-                    <Badge tone="accent">{`${shipments.length} shipment${shipments.length === 1 ? "" : "s"}`}</Badge>
+                    <Badge tone="accent">{t("ledger.shipmentCount", { count: shipments.length })}</Badge>
                   </div>
                   <div className="mt-3 text-sm font-medium text-ui-ink">
-                    {stringValue(row.name) ?? buildLookupFriendlyLabel("Route", routeRunId)}
+                    {stringValue(row.name) ?? buildLookupFriendlyLabel(t("ledger.route"), routeRunId)}
                   </div>
                   <div className="mt-2 text-sm text-ui-muted">
                     {formatDateTimeRange(
@@ -360,15 +370,15 @@ export async function PickupWavesPage({
                       row.planned_end_at,
                       me?.locale,
                       me?.timezone,
-                    ) ?? "No planned window."}
+                    ) ?? t("ledger.noWindow")}
                   </div>
                   <div className="mt-3">
                     {renderFieldPairs([
-                      ["Branch", stringValue(row.branch_label)],
-                      ["Driver", stringValue(row.driver_label) ?? pickupRelationshipLabel(assignmentChoices.options.drivers, row.driver_user_id)],
-                      ["Vehicle", stringValue(row.vehicle_label) ?? pickupRelationshipLabel(assignmentChoices.options.vehicles, row.vehicle_id)],
-                      ["Pickup stops", row.pickup_stop_count],
-                      ["Total boxes", row.total_box_count],
+                      [t("fields.branch"), stringValue(row.branch_label)],
+                      [t("fields.driver"), stringValue(row.driver_label) ?? pickupRelationshipLabel(assignmentChoices.options.drivers, row.driver_user_id)],
+                      [t("fields.vehicle"), stringValue(row.vehicle_label) ?? pickupRelationshipLabel(assignmentChoices.options.vehicles, row.vehicle_id)],
+                      [t("ledger.pickupStops"), row.pickup_stop_count],
+                      [t("ledger.totalBoxes"), row.total_box_count],
                     ])}
                   </div>
                   <div className="mt-3 space-y-3">
@@ -385,7 +395,7 @@ export async function PickupWavesPage({
                               <div className="font-medium text-ui-ink">
                                 {stringValue(shipmentRecord?.tracking_number) ?? shipmentId}
                               </div>
-                              <div>{stringValue(shipmentRecord?.status) ?? "unknown"}</div>
+                              <div>{stringValue(shipmentRecord?.status) ?? createUiTranslator("ui.pickupOperations")("unknownStatus")}</div>
                             </div>
                           );
                         })}
@@ -400,10 +410,10 @@ export async function PickupWavesPage({
                   <div className="mt-4 grid gap-4 xl:grid-cols-2">
                     <PickupMutationForm
                       action={assignInternalWave}
-                      submitLabel="Assign driver"
-                      pendingLabel="Assigning..."
+                      submitLabel={t("assign.driverSubmit")}
+                      pendingLabel={t("assign.pending")}
                       testIdPrefix={`${testIdPrefix}-assign-driver-${routeRunId}`}
-                      helperText="Internal assignments can set driver and vehicle together."
+                      helperText={t("assign.driverHelper")}
                       fields={[
                         { name: "route_run_id", kind: "hidden", defaultValue: routeRunId },
                         {
@@ -413,22 +423,22 @@ export async function PickupWavesPage({
                         },
                         {
                           name: "driver_user_id",
-                          label: "Driver",
+                          label: t("fields.driver"),
                           kind: "relation",
                           options: lookups.options.drivers.length ? lookups.options.drivers : rowChoices.drivers,
                           defaultValue: stringValue(row.driver_user_id) ?? "",
                         },
                         {
                           name: "vehicle_id",
-                          label: "Vehicle",
+                          label: t("fields.vehicle"),
                           kind: "relation",
                           options: lookups.options.vehicles.length ? lookups.options.vehicles : rowChoices.vehicles,
                           defaultValue: stringValue(row.vehicle_id) ?? "",
                         },
-                        { name: "idempotency_key", label: "Idempotency key", kind: "text" },
+                        { name: "idempotency_key", label: t("fields.idempotencyKey"), kind: "text" },
                         {
                           name: "metadata_json",
-                          label: "Metadata JSON",
+                          label: t("fields.metadataJson"),
                           kind: "textarea",
                           layout: "full",
                           rows: 3,
@@ -438,10 +448,10 @@ export async function PickupWavesPage({
                     />
                     <PickupMutationForm
                       action={assignPartnerWave}
-                      submitLabel="Assign partner"
-                      pendingLabel="Assigning..."
+                      submitLabel={t("assign.partnerSubmit")}
+                      pendingLabel={t("assign.pending")}
                       testIdPrefix={`${testIdPrefix}-assign-partner-${routeRunId}`}
-                      helperText="Partner assignment accepts a dynamic partner object. Replacing existing ownership requires a reason and uses the governed route handoff."
+                      helperText={t("assign.partnerHelper")}
                       fields={[
                         { name: "route_run_id", kind: "hidden", defaultValue: routeRunId },
                         {
@@ -450,7 +460,7 @@ export async function PickupWavesPage({
                           defaultValue: stringValue(row.organization_id) ?? "",
                         },
                         {
-                          name: "partner_id", label: "Known private-pool partner", kind: "relation",
+                          name: "partner_id", label: t("fields.partner"), kind: "relation",
                           options: [
                             ...rowChoices.partners,
                             ...(stringValue(recordValue(pickupAssignment?.partner)?.partner_id) &&
@@ -459,11 +469,11 @@ export async function PickupWavesPage({
                                   label: stringValue(recordValue(pickupAssignment?.partner)?.partner_name) || stringValue(recordValue(pickupAssignment?.partner)?.partner_id)! }]
                               : []),
                           ],
-                          helpText: "Optional: select an approved partner, or keep using the dynamic partner details below.",
+                          helpText: t("fields.partnerHelp"),
                         },
                         {
                           name: "partner_json",
-                          label: "Partner JSON",
+                          label: t("fields.partnerJson"),
                           kind: "textarea",
                           layout: "full",
                           rows: 6,
@@ -479,19 +489,19 @@ export async function PickupWavesPage({
                         },
                         {
                           name: "reassignment_reason",
-                          label: "Reassignment reason",
+                          label: t("fields.reassignmentReason"),
                           kind: "textarea",
                           layout: "full",
                           rows: 2,
                           required: hasPickupOwnership,
                           helpText: hasPickupOwnership
-                            ? "Required to replace the current driver or partner assignment."
-                            : "Optional for the first assignment.",
+                            ? t("fields.reassignmentRequired")
+                            : t("fields.reassignmentOptional"),
                         },
-                        { name: "idempotency_key", label: "Idempotency key", kind: "text" },
+                        { name: "idempotency_key", label: t("fields.idempotencyKey"), kind: "text" },
                         {
                           name: "metadata_json",
-                          label: "Metadata JSON",
+                          label: t("fields.metadataJson"),
                           kind: "textarea",
                           layout: "full",
                           rows: 3,

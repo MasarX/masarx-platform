@@ -292,7 +292,8 @@
     },
     "common": {
       "workflowFirst": "‏Workflow-first",
-      "remove": "‏Remove"
+      "remove": "‏Remove",
+      "invalidJson": "‏أدخل JSON صالحًا في هذا الحقل، ثم أرسل مرة أخرى."
     },
     "operationReport": {
       "title": "تقرير العملية",
@@ -3443,6 +3444,181 @@
     },
     "kanbanBoard": {
       "noItems": "‏لا توجد عناصر"
+    },
+    "pickupOperations": {
+      "form": {
+        "selectBeforeSubmit": "‏اختر {label} قبل الإرسال.",
+        "selectPlaceholder": "‏اختر {label}",
+        "enterIdsDirectly": "‏أدخل المعرّفات المصرّح بها مباشرةً",
+        "idsLabel": "‏معرّفات {label}",
+        "idsHelp": "‏استخدم هذا للسجلات غير الموجودة في الخيارات المحمّلة. يظل الخادم يتحقق من صلاحياتك.",
+        "selectOption": "‏اختر...",
+        "saving": "‏جارٍ الحفظ...",
+        "failed": "‏فشلت عملية الاستلام.",
+        "completed": "‏اكتملت عملية الاستلام."
+      },
+      "navigation": {
+        "requests": "‏الطلبات",
+        "waves": "‏الدفعات",
+        "failures": "‏الإخفاقات"
+      },
+      "unknownStatus": "‏غير معروف",
+      "kinds": {
+        "client": "‏العميل",
+        "sender": "‏المرسل",
+        "branch": "‏الفرع",
+        "driver": "‏السائق",
+        "vehicle": "‏المركبة",
+        "shipment": "‏الشحنة",
+        "reference": "‏المرجع"
+      },
+      "errors": {
+        "assignmentChoices": "‏تعذر تحميل خيارات تعيين الاستلام. أعد التحميل للمحاولة مجددًا.",
+        "relationship": "‏تعذر تحميل {resource} للاستلام. أعد التحميل للمحاولة مجددًا.",
+        "loadPickups": "‏تعذر تحميل عمليات الاستلام.",
+        "displayLabels": "‏تعذر تحميل تسميات عرض الاستلام. أعد التحميل للمحاولة مجددًا.",
+        "session": "‏تعذر تحميل جلستك.",
+        "senderClientScope": "‏تعذر تحديد نطاق عميل المرسل.",
+        "senderScope": "‏نطاق المرسل غير متاح.",
+        "choices": "‏تعذر تحميل خيارات {kind}."
+      }
+    },
+    "pickupWaves": {
+      "eyebrow": "‏العمليات / الاستلام",
+      "title": "‏دفعات الاستلام",
+      "description": "‏اجمع طلبات الاستلام في دفعات، ثم أسند الدفعة إلى سائق أو مركبة أو شريك باستخدام إسقاط pickup_waves.",
+      "unavailable": {
+        "description": "‏خطّط دفعات الاستلام وأسندها إلى السائقين أو المركبات أو الشركاء.",
+        "title": "‏دفعات الاستلام غير متاحة",
+        "action": "‏تحقق من عرض دفعات الاستلام وصلاحيات القراءة في قاعدة البيانات.",
+        "fallback": "‏تعذّر تحميل دفعات الاستلام."
+      },
+      "create": {
+        "title": "‏إنشاء دفعة استلام",
+        "submit": "‏إنشاء دفعة استلام",
+        "pending": "‏جارٍ الإنشاء...",
+        "helper": "‏اختر طلبات الاستلام من السجل أو أدخل معرّفات الشحنات المصرّح بها مباشرةً."
+      },
+      "choicesUnavailable": {
+        "title": "‏خيارات الاستلام غير متاحة",
+        "action": "‏أعد التحميل للمحاولة مجددًا؛ لم تتغير الإسنادات الحالية."
+      },
+      "blocked": {
+        "title": "‏إنشاء دفعات الاستلام محظور",
+        "action": "‏لا يزال بإمكانك مراجعة سجل دفعات الاستلام أدناه.",
+        "sessionUnavailable": "‏تعذّر تحميل جلستك.",
+        "capabilityDenied": "‏الصلاحية مرفوضة: {capability}"
+      },
+      "fields": {
+        "organizationId": "‏معرّف المؤسسة",
+        "branch": "‏الفرع",
+        "plannedDate": "‏التاريخ المخطط",
+        "plannedStart": "‏البداية المخططة",
+        "plannedEnd": "‏النهاية المخططة",
+        "pickupShipments": "‏شحنات الاستلام",
+        "shipmentsPlaceholder": "‏ابحث برقم التتبع أو المرجع",
+        "idempotencyKey": "‏مفتاح منع التكرار",
+        "idempotencyPlaceholder": "‏مفتاح إعادة المحاولة (اختياري)",
+        "metadataJson": "‏البيانات الوصفية (JSON)",
+        "driver": "‏السائق",
+        "vehicle": "‏المركبة",
+        "partner": "‏شريك معروف من المجموعة الخاصة",
+        "partnerHelp": "‏اختياري: اختر شريكًا معتمدًا، أو واصل استخدام تفاصيل الشريك الديناميكية أدناه.",
+        "partnerJson": "‏بيانات الشريك (JSON)",
+        "reassignmentReason": "‏سبب إعادة الإسناد",
+        "reassignmentRequired": "‏مطلوب لاستبدال إسناد السائق أو الشريك الحالي.",
+        "reassignmentOptional": "‏اختياري للإسناد الأول."
+      },
+      "ledger": {
+        "title": "‏سجل دفعات الاستلام",
+        "description": "‏محمّل من pickup_waves. عدد الصفوف في هذه الصفحة: {count}.",
+        "emptyTitle": "‏لا توجد دفعات استلام بعد",
+        "emptyDescription": "‏أنشئ أول دفعة استلام لبدء ترتيب الطلبات في تشغيل مسار.",
+        "shipmentCount": "‏{count, plural, zero {لا شحنات} one {شحنة واحدة} two {شحنتان} few {# شحنات} many {# شحنة} other {# شحنة}}",
+        "route": "‏المسار",
+        "noWindow": "‏لا توجد نافذة زمنية مخططة.",
+        "pickupStops": "‏نقاط الاستلام",
+        "totalBoxes": "‏إجمالي الصناديق"
+      },
+      "assign": {
+        "driverSubmit": "‏إسناد سائق",
+        "partnerSubmit": "‏إسناد شريك",
+        "pending": "‏جارٍ الإسناد...",
+        "driverHelper": "‏يمكن للإسنادات الداخلية تعيين السائق والمركبة معًا.",
+        "partnerHelper": "‏يقبل إسناد الشريك كائن شريك ديناميكيًا. يتطلب استبدال الملكية الحالية سببًا ويستخدم تسليم المسار المحكوم."
+      },
+      "messages": {
+        "shipmentRequired": "‏أدخل معرّف شحنة واحدًا على الأقل.",
+        "created": "‏دفعة الاستلام {routeRunId}.",
+        "createdFallback": "‏تم إنشاء دفعة الاستلام.",
+        "createFailed": "‏فشل إنشاء دفعة الاستلام.",
+        "assignmentUpdated": "‏تم تحديث إسناد دفعة الاستلام.",
+        "partnerAssignmentUpdated": "‏تم تحديث إسناد شريك الاستلام.",
+        "assignmentFailed": "‏فشل إسناد دفعة الاستلام."
+      }
+    },
+    "transferManifestCreate": {
+      "page": {
+        "title": "‏إنشاء بيان نقل",
+        "description": "‏أنشئ مسودات بيانات نقل المستودعات عبر عقد بيان النقل المعتمد.",
+        "sectionTitle": "‏تفاصيل البيان",
+        "sectionDescription": "‏ينشئ البيان صف المسودة في warehouse_transfers وعضويته في warehouse_transfer_items في خطوة واحدة معتمدة."
+      },
+      "form": {
+        "organization": "‏المؤسسة",
+        "unavailable": "‏غير متاح",
+        "sessionScope": "‏نطاق الجلسة",
+        "scope": {
+          "tenant": "‏نطاق المستأجر",
+          "platform": "‏نطاق المنصة",
+          "client": "‏نطاق العميل",
+          "sender": "‏نطاق المرسل",
+          "other": "‏جلسة محددة النطاق"
+        },
+        "permissionsDenied": "‏ليست لديك صلاحية إنشاء عمليات نقل المستودعات من هذه الواجهة.",
+        "permissionsUnavailable": "‏صلاحيات إنشاء نقل المستودعات غير متاحة لهذه الجلسة.",
+        "transferCode": "‏رمز النقل",
+        "manifestSize": "‏حجم البيان",
+        "shipmentCount": "‏{count, plural, zero {لا شحنات} one {شحنة واحدة} two {شحنتان} few {# شحنات} many {# شحنة} other {# شحنة}}",
+        "fromBranch": "‏من الفرع",
+        "toBranch": "‏إلى الفرع",
+        "shipments": "‏الشحنات",
+        "fromBranchPlaceholder": "‏ابحث في فروع المصدر",
+        "toBranchPlaceholder": "‏ابحث في فروع الوجهة",
+        "shipmentsPlaceholder": "‏ابحث برقم تتبع الشحنة أو مرجع العميل",
+        "plannedDispatchLocal": "‏وقت الإرسال المخطط (بالتوقيت المحلي)",
+        "plannedReceiveLocal": "‏وقت الاستلام المخطط (بالتوقيت المحلي)",
+        "rawSection": "‏أدخل معرّفات السجلات والطوابع الزمنية",
+        "fromBranchId": "‏معرّف الفرع المصدر",
+        "toBranchId": "‏معرّف الفرع الوجهة",
+        "branchIdPlaceholder": "‏معرّف UUID للفرع",
+        "plannedDispatchAt": "‏موعد الإرسال المخطط",
+        "plannedReceiveAt": "‏موعد الاستلام المخطط",
+        "shipmentIds": "‏معرّفات الشحنات",
+        "shipmentIdsPlaceholder": "‏معرّف UUID لشحنة واحدة في كل سطر، أو قيم مفصولة بفواصل.",
+        "back": "‏العودة إلى بيانات النقل",
+        "creating": "‏جارٍ الإنشاء...",
+        "submit": "‏إنشاء بيان نقل",
+        "unsavedWarning": "‏لديك مسودة بيان نقل مستودع غير محفوظة."
+      },
+      "errors": {
+        "organizationRequired": "‏يتطلب إنشاء بيان نقل المستودع جلسة على مستوى المؤسسة.",
+        "transferCodeRequired": "‏رمز النقل مطلوب.",
+        "branchesRequired": "‏معرّف الفرع المصدر ومعرّف الفرع الوجهة مطلوبان.",
+        "shipmentsRequired": "‏يلزم معرّف شحنة واحد على الأقل.",
+        "permissionDenied": "‏ليست لديك صلاحية إنشاء عمليات نقل المستودعات.",
+        "permissionsUnavailable": "‏صلاحيات إنشاء نقل المستودعات غير متاحة.",
+        "invalidDispatch": "‏أدخل وقت الإرسال المخطط بتنسيق ISO 8601 للتاريخ والوقت مع Z أو فرق توقيت عن UTC.",
+        "invalidReceive": "‏أدخل وقت الاستلام المخطط بتنسيق ISO 8601 للتاريخ والوقت مع Z أو فرق توقيت عن UTC.",
+        "receiveBeforeDispatch": "‏يجب أن يكون وقت الاستلام المخطط في وقت الإرسال المخطط أو بعده.",
+        "missingTransferId": "‏اكتمل إنشاء بيان نقل المستودع دون إرجاع transfer_id.",
+        "createFailed": "‏فشل إنشاء بيان نقل المستودع."
+      },
+      "toast": {
+        "created": "‏تم إنشاء بيان النقل",
+        "reused": "‏تمت إعادة استخدام بيان نقل موجود",
+        "failed": "‏فشل إنشاء بيان النقل"
+      }
     }
   }
 }
