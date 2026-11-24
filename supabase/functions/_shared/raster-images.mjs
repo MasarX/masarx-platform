@@ -189,6 +189,10 @@ export const stripProofImageMetadata = (bytes, mime) => {
       // A fixed-size Adobe APP14 segment supplies the JPEG color transform.
       if (marker === 0xee && end - payload === 12 &&
           String.fromCharCode(...bytes.subarray(payload, payload + 5)) === "Adobe") return;
+      // ICC APP2 color profiles may span several numbered segments.
+      if (marker === 0xe2 && end - payload > 14 &&
+          String.fromCharCode(...bytes.subarray(payload, payload + 12)) === "ICC_PROFILE\0" &&
+          bytes[payload + 12] > 0 && bytes[payload + 12] <= bytes[payload + 13]) return;
       parts.push(bytes.subarray(start, offset));
       start = end;
     })) return null;

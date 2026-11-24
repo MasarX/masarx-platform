@@ -32,14 +32,12 @@ const TRACKING_IP_HASH_SALT = readEnv("PUBLIC_TRACKING_IP_HASH_SALT", [
   "TRACKING_IP_HASH_SALT",
   "MARKETING_IP_HASH_SALT",
 ]);
-const TRACKING_PROOF_SIGNING_SECRET = readEnv("PUBLIC_TRACKING_PROOF_SIGNING_SECRET");
 const TRACKING_RPC_SCHEMA =
   readEnv("PUBLIC_TRACKING_RPC_SCHEMA", ["EDGE_RPC_SCHEMA", "API_RPC_SCHEMA"]) || "api";
 const LOCAL_TRACKING_TURNSTILE_SECRET_KEY = "EXAMPLE_PASSWORD";
 const LOCAL_TRACKING_TURNSTILE_TEST_TOKEN = "1x00000000000000000000AA";
 const LEGACY_LOCAL_TRACKING_TURNSTILE_SECRET_KEY = "local-dev-turnstile-secret";
 const LOCAL_TRACKING_IP_HASH_SALT = "local-public-tracking";
-const LOCAL_TRACKING_PROOF_SIGNING_SECRET = "local-public-tracking-proof";
 
 const asString = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 const isJwtLike = (value: string): boolean => String(value || "").trim().split(".").length === 3;
@@ -223,7 +221,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // objectives:allow LOCALHOST Justification: local-only fallback client IP is required when loopback QA requests omit forwarded IP headers.
   const clientIp = readClientIp(req) || (cors.localContext ? "127.0.0.1" : "");
   const sensitiveLogValues = [
-    TRACKING_PROOF_SIGNING_SECRET,
     TRACKING_TURNSTILE_SECRET_KEY,
     LOCAL_TRACKING_TURNSTILE_SECRET_KEY,
     EDGE_SUPABASE_SECRET_KEY,
@@ -295,9 +292,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const ipHash = await sha256Hex(`${effectiveIpHashSalt}:${clientIp}`);
   if (isProof) {
-    const signingSecret = TRACKING_PROOF_SIGNING_SECRET || (cors.localContext ? LOCAL_TRACKING_PROOF_SIGNING_SECRET : "");
-    if (!signingSecret) return reportInternalError(500, "server_misconfigured", "proof_signing_secret_missing");
-    return serveTrackingProof(serviceClient, { ...payload, ip_hash: ipHash }, requestUrl, cors.headers, signingSecret);
+    return serveTrackingProof(serviceClient, { ...payload, ip_hash: ipHash }, requestUrl, cors.headers, effectiveIpHashSalt);
   }
 
   let turnstileVerified = false;

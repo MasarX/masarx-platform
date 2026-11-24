@@ -12,6 +12,12 @@ const chunk = (kind, bytes) => {
   return Buffer.concat([length, Buffer.from(kind), bytes, Buffer.alloc(4)]);
 };
 
+const jpegSegment = (marker, payload) => {
+  const header = Buffer.from([0xff, marker, 0, 0]);
+  header.writeUInt16BE(payload.length + 2, 2);
+  return Buffer.concat([header, payload]);
+};
+
 const png = Buffer.concat([
   Buffer.from('89504e470d0a1a0a', 'hex'),
   chunk('IHDR', Buffer.from('00000001000000010802000000', 'hex')),
@@ -37,7 +43,7 @@ async function setup(bytes = png, mime = 'image/png') {
     Date: { now: () => now, parse: Date.parse },
   });
   const { serveTrackingProof } = record.exports;
-  const org = randomUUID();
+  const org = 'a' + randomUUID().slice(1);
   const owner = randomUUID();
   const other = randomUUID();
   const token = randomUUID();
@@ -66,7 +72,7 @@ async function setup(bytes = png, mime = 'image/png') {
     serveTrackingProof(client, { session_token: sessionToken }, url, {}, secret);
   const list = async () => (await (await request()).json()).proof;
   const fileUrl = (relative) => new URL(relative, requestUrl);
-  return { org, artifact, artifacts, download, request, list, fileUrl, raster, advance: () => { now += 600_000; } };
+  return { org, owner, secret, artifact, artifacts, download, request, list, fileUrl, raster, advance: () => { now += 600_000; } };
 }
 
 test('proof URLs bind to the session and artifact, detect tampering and expire', async () => {
@@ -97,6 +103,23 @@ test('proof URLs bind to the session and artifact, detect tampering and expire',
   expect(download).toHaveBeenCalledTimes(2);
 });
 
+test('proof file refuses a link signed directly with the IP hash salt', async () => {
+  const { owner, secret, artifact, download, request, list, fileUrl } = await setup();
+  const { artifacts } = await list();
+  const url = fileUrl(artifacts[0].url);
+  const expiry = Number(url.searchParams.get('expires'));
+  const rawKey = await webcrypto.subtle.importKey(
+    'raw', Buffer.from(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+  );
+  const data = Buffer.from(JSON.stringify(['public-tracking-proof-v1', owner, artifact.id, expiry]));
+  const signature = await webcrypto.subtle.sign('HMAC', rawKey, data);
+  url.searchParams.set('signature', Buffer.from(signature).toString('hex'));
+
+  download.mockClear();
+  expect((await request(url)).status).toBe(404);
+  expect(download).not.toHaveBeenCalled();
+});
+
 test('proof refuses invalid storage paths before calling Storage', async () => {
   const { org, artifact, download, request, list, fileUrl } = await setup();
   const { artifacts } = await list();
@@ -108,6 +131,8 @@ test('proof refuses invalid storage paths before calling Storage', async () => {
     org + '/%2e%2e/' + otherOrg + '/photo.jpg',
     org + '/..\\' + otherOrg + '\\photo.jpg',
     org + '/./photo.jpg', org + '//photo.jpg', '/' + org + '/photo.jpg',
+    org + 'x/photo.jpg', org.toUpperCase() + '/photo.jpg',
+    org + '/photo.jpg/', org + '/photo%2e.jpg',
     otherOrg + '/photo.jpg',
   ];
   for (const path of rejected) {
@@ -119,17 +144,12 @@ test('proof refuses invalid storage paths before calling Storage', async () => {
 });
 
 test('JPEG proof preserves Adobe color data and strips private metadata between scans', async () => {
-  const segment = (marker, payload) => {
-    const header = Buffer.from([0xff, marker, 0, 0]);
-    header.writeUInt16BE(payload.length + 2, 2);
-    return Buffer.concat([header, payload]);
-  };
-  const adobe = segment(0xee, Buffer.concat([Buffer.from('Adobe'), Buffer.from([0, 100, 0, 0, 0, 0, 1])]));
-  const exif = segment(0xe1, Buffer.from('Exif\0\0fixture'));
-  const xmp = segment(0xe1, Buffer.from('http://ns.adobe.com/xap/1.0/\0fixture'));
-  const app2 = segment(0xe2, Buffer.from('fixture ICC metadata'));
-  const app13 = segment(0xed, Buffer.from('fixture Photoshop metadata'));
-  const comment = segment(0xfe, Buffer.from('fixture JPEG comment'));
+  const adobe = jpegSegment(0xee, Buffer.concat([Buffer.from('Adobe'), Buffer.from([0, 100, 0, 0, 0, 0, 1])]));
+  const exif = jpegSegment(0xe1, Buffer.from('Exif\0\0fixture'));
+  const xmp = jpegSegment(0xe1, Buffer.from('http://ns.adobe.com/xap/1.0/\0fixture'));
+  const app2 = jpegSegment(0xe2, Buffer.from('fixture ICC metadata'));
+  const app13 = jpegSegment(0xed, Buffer.from('fixture Photoshop metadata'));
+  const comment = jpegSegment(0xfe, Buffer.from('fixture JPEG comment'));
   const secondScan = progressive.indexOf(Buffer.from([0xff, 0xda]), 2 + progressive.indexOf(Buffer.from([0xff, 0xda])));
   const input = Buffer.concat([
     progressive.subarray(0, 2), adobe, exif, app2, progressive.subarray(2, secondScan),
@@ -143,6 +163,21 @@ test('JPEG proof preserves Adobe color data and strips private metadata between 
   expect(raster.validatedLogoContentType(output, 'image/jpeg')).toBe('image/jpeg');
   const endJfif = 4 + progressive.readUInt16BE(4);
   expect(output).toEqual(Buffer.concat([progressive.subarray(0, 2), adobe, progressive.subarray(endJfif)]));
+});
+
+test('JPEG proof preserves both APP2 segments of a split ICC profile', async () => {
+  const identifier = Buffer.from('ICC_PROFILE\0');
+  const first = jpegSegment(0xe2, Buffer.concat([identifier, Buffer.from([1, 2, 1])]));
+  const second = jpegSegment(0xe2, Buffer.concat([identifier, Buffer.from([2, 2, 2])]));
+  const input = Buffer.concat([progressive.subarray(0, 2), first, second, progressive.subarray(2)]);
+  const { request, list, fileUrl, raster } = await setup(input, 'image/jpeg');
+  const { artifacts } = await list();
+  const file = await request(fileUrl(artifacts[0].url));
+  expect(file.status).toBe(200);
+  const output = Buffer.from(await file.arrayBuffer());
+  expect(raster.validatedLogoContentType(output, 'image/jpeg')).toBe('image/jpeg');
+  const endJfif = 4 + progressive.readUInt16BE(4);
+  expect(output).toEqual(Buffer.concat([progressive.subarray(0, 2), first, second, progressive.subarray(endJfif)]));
 });
 
 test.each([

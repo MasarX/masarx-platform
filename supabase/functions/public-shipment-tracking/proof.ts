@@ -80,7 +80,7 @@ export async function serveTrackingProof<Schema extends string>(
   input: Record<string, unknown>,
   requestUrl: URL,
   corsHeaders: HeadersInit,
-  signingSecret: string,
+  ipHashSalt: string,
 ): Promise<Response> {
   const headers = new Headers(corsHeaders);
   headers.set("Cache-Control", "no-store");
@@ -116,9 +116,10 @@ export async function serveTrackingProof<Schema extends string>(
     return reply(200, { ok: true, proof: { state: proof.state, available_until: proof.available_until, recipient_name: null, artifacts: [] } });
   }
 
-  const key = await crypto.subtle.importKey(
-    "raw", encoder.encode(signingSecret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"],
-  );
+  const hmac = { name: "HMAC", hash: "SHA-256" };
+  const rootKey = await crypto.subtle.importKey("raw", encoder.encode(ipHashSalt), hmac, false, ["sign"]);
+  const linkKeyBytes = await crypto.subtle.sign("HMAC", rootKey, encoder.encode("public-tracking-proof-link-v1"));
+  const linkKey = await crypto.subtle.importKey("raw", linkKeyBytes, hmac, false, ["sign", "verify"]);
   const cap = Math.floor(Math.min(
     Date.parse(proof.available_until ?? ""),
     result.session_expires_at ? Date.parse(result.session_expires_at) : Infinity,
@@ -129,7 +130,7 @@ export async function serveTrackingProof<Schema extends string>(
     const artifact = proof.artifacts.find((item) => item.id === artifactId);
     const signatureBytes = Uint8Array.from(signature.match(/../g) ?? [], (value) => parseInt(value, 16));
     if (!artifact || expiry > cap ||
-        !await crypto.subtle.verify("HMAC", key, signatureBytes, linkData(result.session_id, artifactId, expiry))) {
+        !await crypto.subtle.verify("HMAC", linkKey, signatureBytes, linkData(result.session_id, artifactId, expiry))) {
       return unavailable();
     }
     const image = await loadProofImage(client, result.organization_id, artifact);
@@ -150,7 +151,7 @@ export async function serveTrackingProof<Schema extends string>(
   if (cap <= listedAt) return unavailable();
   const linkExpiry = Math.min(cap, listedAt + 600);
   const artifacts = await Promise.all(eligible.map(async (artifact) => {
-    const digest = await crypto.subtle.sign("HMAC", key, linkData(result.session_id, artifact.id, linkExpiry));
+    const digest = await crypto.subtle.sign("HMAC", linkKey, linkData(result.session_id, artifact.id, linkExpiry));
     const signature = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
     const query = new URLSearchParams({ artifact: artifact.id, expires: String(linkExpiry), signature });
     return {
