@@ -29,15 +29,20 @@ SELECT is((SELECT count(*) FROM previous_worker_claims), 2::bigint, 'previous wo
 
 SELECT set_config('request.method', 'POST', true);
 SELECT set_config('request.headers', '{}', true);
-SELECT is(public.get_claimed_edge_job_call_spec_v1(job_id, lease_token), NULL::jsonb,
+SELECT is(api.get_claimed_edge_job_call_spec_v1(job_id, lease_token), NULL::jsonb,
   kind || ' gives no dispatch spec to the previous HTTP worker') FROM previous_worker_claims;
 SELECT ok(o.status = 'pending_edge' AND o.scheduled_at > now() AND o.completed_at IS NULL
-    AND o.edge_lease_token IS NULL AND public.check_async_response(c.request_id)->>'completed' = 'false',
+    AND o.edge_lease_token IS NULL AND o.lease_expires_at IS NULL AND o.retry_count = 0
+    AND public.check_async_response(c.request_id)->>'completed' = 'false',
   c.kind || ' retains its original pending request for the upgraded worker')
 FROM previous_worker_claims c JOIN public.outbound_calls o ON o.id = c.job_id;
-SELECT throws_ok(format('SELECT public.get_claimed_edge_job_call_spec_v1(%L::uuid,%L::uuid)', job_id, lease_token),
+SELECT throws_ok(format('SELECT api.get_claimed_edge_job_call_spec_v1(%L::uuid,%L::uuid)', job_id, lease_token),
   'P0001', format('get_claimed_edge_job_call_spec_v1: active lease for job %s not found', job_id),
   kind || ' refuses to use the released lease again') FROM previous_worker_claims;
+
+SELECT throws_ok(format('SELECT api.claim_edge_job_by_id_v1(%L::uuid)', job_id),
+  'P0001', format('claim_edge_job_by_id_v1: outbound call %s is not claimable', job_id),
+  kind || ' remains deferred through the original lease window') FROM previous_worker_claims;
 
 -- Advance eligibility without waiting on the wall clock.
 UPDATE public.outbound_calls SET scheduled_at = now() WHERE id IN (SELECT job_id FROM previous_worker_claims);
@@ -47,7 +52,7 @@ SELECT c.kind, c.request_id, c.lease_token AS old_token, claim.*
 FROM previous_worker_claims c CROSS JOIN LATERAL public.claim_edge_job_by_id_v1(c.job_id) claim;
 SELECT is((SELECT count(*) FROM upgraded_worker_claims), 2::bigint, 'upgraded worker acquires each original job once');
 SELECT ok(lease_token IS DISTINCT FROM old_token
-    AND public.get_claimed_edge_job_call_spec_v1(job_id, lease_token) ? 'renderer_credential_ref',
+    AND api.get_claimed_edge_job_call_spec_v1(job_id, lease_token) ? 'renderer_credential_ref',
   kind || ' uses a new lease with the current renderer protocol') FROM upgraded_worker_claims;
 SELECT public.mark_claimed_edge_job_success_v1(job_id, lease_token, 200, '{}'::jsonb, '{"ok":true}'::jsonb, 1)
 FROM upgraded_worker_claims;

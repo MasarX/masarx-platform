@@ -103,19 +103,16 @@ const GUARDED_EGRESS_PROXY_USERNAME = readEnv(GUARDED_EGRESS_PROXY_ENV.username,
 const GUARDED_EGRESS_PROXY_PASSWORD = readEnv(GUARDED_EGRESS_PROXY_ENV.password, []);
 const ALLOW_DEV_DIRECT_EGRESS = Deno.env?.get("EDGE_ENVIRONMENT") === "dev" &&
   Object.values(GUARDED_EGRESS_PROXY_ENV).every((key) => Deno.env.get(key) === undefined);
-let supabase = null as ReturnType<typeof createClient> | null;
-if (SUPABASE_URL && SUPABASE_ANON_KEY && EDGE_DB_JWT) {
-  supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+const RENDERER_TRANSPORT_HEADER = "x-masarx-renderer-transport";
+const createWorkerClient = (headers: Record<string, string>) =>
+  createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false },
     db: { schema: "api" },
-    global: {
-      headers: {
-        Authorization: `Bearer ${EDGE_DB_JWT}`,
-        "x-masarx-renderer-transport": "1",
-      },
-    },
+    global: { headers: { ...headers, Authorization: `Bearer ${EDGE_DB_JWT}` } },
   });
-}
+const supabase = SUPABASE_URL && SUPABASE_ANON_KEY && EDGE_DB_JWT
+  ? createWorkerClient({ [RENDERER_TRANSPORT_HEADER]: "1" })
+  : null;
 if (!supabase) {
   console.error(
     EDGE_REQUIRE_DB_JWT
@@ -455,14 +452,37 @@ const executeClaimedJob = async (
     };
   }
 
+  // Refresh again after the bounded network operation so even a near-600-second
+  // call has a full ownership window for compare-and-swap finalization.
+  await renewClaimedLease(client, jobId, leaseToken);
+
+  // v0.1.0 rejects the gateway role before it can render or print.
+  if (
+    isRenderer && callResult.status === 403 &&
+    callResult.headers["x-masarx-edge-function"] === "label-renderer" &&
+    callResult.headers[RENDERER_TRANSPORT_HEADER] === undefined &&
+    JSON.stringify(callResult.body) === '{"error":"Unauthorized role"}'
+  ) {
+    // Omitting the version asks the database to release this lease through the rollout gate.
+    const { data, error } = await createWorkerClient({}).rpc("get_claimed_edge_job_call_spec_v1", {
+      p_job_id: jobId,
+      p_lease_token: leaseToken,
+    });
+    if (error || data !== null) {
+      throw new Error(`Could not defer renderer transport for job ${jobId}`);
+    }
+    console.warn("[api-caller] renderer_transport_deferred");
+    return {
+      job_id: jobId,
+      success: false,
+      result: { ...callResult, status: 503, completed: false, error: "renderer_transport_deferred" },
+    };
+  }
+
   if (isRenderer && (callResult.status === 401 || callResult.status === 403)) {
     callResult = { ...callResult, error: "renderer_gateway_rejected" };
     console.error("[api-caller] renderer_gateway_rejected");
   }
-
-  // Refresh again after the bounded network operation so even a near-600-second
-  // call has a full ownership window for compare-and-swap finalization.
-  await renewClaimedLease(client, jobId, leaseToken);
 
   const isSuccess = callResult.status >= 200 && callResult.status < 300;
 
