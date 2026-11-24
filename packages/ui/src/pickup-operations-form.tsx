@@ -7,6 +7,7 @@ import { Select } from "./select";
 import { Textarea } from "./textarea";
 import { cn } from "./utils";
 import { Combobox } from "./combobox";
+import { createUiTranslator } from "./i18n";
 
 export type PickupLookupOption = { value: string; label: string; searchText?: string; groupValue?: string | null };
 
@@ -94,6 +95,7 @@ export function PickupMutationForm({
   pendingLabel,
   helperText,
 }: PickupMutationFormProps) {
+  const t = React.useMemo(() => createUiTranslator("ui.pickupOperations.form"), []);
   const [state, formAction, isPending] = React.useActionState(action, initialState);
   const [validationError, setValidationError] = React.useState<string | null>(null);
   const formRef = React.useRef<HTMLFormElement>(null);
@@ -171,7 +173,7 @@ export function PickupMutationForm({
         });
         if (missing) {
           event.preventDefault();
-          setValidationError(`Select ${missing.label ?? missing.name} before submitting.`);
+          setValidationError(t("selectBeforeSubmit", { label: missing.label ?? missing.name }));
           return;
         }
         submittedValues.current = { ...values };
@@ -202,20 +204,20 @@ export function PickupMutationForm({
               <div role="group" aria-labelledby={`${testIdPrefix}-${field.name}-label`}>
                 <Combobox mode={field.mode ?? "single"} options={options} value={value} aria-labelledby={`${testIdPrefix}-${field.name}-label`}
                   onChange={(next) => updateValue(field.name, next)} disabled={isPending}
-                  placeholder={field.placeholder ?? `Select ${field.label.toLowerCase()}`} />
+                  placeholder={field.placeholder ?? t("selectPlaceholder", { label: field.label.toLowerCase() })} />
               </div>
               {(Array.isArray(value) ? value : [value]).map((entry, index) =>
                 <input key={`${entry}-${index}`} type="hidden" name={field.name} value={entry} />)}
               <details>
-                <summary className="cursor-pointer text-xs text-ui-muted">Enter authorized IDs directly</summary>
-                <Input aria-label={`${field.label} IDs`} disabled={isPending}
+                <summary className="cursor-pointer text-xs text-ui-muted">{t("enterIdsDirectly")}</summary>
+                <Input aria-label={t("idsLabel", { label: field.label })} disabled={isPending}
                   value={referenceDrafts[field.name] ?? (Array.isArray(value) ? value.join(", ") : value)}
                   onChange={(event) => {
                     const raw = event.currentTarget.value;
                     updateValue(field.name, field.mode === "multi" ? raw.split(/[\s,]+/).filter(Boolean) : raw.trim());
                     setReferenceDrafts((current) => ({ ...current, [field.name]: raw }));
                   }} />
-                <p className="text-xs text-ui-muted">Use this for records outside the loaded choices. The server still checks your access.</p>
+                <p className="text-xs text-ui-muted">{t("idsHelp")}</p>
               </details>
               {field.helpText ? <div className="text-xs text-ui-muted">{field.helpText}</div> : null}
             </div>;
@@ -251,7 +253,7 @@ export function PickupMutationForm({
                   value={String(values[field.name] ?? "")}
                   onChange={(event) => updateValue(field.name, event.currentTarget.value)}
                 >
-                  <option value="">Select...</option>
+                  <option value="">{t("selectOption")}</option>
                   {field.options.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
@@ -279,7 +281,7 @@ export function PickupMutationForm({
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" loading={isPending} data-testid={`${testIdPrefix}-submit`}>
-          {isPending ? pendingLabel ?? "Saving..." : submitLabel}
+          {isPending ? pendingLabel ?? t("saving") : submitLabel}
         </Button>
         {helperText ? (
           <span className="text-xs text-ui-muted">{helperText}</span>
@@ -292,7 +294,7 @@ export function PickupMutationForm({
           className="rounded-2xl border border-ui-danger/30 bg-ui-danger/5 p-3 text-sm text-ui-ink"
           data-testid={`${testIdPrefix}-error`}
         >
-          {validationError ?? state.message ?? "Pickup operation failed."}
+          {validationError ?? state.message ?? t("failed")}
         </div>
       ) : null}
 
@@ -302,7 +304,7 @@ export function PickupMutationForm({
           className="rounded-2xl border border-ui-border bg-ui-surface/80 p-3 text-sm text-ui-ink"
           data-testid={`${testIdPrefix}-success`}
         >
-          {state.message ?? "Pickup operation completed."}
+          {state.message ?? t("completed")}
         </div>
       ) : null}
     </form>

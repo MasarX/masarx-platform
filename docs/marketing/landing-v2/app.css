@@ -1559,8 +1559,9 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   position: relative;
   display: grid;
   gap: 0.25rem;
-  padding: 0.9rem 0.9rem 0.9rem 1.3rem;
-  border-left: 2px solid rgba(23, 77, 196, 0.28);
+  padding: 0.9rem;
+  padding-inline-start: 1.3rem;
+  border-inline-start: 2px solid rgba(23, 77, 196, 0.28);
   background: rgba(255,255,255,0.66);
   border-radius: 0.9rem;
 }
@@ -1568,13 +1569,13 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
 [data-theme="dark"] .track-timeline-item,
 [data-theme="dark"] .track-timeline-empty {
   background: rgba(7, 12, 22, 0.55);
-  border-left-color: rgba(88, 180, 255, 0.4);
+  border-inline-start-color: rgba(88, 180, 255, 0.4);
 }
 
 .track-timeline-item::before {
   content: "";
   position: absolute;
-  left: -0.42rem;
+  inset-inline-start: -0.42rem;
   top: 1rem;
   width: 0.65rem;
   height: 0.65rem;

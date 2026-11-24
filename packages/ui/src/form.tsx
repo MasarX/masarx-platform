@@ -46,17 +46,99 @@ export function Form<TFieldValues extends FieldValues>({
   );
 }
 
-export type FormFieldRenderProps<
-  TFieldValues extends FieldValues,
-  TName extends FieldPath<TFieldValues>,
-> = {
-  field: ControllerRenderProps<TFieldValues, TName>;
-  fieldState: ControllerFieldState;
+export type FormFieldLayoutRenderProps = {
   fieldId: string;
+  labelId: string;
   descriptionId: string;
   messageId: string;
   describedBy?: string;
   invalid: boolean;
+};
+
+export type FormFieldLayoutProps = {
+  id?: string;
+  label?: string;
+  labelClassName?: string;
+  description?: string;
+  error?: string | null;
+  className?: string;
+  messageClassName?: string;
+  messageTestId?: string;
+  children: (props: FormFieldLayoutRenderProps) => React.ReactNode;
+};
+
+/**
+ * Label, hint and error wiring for one field. FormField uses it with react-hook-form;
+ * forms that keep their own state pass `error` directly.
+ */
+export function FormFieldLayout({
+  id,
+  label,
+  labelClassName,
+  description,
+  error,
+  className,
+  messageClassName,
+  messageTestId,
+  children,
+}: FormFieldLayoutProps) {
+  const generatedId = React.useId();
+  const fieldId = id ?? generatedId;
+  const labelId = `${fieldId}-label`;
+  const descriptionId = `${fieldId}-description`;
+  const messageId = `${fieldId}-message`;
+  const hasError = Boolean(error);
+  const describedBy = [
+    description ? descriptionId : null,
+    hasError ? messageId : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <div className={cn("space-y-1.5", className)}>
+      {label ? (
+        <label
+          id={labelId}
+          htmlFor={fieldId}
+          className={cn("text-sm font-medium text-ui-ink", labelClassName)}
+        >
+          {label}
+        </label>
+      ) : null}
+      {children({
+        fieldId,
+        labelId,
+        descriptionId,
+        messageId,
+        describedBy: describedBy || undefined,
+        invalid: hasError,
+      })}
+      {description ? (
+        <p id={descriptionId} className="text-xs text-ui-muted">
+          {description}
+        </p>
+      ) : null}
+      {hasError ? (
+        <p
+          id={messageId}
+          className={cn("text-xs text-ui-danger", messageClassName)}
+          role="alert"
+          data-testid={messageTestId}
+        >
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+export type FormFieldRenderProps<
+  TFieldValues extends FieldValues,
+  TName extends FieldPath<TFieldValues>,
+> = FormFieldLayoutRenderProps & {
+  field: ControllerRenderProps<TFieldValues, TName>;
+  fieldState: ControllerFieldState;
 };
 
 export type FormFieldProps<
@@ -93,62 +175,22 @@ export function FormField<
     throw new Error("FormField requires a react-hook-form control.");
   }
 
-  const fieldId = React.useId();
-  const descriptionId = `${fieldId}-description`;
-  const messageId = `${fieldId}-message`;
-
   return (
-    <div className={cn("space-y-1.5", className)}>
-      {label ? (
-        <label
-          htmlFor={fieldId}
-          className={cn("text-sm font-medium text-ui-ink", labelClassName)}
+    <Controller
+      name={name}
+      control={resolvedControl}
+      render={({ field, fieldState }) => (
+        <FormFieldLayout
+          label={label}
+          labelClassName={labelClassName}
+          description={description}
+          error={fieldState.error?.message}
+          className={className}
         >
-          {label}
-        </label>
-      ) : null}
-      <Controller
-        name={name}
-        control={resolvedControl}
-        render={({ field, fieldState }) => {
-          const hasError = Boolean(fieldState.error?.message);
-          const describedBy = [
-            description ? descriptionId : null,
-            hasError ? messageId : null,
-          ]
-            .filter(Boolean)
-            .join(" ");
-
-          return (
-            <>
-              {render({
-                field,
-                fieldState,
-                fieldId,
-                descriptionId,
-                messageId,
-                describedBy: describedBy || undefined,
-                invalid: hasError,
-              })}
-              {description ? (
-                <p id={descriptionId} className="text-xs text-ui-muted">
-                  {description}
-                </p>
-              ) : null}
-              {hasError ? (
-                <p
-                  id={messageId}
-                  className="text-xs text-ui-danger"
-                  role="alert"
-                >
-                  {fieldState.error?.message}
-                </p>
-              ) : null}
-            </>
-          );
-        }}
-      />
-    </div>
+          {(ids) => render({ field, fieldState, ...ids })}
+        </FormFieldLayout>
+      )}
+    />
   );
 }
 

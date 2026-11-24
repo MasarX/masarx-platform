@@ -292,7 +292,8 @@
     },
     "common": {
       "workflowFirst": "Workflow-first",
-      "remove": "Remove"
+      "remove": "Remove",
+      "invalidJson": "Enter valid JSON in this field, then submit again."
     },
     "operationReport": {
       "title": "Operation report",
@@ -491,7 +492,8 @@
       "removeAria": "Remove {label}",
       "createOption": "Create \"{query}\"",
       "empty": "No results",
-      "loading": "Loading…"
+      "loading": "Loading…",
+      "listAria": "Options"
     },
     "timePicker": {
       "ariaLabel": "Select time"
@@ -1052,7 +1054,12 @@
     },
     "routeOperations": {
       "unknown": "unknown",
-      "scopeLabel": "{scopeType}: {scopeLabel}",
+      "scopeTypes": {
+        "global": "Global",
+        "tenant": "Tenant",
+        "client": "Client",
+        "sender": "Sender"
+      },
       "title": "Route operations workspace",
       "description": "Route-first operations shell driven by ui_navigation and ui_read_registry.",
       "errors": {
@@ -1191,7 +1198,12 @@
     },
     "exceptionInbox": {
       "unknown": "unknown",
-      "scopeLabel": "{scopeType}: {scopeLabel}",
+      "scopeTypes": {
+        "global": "Global",
+        "tenant": "Tenant",
+        "client": "Client",
+        "sender": "Sender"
+      },
       "title": "Exception inbox",
       "description": "Workflow exception inbox built from navigation + registry rows.",
       "errors": {
@@ -3433,6 +3445,181 @@
     },
     "kanbanBoard": {
       "noItems": "No items"
+    },
+    "pickupOperations": {
+      "form": {
+        "selectBeforeSubmit": "Select {label} before submitting.",
+        "selectPlaceholder": "Select {label}",
+        "enterIdsDirectly": "Enter authorized IDs directly",
+        "idsLabel": "{label} IDs",
+        "idsHelp": "Use this for records outside the loaded choices. The server still checks your access.",
+        "selectOption": "Select...",
+        "saving": "Saving...",
+        "failed": "Pickup operation failed.",
+        "completed": "Pickup operation completed."
+      },
+      "navigation": {
+        "requests": "Requests",
+        "waves": "Waves",
+        "failures": "Failures"
+      },
+      "unknownStatus": "unknown",
+      "kinds": {
+        "client": "Client",
+        "sender": "Sender",
+        "branch": "Branch",
+        "driver": "Driver",
+        "vehicle": "Vehicle",
+        "shipment": "Shipment",
+        "reference": "Reference"
+      },
+      "errors": {
+        "assignmentChoices": "Pickup assignment choices could not be loaded. Reload to retry.",
+        "relationship": "Pickup {resource} could not be loaded. Reload to retry.",
+        "loadPickups": "Unable to load pickups.",
+        "displayLabels": "Pickup display labels could not be loaded. Reload to retry.",
+        "session": "Your session could not be loaded.",
+        "senderClientScope": "Sender client scope could not be resolved.",
+        "senderScope": "Sender scope unavailable.",
+        "choices": "Unable to load {kind} choices."
+      }
+    },
+    "pickupWaves": {
+      "eyebrow": "Operations / Pickup",
+      "title": "Pickup waves",
+      "description": "Group pickup requests into waves, then assign the wave to a driver, vehicle, or partner using the pickup_waves projection.",
+      "unavailable": {
+        "description": "Plan pickup waves and assign them to drivers, vehicles, or partners.",
+        "title": "Pickup waves unavailable",
+        "action": "Check the pickup wave view and database read permissions.",
+        "fallback": "Unable to load pickup waves."
+      },
+      "create": {
+        "title": "Create pickup wave",
+        "submit": "Create pickup wave",
+        "pending": "Creating...",
+        "helper": "Select pickup requests from the ledger or enter authorized shipment IDs directly."
+      },
+      "choicesUnavailable": {
+        "title": "Pickup choices unavailable",
+        "action": "Reload to retry; existing assignments are unchanged."
+      },
+      "blocked": {
+        "title": "Pickup wave creation is blocked",
+        "action": "You can still review the pickup wave ledger below.",
+        "sessionUnavailable": "Your session could not be loaded.",
+        "capabilityDenied": "Capability denied: {capability}"
+      },
+      "fields": {
+        "organizationId": "Organization ID",
+        "branch": "Branch",
+        "plannedDate": "Planned date",
+        "plannedStart": "Planned start",
+        "plannedEnd": "Planned end",
+        "pickupShipments": "Pickup shipments",
+        "shipmentsPlaceholder": "Search tracking number or reference",
+        "idempotencyKey": "Idempotency key",
+        "idempotencyPlaceholder": "Optional retry key",
+        "metadataJson": "Metadata JSON",
+        "driver": "Driver",
+        "vehicle": "Vehicle",
+        "partner": "Known private-pool partner",
+        "partnerHelp": "Optional: select an approved partner, or keep using the dynamic partner details below.",
+        "partnerJson": "Partner JSON",
+        "reassignmentReason": "Reassignment reason",
+        "reassignmentRequired": "Required to replace the current driver or partner assignment.",
+        "reassignmentOptional": "Optional for the first assignment."
+      },
+      "ledger": {
+        "title": "Pickup wave ledger",
+        "description": "Loaded from pickup_waves. {count} row(s) on this page.",
+        "emptyTitle": "No pickup waves yet",
+        "emptyDescription": "Create the first pickup wave to start sequencing requests into a route run.",
+        "shipmentCount": "{count, plural, one {# shipment} other {# shipments}}",
+        "route": "Route",
+        "noWindow": "No planned window.",
+        "pickupStops": "Pickup stops",
+        "totalBoxes": "Total boxes"
+      },
+      "assign": {
+        "driverSubmit": "Assign driver",
+        "partnerSubmit": "Assign partner",
+        "pending": "Assigning...",
+        "driverHelper": "Internal assignments can set driver and vehicle together.",
+        "partnerHelper": "Partner assignment accepts a dynamic partner object. Replacing existing ownership requires a reason and uses the governed route handoff."
+      },
+      "messages": {
+        "shipmentRequired": "Provide at least one shipment id.",
+        "created": "Pickup wave {routeRunId}.",
+        "createdFallback": "Pickup wave created.",
+        "createFailed": "Pickup wave creation failed.",
+        "assignmentUpdated": "Pickup wave assignment updated.",
+        "partnerAssignmentUpdated": "Pickup partner assignment updated.",
+        "assignmentFailed": "Pickup wave assignment failed."
+      }
+    },
+    "transferManifestCreate": {
+      "page": {
+        "title": "Create transfer manifest",
+        "description": "Create draft warehouse transfer manifests through the canonical transfer-manifest contract.",
+        "sectionTitle": "Manifest details",
+        "sectionDescription": "A manifest creates the draft warehouse_transfers row and its warehouse_transfer_items membership in one authoritative step."
+      },
+      "form": {
+        "organization": "Organization",
+        "unavailable": "Unavailable",
+        "sessionScope": "Session scope",
+        "scope": {
+          "tenant": "Tenant scope",
+          "platform": "Platform scope",
+          "client": "Client scope",
+          "sender": "Sender scope",
+          "other": "Scoped session"
+        },
+        "permissionsDenied": "You do not have permission to create warehouse transfers from this surface.",
+        "permissionsUnavailable": "Warehouse transfer create permissions are unavailable for this session.",
+        "transferCode": "Transfer code",
+        "manifestSize": "Manifest size",
+        "shipmentCount": "{count, plural, one {# shipment} other {# shipments}}",
+        "fromBranch": "From branch",
+        "toBranch": "To branch",
+        "shipments": "Shipments",
+        "fromBranchPlaceholder": "Search origin branches",
+        "toBranchPlaceholder": "Search destination branches",
+        "shipmentsPlaceholder": "Search shipment tracking or client reference",
+        "plannedDispatchLocal": "Planned dispatch time (local)",
+        "plannedReceiveLocal": "Planned receipt time (local)",
+        "rawSection": "Enter record IDs and timestamps",
+        "fromBranchId": "From branch ID",
+        "toBranchId": "To branch ID",
+        "branchIdPlaceholder": "branch UUID",
+        "plannedDispatchAt": "Planned dispatch at",
+        "plannedReceiveAt": "Planned receive at",
+        "shipmentIds": "Shipment IDs",
+        "shipmentIdsPlaceholder": "One shipment UUID per line or comma-separated values.",
+        "back": "Back to transfer manifests",
+        "creating": "Creating...",
+        "submit": "Create transfer manifest",
+        "unsavedWarning": "You have an unsaved warehouse transfer manifest draft."
+      },
+      "errors": {
+        "organizationRequired": "Warehouse transfer manifest create requires an organization-scoped session.",
+        "transferCodeRequired": "Transfer code is required.",
+        "branchesRequired": "From branch ID and to branch ID are required.",
+        "shipmentsRequired": "At least one shipment ID is required.",
+        "permissionDenied": "You do not have permission to create warehouse transfers.",
+        "permissionsUnavailable": "Warehouse transfer create permissions are unavailable.",
+        "invalidDispatch": "Enter the planned dispatch time as an ISO 8601 date and time with Z or a UTC offset.",
+        "invalidReceive": "Enter the planned receive time as an ISO 8601 date and time with Z or a UTC offset.",
+        "receiveBeforeDispatch": "Planned receive time must be at or after planned dispatch time.",
+        "missingTransferId": "Warehouse transfer manifest create completed without returning transfer_id.",
+        "createFailed": "Warehouse transfer manifest create failed."
+      },
+      "toast": {
+        "created": "Transfer manifest created",
+        "reused": "Existing transfer manifest reused",
+        "failed": "Transfer manifest create failed"
+      }
     }
   }
 }
