@@ -155,7 +155,7 @@ describe('release admission behavior', () => {
     const bash = process.platform === 'win32' ? path.join(process.env.ProgramFiles, 'Git', 'bin', 'bash.exe') : 'bash';
     const fixture = `
       fake_gh() {
-        case "${*: -1}" in
+        case "\${*: -1}" in
           "repos/example/platform/actions/workflows/public-ci.yml/runs?head_sha=$FIXTURE_SHA&per_page=100")
             printf '%s' "$FIXTURE_RUNS" ;;
           "repos/example/platform/commits/$FIXTURE_SHA/check-runs?check_name=ci-gate&filter=all&per_page=100")
