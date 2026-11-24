@@ -518,6 +518,8 @@ async function qualify(diagnostic) {
     const { shadowPort, apiPort, dbPort } = summary.stackPorts;
     const edge = disposableShard ? integrationEdgeEnvironment(apiPort) : undefined;
     if (edge) {
+      // PostgREST needs the empty schema for startup, before the tracked migrations replay.
+      fs.writeFileSync(path.join(sb, 'ci-api-bootstrap.sql'), 'CREATE SCHEMA IF NOT EXISTS api;\n', { mode: 0o600 });
       Object.assign(env, edge.vars);
       // The Edge worker reaches Kong on the stack network.
       cliEnv = { ...cliEnv, ...edge.vars, EDGE_SUPABASE_URL: 'http://kong:8000',
@@ -526,7 +528,8 @@ async function qualify(diagnostic) {
     fs.writeFileSync(path.join(sb, 'config.toml'), [
       `project_id = "${project}"`, '[api]', 'enabled = true', `port = ${apiPort}`, 'schemas = ["api"]',
       'extra_search_path = ["public", "extensions"]', '[db]', `port = ${dbPort}`,
-      `shadow_port = ${shadowPort}`, `major_version = ${major}`, '[db.seed]', 'enabled = false',
+      `shadow_port = ${shadowPort}`, `major_version = ${major}`, '[db.seed]',
+      ...(edge ? ['enabled = true', 'sql_paths = ["./ci-api-bootstrap.sql"]'] : ['enabled = false']),
       '[studio]', 'enabled = false', '[analytics]', 'enabled = false', '[auth]', 'enabled = true',
       'site_url = "http://127.0.0.1:3001"',
       ...(edge ? ['jwt_secret = "env(SUPABASE_AUTH_JWT_SECRET)"',

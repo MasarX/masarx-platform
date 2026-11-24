@@ -227,10 +227,11 @@ jobs:
       - name: Require database build and complete shard coverage
         if: always()
         env:
+          HOSTED_INTEGRATION_REQUIRED: 'true'
           BUILD_RESULT: ${{ needs.database-build.result }}
           DATABASE_PRESENT: ${{ needs.database-build.outputs.present }}
           PGTAP_RESULT: ${{ needs.database-pgtap.result }}
-        run: node scripts/ci-hosted/database-result.cjs --integration
+        run: node scripts/ci-hosted/database-result.cjs
 
   append-only:
     name: Append-only migrations

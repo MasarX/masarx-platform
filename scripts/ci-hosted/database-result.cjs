@@ -91,7 +91,7 @@ function main() {
     try {
       entries = loadExceptions();
       inventory = fs.readdirSync('supabase/tests/pgtap');
-      if (process.argv[2] === '--integration') {
+      if (process.env.HOSTED_INTEGRATION_REQUIRED === 'true') {
         const coverage = integrationCoverage(shards, integrationInventory(), read(exceptionFile) ?? []);
         integration = `\nIntegration coverage: ${coverage.ok ? 'PASS' : 'FAIL'} (${coverage.seen}/${coverage.expected} reported, ${coverage.ran} executed, ${coverage.skipped.length} fully skipped with numbered exceptions)\n`;
         integration += coverage.skipped.map(row => `\n- ${cell(row)}`).join('');
