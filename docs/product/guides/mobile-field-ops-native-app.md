@@ -105,6 +105,19 @@ Native tool routes (mobile `href`)
   - Never "fake success" when offline; show pending state until server confirmation or explicit policy allows optimistic UI. An item is synced only when its ID appears in that sync invocation’s positive completion receipt after execution and queue removal; an absent or cleared row is not proof.
   - Route/settlement interaction telemetry (`mobile_route_navigate`, `mobile_route_contact`, `mobile_settlement_counted`) is queued through `ui_log_events_v1` for auditability and diagnostics.
 
+### Outbox diagnostics
+
+Outbox diagnostics preserve the complete fixed messages `AssertionError`, `Assertion failed` and `Unexpected token < in JSON`. Additional text goes through the normal redactor.
+
+| Diagnostic text | Withholding reason |
+| --- | --- |
+| Database uniqueness and foreign-key details | Constraint details can include record identifiers and values. The client can still use the conflict category when available. |
+| Authentication, session, signature, PIN or key messages | Free-form messages can contain credentials or identity data. |
+| Prose containing ambiguous credential terms | The redactor cannot establish the source or meaning of arbitrary prose. |
+| ANSI formatting or unit symbols that normalize outside the supported character set | Withholding keeps the diagnostic character boundary predictable. |
+| URLs with a `code` query parameter | A query parameter can carry a one-time credential. |
+| Text combining colons and `@` in a credential-shaped segment | The redactor treats ambiguous user information as sensitive. |
+
 ## Implementation (write-once)
 - Shared engine: `@masarx/mobile-core` provides a generic Outbox + sync loop (no business rules).
 - Durable store: `@masarx/mobile-core/sqlite` implements a SQLite-backed store using `expo-sqlite` (Expo-managed; production-safe).
