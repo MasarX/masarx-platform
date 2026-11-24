@@ -73,7 +73,7 @@ svg { flex-shrink: 0; }
 .skip-link {
   position: fixed;
   top: 8px;
-  left: 8px;
+  inset-inline-start: 8px;
   background: var(--accent);
   color: var(--ink-inv);
   padding: 6px 10px;

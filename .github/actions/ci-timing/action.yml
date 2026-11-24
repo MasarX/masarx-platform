@@ -1,0 +1,14 @@
+name: Record CI timing
+description: Mark a phase boundary and publish timing for the job
+inputs:
+  phase:
+    description: Phase that begins at this boundary
+    required: true
+  npm-cache:
+    description: Observed npm cache restore result
+    default: NOT_RUN
+runs:
+  using: node24
+  main: timing.cjs
+  post: timing.cjs
+  post-if: always()
