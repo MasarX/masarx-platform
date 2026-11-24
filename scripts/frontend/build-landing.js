@@ -6,6 +6,7 @@ const path = require("path");
 const vm = require("vm");
 const { loadEnv } = require("../utils/load-env");
 const { parseFlagArgs } = require("../utils/cli-args");
+const { readSharedUiTokenCss } = require("./landing-shared-tokens");
 
 let esbuild;
 try {
@@ -728,7 +729,8 @@ function main() {
 
   copyDir(brandDir, path.join(outDir, "brand"));
 
-  const cssSource = readText(path.join(srcDir, "app.css")) +
+  const cssSource = readSharedUiTokenCss(repoRoot) +
+    readText(path.join(srcDir, "app.css")) +
     (isDev ? "\n" + readText(path.join(srcDir, "app.dev.css")) : "");
   const appSource = readText(path.join(srcDir, "app.js"));
   const contentSource = readText(path.join(srcDir, "content.js")) +

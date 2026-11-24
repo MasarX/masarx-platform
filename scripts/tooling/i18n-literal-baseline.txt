@@ -1,7 +1,6 @@
 # Files that still hold English UI literals, with the count the i18n literal guard found.
 # The count may only fall. Delete a file's line once its text comes from the catalogs.
 # Report a file: node scripts/tooling/i18n-literal-guard.js --report <path prefix>
-apps/console-v2/src/App.tsx 8
 apps/console-v2/src/components/CapabilityEvalDrilldown.tsx 23
 apps/console-v2/src/components/CapacityGauge.tsx 1
 apps/console-v2/src/components/CoverageHeatmap.tsx 3
@@ -115,13 +114,12 @@ apps/console-v2/src/modules/workflows/review-queue.tsx 193
 apps/console-v2/src/modules/workflows/runs.tsx 269
 apps/console-v2/src/modules/workflows/templates.tsx 240
 apps/console-v2/src/modules/workflows/workflow-run-context.tsx 17
-apps/console-v2/src/shell/AppGuard.tsx 40
 apps/console-v2/src/shell/AppShell.tsx 2
 apps/console-v2/src/shell/NotifsPanel.tsx 7
 apps/console-v2/src/shell/Sidenav.tsx 4
 apps/console-v2/src/shell/Statusbar.tsx 19
 apps/console-v2/src/shell/TenantPicker.tsx 11
-apps/console-v2/src/shell/Topbar.tsx 15
+apps/console-v2/src/shell/Topbar.tsx 10
 apps/console-v2/src/shell/UserMenuDrawer.tsx 20
 apps/console/app/_components/webhook-tester-page.tsx 1
 apps/console/app/integrations/plugins/[plugin_id]/page.tsx 2
@@ -134,7 +132,7 @@ apps/console/app/marketplace/requests/page.tsx 1
 apps/console/app/marketplace/settlements/page.tsx 1
 apps/console/app/operations/public-tracking-requests/page.tsx 1
 apps/console/app/workflows/templates/page.tsx 2
-apps/fieldops/App.tsx 505
+apps/fieldops/App.tsx 486
 apps/fieldops/src/components/BottomSheet.tsx 2
 apps/fieldops/src/components/Skeleton.tsx 2
 apps/fieldops/src/fixtures/mobile-v2-bay-detail-fixtures.ts 1

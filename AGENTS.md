@@ -30,14 +30,16 @@ MasarX helps delivery teams manage shipments and coordinate integrations, wareho
 
 ## Commands
 
+Push and let CI run tests, lint, typecheck and builds. Do not run them locally on the shared workstation.
+
 - Set up: use the Node.js version in `.nvmrc` and run `npm ci --ignore-scripts` at the repository root.
-- Lint: `npm run lint:frontend`, `npm run lint:structure`, `npm run lint:commands`, `npm run lint:docs:ssot`, `npm run lint:db` and `npm run lint:db:managed-grants`. Select the checks that cover the change.
+- Lint command references: `npm run lint:frontend`, `npm run lint:structure`, `npm run lint:commands`, `npm run lint:docs:ssot`, `npm run lint:db` and `npm run lint:db:managed-grants`.
 - Format Console V2: `npm --prefix apps/console-v2 run format`.
-- Typecheck: `npm run typecheck:frontend`, `npm --prefix apps/console-v2 run typecheck`, or `npm run typecheck:fieldops`.
-- Affected tests: run `npm run ci:local:impact -- --base-ref origin/main` against the intended base, substituting its ref when needed. The `ci` workflow in `.github/workflows/public-ci.yml` selects affected jobs for pull requests.
-- Full tests: the same workflow runs the full hosted CI graph on `merge_group`. Use `npm run ci:local:strict` for strict local qualification. See `docs/guides/TESTING_GUIDE.md` for the suite commands and backend requirements.
-- pgTAP: `npm run test:pgtap` uses `psql` and a configured, isolated PostgreSQL test database with the Supabase schema and fixtures. Verify the target before running database tests.
-- Build: run `npm run build` in the Console, Console V2 or Portal app directory, or `npm run build:landing` at the root.
+- Typecheck command references: `npm run typecheck:frontend`, `npm --prefix apps/console-v2 run typecheck`, or `npm run typecheck:fieldops`.
+- Affected tests: after a push to a pull request, the [CI workflow](.github/workflows/public-ci.yml) selects affected jobs and `ci-gate` checks their results. Command reference: `npm run ci:local:impact -- --base-ref origin/main`.
+- Full tests: the same workflow runs the full hosted CI graph on `merge_group`, with `ci-gate` aggregating the results. Command reference: `npm run ci:local:strict`. See the [testing guide](docs/guides/TESTING_GUIDE.md) for suite commands and backend requirements.
+- pgTAP: the `Database pgTAP` matrix runs all six shards when CI selects database coverage on a pull request and on every `merge_group`. Command reference: `npm run test:pgtap`, which uses `psql` and requires a verified, isolated PostgreSQL test database with the Supabase schema and fixtures.
+- Build command references: `npm run build` in the Console, Console V2 or Portal app directory and `npm run build:landing` at the root.
 - Run locally: `npm run dev:console:v2`, `npm run dev:console`, `npm run dev:portal`, `npm run dev:fieldops` or `npm run dev:landing`. See `docs/guides/LOCAL_SETUP.md` for backend setup.
 
 ## Must-follow coding rules
@@ -92,7 +94,7 @@ Use the configured [location partition purge](supabase/migrations/202601251090_t
 - For a database function change, write a new migration with `CREATE OR REPLACE`. Start from the live catalog body using `pg_get_functiondef`, or the catalog after replaying `main` from zero. The original migration is historical. Preserve later fixes.
 - Give new tables explicit `REVOKE` and `GRANT` statements and enable RLS with scoped policies. Give new functions explicit `REVOKE` and `GRANT` statements and verify their row access. State the effective grants for each new or changed function, such as `service_role` only.
 - In migration PRs, list each `GRANT`, `REVOKE`, `ALTER DEFAULT PRIVILEGES` and `CREATE POLICY` by object, privilege or policy scope, and role. Reject broad schema grants, default-privilege changes, loop grants and changes to extension-managed privileges.
-- Run `npm run lint:db:managed-grants` for changed migrations. Use the exact-file, hash-bound policy in `config/ci/supabase-managed-grants.json` for reviewed dynamic grant targets. Keep `supabase/tests/pgtap/045a_definer_execute_allowlist.sql` current when `SECURITY DEFINER` execute access for `anon` or `authenticated` changes in `public` or `api`.
+- After a push with migration changes to a pull request, the CI `Lint` job runs `npm run lint:db:managed-grants`. Use the exact-file, hash-bound policy in `config/ci/supabase-managed-grants.json` for reviewed dynamic grant targets. Keep `supabase/tests/pgtap/045a_definer_execute_allowlist.sql` current when `SECURITY DEFINER` execute access for `anon` or `authenticated` changes in `public` or `api`.
 - New public tables follow the executor-only trusted policy, API contract view and lookup contracts checked by `supabase/tests/pgtap/0zz_ui_rpc_executor_role_v1.sql`, `supabase/tests/pgtap/0zz_api_contract_views.sql` and `supabase/tests/pgtap/0zz_no_literal_enum_checks.sql`.
 - Use an isolated test database and generated data. Never copy one environment's data into another. Require a [verified production backup before every production deploy](DELIVERY.md#deploys).
 
