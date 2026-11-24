@@ -1,6 +1,7 @@
 BEGIN;
 
 SET LOCAL search_path TO pg_catalog;
+SET LOCAL lock_timeout = '10s';
 
 -- Preserve the functions required by the UI executor privilege plan after closing PUBLIC EXECUTE.
 GRANT EXECUTE ON FUNCTION
@@ -509,5 +510,71 @@ REVOKE EXECUTE ON FUNCTION
   public.zone_districts_enforce_org_match(),
   public.zone_override_requests_sync_manual_review_resolution_v1()
 FROM PUBLIC;
+
+-- Carry the shared executor dependencies forward while preserving the prior sealed plan.
+DO $receipt$
+DECLARE
+  prior_seal text;
+  prior_before jsonb;
+  prior_after jsonb;
+  current_plan jsonb;
+  added jsonb;
+  digest text;
+BEGIN
+  LOCK TABLE public.marketplace_review_readback_state_v1 IN EXCLUSIVE MODE;
+  IF (SELECT relowner FROM pg_class WHERE oid = 'public.marketplace_review_readback_state_v1'::regclass)
+      IS DISTINCT FROM current_user::regrole::oid THEN
+    RAISE EXCEPTION 'Executor receipt extension requires the existing receipt owner' USING ERRCODE = '42501';
+  END IF;
+
+  prior_seal := obj_description('public.marketplace_review_readback_state_v1'::regclass, 'pg_class');
+  SELECT encode(sha256(convert_to(jsonb_object_agg(key, value ORDER BY key)::text, 'UTF8')), 'hex')
+    INTO digest FROM public.marketplace_review_readback_state_v1;
+  IF prior_seal IS DISTINCT FROM 'marketplace_review_readback_state_v1:sha256:' || digest THEN
+    RAISE EXCEPTION 'Marketplace predecessor receipt integrity mismatch';
+  END IF;
+
+  SELECT value INTO STRICT prior_before FROM public.marketplace_review_readback_state_v1 WHERE key = 'plan_before';
+  SELECT value INTO STRICT prior_after FROM public.marketplace_review_readback_state_v1 WHERE key = 'plan_after';
+  SELECT jsonb_agg(to_jsonb(p) ORDER BY object_kind, object_id, privilege, column_name)
+    INTO current_plan FROM public.ui_rpc_executor_privilege_plan_v1() AS p;
+  SELECT COALESCE(jsonb_agg(entry ORDER BY position), '[]'::jsonb) INTO added
+  FROM jsonb_array_elements(current_plan) WITH ORDINALITY AS plan(entry, position)
+  WHERE NOT prior_after @> jsonb_build_array(entry);
+
+  IF NOT (current_plan @> prior_after) OR jsonb_array_length(added) <> 46 OR EXISTS (
+    SELECT 1
+    FROM jsonb_to_recordset(added) AS p(object_kind text, object_id oid, privilege text, column_name text)
+    WHERE p.object_kind <> 'function' OR p.privilege <> 'EXECUTE' OR p.column_name IS NOT NULL
+      OR NOT EXISTS (
+        SELECT 1 FROM pg_proc AS f CROSS JOIN LATERAL aclexplode(f.proacl) AS acl
+        WHERE f.oid = p.object_id AND acl.grantee = 'ui_rpc_executor'::regrole::oid
+          AND acl.privilege_type = 'EXECUTE'
+      )
+  ) THEN
+    RAISE EXCEPTION 'Unexpected executor plan delta after PUBLIC EXECUTE closure';
+  END IF;
+
+  INSERT INTO public.marketplace_review_readback_state_v1(key, value) VALUES (
+    'public_execute_closure_extension_v1',
+    jsonb_build_object('predecessor_seal', prior_seal, 'plan_before', prior_before,
+      'plan_after', prior_after, 'added', added)
+  );
+  UPDATE public.marketplace_review_readback_state_v1 SET value = (
+    SELECT jsonb_agg(entry ORDER BY entry->>'object_kind', (entry->>'object_id')::oid,
+      entry->>'privilege', entry->>'column_name')
+    FROM jsonb_array_elements(value || added) AS plan(entry)
+  ) WHERE key IN ('plan_before', 'plan_after');
+  IF (SELECT value FROM public.marketplace_review_readback_state_v1 WHERE key = 'plan_after')
+      IS DISTINCT FROM current_plan THEN
+    RAISE EXCEPTION 'PUBLIC EXECUTE receipt readback mismatch';
+  END IF;
+
+  SELECT encode(sha256(convert_to(jsonb_object_agg(key, value ORDER BY key)::text, 'UTF8')), 'hex')
+    INTO digest FROM public.marketplace_review_readback_state_v1;
+  EXECUTE format('COMMENT ON TABLE public.marketplace_review_readback_state_v1 IS %L',
+    'marketplace_review_readback_state_v1:sha256:' || digest);
+END;
+$receipt$;
 
 COMMIT;
