@@ -78,9 +78,10 @@ async function main() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = crypto.randomBytes(32).toString('hex');
     return npmScript('build', subject);
   }
-  if (command === 'browser-install' || command === 'landing-e2e') {
+  const suites = { 'landing-e2e': 'landing', 'console-a11y': 'console-a11y' };
+  if (command === 'browser-install' || suites[command]) {
     const args = command === 'browser-install' ? ['install', '--with-deps', 'chromium']
-      : ['test', '-c', 'scripts/ci-hosted/playwright.landing.config.cjs'];
+      : ['test', '-c', `scripts/ci-hosted/playwright.${suites[command]}.config.cjs`];
     return run(process.execPath, [require.resolve('@playwright/test/cli'), ...args]);
   }
   if (command === 'visual' || command === 'visual-preflight') {
