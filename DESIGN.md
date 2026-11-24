@@ -160,7 +160,7 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 
 ### Numerals, dates and direction
 
-- Arabic UI follows each product's `Intl` locale. Console V2 uses `ar-SA`, which gives Arabic-Indic digits. Public tracking and landing use the document language `ar`, which gives Latin digits.
+- Digits follow each product's `Intl` locale, as [section 7](#7-language-and-direction) describes. Console V2 uses the user's preferred regional variant of the UI language through `resolveIntlLocale`, else the bare language. Public tracking and landing use the document language `ar`.
 - Use a 12-hour clock and the Gregorian calendar. Format time ranges with `Intl.DateTimeFormat#formatRange`.
 - Format every date, time and number with the app's i18n formatter. Never use `toLocale*([])` or the browser default.
 - Keep identifiers in Latin characters.
