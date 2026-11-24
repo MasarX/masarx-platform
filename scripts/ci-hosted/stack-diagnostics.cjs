@@ -6,7 +6,9 @@ const { sanitize, environmentSecrets, outputTail } = require('./diagnostics.cjs'
 const imagePrefix = image => String(image || '').replace(/(sha256:[a-f0-9]{12})[a-f0-9]+/g, '$1');
 const belongsToStack = (row, project) => String(row.Names || '').split(',').some(name => name.endsWith(`_${project}`))
   || String(row.Labels || '').split(',').includes(`com.supabase.cli.project=${project}`);
-const isHostedPgtap = env => Boolean(env.PGTAP_SHARD) && env.GITHUB_ACTIONS === 'true' && env.RUNNER_ENVIRONMENT === 'github-hosted';
+const isGitHubHosted = env => env.GITHUB_ACTIONS === 'true' && env.RUNNER_ENVIRONMENT === 'github-hosted';
+const isHostedPgtap = env => isGitHubHosted(env) && Boolean(env.PGTAP_SHARD);
+const needsHostedDatabaseInit = env => isGitHubHosted(env) && (Boolean(env.PGTAP_SHARD) || env.GITHUB_JOB === 'database-build');
 
 async function captureDatabaseLog({ project, env, logFile, execute = run }) {
   const secrets = environmentSecrets(env);
@@ -93,4 +95,4 @@ async function collectStackDiagnostics({ project, env, dockerRoot, imagePolicy =
   return report;
 }
 
-module.exports = { captureDatabaseLog, collectStackDiagnostics, imagePrefix, belongsToStack, isHostedPgtap };
+module.exports = { captureDatabaseLog, collectStackDiagnostics, imagePrefix, belongsToStack, isHostedPgtap, needsHostedDatabaseInit };
