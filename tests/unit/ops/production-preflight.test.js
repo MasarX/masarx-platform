@@ -103,13 +103,25 @@ test('refuses production apply when preflight evidence cannot be read', () => {
   expect(() => requireProductionPreflight(admission, exec)).toThrow('invalid production preflight run inventory');
 });
 
-test('gates all production apply blocks before reading a backup token or invoking a provider', () => {
-  const runbook = readFileSync(resolve(__dirname, '../../../docs/ops/production-release.md'), 'utf8');
-  const applyBlocks = [...runbook.matchAll(/```bash\r?\n([\s\S]*?)\r?\n```/g)]
-    .map(([, block]) => block.split(/\r?\n/))
-    .filter(lines => lines.some(line => /\$(SUPABASE|VERCEL|WRANGLER)_CLI/.test(line)));
+const runbook = readFileSync(resolve(__dirname, '../../../docs/ops/production-release.md'), 'utf8');
+const commands = [...runbook.matchAll(/```bash\r?\n([\s\S]*?)\r?\n```/g)].map(([, block]) => block.split(/\r?\n/));
+
+test('requires the shared exact-SHA CI check before creating the tag', () => {
+  const block = commands.find(lines => lines.some(line => line.startsWith('git tag -a ')));
+  expect(block).toBeDefined();
+  const gate = block.indexOf('bash scripts/deploy/require-ci-gate.sh "$repo" "$RELEASE_SHA" "${app_gh[@]}" || exit 1');
+  expect(gate).toBeGreaterThanOrEqual(0);
+  expect(gate).toBeLessThan(block.findIndex(line => line.startsWith('git tag -a ')));
+});
+
+test('gates all production apply blocks and stops on command failure', () => {
+  const applyBlocks = commands.filter(lines => lines.some(line => /\$(SUPABASE|VERCEL|WRANGLER)_CLI/.test(line)));
   expect(applyBlocks).toHaveLength(3);
   for (const lines of applyBlocks) {
+    expect(lines[0]).toBe('set -euo pipefail');
+    for (const [index, line] of lines.entries()) {
+      if (line === '(') expect(lines[index + 1].trim()).toBe('set -euo pipefail');
+    }
     const approval = lines.findIndex(line => line.includes('require-production-preflight.cjs'));
     const backupCheck = lines.findIndex(line => line.includes('check-supabase-backup.cjs'));
     const provider = lines.findIndex(line => /\$(SUPABASE|VERCEL|WRANGLER)_CLI/.test(line));
@@ -130,8 +142,10 @@ test('serializes the prod approval check behind tag verification with no apply s
   expect(Object.keys(workflow.jobs)).toEqual(['verify', 'preflight']);
   const { verify, preflight } = workflow.jobs;
   expect(verify.environment).toBeUndefined();
+  expect(verify.permissions).toEqual({ contents: 'read', checks: 'read', actions: 'read' });
   expect(verify.steps[1].with).toMatchObject({ ref: '${{ github.ref }}', 'persist-credentials': false });
   expect(verify.steps[2].run).toContain('refs/remotes/origin/main');
+  expect(verify.steps[2].run).toContain('bash scripts/deploy/require-ci-gate.sh "$GITHUB_REPOSITORY" "$EXPECTED_SHA"');
   expect(preflight.needs).toBe('verify');
   expect(preflight.permissions).toEqual({});
   expect(preflight.environment).toEqual({ name: 'prod', deployment: false });

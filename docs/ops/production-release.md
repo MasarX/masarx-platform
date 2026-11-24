@@ -13,7 +13,7 @@ Production remains paused under [#152](https://github.com/MasarX/masarx-platform
 
 Use the [v0.2.0 milestone](https://github.com/MasarX/masarx-platform/milestone/1) for the ship date and scope. A release candidate needs a successful staging deployment and a recorded rollback rehearsal before production admission. See [#243](https://github.com/MasarX/masarx-platform/issues/243) and [#200](https://github.com/MasarX/masarx-platform/issues/200).
 
-Set `RELEASE_SHA` to the approved full commit SHA. Use a configured App helper path in `APP_RUN` for the GitHub read commands. The operator verifies first-parent ancestry and uses the exact-SHA `ci-gate` check in the [release verification step](../../.github/workflows/provenance-on-tag.yml) before creating the annotated tag using the authorized identity from [the release policy](../../DELIVERY.md#releases).
+Set `RELEASE_SHA` to the approved full commit SHA. Use a configured App helper path in `APP_RUN` for the GitHub read commands. Run the tag block from a trusted checkout containing the [shared CI check](../../scripts/deploy/require-ci-gate.sh). The operator verifies first-parent ancestry and exact-SHA `ci-gate` success before creating the annotated tag using the authorized identity from [the release policy](../../DELIVERY.md#releases).
 
 ```bash
 set -euo pipefail
@@ -23,6 +23,7 @@ app_gh=(python -I "$APP_RUN" --org MasarX --repo masarx-platform gh)
 [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
 git fetch origin main
 git rev-list --first-parent origin/main | grep -Fx "$RELEASE_SHA" > /dev/null
+bash scripts/deploy/require-ci-gate.sh "$repo" "$RELEASE_SHA" "${app_gh[@]}" || exit 1
 git tag -a "$tag" "$RELEASE_SHA" -m "Release $tag"
 git push origin "refs/tags/$tag"
 tag_object=$("${app_gh[@]}" api "repos/$repo/git/ref/tags/$tag" |
@@ -57,13 +58,15 @@ For each deployable, take `ARTIFACT`, `ARTIFACT_SHA256` and `MAIN_BUILD_WORKFLOW
 Before each production deployment, use the tagged checkout and the production project binding from the private target configuration. The apply checks require the latest Production preflight for the exact tag and SHA to have completed successfully. Record the emitted `production_preflight_run` ID with the release evidence. `BACKUP_MAX_AGE_HOURS` is the approved maximum recovery-point age. The token on stdin needs Supabase Management API `backups_read` access to the selected project. The checker requires a fresh completed provider backup record. Retain its UTC timestamp with the release audit evidence and check the separately recorded restore rehearsal before continuing. [Backup listing API](https://supabase.com/docs/reference/api/v1-list-all-backups)
 
 ```bash
-set +x
 set -euo pipefail
+set +x
 git checkout --detach "$RELEASE_SHA"
 export SUPABASE_PROJECT_REF BACKUP_MAX_AGE_HOURS
 node scripts/deploy/require-production-preflight.cjs "$APP_RUN" "$repo" "$tag" "$RELEASE_SHA" || exit 1
 node scripts/deploy/check-supabase-backup.cjs < "$BACKUP_READ_TOKEN_FILE" || exit 1
 (
+  set -euo pipefail
+  set +x
   export SUPABASE_ACCESS_TOKEN="$(< "$SUPABASE_ACCESS_TOKEN_FILE")"
   export SUPABASE_DB_PASSWORD="$(< "$SUPABASE_DB_PASSWORD_FILE")"
   "$SUPABASE_CLI" link --project-ref "$SUPABASE_PROJECT_REF" --yes
@@ -74,9 +77,13 @@ node scripts/deploy/check-supabase-backup.cjs < "$BACKUP_READ_TOKEN_FILE" || exi
 `SUPABASE_CLI` is the checksum-verified version qualified with the release. Compare the dry-run migration list to the approved tagged migration plan. Once approved, run `db push` once through the same linked checkout. Keep the raw output in the operator's private release evidence.
 
 ```bash
+set -euo pipefail
+set +x
 node scripts/deploy/require-production-preflight.cjs "$APP_RUN" "$repo" "$tag" "$RELEASE_SHA" || exit 1
 node scripts/deploy/check-supabase-backup.cjs < "$BACKUP_READ_TOKEN_FILE" || exit 1
 (
+  set -euo pipefail
+  set +x
   export SUPABASE_ACCESS_TOKEN="$(< "$SUPABASE_ACCESS_TOKEN_FILE")"
   export SUPABASE_DB_PASSWORD="$(< "$SUPABASE_DB_PASSWORD_FILE")"
   "$SUPABASE_CLI" link --project-ref "$SUPABASE_PROJECT_REF" --yes
@@ -88,15 +95,21 @@ node scripts/deploy/check-supabase-backup.cjs < "$BACKUP_READ_TOKEN_FILE" || exi
 Recheck production admission and the backup before promoting the verified Edge, ingress and web artifacts. For Edge and ingress, run the checks below before using the exact verified bundle upload commands recorded by the staging rehearsal. For web, extract the verified artifacts using the release manifest. Each Vercel directory must contain the production `.vercel/output` layout. Set the project selectors from the private target configuration, point CLI credentials at the correct account, and disable CLI telemetry on the operator machine.
 
 ```bash
+set -euo pipefail
+set +x
 node scripts/deploy/require-production-preflight.cjs "$APP_RUN" "$repo" "$tag" "$RELEASE_SHA" || exit 1
 node scripts/deploy/check-supabase-backup.cjs < "$BACKUP_READ_TOKEN_FILE" || exit 1
 export VERCEL_ORG_ID VERCEL_TELEMETRY_DISABLED=1 CLOUDFLARE_ACCOUNT_ID
 (
+  set -euo pipefail
+  set +x
   export VERCEL_TOKEN="$(< "$VERCEL_TOKEN_FILE")"
   VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID_CONSOLE" "$VERCEL_CLI" deploy --cwd "$CONSOLE_PREBUILT_DIR" --prebuilt --prod --yes
   VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID_PORTAL" "$VERCEL_CLI" deploy --cwd "$PORTAL_PREBUILT_DIR" --prebuilt --prod --yes
 )
 (
+  set -euo pipefail
+  set +x
   export CLOUDFLARE_API_TOKEN="$(< "$CLOUDFLARE_API_TOKEN_FILE")"
   "$WRANGLER_CLI" pages deploy "$LANDING_PREBUILT_DIR" \
     --project-name "$CLOUDFLARE_PAGES_PROJECT_LANDING" --branch "$LANDING_PRODUCTION_BRANCH"
