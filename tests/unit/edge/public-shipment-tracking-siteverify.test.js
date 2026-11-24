@@ -214,9 +214,9 @@ describe('public shipment tracking siteverify', () => {
     const text = await expectResponse(response, app.log, 500, { ok: false, error: { code: 'rpc_failed' } });
     expect(text).not.toContain(message);
     expect(text).not.toContain(rpcName);
-    const entry = expectErrorLog(app.logError, 'rpc_failed', message, rpcName);
-    expect([entry.rpc_error_code, entry.details, entry.hint])
-      .toEqual(['P0001', 'fixture details: [redacted]', 'fixture hint: [redacted]']);
+    const entry = expectErrorLog(app.logError, 'rpc_failed', 'rpc_failed', rpcName);
+    expect(entry).toMatchObject({ rpc_error_code: 'P0001', error_type: 'unexpected' });
+    expect(JSON.stringify(entry)).not.toMatch(/fixture (internal detail|details|hint)/);
     expect(app.rpc).toHaveBeenCalledTimes(1);
     expect(app.from).not.toHaveBeenCalled();
   });
@@ -232,8 +232,9 @@ describe('public shipment tracking siteverify', () => {
     const response = await app.handler(request({ session_token: sessionToken }, 'session'));
 
     await expectResponse(response, app.log, 500, { ok: false, error: { code: 'rpc_failed' } });
-    const entry = expectErrorLog(app.logError, 'rpc_failed', 'session lookup failed: [redacted]', rpcName);
-    expect(entry.rpc_error_code).toBe('[redacted]');
+    const entry = expectErrorLog(app.logError, 'rpc_failed', 'rpc_failed', rpcName);
+    expect(entry).toMatchObject({ rpc_error_code: 'unclassified', error_type: 'unexpected' });
+    expect(JSON.stringify(entry)).not.toContain(sessionToken);
     expect(app.fetch).not.toHaveBeenCalled();
     expect(app.rpc).toHaveBeenCalledTimes(1);
   });
