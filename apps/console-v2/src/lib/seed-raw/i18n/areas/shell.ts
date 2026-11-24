@@ -533,7 +533,7 @@ export const ar: CatalogShape<typeof en> = {
       zoomIn: 'تكبير',
       zoomOut: 'تصغير',
       resetView: 'إعادة ضبط العرض',
-      reset: 'إعادة الضبط',
+      reset: 'إعادة ضبط',
       setupNeeded: 'يلزم إعداد الخريطة',
       setupHint: 'حدّد عرضًا افتراضيًا أو احفظ الإحداثيات قبل فتح الخريطة.',
       zoneRequired: 'يلزم تحديد شكل المنطقة',
