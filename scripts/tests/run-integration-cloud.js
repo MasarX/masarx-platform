@@ -237,11 +237,15 @@ function buildJestArgs({ configPath, env, argv }) {
 }
 
 function main() {
+  const callerRunFlags = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => /^RUN_[A-Z0-9_]+$/.test(key)),
+  );
   loadEnv();
-  const runtimeEnv = resolveIntegrationEdgeAuthAliases(process.env);
+  const runtimeEnv = { ...resolveIntegrationEdgeAuthAliases(process.env), ...callerRunFlags };
   const extraArgs = process.argv.slice(2);
   const requiredToggles = resolveRequiredTestToggles({ argv: extraArgs, env: runtimeEnv });
-  const executionEnv = { ...runtimeEnv, ...requiredToggles };
+  // Child scripts load the file again, so keep the runner's resolved values authoritative.
+  const executionEnv = { ...runtimeEnv, ...requiredToggles, ENV_FILE_OVERRIDE: '0' };
   if (Object.keys(requiredToggles).length > 0) {
     console.log(
       `[integration] Auto-enabled test toggles for selected paths: ${Object.keys(requiredToggles)

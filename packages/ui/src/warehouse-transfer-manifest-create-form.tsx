@@ -11,6 +11,7 @@ import {
 } from "@masarx/api";
 import { Button } from "./button";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
+import { FormFieldLayout } from "./form";
 import { Input } from "./input";
 import { Textarea } from "./textarea";
 import { RelationField } from "./relation-field";
@@ -25,8 +26,15 @@ import { createUiTranslator } from "./i18n";
 type ManifestTranslator = ReturnType<typeof createUiTranslator>;
 const plannedTimestamp = z.iso.datetime({ offset: true });
 
-// input is the field the error belongs to: an input, a textarea, or a lookup group holding a combobox.
-type ManifestError = { message: string; input?: React.RefObject<HTMLElement | null> };
+type ManifestField =
+  | "transferCode" | "fromBranch" | "toBranch" | "shipments" | "dispatch" | "receive"
+  | "rawFromBranch" | "rawToBranch" | "rawShipments" | "rawDispatch" | "rawReceive";
+// field is where the error is shown and announced; errors without one use the form error box.
+type ManifestError = { message: string; field?: ManifestField };
+const rawFieldClass = "space-y-2 text-sm text-ui-ink";
+const rawLabelClass = "block text-xs font-normal uppercase tracking-wide text-ui-muted";
+// DESIGN.md section 2: error boxes pair the danger tokens with readable ink text.
+const errorBoxClass = "rounded-2xl border border-ui-danger/30 bg-ui-danger/5 p-3 text-sm text-ui-ink";
 
 type WarehouseTransferManifestCreateFormProps = {
   appBasePath: string;
@@ -136,30 +144,24 @@ export function WarehouseTransferManifestCreateForm({
   const [toBranchId, setToBranchId] = React.useState("");
   const [plannedDispatch, setPlannedDispatch] = React.useState({ value: "", raw: false });
   const [plannedReceive, setPlannedReceive] = React.useState({ value: "", raw: false });
-  const dispatchInputRef = React.useRef<HTMLInputElement>(null);
-  const receiveInputRef = React.useRef<HTMLInputElement>(null);
-  const rawDispatchInputRef = React.useRef<HTMLInputElement>(null);
-  const rawReceiveInputRef = React.useRef<HTMLInputElement>(null);
-  const transferCodeInputRef = React.useRef<HTMLInputElement>(null);
-  const fromBranchLookupRef = React.useRef<HTMLDivElement>(null);
-  const toBranchLookupRef = React.useRef<HTMLDivElement>(null);
-  const shipmentsLookupRef = React.useRef<HTMLDivElement>(null);
-  const rawFromBranchInputRef = React.useRef<HTMLInputElement>(null);
-  const rawToBranchInputRef = React.useRef<HTMLInputElement>(null);
-  const rawShipmentsInputRef = React.useRef<HTMLTextAreaElement>(null);
-  const errorId = React.useId();
+  const baseId = React.useId();
   const [shipmentIdsText, setShipmentIdsText] = React.useState("");
   const [error, setError] = React.useState<ManifestError | null>(null);
   const [pending, setPending] = React.useState(false);
-  const isErrorField = (ref: React.RefObject<HTMLElement | null>) => error?.input === ref;
+  const fieldProps = (field: ManifestField) => ({
+    id: `${baseId}-${field}`,
+    error: error?.field === field ? error.message : null,
+    messageClassName: errorBoxClass,
+    messageTestId: `${resolvedTestIdPrefix}-error`,
+  });
 
   React.useLayoutEffect(() => {
-    const input = error?.input?.current;
+    const input = error?.field ? document.getElementById(`${baseId}-${error.field}`) : null;
     if (!input) return;
     const details = input.closest("details");
     if (details) details.open = true;
     (input.querySelector<HTMLElement>('[role="combobox"]') ?? input).focus();
-  }, [error]);
+  }, [baseId, error]);
 
   const shipmentIds = React.useMemo(() => parseShipmentIds(shipmentIdsText), [shipmentIdsText]);
   const [branchOptions, setBranchOptions] = React.useState<LookupOption[]>([]);
@@ -219,19 +221,19 @@ export function WarehouseTransferManifestCreateForm({
       return;
     }
     if (!transferCode.trim()) {
-      setError({ message: t("errors.transferCodeRequired"), input: transferCodeInputRef });
+      setError({ message: t("errors.transferCodeRequired"), field: "transferCode" });
       return;
     }
     if (!fromBranchId.trim() || !toBranchId.trim()) {
       // Point at the first missing branch: the lookup when it is usable, otherwise the raw ID field.
-      const input = !fromBranchId.trim()
-        ? lookupEnabled ? fromBranchLookupRef : rawFromBranchInputRef
-        : lookupEnabled ? toBranchLookupRef : rawToBranchInputRef;
-      setError({ message: t("errors.branchesRequired"), input });
+      const field = !fromBranchId.trim()
+        ? lookupEnabled ? "fromBranch" : "rawFromBranch"
+        : lookupEnabled ? "toBranch" : "rawToBranch";
+      setError({ message: t("errors.branchesRequired"), field });
       return;
     }
     if (shipmentIds.length < 1) {
-      setError({ message: t("errors.shipmentsRequired"), input: lookupEnabled ? shipmentsLookupRef : rawShipmentsInputRef });
+      setError({ message: t("errors.shipmentsRequired"), field: lookupEnabled ? "shipments" : "rawShipments" });
       return;
     }
     if (!canCreate) {
@@ -247,13 +249,13 @@ export function WarehouseTransferManifestCreateForm({
     const dispatchMillis = parsePlannedTimestamp(dispatchTime);
     const receiveMillis = parsePlannedTimestamp(receiveTime);
     if (dispatchTime && Number.isNaN(dispatchMillis)) {
-      setError({ message: t("errors.invalidDispatch"), input: plannedDispatch.raw ? rawDispatchInputRef : dispatchInputRef });
+      setError({ message: t("errors.invalidDispatch"), field: plannedDispatch.raw ? "rawDispatch" : "dispatch" });
       return;
     }
     if ((receiveTime && Number.isNaN(receiveMillis)) || receiveMillis < dispatchMillis) {
       setError({
         message: Number.isNaN(receiveMillis) ? t("errors.invalidReceive") : t("errors.receiveBeforeDispatch"),
-        input: plannedReceive.raw ? rawReceiveInputRef : receiveInputRef,
+        field: plannedReceive.raw ? "rawReceive" : "receive",
       });
       return;
     }
@@ -374,19 +376,17 @@ export function WarehouseTransferManifestCreateForm({
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
-        <label className="space-y-2 text-sm text-ui-ink">
-          <span className="text-xs uppercase tracking-wide text-ui-muted">{t("form.transferCode")}</span>
-          <Input
-            ref={transferCodeInputRef}
-            invalid={isErrorField(transferCodeInputRef)}
-            aria-describedby={isErrorField(transferCodeInputRef) ? errorId : undefined}
-            value={transferCode}
-            onChange={(event) => setTransferCode(event.target.value)}
-            placeholder="XFER-20260404-001"
-            disabled={pending}
-            data-testid={`${resolvedTestIdPrefix}-transfer-code`}
-          />
-        </label>
+        <FormFieldLayout {...fieldProps("transferCode")} label={t("form.transferCode")} className={rawFieldClass} labelClassName={rawLabelClass}>
+          {({ fieldId, describedBy, invalid }) => (
+            <Input id={fieldId} invalid={invalid} aria-describedby={describedBy}
+              value={transferCode}
+              onChange={(event) => setTransferCode(event.target.value)}
+              placeholder="XFER-20260404-001"
+              disabled={pending}
+              data-testid={`${resolvedTestIdPrefix}-transfer-code`}
+            />
+          )}
+        </FormFieldLayout>
 
         <div className="space-y-2 rounded-2xl border border-ui-border bg-ui-surface/60 px-4 py-3 text-sm text-ui-muted">
           <div className="text-xs uppercase tracking-wide text-ui-muted/70">{t("form.manifestSize")}</div>
@@ -397,141 +397,131 @@ export function WarehouseTransferManifestCreateForm({
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <div ref={fromBranchLookupRef} className="space-y-2" role="group" aria-labelledby={`${resolvedTestIdPrefix}-from-branch-label`}>
-          <span id={`${resolvedTestIdPrefix}-from-branch-label`} className="text-sm text-ui-ink">{t("form.fromBranch")}</span>
-          <RelationField value={fromBranchId} onChange={(value) => setFromBranchId(String(value))}
-            aria-invalid={isErrorField(fromBranchLookupRef)}
-            aria-describedby={isErrorField(fromBranchLookupRef) ? errorId : undefined}
-            options={branchOptions.filter((item) => item.value === fromBranchId)} fetcher={lookupEnabled ? fetchBranches : undefined}
-            placeholder={t("form.fromBranchPlaceholder")} disabled={pending || !lookupEnabled} />
-        </div>
-        <div ref={toBranchLookupRef} className="space-y-2" role="group" aria-labelledby={`${resolvedTestIdPrefix}-to-branch-label`}>
-          <span id={`${resolvedTestIdPrefix}-to-branch-label`} className="text-sm text-ui-ink">{t("form.toBranch")}</span>
-          <RelationField value={toBranchId} onChange={(value) => setToBranchId(String(value))}
-            aria-invalid={isErrorField(toBranchLookupRef)}
-            aria-describedby={isErrorField(toBranchLookupRef) ? errorId : undefined}
-            options={branchOptions.filter((item) => item.value === toBranchId)} fetcher={lookupEnabled ? fetchBranches : undefined}
-            placeholder={t("form.toBranchPlaceholder")} disabled={pending || !lookupEnabled} />
-        </div>
+        <FormFieldLayout {...fieldProps("fromBranch")} label={t("form.fromBranch")} className="space-y-2" labelClassName="font-normal">
+          {({ fieldId, labelId, describedBy, invalid }) => (
+            // The combobox keeps its search name; the group carries the field label.
+            <div id={fieldId} role="group" aria-labelledby={labelId}>
+              <RelationField value={fromBranchId} onChange={(value) => setFromBranchId(String(value))}
+                aria-invalid={invalid} aria-describedby={describedBy}
+                options={branchOptions.filter((item) => item.value === fromBranchId)} fetcher={lookupEnabled ? fetchBranches : undefined}
+                placeholder={t("form.fromBranchPlaceholder")} disabled={pending || !lookupEnabled} />
+            </div>
+          )}
+        </FormFieldLayout>
+        <FormFieldLayout {...fieldProps("toBranch")} label={t("form.toBranch")} className="space-y-2" labelClassName="font-normal">
+          {({ fieldId, labelId, describedBy, invalid }) => (
+            <div id={fieldId} role="group" aria-labelledby={labelId}>
+              <RelationField value={toBranchId} onChange={(value) => setToBranchId(String(value))}
+                aria-invalid={invalid} aria-describedby={describedBy}
+                options={branchOptions.filter((item) => item.value === toBranchId)} fetcher={lookupEnabled ? fetchBranches : undefined}
+                placeholder={t("form.toBranchPlaceholder")} disabled={pending || !lookupEnabled} />
+            </div>
+          )}
+        </FormFieldLayout>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <label className="space-y-2 text-sm text-ui-ink">
-          <span>{t("form.plannedDispatchLocal")}</span>
-          <Input ref={dispatchInputRef} type="datetime-local" value={toLocalDateTime(plannedDispatch.value)}
-            invalid={error?.input === dispatchInputRef}
-            aria-describedby={error?.input === dispatchInputRef ? errorId : undefined}
-            onChange={(event) => setPlannedDispatch({ value: fromLocalDateTime(event.target.value), raw: false })} disabled={pending} />
-        </label>
-        <label className="space-y-2 text-sm text-ui-ink">
-          <span>{t("form.plannedReceiveLocal")}</span>
-          <Input ref={receiveInputRef} type="datetime-local" value={toLocalDateTime(plannedReceive.value)}
-            invalid={error?.input === receiveInputRef}
-            aria-describedby={error?.input === receiveInputRef ? errorId : undefined}
-            onChange={(event) => setPlannedReceive({ value: fromLocalDateTime(event.target.value), raw: false })} disabled={pending} />
-        </label>
+        <FormFieldLayout {...fieldProps("dispatch")} label={t("form.plannedDispatchLocal")} className="space-y-2" labelClassName="font-normal">
+          {({ fieldId, describedBy, invalid }) => (
+            <Input id={fieldId} type="datetime-local" value={toLocalDateTime(plannedDispatch.value)}
+              invalid={invalid} aria-describedby={describedBy}
+              onChange={(event) => setPlannedDispatch({ value: fromLocalDateTime(event.target.value), raw: false })} disabled={pending} />
+          )}
+        </FormFieldLayout>
+        <FormFieldLayout {...fieldProps("receive")} label={t("form.plannedReceiveLocal")} className="space-y-2" labelClassName="font-normal">
+          {({ fieldId, describedBy, invalid }) => (
+            <Input id={fieldId} type="datetime-local" value={toLocalDateTime(plannedReceive.value)}
+              invalid={invalid} aria-describedby={describedBy}
+              onChange={(event) => setPlannedReceive({ value: fromLocalDateTime(event.target.value), raw: false })} disabled={pending} />
+          )}
+        </FormFieldLayout>
       </div>
 
-      <div ref={shipmentsLookupRef} className="space-y-2" role="group" aria-labelledby={`${resolvedTestIdPrefix}-shipments-label`}>
-        <span id={`${resolvedTestIdPrefix}-shipments-label`} className="text-sm text-ui-ink">{t("form.shipments")}</span>
-        <RelationField mode="multi" value={shipmentIds}
-          aria-invalid={isErrorField(shipmentsLookupRef)}
-          aria-describedby={isErrorField(shipmentsLookupRef) ? errorId : undefined}
-          onChange={(value) => setShipmentIdsText(Array.isArray(value) ? value.join("\n") : value)}
-          options={shipmentOptions.filter((item) => shipmentIds.includes(item.value))}
-          fetcher={lookupEnabled ? fetchShipments : undefined}
-          placeholder={t("form.shipmentsPlaceholder")} disabled={pending || !lookupEnabled} />
-      </div>
+      <FormFieldLayout {...fieldProps("shipments")} label={t("form.shipments")} className="space-y-2" labelClassName="font-normal">
+        {({ fieldId, labelId, describedBy, invalid }) => (
+          <div id={fieldId} role="group" aria-labelledby={labelId}>
+            <RelationField mode="multi" value={shipmentIds}
+              aria-invalid={invalid} aria-describedby={describedBy}
+              onChange={(value) => setShipmentIdsText(Array.isArray(value) ? value.join("\n") : value)}
+              options={shipmentOptions.filter((item) => shipmentIds.includes(item.value))}
+              fetcher={lookupEnabled ? fetchShipments : undefined}
+              placeholder={t("form.shipmentsPlaceholder")} disabled={pending || !lookupEnabled} />
+          </div>
+        )}
+      </FormFieldLayout>
 
       <details className="space-y-3">
         <summary className="text-sm text-ui-muted">{t("form.rawSection")}</summary>
         <div className="grid gap-4 md:grid-cols-2">
-          <label className="space-y-2 text-sm text-ui-ink">
-            <span className="text-xs uppercase tracking-wide text-ui-muted">{t("form.fromBranchId")}</span>
-            <Input
-              ref={rawFromBranchInputRef}
-              invalid={isErrorField(rawFromBranchInputRef)}
-              aria-describedby={isErrorField(rawFromBranchInputRef) ? errorId : undefined}
-              value={fromBranchId}
-              onChange={(event) => setFromBranchId(event.target.value)}
-              placeholder={t("form.branchIdPlaceholder")}
-              disabled={pending}
-              data-testid={`${resolvedTestIdPrefix}-from-branch-id`}
-            />
-          </label>
+          <FormFieldLayout {...fieldProps("rawFromBranch")} label={t("form.fromBranchId")} className={rawFieldClass} labelClassName={rawLabelClass}>
+            {({ fieldId, describedBy, invalid }) => (
+              <Input id={fieldId} invalid={invalid} aria-describedby={describedBy}
+                value={fromBranchId}
+                onChange={(event) => setFromBranchId(event.target.value)}
+                placeholder={t("form.branchIdPlaceholder")}
+                disabled={pending}
+                data-testid={`${resolvedTestIdPrefix}-from-branch-id`}
+              />
+            )}
+          </FormFieldLayout>
 
-          <label className="space-y-2 text-sm text-ui-ink">
-            <span className="text-xs uppercase tracking-wide text-ui-muted">{t("form.toBranchId")}</span>
-            <Input
-              ref={rawToBranchInputRef}
-              invalid={isErrorField(rawToBranchInputRef)}
-              aria-describedby={isErrorField(rawToBranchInputRef) ? errorId : undefined}
-              value={toBranchId}
-              onChange={(event) => setToBranchId(event.target.value)}
-              placeholder={t("form.branchIdPlaceholder")}
-              disabled={pending}
-              data-testid={`${resolvedTestIdPrefix}-to-branch-id`}
-            />
-          </label>
+          <FormFieldLayout {...fieldProps("rawToBranch")} label={t("form.toBranchId")} className={rawFieldClass} labelClassName={rawLabelClass}>
+            {({ fieldId, describedBy, invalid }) => (
+              <Input id={fieldId} invalid={invalid} aria-describedby={describedBy}
+                value={toBranchId}
+                onChange={(event) => setToBranchId(event.target.value)}
+                placeholder={t("form.branchIdPlaceholder")}
+                disabled={pending}
+                data-testid={`${resolvedTestIdPrefix}-to-branch-id`}
+              />
+            )}
+          </FormFieldLayout>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <label className="space-y-2 text-sm text-ui-ink">
-            <span className="text-xs uppercase tracking-wide text-ui-muted">
-              {t("form.plannedDispatchAt")}
-            </span>
-            <Input
-              ref={rawDispatchInputRef}
-              value={plannedDispatch.value}
-              invalid={error?.input === rawDispatchInputRef}
-              aria-describedby={error?.input === rawDispatchInputRef ? errorId : undefined}
-              onChange={(event) => setPlannedDispatch({ value: event.target.value, raw: true })}
-              placeholder="2026-04-05T08:00:00Z"
-              disabled={pending}
-              data-testid={`${resolvedTestIdPrefix}-planned-dispatch-at`}
-            />
-          </label>
+          <FormFieldLayout {...fieldProps("rawDispatch")} label={t("form.plannedDispatchAt")} className={rawFieldClass} labelClassName={rawLabelClass}>
+            {({ fieldId, describedBy, invalid }) => (
+              <Input id={fieldId} invalid={invalid} aria-describedby={describedBy}
+                value={plannedDispatch.value}
+                onChange={(event) => setPlannedDispatch({ value: event.target.value, raw: true })}
+                placeholder="2026-04-05T08:00:00Z"
+                disabled={pending}
+                data-testid={`${resolvedTestIdPrefix}-planned-dispatch-at`}
+              />
+            )}
+          </FormFieldLayout>
 
-          <label className="space-y-2 text-sm text-ui-ink">
-            <span className="text-xs uppercase tracking-wide text-ui-muted">
-              {t("form.plannedReceiveAt")}
-            </span>
-            <Input
-              ref={rawReceiveInputRef}
-              value={plannedReceive.value}
-              invalid={error?.input === rawReceiveInputRef}
-              aria-describedby={error?.input === rawReceiveInputRef ? errorId : undefined}
-              onChange={(event) => setPlannedReceive({ value: event.target.value, raw: true })}
-              placeholder="2026-04-05T12:00:00Z"
-              disabled={pending}
-              data-testid={`${resolvedTestIdPrefix}-planned-receive-at`}
-            />
-          </label>
+          <FormFieldLayout {...fieldProps("rawReceive")} label={t("form.plannedReceiveAt")} className={rawFieldClass} labelClassName={rawLabelClass}>
+            {({ fieldId, describedBy, invalid }) => (
+              <Input id={fieldId} invalid={invalid} aria-describedby={describedBy}
+                value={plannedReceive.value}
+                onChange={(event) => setPlannedReceive({ value: event.target.value, raw: true })}
+                placeholder="2026-04-05T12:00:00Z"
+                disabled={pending}
+                data-testid={`${resolvedTestIdPrefix}-planned-receive-at`}
+              />
+            )}
+          </FormFieldLayout>
         </div>
 
-        <label className="space-y-2 text-sm text-ui-ink">
-          <span className="text-xs uppercase tracking-wide text-ui-muted">
-            {t("form.shipmentIds")}
-          </span>
-          <Textarea
-            ref={rawShipmentsInputRef}
-            aria-invalid={isErrorField(rawShipmentsInputRef) || undefined}
-            aria-describedby={isErrorField(rawShipmentsInputRef) ? errorId : undefined}
-            value={shipmentIdsText}
-            onChange={(event) => setShipmentIdsText(event.target.value)}
-            placeholder={t("form.shipmentIdsPlaceholder")}
-            rows={6}
-            disabled={pending}
-            data-testid={`${resolvedTestIdPrefix}-shipment-ids`}
-          />
-        </label>
+        <FormFieldLayout {...fieldProps("rawShipments")} label={t("form.shipmentIds")} className={rawFieldClass} labelClassName={rawLabelClass}>
+          {({ fieldId, describedBy, invalid }) => (
+            <Textarea id={fieldId} aria-invalid={invalid || undefined} aria-describedby={describedBy}
+              value={shipmentIdsText}
+              onChange={(event) => setShipmentIdsText(event.target.value)}
+              placeholder={t("form.shipmentIdsPlaceholder")}
+              rows={6}
+              disabled={pending}
+              data-testid={`${resolvedTestIdPrefix}-shipment-ids`}
+            />
+          )}
+        </FormFieldLayout>
       </details>
 
-      {error ? (
+      {error && !error.field ? (
         <div
-          className="rounded-2xl border border-ui-danger/30 bg-ui-danger/5 p-3 text-sm text-ui-ink"
+          className={errorBoxClass}
           data-testid={`${resolvedTestIdPrefix}-error`}
-          id={errorId}
           role="alert"
         >
           {error.message}
