@@ -104,6 +104,7 @@ npx playwright test --workers=1
 Notes:
 - UI tests rely on Testing Library `@testing-library/user-event` (declared in root devDependencies). If Jest cannot resolve it, run `npm install` from the repo root.
 - Run Playwright locally without forcing `CI=1` when using localhost apps (`3001` console / `3002` portal), so the config can auto-start dev servers.
+- To start the Next.js console manually, run `npm run dev:console`.
 - In CI/strict environments, set `CONSOLE_BASE_URL` and `PORTAL_BASE_URL` explicitly.
 - Use host-root values (for example `https://vkhyghkwqoksmtxwrkgqyyxk.example.invalid`, `https://yguwjnwkkqutolgwughjsloj.example.invalid`), not `/console` or `/portal` path prefixes.
 - For Console V2 production-readiness checks, navigate to each target through visible app controls first: sidebar/shell navigation, command palette, breadcrumbs, row actions, drawer actions, or other in-app links. Direct URL entry is a separate deep-link/legacy-redirect assertion and cannot be the only proof that the route is navigable.

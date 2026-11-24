@@ -3,6 +3,8 @@ let checks = 0;
 const rawAssert = require('node:assert/strict');
 const assert = new Proxy(rawAssert, { get(target, key) { const value = target[key]; return typeof value === 'function' ? (...args) => { checks++; return value(...args); } : value; } });
 const fs = require('node:fs'); const path = require('node:path'); const crypto = require('node:crypto');
+const { createRequire } = require('node:module');
+const { runInNewContext } = require('node:vm');
 const { evaluate, identity, parseList, resultDetails, relativeFile } = require('./jest.cjs');
 const { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch } = require('./backend.cjs');
 const { handleRequest, handleConnect } = require('./deny-egress.cjs');
@@ -289,6 +291,31 @@ const savedExists = fs.existsSync; const savedOutput = process.env.GITHUB_OUTPUT
 try { delete process.env.GITHUB_OUTPUT; fs.existsSync = file => file.split(path.sep).join('/').endsWith('scripts/frontend/build-landing.js'); console.log = line => detection.push(line); detect('landing'); }
 finally { fs.existsSync = savedExists; console.log = savedLog; if (savedOutput === undefined) delete process.env.GITHUB_OUTPUT; else process.env.GITHUB_OUTPUT = savedOutput; }
 assert.deepEqual(detection, ['landing: present']);
+
+const taskFile = require.resolve('./tasks.cjs');
+const taskRequire = createRequire(taskFile);
+const taskModule = { exports: {} };
+const lintCalls = [];
+function requireLintTask(name) {
+  if (name !== 'node:child_process') return taskRequire(name);
+  return {
+    spawnSync(command, args) {
+      lintCalls.push([command, ...args]);
+      return { status: 0 };
+    },
+  };
+}
+requireLintTask.main = taskModule;
+runInNewContext(fs.readFileSync(taskFile, 'utf8'), {
+  module: taskModule,
+  require: requireLintTask,
+  process: { argv: [process.execPath, taskFile, 'lint'], cwd: () => root, env: {} },
+}, { filename: taskFile });
+assert.ok(
+  lintCalls.some(([command, action, script]) => command === 'npm' && action === 'run' && script === 'lint:docs:ssot'),
+  'Hosted Lint must run npm run lint:docs:ssot',
+);
+
 const emptyRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hosted-result-selfcheck-'));
 try {
   const run = require('node:child_process').spawnSync(process.execPath, [path.join(root, 'scripts/ci-hosted/jest.cjs'), 'unit'], {
