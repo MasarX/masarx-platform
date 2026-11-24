@@ -66,6 +66,7 @@ import {
   extractCapabilityDeniedKey,
   formatUiError,
   isCapabilityDeniedMessage,
+  isAuthorizationUiError,
   isStatementTimeoutUiError,
 } from "./utils";
 import {
@@ -386,6 +387,7 @@ export async function ResourcePage({
   let analyticsEnabled = true;
   let errorMessage: string | null = null;
   let isTimeoutError = false;
+  let isAuthorizationError = false;
   let resourceKeySuggestions: string[] = [];
   let deniedMessage: string | null = null;
   let detailError: string | null = null;
@@ -446,6 +448,7 @@ export async function ResourcePage({
     }
   } else {
     isTimeoutError = isStatementTimeoutUiError(registryResult.reason);
+    isAuthorizationError = isAuthorizationUiError(registryResult.reason);
     errorMessage = formatUiError(registryResult.reason, t("errors.loadRegistry"));
   }
 
@@ -697,6 +700,7 @@ export async function ResourcePage({
       }
     } catch (error) {
       isTimeoutError = isStatementTimeoutUiError(error);
+      isAuthorizationError = isAuthorizationUiError(error);
       errorMessage = formatUiError(error, t("errors.loadResourceList"));
     }
   }
@@ -1353,6 +1357,13 @@ export async function ResourcePage({
           title={t("blocked.title")}
           action={t("blocked.action")}
           detailNode={blockedNoticeDetail}
+        />
+      ) : errorMessage && isAuthorizationError ? (
+        <ContextNotice
+          testId={errorTestId}
+          title={t("authRequired.title")}
+          action={t("authRequired.action")}
+          links={[{ href: resolveSafeHref(appBasePath, "/signin") ?? "/signin", label: t("authRequired.signIn") }]}
         />
       ) : errorMessage ? (
         <ContextNotice

@@ -34,7 +34,10 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-          sparse-checkout: .github/workflows
+          sparse-checkout: |
+            .github/workflows
+            scripts/deploy/require-ci-gate.sh
+          sparse-checkout-cone-mode: false
       - name: Verify the release tag and required CI check
         id: verify
         env:
@@ -54,28 +57,7 @@ jobs:
             exit 1
           fi
 
-          # Public CI on pull requests can skip jobs and can use changes to the workflow from the PR.
-          if ! suites="$(gh api --paginate --slurp \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/public-ci.yml/runs?head_sha=$sha&per_page=100" \
-            | jq -c '[.[].workflow_runs[]
-              | select((.event == "merge_group" and (.head_branch // "" | startswith("gh-readonly-queue/main/")))
-                or (.event == "push" and .head_branch == "main"))
-              | .check_suite_id]')" ||
-             ! checks="$(gh api --paginate --slurp \
-            "repos/$GITHUB_REPOSITORY/commits/$sha/check-runs?check_name=ci-gate&filter=all&per_page=100")"; then
-            echo "::error::Could not read CI check evidence for release commit $sha."
-            exit 1
-          fi
-          if ! jq -e --arg sha "$sha" --argjson suites "$suites" '
-            [.[].check_runs[]
-              | select(.name == "ci-gate" and .head_sha == $sha and .app.slug == "github-actions")
-              | select(.check_suite.id as $suite | $suites | index($suite))]
-            | max_by(.id)
-            | .status == "completed" and .conclusion == "success"
-          ' <<< "$checks" > /dev/null; then
-            echo "::error::Release requires a successful ci-gate from the latest qualifying public CI evidence on $sha."
-            exit 1
-          fi
+          bash scripts/deploy/require-ci-gate.sh "$GITHUB_REPOSITORY" "$sha" "${GH_CLI:-gh}"
           printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
 
   build:
