@@ -108,7 +108,12 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY && EDGE_DB_JWT) {
   supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false },
     db: { schema: "api" },
-    global: { headers: { Authorization: `Bearer ${EDGE_DB_JWT}` } },
+    global: {
+      headers: {
+        Authorization: `Bearer ${EDGE_DB_JWT}`,
+        "x-masarx-renderer-transport": "1",
+      },
+    },
   });
 }
 if (!supabase) {
