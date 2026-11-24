@@ -16,14 +16,15 @@ vi.mock('@tanstack/react-router', async () => {
 import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import * as api from '@/lib/api';
+import type { IdentityProviderMockValue } from '@/lib/identity';
 // @ts-expect-error - seed-raw/*.js has no declaration file by design
 import { navigation as seedNavigation } from '@/lib/seed-raw/navigation.js';
 import { AppShell } from './AppShell';
 import { TenantPicker } from './TenantPicker';
 import { UserMenuDrawer } from './UserMenuDrawer';
 
-const TENANT = { id: 'org_test', label: 'Test Logistics', rank: 2 };
-const IDENTITY = {
+const TENANT = { id: 'org_test', label: 'Test Logistics', rank: 2 } as const;
+const IDENTITY: IdentityProviderMockValue = {
   capabilities: ['all'],
   user: {
     name: 'Test Operator',
