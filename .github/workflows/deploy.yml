@@ -983,6 +983,69 @@ jobs:
           node scripts/ops/vercel/validate-build.js dev-alias console "$url" "$marker"
           printf '%s' "$url" | node scripts/ci-hosted/dev-e2e-previews.cjs capture
 
+  console-v2:
+    needs: database
+    if: ${{ !cancelled() && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && needs.database.outputs.configured == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: dev
+    concurrency:
+      group: deploy-dev-console-v2
+      cancel-in-progress: false
+    outputs:
+      superseded: ${{ steps.deploy.outputs.superseded }}
+    env:
+      CONSOLE_V2_DEV_ORIGIN: ${{ vars.CONSOLE_V2_DEV_ORIGIN }}
+      CORS_ALLOW_ORIGIN: ${{ vars.CORS_ALLOW_ORIGIN }}
+      VITE_USE_SEED: 'false'
+      VITE_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+    steps:
+      - name: Guard Console V2 DEV configuration
+        env:
+          CONFIGURED: ${{ vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.CLOUDFLARE_WORKER_CONSOLE_V2 != '' && vars.CONSOLE_V2_DEV_ORIGIN != '' && vars.SUPABASE_PROJECT_REF != '' && secrets.CLOUDFLARE_API_TOKEN != '' && secrets.E2E_CONSOLE_AUTH_EMAIL != '' && secrets.E2E_CONSOLE_AUTH_PASSWORD != '' }}
+        run: |
+          if [[ "$DEPLOY_ENV:$GITHUB_REF" != dev:refs/heads/main || "$CONFIGURED" != true ]]; then
+            echo '::error::Console V2 deployment requires the main ref and the approved DEV configuration.'
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install lockfile dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix tooling/apps/deploy --ignore-scripts --no-audit --no-fund
+      - name: Build Console V2 in live mode
+        env:
+          CLOUDFLARE_WORKER_CONSOLE_V2: ${{ vars.CLOUDFLARE_WORKER_CONSOLE_V2 }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          NEXT_PUBLIC_UI_MAP_TILE_ORIGINS: ${{ vars.NEXT_PUBLIC_UI_MAP_TILE_ORIGINS }}
+          NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS: ${{ vars.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS }}
+        run: node scripts/deploy/console-v2-dev.mjs build
+      - name: Install lockfile-selected Chromium
+        run: ./node_modules/.bin/playwright install --with-deps chromium
+      - name: Deploy and confirm the exact Worker version
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_WORKER_CONSOLE_V2: ${{ vars.CLOUDFLARE_WORKER_CONSOLE_V2 }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/deploy/console-v2-dev.mjs deploy
+      - name: Verify served assets, security headers, and a live dispatcher read
+        if: steps.deploy.outputs.superseded != 'true'
+        env:
+          E2E_CONSOLE_LIVE: '1'
+          E2E_CONSOLE_AUTH_EMAIL: ${{ secrets.E2E_CONSOLE_AUTH_EMAIL }}
+          E2E_CONSOLE_AUTH_PASSWORD: ${{ secrets.E2E_CONSOLE_AUTH_PASSWORD }}
+        run: node scripts/deploy/console-v2-dev.mjs readout
+
   portal:
     needs: database
     if: ${{ !cancelled() && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
@@ -1293,7 +1356,7 @@ jobs:
           PY
 
   summary:
-    needs: [database, console, portal, landing, ingress]
+    needs: [database, console, console-v2, portal, landing, ingress]
     if: ${{ always() && (github.event_name == 'push' || inputs.mode == 'deploy') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

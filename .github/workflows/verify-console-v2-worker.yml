@@ -1,0 +1,51 @@
+name: Verify Console V2 Worker
+
+'on':
+  pull_request:
+    paths:
+      - .github/workflows/deploy.yml
+      - .github/workflows/verify-console-v2-worker.yml
+      - apps/console-v2/**
+      - apps/shared/security-headers.js
+      - packages/config/**
+      - packages/ui/**
+      - scripts/deploy/console-v2-dev.mjs
+      - scripts/ops/vercel/validate-build.js
+      - tooling/apps/console-v2-worker/**
+      - tooling/apps/deploy/**
+      - .nvmrc
+      - package.json
+      - package-lock.json
+
+permissions:
+  contents: read
+
+jobs:
+  console-v2-worker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CONSOLE_V2_DEV_ORIGIN: https://console.example.invalid
+      CORS_ALLOW_ORIGIN: https://console.example.invalid
+      CLOUDFLARE_WORKER_CONSOLE_V2: synthetic-console-v2
+      VITE_USE_SEED: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install lockfile dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix tooling/apps/deploy --ignore-scripts --no-audit --no-fund
+      - name: Build and bundle the Console V2 Worker without deploy credentials
+        run: |
+          export SUPABASE_PROJECT_REF="$(node -p "require('node:crypto').randomBytes(20).map(value => 97 + value % 26).toString()")"
+          export VITE_SUPABASE_URL="https://$SUPABASE_PROJECT_REF.supabase.co"
+          export VITE_SUPABASE_ANON_KEY="$(node -p "['sb', 'publishable', require('node:crypto').randomUUID()].join('_')")"
+          node scripts/deploy/console-v2-dev.mjs build
+          node scripts/deploy/console-v2-dev.mjs bundle
