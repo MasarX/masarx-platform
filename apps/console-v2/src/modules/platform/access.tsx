@@ -58,6 +58,7 @@ import {
 import { pushToast } from '@/components/toastStore';
 import { CapabilityEvalDrilldown } from '@/components/CapabilityEvalDrilldown';
 import { readAuthorizedConsoleScopeOverride } from '@/lib/scope-url';
+import { fill, useI18n, type Translate } from '@/lib/i18n';
 
 interface PolicyCapability {
   key: string;
@@ -374,6 +375,7 @@ function RbacRoleEditorBody({
   existing?: RbacRoleRow;
   onDraftChange: (draft: RbacRoleEditorDraft) => void;
 }) {
+  const { t } = useI18n();
   const editing = Boolean(existing);
   const [keyManuallyEdited, setKeyManuallyEdited] = useState(editing);
   const [draft, setDraft] = useState<RbacRoleEditorDraft>(() => ({
@@ -402,18 +404,15 @@ function RbacRoleEditorBody({
           fontSize: '11.5px',
         }}
       >
-        Saves a tenant-scoped access role and keeps permission history intact.
-        The role slug is unique within the tenant and is used by policies.
-        Permissions attached to the role are lookup-backed. Use Templates for
-        predefined roles such as driver or operations admin.
+        {t('platformAccess.rbacRoleEditorBody.savesATenantScoped')}
       </p>
       <div className="field">
-        <label className="field__label">Name</label>
+        <label className="field__label">{t('platformAccess.rbacRoleEditorBody.name')}</label>
         <input
           type="text"
           value={draft.name}
           data-testid="rbac-role-editor-name"
-          placeholder="Dispatch lead"
+          placeholder={t('platformAccess.rbacRoleEditorBody.dispatchLead')}
           onChange={(event) => {
             const nextName = event.target.value;
             updateDraft((previous) => {
@@ -433,11 +432,11 @@ function RbacRoleEditorBody({
         />
       </div>
       <div className="field">
-        <label className="field__label">Custom role slug</label>
+        <label className="field__label">{t('platformAccess.rbacRoleEditorBody.customRoleSlug')}</label>
         <input
           type="text"
           value={draft.key}
-          placeholder="dispatch_lead"
+          placeholder={t('platformAccess.rbacRoleEditorBody.dispatchLead2')}
           data-testid="rbac-role-editor-key"
           disabled={editing}
           onChange={(event) => {
@@ -449,16 +448,16 @@ function RbacRoleEditorBody({
           }}
         />
         <small className="state__hint">
-          Lowercase snake case, unique within the tenant, and safe to reference from workflow policies and permission audits.
+          {t('platformAccess.rbacRoleEditorBody.lowercaseSnakeCaseUnique')}
         </small>
       </div>
       <div className="field">
-        <label className="field__label">Description</label>
+        <label className="field__label">{t('platformAccess.rbacRoleEditorBody.description')}</label>
         <input
           type="text"
           value={draft.description}
           data-testid="rbac-role-editor-description"
-          placeholder="What this role is allowed to do"
+          placeholder={t('platformAccess.rbacRoleEditorBody.whatThisRoleIs')}
           onChange={(event) => {
             updateDraft((previous) => ({
               ...previous,
@@ -535,19 +534,22 @@ function normalizeTemplateApplyRoles(result: RbacTemplateApplyResult | null): Rb
 
 type AccessTabKey = 'policy' | 'roles' | 'assignments' | 'templates' | 'requests';
 
-const TABS: Array<{ key: AccessTabKey; label: string }> = [
-  { key: 'policy', label: 'Policy' },
-  { key: 'roles', label: 'Roles' },
-  { key: 'assignments', label: 'Assignments' },
-  { key: 'templates', label: 'Templates' },
-  { key: 'requests', label: 'Requests' },
-];
+function accessTabs(t: Translate): Array<{ key: AccessTabKey; label: string }> {
+  return [
+    { key: 'policy', label: t('platformAccess.accessModule.policy') },
+    { key: 'roles', label: t('platformAccess.accessModule.roles') },
+    { key: 'assignments', label: t('platformAccess.accessModule.assignments') },
+    { key: 'templates', label: t('platformAccess.accessModule.templates') },
+    { key: 'requests', label: t('platformAccess.accessModule.requests') },
+  ];
+}
 
 // -----------------------------------------------------------------------------
 // AccessModule — top-level surface with tabbed lifecycle.
 // -----------------------------------------------------------------------------
 
 export function AccessModule() {
+  const { t } = useI18n();
   const { user, scope, capabilities, hasCapability } = useIdentity();
   const myCaps = useMemo(() => new Set(capabilities), [capabilities]);
   const modal = useModal();
@@ -766,7 +768,7 @@ export function AccessModule() {
     modal.open({
       title: (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-          {`Request access · ${formatCapabilityLabel(cap, { titleCase: true })}`}
+          {fill(t('platformAccess.accessModule.requestAccess'), { value: String(formatCapabilityLabel(cap, { titleCase: true })) })}
         </span>
       ),
       body: (
@@ -781,11 +783,10 @@ export function AccessModule() {
               fontSize: '11.5px',
             }}
           >
-            Submits a scoped, time-bounded access request for approval. Approvers
-            review the persisted row from the Requests tab.
+            {t('platformAccess.accessModule.submitsAScopedTime')}
           </p>
           <div className="field">
-            <label className="field__label">Scope</label>
+            <label className="field__label">{t('platformAccess.accessModule.scope')}</label>
             <select
               className="field"
               defaultValue={scopeType}
@@ -801,10 +802,10 @@ export function AccessModule() {
             </select>
           </div>
           <div className="field">
-            <label className="field__label">Duration (hours)</label>
+            <label className="field__label">{t('platformAccess.accessModule.durationHours')}</label>
             {grantPolicy ? null : (
               <Chip
-                label="Access request policy missing"
+                label={t('platformAccess.accessModule.accessRequestPolicyMissing')}
                 kind="danger"
                 size="xs"
                 className="mono"
@@ -821,10 +822,10 @@ export function AccessModule() {
             />
           </div>
           <div className="field">
-            <label className="field__label">Justification</label>
+            <label className="field__label">{t('platformAccess.accessModule.justification')}</label>
             <input
               type="text"
-              placeholder="Required for incident response"
+              placeholder={t('platformAccess.accessModule.requiredForIncidentResponse')}
               onChange={(e) => {
                 justification = e.target.value;
               }}
@@ -834,9 +835,9 @@ export function AccessModule() {
       ),
       footer: (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('platformAccess.accessModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Submit request"
+            label={t('platformAccess.accessModule.submitRequest')}
             iconName="check"
             kind="primary"
             onClick={() => {
@@ -853,14 +854,14 @@ export function AccessModule() {
                   onSuccess: (result: Record<string, unknown>) => {
                     const readback = normalizeAccessRequestReadback(result);
                     if (!readback) {
-                      pushToast('Access request submitted, but the saved result could not be confirmed.', 'danger');
+                      pushToast(t('platformAccess.accessModule.accessRequestSubmittedBut'), 'danger');
                       return;
                     }
                     setAccessRequestEvidence(readback);
-                    pushToast(`Access request submitted - ${formatCapabilityTitle(cap)}`, 'good');
+                    pushToast(fill(t('platformAccess.accessModule.accessRequestSubmitted'), { value: String(formatCapabilityTitle(cap)) }), 'good');
                     modal.close();
                   },
-                  onError: () => pushToast('Access request could not be submitted. Review the request and try again.', 'danger'),
+                  onError: () => pushToast(t('platformAccess.accessModule.accessRequestCouldNot'), 'danger'),
                 },
               );
             }}
@@ -880,7 +881,7 @@ export function AccessModule() {
     const submitReview = async () => {
       if (submitted) return;
       submitted = true;
-      pushToast(`Reviewing access request - ${request.capability_key}`, 'info');
+      pushToast(fill(t('platformAccess.accessModule.reviewingAccessRequest'), { capability_key: String(request.capability_key) }), 'info');
       try {
         const result = await reviewGrantRequest.mutateAsync({
           request_id: request.id,
@@ -890,20 +891,20 @@ export function AccessModule() {
         const readback = normalizeAccessRequestReviewReadback(result);
         if (!readback) {
           submitted = false;
-          pushToast('Access request review completed, but the saved result could not be confirmed.', 'danger');
+          pushToast(t('platformAccess.accessModule.accessRequestReviewCompleted'), 'danger');
           return;
         }
         await refetchRbacSurface();
         setAccessRequestReviewEvidence(readback);
-        pushToast(`Access request ${decision} - ${request.capability_key}`, 'good');
+        pushToast(fill(t('platformAccess.accessModule.accessRequest'), { decision: String(decision), capability_key: String(request.capability_key) }), 'good');
         modal.close();
       } catch (err) {
         submitted = false;
-        pushToast('Access request review could not be saved. Review the request and try again.', 'danger');
+        pushToast(t('platformAccess.accessModule.accessRequestReviewCould'), 'danger');
       }
     };
     modal.open({
-      title: `${approving ? 'Approve' : 'Deny'} access request`,
+      title: t(approving ? 'platformAccess.accessModule.approveAccessRequest' : 'platformAccess.accessModule.denyAccessRequest'),
       body: (
         <div data-testid="access-request-review-body">
           <p
@@ -916,14 +917,13 @@ export function AccessModule() {
               fontSize: '11.5px',
             }}
           >
-            Reviews the persisted access request and reconciles the request row
-            with the RBAC role and assignment read models in the same screen.
+            {t('platformAccess.accessModule.reviewsThePersistedAccess')}
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
             <Chip label={request.capability_key} kind="neutral" size="xs" className="mono" />
             <Chip label={request.status} kind={request.status === 'pending' ? 'warn' : 'info'} size="xs" />
             <Chip
-              label={request.target_user_email ?? request.target_user_full_name ?? request.target_user_id ?? 'target user'}
+              label={request.target_user_email ?? request.target_user_full_name ?? request.target_user_id ?? t('platformAccess.accessModule.targetUser')}
               kind="neutral"
               size="xs"
               className="mono"
@@ -935,10 +935,10 @@ export function AccessModule() {
             </div>
           ) : null}
           <div className="field">
-            <label className="field__label">Decision notes</label>
+            <label className="field__label">{t('platformAccess.accessModule.decisionNotes')}</label>
             <input
               type="text"
-              placeholder={approving ? 'Approved for current operations' : 'Denied with reason'}
+              placeholder={approving ? t('platformAccess.accessModule.approvedForCurrentOperations') : t('platformAccess.accessModule.deniedWithReason')}
               data-testid="access-request-review-notes"
               onChange={(event) => {
                 notes = event.target.value;
@@ -949,14 +949,14 @@ export function AccessModule() {
       ),
       footer: (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('platformAccess.accessModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label={approving ? 'Approve' : 'Deny'}
+            label={approving ? t('platformAccess.accessModule.approve') : t('platformAccess.accessModule.deny')}
             iconName={approving ? 'check' : 'close'}
             kind={approving ? 'primary' : 'danger'}
             capability={CAP.ACCESS_POLICY_APPROVE}
             disabled={request.status !== 'pending'}
-            title={request.status !== 'pending' ? 'Request is already reviewed.' : undefined}
+            title={request.status !== 'pending' ? t('platformAccess.accessModule.requestIsAlreadyReviewed') : undefined}
             onClick={() => {
               void submitReview();
             }}
@@ -995,7 +995,7 @@ export function AccessModule() {
     };
     const editing = Boolean(existing);
     modal.open({
-      title: editing ? `Edit role - ${existing!.name || existing!.key}` : 'Create access role',
+      title: editing ? fill(t('platformAccess.accessModule.editRole'), { value: String(existing!.name || existing!.key) }) : t('platformAccess.accessModule.createAccessRole'),
       body: (
         <RbacRoleEditorBody
           existing={existing}
@@ -1006,9 +1006,9 @@ export function AccessModule() {
       ),
       footer: (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('platformAccess.accessModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label={editing ? 'Save' : 'Create'}
+            label={editing ? t('platformAccess.accessModule.save') : t('platformAccess.accessModule.create')}
             iconName="check"
             kind="primary"
             capability={CAP.ACCESS_POLICY_APPROVE}
@@ -1017,18 +1017,18 @@ export function AccessModule() {
               const name = draft.name.trim();
               const description = draft.description.trim();
               if (!key || !name) {
-                pushToast('Role name and custom role slug are required.', 'danger');
+                pushToast(t('platformAccess.accessModule.roleNameAndCustom'), 'danger');
                 return;
               }
               if (!tenantId) {
-                pushToast('Select a tenant before changing tenant RBAC roles.', 'danger');
+                pushToast(t('platformAccess.accessModule.selectATenantBefore'), 'danger');
                 return;
               }
               const duplicate = (rolesQuery.data?.rows ?? []).some(
                 (role) => role.key === key && role.id !== existing?.id,
               );
               if (duplicate) {
-                pushToast(`Role slug already exists - ${key}`, 'danger');
+                pushToast(fill(t('platformAccess.accessModule.roleSlugAlreadyExists'), { key: String(key) }), 'danger');
                 return;
               }
               const args: Record<string, unknown> = {
@@ -1046,13 +1046,13 @@ export function AccessModule() {
                   await refetchRbacSurface();
                   pushToast(
                     editing
-                      ? `Access role updated - ${name || key}`
-                      : `Access role created - ${name || key}`,
+                      ? fill(t('platformAccess.accessModule.accessRoleUpdated'), { value: String(name || key) })
+                      : fill(t('platformAccess.accessModule.accessRoleCreated'), { value: String(name || key) }),
                     'good',
                   );
                   modal.close();
                 },
-                onError: () => pushToast('Access role could not be saved. Review the role and try again.', 'danger'),
+                onError: () => pushToast(t('platformAccess.accessModule.accessRoleCouldNot'), 'danger'),
               });
             }}
           />
@@ -1063,22 +1063,22 @@ export function AccessModule() {
 
   const openRoleDelete = (role: RbacRoleRow) => {
     modal.open({
-      title: `Deactivate role · ${role.key}`,
+      title: fill(t('platformAccess.accessModule.deactivateRole'), { key: String(role.key) }),
       body: (
         <div data-testid="rbac-role-delete-body">
           <p>
-            Deactivate role <code className="mono">{role.key}</code>?{' '}
-            The role stays in the access history as inactive, and all{' '}
-            <code className="mono">{role.assignment_count ?? 0}</code> active
-            assignments are revoked atomically.
+            {t('platformAccess.accessModule.deactivateRolePrefix')} <code className="mono">{role.key}</code>
+            {t('platformAccess.accessModule.theRoleStaysInactive')}{' '}
+            <code className="mono">{role.assignment_count ?? 0}</code>{' '}
+            {t('platformAccess.accessModule.activeAssignmentsAreRevoked')}
           </p>
         </div>
       ),
       footer: (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('platformAccess.accessModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Deactivate"
+            label={t('platformAccess.accessModule.deactivate')}
             iconName="close"
             kind="danger"
             capability={CAP.ACCESS_POLICY_APPROVE}
@@ -1090,11 +1090,11 @@ export function AccessModule() {
                 {
                   onSuccess: async () => {
                     await refetchRbacSurface();
-                    pushToast(`Access role deactivated - ${role.name || role.key}`, 'good');
+                    pushToast(fill(t('platformAccess.accessModule.accessRoleDeactivated'), { value: String(role.name || role.key) }), 'good');
                     modal.close();
                     drawer.close();
                   },
-                  onError: () => pushToast('Access role could not be deactivated. Review the role and try again.', 'danger'),
+                  onError: () => pushToast(t('platformAccess.accessModule.accessRoleCouldNot2'), 'danger'),
                 },
               )
             }
@@ -1109,7 +1109,7 @@ export function AccessModule() {
     let roleId = grantableRoleOptions[0]?.id ?? '';
     const hasUsers = userOptions.length > 0;
     modal.open({
-      title: 'Grant role to user',
+      title: t('platformAccess.accessModule.grantRoleToUser'),
       body: (
         <div data-testid="rbac-grant-modal-body">
           <p
@@ -1122,11 +1122,11 @@ export function AccessModule() {
               fontSize: '11.5px',
             }}
           >
-            Grants the selected role to the selected user and records the approval history.
+            {t('platformAccess.accessModule.grantsTheSelectedRole')}
           </p>
           {hasUsers ? (
             <div className="field">
-              <label className="field__label">User</label>
+              <label className="field__label">{t('platformAccess.accessModule.user')}</label>
               <select
                 defaultValue={userId}
                 data-testid="rbac-grant-user-id"
@@ -1144,12 +1144,12 @@ export function AccessModule() {
           ) : (
             <StateView
               kind="error"
-              title="No users available"
-              hint="Granting a role requires an available user in this scope."
+              title={t('platformAccess.accessModule.noUsersAvailable')}
+              hint={t('platformAccess.accessModule.grantingARoleRequires')}
             />
           )}
           <div className="field">
-            <label className="field__label">Role</label>
+            <label className="field__label">{t('platformAccess.accessModule.role')}</label>
             <select
               defaultValue={roleId}
               data-testid="rbac-grant-role-select"
@@ -1168,9 +1168,9 @@ export function AccessModule() {
       ),
       footer: (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('platformAccess.accessModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Grant"
+            label={t('platformAccess.accessModule.grant')}
             iconName="check"
             kind="primary"
             capability={CAP.ACCESS_POLICY_APPROVE}
@@ -1196,10 +1196,10 @@ export function AccessModule() {
                       correlationId:
                         typeof result.correlation_id === 'string' ? result.correlation_id : null,
                     });
-                    pushToast(`Role granted - ${selectedUser ? userPickerLabel(selectedUser) : 'selected user'}`, 'good');
+                    pushToast(fill(t('platformAccess.accessModule.roleGranted'), { value: String(selectedUser ? userPickerLabel(selectedUser) : 'selected user') }), 'good');
                     modal.close();
                   },
-                  onError: () => pushToast('Role grant could not be saved. Review the user and role and try again.', 'danger'),
+                  onError: () => pushToast(t('platformAccess.accessModule.roleGrantCouldNot'), 'danger'),
                 },
               );
             }}
@@ -1212,7 +1212,7 @@ export function AccessModule() {
   const openRevokeAssignment = (assignment: RbacUserRoleAssignmentRow) => {
     let reason = '';
     modal.open({
-      title: `Revoke role · ${assignment.role_key ?? assignment.role_id}`,
+      title: fill(t('platformAccess.accessModule.revokeRole'), { value: String(assignment.role_key ?? assignment.role_id) }),
       body: (
         <div data-testid="rbac-revoke-modal-body">
           <p
@@ -1225,13 +1225,13 @@ export function AccessModule() {
               fontSize: '11.5px',
             }}
           >
-            Revokes the selected assignment while preserving the access history.
+            {t('platformAccess.accessModule.revokesTheSelectedAssignment')}
           </p>
           <div className="field">
-            <label className="field__label">Reason</label>
+            <label className="field__label">{t('platformAccess.accessModule.reason')}</label>
             <input
               type="text"
-              placeholder="No longer required"
+              placeholder={t('platformAccess.accessModule.noLongerRequired')}
               data-testid="rbac-revoke-reason"
               onChange={(e) => {
                 reason = e.target.value;
@@ -1242,9 +1242,9 @@ export function AccessModule() {
       ),
       footer: (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('platformAccess.accessModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Revoke"
+            label={t('platformAccess.accessModule.revoke')}
             iconName="close"
             kind="danger"
             capability={CAP.ACCESS_POLICY_APPROVE}
@@ -1269,13 +1269,13 @@ export function AccessModule() {
                         typeof result.correlation_id === 'string' ? result.correlation_id : null,
                     });
                     pushToast(
-                      `Role revoked - ${assignment.role_name ?? assignment.role_key ?? assignment.role_id}`,
+                      fill(t('platformAccess.accessModule.roleRevoked'), { value: String(assignment.role_name ?? assignment.role_key ?? assignment.role_id) }),
                       'good',
                     );
                     modal.close();
                     drawer.close();
                   },
-                  onError: () => pushToast('Role revoke could not be saved. Review the assignment and try again.', 'danger'),
+                  onError: () => pushToast(t('platformAccess.accessModule.roleRevokeCouldNot'), 'danger'),
                 },
               )
             }
@@ -1287,7 +1287,7 @@ export function AccessModule() {
 
   const openApplyTemplate = (template: RbacRoleTemplateRow) => {
     modal.open({
-      title: `Apply template · ${template.key}`,
+      title: fill(t('platformAccess.accessModule.applyTemplate'), { key: String(template.key) }),
       body: (
         <div data-testid="rbac-template-apply-body">
           <p
@@ -1300,14 +1300,14 @@ export function AccessModule() {
               fontSize: '11.5px',
             }}
           >
-            Applies the selected access template without removing existing roles. Provisions{' '}
+            {t('platformAccess.accessModule.appliesTheSelectedTemplate')}{' '}
             <strong>{template.permission_count ?? template.permission_values?.length ?? 0}</strong>{' '}
-            lookup-backed permissions onto a tenant-scoped role slugged{' '}
+            {t('platformAccess.accessModule.permissionsOntoTenantRole')}{' '}
             <code className="mono">{template.key}</code>.
           </p>
           {template.permission_values && template.permission_values.length > 0 ? (
             <div className="field">
-              <label className="field__label">Permissions</label>
+              <label className="field__label">{t('platformAccess.accessModule.permissions')}</label>
               <div
                 style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}
                 data-testid="rbac-template-permission-list"
@@ -1322,9 +1322,9 @@ export function AccessModule() {
       ),
       footer: (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('platformAccess.accessModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Apply"
+            label={t('platformAccess.accessModule.apply')}
             iconName="check"
             kind="primary"
             capability={CAP.ACCESS_POLICY_APPROVE}
@@ -1341,12 +1341,12 @@ export function AccessModule() {
                     await refetchRbacSurface();
                     setTemplateApplyEvidence(result as RbacTemplateApplyResult);
                     pushToast(
-                      `Access template applied - ${template.name || template.key}`,
+                      fill(t('platformAccess.accessModule.accessTemplateApplied'), { value: String(template.name || template.key) }),
                       'good',
                     );
                     modal.close();
                   },
-                  onError: () => pushToast('Access template could not be applied. Review the template and try again.', 'danger'),
+                  onError: () => pushToast(t('platformAccess.accessModule.accessTemplateCouldNot'), 'danger'),
                 },
               )
             }
@@ -1378,22 +1378,22 @@ export function AccessModule() {
       body: (
         <div data-testid="rbac-role-drawer-body" style={{ padding: '12px' }}>
           <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
-            <Chip label={role.is_active ? 'active' : 'inactive'} kind={role.is_active ? 'good' : 'warn'} size="xs" />
+            <Chip label={role.is_active ? t('platformAccess.accessModule.active') : t('platformAccess.accessModule.inactive')} kind={role.is_active ? 'good' : 'warn'} size="xs" />
             <Chip
-              label={`${permCount} permissions`}
+              label={fill(t('platformAccess.accessModule.permissions2'), { permCount: String(permCount) })}
               kind="info"
               size="xs"
               data-testid="rbac-role-drawer-permission-count"
             />
             <Chip
-              label={`${assignmentCount} assignees`}
+              label={fill(t('platformAccess.accessModule.assignees'), { assignmentCount: String(assignmentCount) })}
               kind="info"
               size="xs"
               data-testid="rbac-role-drawer-assignment-count"
             />
             {summary ? (
               <Chip
-                label={`${revokedCount} revoked`}
+                label={fill(t('platformAccess.accessModule.revoked'), { revokedCount: String(revokedCount) })}
                 kind={revokedCount > 0 ? 'warn' : 'neutral'}
                 size="xs"
                 data-testid="rbac-role-drawer-revoked-count"
@@ -1401,7 +1401,7 @@ export function AccessModule() {
             ) : null}
             {roleTier ? (
               <Chip
-                label={`tier · ${roleTier}`}
+                label={fill(t('platformAccess.accessModule.tier'), { roleTier: String(roleTier) })}
                 kind="neutral"
                 size="xs"
                 data-testid="rbac-role-drawer-tier"
@@ -1417,7 +1417,7 @@ export function AccessModule() {
             ) : null}
             {lastAssignedAt ? (
               <Chip
-                label={`last assigned · ${lastAssignedAt.slice(0, 10)}`}
+                label={fill(t('platformAccess.accessModule.lastAssigned'), { value: String(lastAssignedAt.slice(0, 10)) })}
                 kind="neutral"
                 size="xs"
                 data-testid="rbac-role-drawer-last-assigned"
@@ -1425,7 +1425,7 @@ export function AccessModule() {
             ) : null}
             <span style={{ flex: 1 }} />
             <Button
-              label="Edit"
+              label={t('platformAccess.accessModule.edit')}
               kind="ghost"
               size="sm"
               capability={CAP.ACCESS_POLICY_APPROVE}
@@ -1435,12 +1435,12 @@ export function AccessModule() {
               }}
             />
             <Button
-              label="Deactivate"
+              label={t('platformAccess.accessModule.deactivate')}
               kind="danger"
               size="sm"
               capability={CAP.ACCESS_POLICY_APPROVE}
               disabled={!role.is_active}
-              title={!role.is_active ? 'Role is already inactive.' : undefined}
+              title={!role.is_active ? t('platformAccess.accessModule.roleIsAlreadyInactive') : undefined}
               onClick={() => {
                 drawer.close();
                 openRoleDelete(role);
@@ -1452,11 +1452,11 @@ export function AccessModule() {
               {role.description}
             </p>
           ) : null}
-          <div className="section-eyebrow" style={{ marginTop: 0 }}>Permissions</div>
+          <div className="section-eyebrow" style={{ marginTop: 0 }}>{t('platformAccess.accessModule.permissions')}</div>
           <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 16px' }} data-testid="rbac-role-drawer-permissions">
             {perms.length === 0 ? (
               <li style={{ fontSize: '11px', color: 'var(--mute)' }}>
-                No permissions granted to this role yet.
+                {t('platformAccess.accessModule.noPermissionsGrantedTo')}
               </li>
             ) : (
               perms.map((p) => (
@@ -1477,11 +1477,11 @@ export function AccessModule() {
               ))
             )}
           </ul>
-          <div className="section-eyebrow" style={{ marginTop: 0 }}>Active assignees</div>
+          <div className="section-eyebrow" style={{ marginTop: 0 }}>{t('platformAccess.accessModule.activeAssignees')}</div>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0 }} data-testid="rbac-role-drawer-assignees">
             {assignees.length === 0 ? (
               <li style={{ fontSize: '11px', color: 'var(--mute)' }}>
-                No active assignees.
+                {t('platformAccess.accessModule.noActiveAssignees')}
               </li>
             ) : (
               assignees.map((a) => (
@@ -1492,11 +1492,11 @@ export function AccessModule() {
                 >
                   <Dot kind="good" />
                   <span className="mono" style={{ fontSize: '11px' }}>
-                    {a.user_email ?? a.user_full_name ?? 'Assigned user'}
+                    {a.user_email ?? a.user_full_name ?? t('platformAccess.accessModule.assignedUser')}
                   </span>
                   <span style={{ flex: 1 }} />
                   <Button
-                    label="Revoke"
+                    label={t('platformAccess.accessModule.revoke')}
                     kind="ghost"
                     size="sm"
                     capability={CAP.ACCESS_POLICY_APPROVE}
@@ -1524,18 +1524,18 @@ export function AccessModule() {
         <div data-testid="rbac-template-drawer-body" style={{ padding: '12px' }}>
           <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
             <Chip
-              label={template.is_active ? 'active' : 'inactive'}
+              label={template.is_active ? t('platformAccess.accessModule.active') : t('platformAccess.accessModule.inactive')}
               kind={template.is_active ? 'good' : 'warn'}
               size="xs"
             />
             <Chip
-              label={`${template.permission_count ?? permissions.length} permissions`}
+              label={fill(t('platformAccess.accessModule.permissions3'), { value: String(template.permission_count ?? permissions.length) })}
               kind="info"
               size="xs"
             />
             <span style={{ flex: 1 }} />
             <Button
-              label="Apply template"
+              label={t('platformAccess.accessModule.applyTemplate2')}
               iconName="check"
               kind="primary"
               size="sm"
@@ -1551,14 +1551,14 @@ export function AccessModule() {
               {template.description}
             </p>
           ) : null}
-          <div className="section-eyebrow" style={{ marginTop: 0 }}>Template permissions</div>
+          <div className="section-eyebrow" style={{ marginTop: 0 }}>{t('platformAccess.accessModule.templatePermissions')}</div>
           <ul
             style={{ listStyle: 'none', padding: 0, margin: 0 }}
             data-testid="rbac-template-drawer-permissions"
           >
             {permissions.length === 0 ? (
               <li style={{ fontSize: '11px', color: 'var(--mute)' }}>
-                No permissions defined on this template.
+                {t('platformAccess.accessModule.noPermissionsDefinedOn')}
               </li>
             ) : (
               permissions.map((permission) => (
@@ -1585,37 +1585,37 @@ export function AccessModule() {
   // -----------------------------------------------------------------------
 
   const ROLE_COLUMNS: DataTableColumn<RbacRoleRow>[] = [
-    { key: 'key', label: 'Role slug', mono: true, sortable: true, filterable: true },
-    { key: 'name', label: 'Name', sortable: true, filterable: true },
-    { key: 'description', label: 'Description' },
-    { key: 'permission_count', label: 'Permissions', align: 'right', sortable: true },
-    { key: 'assignment_count', label: 'Assignees', align: 'right', sortable: true },
+    { key: 'key', label: t('platformAccess.accessModule.roleSlug'), mono: true, sortable: true, filterable: true },
+    { key: 'name', label: t('platformAccess.accessModule.name'), sortable: true, filterable: true },
+    { key: 'description', label: t('platformAccess.accessModule.description') },
+    { key: 'permission_count', label: t('platformAccess.accessModule.permissions'), align: 'right', sortable: true },
+    { key: 'assignment_count', label: t('platformAccess.accessModule.assignees2'), align: 'right', sortable: true },
     {
       key: 'is_active',
-      label: 'Active',
+      label: t('platformAccess.accessModule.active2'),
       sortable: true,
       filterable: true,
       render: (raw) => (
-        <Chip label={raw ? 'active' : 'inactive'} kind={raw ? 'good' : 'warn'} size="xs" />
+        <Chip label={raw ? t('platformAccess.accessModule.active') : t('platformAccess.accessModule.inactive')} kind={raw ? 'good' : 'warn'} size="xs" />
       ),
     },
-    { key: 'updated_at', label: 'Updated', format: 'datetime', sortable: true },
+    { key: 'updated_at', label: t('platformAccess.accessModule.updated'), format: 'datetime', sortable: true },
   ];
 
   const ASSIGNMENT_COLUMNS: DataTableColumn<RbacUserRoleAssignmentRow>[] = [
-    { key: 'user_email', label: 'User', mono: true, sortable: true, filterable: true },
-    { key: 'user_full_name', label: 'Name', sortable: true, filterable: true },
-    { key: 'role_key', label: 'Role', mono: true, sortable: true, filterable: true },
-    { key: 'role_name', label: 'Role name', sortable: true },
-    { key: 'assigned_at', label: 'Assigned', format: 'datetime', sortable: true },
+    { key: 'user_email', label: t('platformAccess.accessModule.user'), mono: true, sortable: true, filterable: true },
+    { key: 'user_full_name', label: t('platformAccess.accessModule.name'), sortable: true, filterable: true },
+    { key: 'role_key', label: t('platformAccess.accessModule.role'), mono: true, sortable: true, filterable: true },
+    { key: 'role_name', label: t('platformAccess.accessModule.roleName'), sortable: true },
+    { key: 'assigned_at', label: t('platformAccess.accessModule.assigned'), format: 'datetime', sortable: true },
     {
       key: 'revoked_at',
-      label: 'Status',
+      label: t('platformAccess.accessModule.status'),
       sortable: true,
       filterable: true,
       render: (raw) => (
         <Chip
-          label={raw ? 'revoked' : 'active'}
+          label={raw ? t('platformAccess.accessModule.revoked2') : t('platformAccess.accessModule.active')}
           kind={raw ? 'warn' : 'good'}
           size="xs"
         />
@@ -1624,42 +1624,42 @@ export function AccessModule() {
   ];
 
   const TEMPLATE_COLUMNS: DataTableColumn<RbacRoleTemplateRow>[] = [
-    { key: 'key', label: 'Template key', mono: true, sortable: true, filterable: true },
-    { key: 'name', label: 'Name', sortable: true, filterable: true },
-    { key: 'description', label: 'Description' },
-    { key: 'permission_count', label: 'Permissions', align: 'right', sortable: true },
+    { key: 'key', label: t('platformAccess.accessModule.templateKey'), mono: true, sortable: true, filterable: true },
+    { key: 'name', label: t('platformAccess.accessModule.name'), sortable: true, filterable: true },
+    { key: 'description', label: t('platformAccess.accessModule.description') },
+    { key: 'permission_count', label: t('platformAccess.accessModule.permissions'), align: 'right', sortable: true },
     {
       key: 'is_active',
-      label: 'Active',
+      label: t('platformAccess.accessModule.active2'),
       sortable: true,
       filterable: true,
       render: (raw) => (
-        <Chip label={raw ? 'active' : 'inactive'} kind={raw ? 'good' : 'warn'} size="xs" />
+        <Chip label={raw ? t('platformAccess.accessModule.active') : t('platformAccess.accessModule.inactive')} kind={raw ? 'good' : 'warn'} size="xs" />
       ),
     },
-    { key: 'updated_at', label: 'Updated', format: 'datetime', sortable: true },
+    { key: 'updated_at', label: t('platformAccess.accessModule.updated'), format: 'datetime', sortable: true },
   ];
 
   const REQUEST_COLUMNS: DataTableColumn<CapabilityGrantRequestRow>[] = [
-    { key: 'capability_key', label: 'Capability', mono: true, sortable: true, filterable: true },
+    { key: 'capability_key', label: t('platformAccess.accessModule.capability'), mono: true, sortable: true, filterable: true },
     {
       key: 'target_user_email',
-      label: 'Target user',
+      label: t('platformAccess.accessModule.targetUser2'),
       sortable: true,
       filterable: true,
-      render: (raw, row) => String(raw ?? row.target_user_full_name ?? row.target_user_id ?? 'Unknown user'),
+      render: (raw, row) => String(raw ?? row.target_user_full_name ?? row.target_user_id ?? t('platformAccess.accessModule.unknownUser')),
     },
     {
       key: 'requested_by_email',
-      label: 'Requested by',
+      label: t('platformAccess.accessModule.requestedBy'),
       sortable: true,
       filterable: true,
-      render: (raw, row) => String(raw ?? row.requested_by_full_name ?? row.requested_by ?? 'Unknown requester'),
+      render: (raw, row) => String(raw ?? row.requested_by_full_name ?? row.requested_by ?? t('platformAccess.accessModule.unknownRequester')),
     },
-    { key: 'scope_type', label: 'Scope', sortable: true, filterable: true },
+    { key: 'scope_type', label: t('platformAccess.accessModule.scope'), sortable: true, filterable: true },
     {
       key: 'status',
-      label: 'Status',
+      label: t('platformAccess.accessModule.status'),
       sortable: true,
       filterable: true,
       render: (raw) => {
@@ -1673,20 +1673,20 @@ export function AccessModule() {
         );
       },
     },
-    { key: 'created_at', label: 'Created', format: 'datetime', sortable: true },
-    { key: 'decided_at', label: 'Decided', format: 'datetime', sortable: true },
+    { key: 'created_at', label: t('platformAccess.accessModule.created'), format: 'datetime', sortable: true },
+    { key: 'decided_at', label: t('platformAccess.accessModule.decided'), format: 'datetime', sortable: true },
   ];
 
   return (
     <div className="page">
       <PageHeader
         moduleKey="access"
-        eyebrow="Platform"
-        titleAccent="Access"
-        titlePlain="control"
+        eyebrow={t('platformAccess.accessModule.platform')}
+        titleAccent={t('platformAccess.accessModule.titleAccent')}
+        titlePlain={t('platformAccess.accessModule.titlePlain')}
         pills={[
           tenantId ? <ScopePill scopeType="tenant" scopeId={tenantId} /> : null,
-          <span key="cap" className="chip chip--xs mono">{`${grantedCount}/${totalCount} capabilities granted`}</span>,
+          <span key="cap" className="chip chip--xs mono">{fill(t('platformAccess.accessModule.capabilitiesGranted'), { grantedCount: String(grantedCount), totalCount: String(totalCount) })}</span>,
           <span key="rbac" className="chip chip--xs mono">{roleCountPillLabel}</span>,
           <span key="policy" className="chip chip--xs mono">{policyPillLabel}</span>,
         ].filter(Boolean) as ReactNode[]}
@@ -1694,15 +1694,15 @@ export function AccessModule() {
 
       {/* Tab strip — stable ordering: policy / roles / assignments / templates */}
       <div className="dt-toolbar" data-testid="access-tabs">
-        {TABS.map((t) => (
+        {accessTabs(t).map((entry) => (
           <button
-            key={t.key}
+            key={entry.key}
             type="button"
-            className={`dt-tb-view-tab ${tab === t.key ? 'is-active' : ''}`}
-            onClick={() => setTab(t.key)}
-            data-testid={`access-tab-${t.key}`}
+            className={`dt-tb-view-tab ${tab === entry.key ? 'is-active' : ''}`}
+            onClick={() => setTab(entry.key)}
+            data-testid={`access-tab-${entry.key}`}
           >
-            {t.label}
+            {entry.label}
           </button>
         ))}
         <span className="dt-tb-spacer" />
@@ -1713,7 +1713,7 @@ export function AccessModule() {
             </span>
             <input
               type="text"
-              placeholder="Filter capabilities, resources..."
+              placeholder={t('platformAccess.accessModule.filterCapabilitiesResources')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               data-testid="access-filter"
@@ -1723,7 +1723,7 @@ export function AccessModule() {
         {tab === 'roles' ? (
           <span data-testid="rbac-create-role-btn">
             <Button
-              label="New role"
+              label={t('platformAccess.accessModule.newRole')}
               iconName="plus"
               kind="primary"
               size="sm"
@@ -1737,7 +1737,7 @@ export function AccessModule() {
         {tab === 'assignments' ? (
           <span data-testid="rbac-grant-role-btn">
             <Button
-              label="Grant role"
+              label={t('platformAccess.accessModule.grantRole')}
               iconName="plus"
               kind="primary"
               size="sm"
@@ -1758,14 +1758,14 @@ export function AccessModule() {
               <StateView
                 kind="denied"
                 capability={CAP.ACCESS_POLICY_READ}
-                hint="Access policy resolution requires access policy permission."
+                hint={t('platformAccess.accessModule.accessPolicyResolutionRequires')}
               />
             </div>
           ) : access.error ? (
             <div style={{ padding: '0 16px 16px' }}>
               <StateView
                 kind="error"
-                title="Access policy unavailable"
+                title={t('platformAccess.accessModule.accessPolicyUnavailable')}
                 hint={accessQueryErrorHint(
                   access.error,
                   'Could not load the access policy.',
@@ -1776,22 +1776,22 @@ export function AccessModule() {
             <div style={{ padding: '0 16px 16px' }}>
               <StateView
                 kind="loading"
-                title="Resolving access policy"
-                hint="Loading the current access policy before showing operator permissions."
+                title={t('platformAccess.accessModule.resolvingAccessPolicy')}
+                hint={t('platformAccess.accessModule.loadingTheCurrentAccess')}
               />
             </div>
           ) : !access.data ? (
             <div style={{ padding: '0 16px 16px' }}>
               <StateView
                 kind="error"
-                title="Access policy unavailable"
-                hint="The access policy resolver returned no policy data."
+                title={t('platformAccess.accessModule.accessPolicyUnavailable')}
+                hint={t('platformAccess.accessModule.theAccessPolicyResolver')}
               />
             </div>
           ) : (
             <>
-          <div className="section-eyebrow">{`Current user · ${user.name} · role ${user.role}`}</div>
-          <div className="section-eyebrow">Access resolution ladder</div>
+          <div className="section-eyebrow">{fill(t('platformAccess.accessModule.currentUserRole'), { name: String(user.name), role: String(user.role) })}</div>
+          <div className="section-eyebrow">{t('platformAccess.accessModule.accessResolutionLadder')}</div>
           <div className="ladder" data-testid="access-ladder" style={{ padding: '0 16px 8px' }}>
             {scopePath.map((step, i) => {
               const isMatch = step.scope_type === winningScopeType;
@@ -1807,7 +1807,7 @@ export function AccessModule() {
                   <span className="ladder__rank">{String(i + 1)}</span>
                   <span className="ladder__level">{accessScopeLabel(step.scope_type)}</span>
                   <span className="ladder__id">{accessScopeReferenceLabel(step.scope_type, step.scope_id)}</span>
-                  <span className="ladder__value">{isMatch ? 'resolved' : 'inherit'}</span>
+                  <span className="ladder__value">{isMatch ? t('platformAccess.accessModule.resolved') : t('platformAccess.accessModule.inherit')}</span>
                 </div>
               );
             })}
@@ -1846,12 +1846,12 @@ export function AccessModule() {
                   <div style={{ flex: 1 }} />
                   {allowed ? (
                     <>
-                      {tenantId ? <Chip label="tenant" kind="info" size="xs" /> : null}
-                      <Chip label="granted" kind="good" size="xs" />
+                      {tenantId ? <Chip label={t('platformAccess.accessModule.tenant')} kind="info" size="xs" /> : null}
+                      <Chip label={t('platformAccess.accessModule.granted')} kind="good" size="xs" />
                     </>
                   ) : (
                     <Button
-                      label="Request"
+                      label={t('platformAccess.accessModule.request')}
                       kind="ghost"
                       size="sm"
                       capability={CAP.ACCESS_POLICY_READ}
@@ -1870,15 +1870,15 @@ export function AccessModule() {
             })}
           </div>
 
-          <div className="section-eyebrow">Resource access matrix</div>
+          <div className="section-eyebrow">{t('platformAccess.accessModule.resourceAccessMatrix')}</div>
           <div style={{ padding: '0 16px 16px', overflow: 'auto' }}>
             <table className="dt__table">
               <thead>
                 <tr>
-                  <th>Resource</th>
-                  <th>Read</th>
-                  <th>Write</th>
-                  <th>Scope policy</th>
+                  <th>{t('platformAccess.accessModule.resource')}</th>
+                  <th>{t('platformAccess.accessModule.read')}</th>
+                  <th>{t('platformAccess.accessModule.write')}</th>
+                  <th>{t('platformAccess.accessModule.scopePolicy')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1892,20 +1892,20 @@ export function AccessModule() {
                       <td>{accessResourceLabel(key)}</td>
                       <td>
                         <Chip
-                          label={r ? formatCapabilityLabel(r, { titleCase: true }) : 'Not available'}
+                          label={r ? formatCapabilityLabel(r, { titleCase: true }) : t('platformAccess.accessModule.notAvailable')}
                           kind={rOk ? 'good' : 'warn'}
                           size="xs"
                         />
                       </td>
                       <td>
                         <Chip
-                          label={w ? formatCapabilityLabel(w, { titleCase: true }) : 'Not available'}
+                          label={w ? formatCapabilityLabel(w, { titleCase: true }) : t('platformAccess.accessModule.notAvailable')}
                           kind={wOk ? 'good' : 'warn'}
                           size="xs"
                         />
                       </td>
                       <td>
-                        <Chip label="enabled" kind="good" size="xs" />
+                        <Chip label={t('platformAccess.accessModule.enabled')} kind="good" size="xs" />
                       </td>
                     </tr>
                   );
@@ -1927,13 +1927,13 @@ export function AccessModule() {
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <div className="section-eyebrow" style={{ margin: 0 }}>
-                      Access request confirmed
+                      {t('platformAccess.accessModule.accessRequestConfirmed')}
                 </div>
                 {accessRequestEvidence.status ? (
                   <Chip label={String(accessRequestEvidence.status)} kind="info" size="xs" />
                 ) : null}
                 {accessRequestEvidence.idempotent ? (
-                  <Chip label="existing pending request" kind="neutral" size="xs" />
+                  <Chip label={t('platformAccess.accessModule.existingPendingRequest')} kind="neutral" size="xs" />
                 ) : null}
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -1947,7 +1947,7 @@ export function AccessModule() {
                 ) : null}
                 {accessRequestEvidence.scope_type ? (
                   <Chip
-                    label={`scope ${accessRequestEvidence.scope_type}`}
+                    label={fill(t('platformAccess.accessModule.scope2'), { scope_type: String(accessRequestEvidence.scope_type) })}
                     kind="neutral"
                     size="xs"
                     className="mono"
@@ -1955,7 +1955,7 @@ export function AccessModule() {
                 ) : null}
                 {accessRequestEvidence.capability_grant_request_id ? (
                   <Chip
-                    label={`request ${accessRequestEvidence.capability_grant_request_id}`}
+                    label={fill(t('platformAccess.accessModule.request2'), { capability_grant_request_id: String(accessRequestEvidence.capability_grant_request_id) })}
                     kind="neutral"
                     size="xs"
                     className="mono"
@@ -1963,7 +1963,7 @@ export function AccessModule() {
                 ) : null}
                 {accessRequestEvidence.duration_hours ? (
                   <Chip
-                    label={`${accessRequestEvidence.duration_hours}h requested`}
+                    label={fill(t('platformAccess.accessModule.hRequested'), { duration_hours: String(accessRequestEvidence.duration_hours) })}
                     kind="neutral"
                     size="xs"
                     className="mono"
@@ -1971,7 +1971,7 @@ export function AccessModule() {
                 ) : null}
                 {accessRequestEvidence.correlation_id ? (
                   <Chip
-                    label="reference recorded"
+                    label={t('platformAccess.accessModule.referenceRecorded')}
                     kind="info"
                     size="xs"
                     className="mono"
@@ -1994,17 +1994,17 @@ export function AccessModule() {
       {/* ------------------------- Tab: Roles ------------------------- */}
       {tab === 'roles' ? (
         <div data-testid="access-roles-pane">
-          <div className="section-eyebrow">Access roles</div>
+          <div className="section-eyebrow">{t('platformAccess.accessModule.accessRoles')}</div>
           {!accessRead ? (
             <StateView
               kind="denied"
               capability={CAP.ACCESS_POLICY_READ}
-              hint="Role list requires access policy permission."
+              hint={t('platformAccess.accessModule.roleListRequiresAccess')}
             />
           ) : rolesQuery.error ? (
             <StateView
               kind="error"
-              title="Access roles unavailable"
+              title={t('platformAccess.accessModule.accessRolesUnavailable')}
               hint={accessQueryErrorHint(
                 rolesQuery.error,
                 'Could not load access roles.',
@@ -2021,13 +2021,13 @@ export function AccessModule() {
               onRowClick={openRoleDrawer}
               rowActions={[
                 {
-                  label: 'Edit',
+                  label: t('platformAccess.accessModule.edit'),
                   icon: 'edit',
                   capability: CAP.ACCESS_POLICY_APPROVE,
                   onClick: openRoleEditor,
                 },
                 {
-                  label: 'Deactivate',
+                  label: t('platformAccess.accessModule.deactivate'),
                   icon: 'close',
                   kind: 'danger',
                   capability: CAP.ACCESS_POLICY_APPROVE,
@@ -2040,7 +2040,7 @@ export function AccessModule() {
           )}
           {!canApprove ? (
             <p className="state__hint" style={{ padding: '0 16px 16px' }}>
-              Role changes require {formatCapabilityRequirement(CAP.ACCESS_POLICY_APPROVE)}.
+              {fill(t('platformAccess.accessModule.roleChangesRequire'), { value: String(formatCapabilityRequirement(CAP.ACCESS_POLICY_APPROVE)) })}
             </p>
           ) : null}
         </div>
@@ -2049,7 +2049,7 @@ export function AccessModule() {
       {/* ----------------------- Tab: Assignments ---------------------- */}
       {tab === 'assignments' ? (
         <div data-testid="access-assignments-pane">
-          <div className="section-eyebrow">User-role assignments</div>
+          <div className="section-eyebrow">{t('platformAccess.accessModule.userRoleAssignments')}</div>
           {canApprove && grantRoleBlockedReason ? (
             <StateView
               kind={
@@ -2059,7 +2059,7 @@ export function AccessModule() {
                     ? 'loading'
                     : 'empty'
               }
-              title="Grant role unavailable"
+              title={t('platformAccess.accessModule.grantRoleUnavailable')}
               hint={grantRoleBlockedReason}
             />
           ) : null}
@@ -2067,12 +2067,12 @@ export function AccessModule() {
             <StateView
               kind="denied"
               capability={CAP.ACCESS_POLICY_READ}
-              hint="Assignment list requires access policy permission."
+              hint={t('platformAccess.accessModule.assignmentListRequiresAccess')}
             />
           ) : assignmentsQuery.error ? (
             <StateView
               kind="error"
-              title="User-role assignments unavailable"
+              title={t('platformAccess.accessModule.userRoleAssignmentsUnavailable')}
               hint={accessQueryErrorHint(
                 assignmentsQuery.error,
                 'Could not load user role assignments.',
@@ -2088,7 +2088,7 @@ export function AccessModule() {
               entityKind="rbac_user_role_assignments"
               rowActions={[
                 {
-                  label: 'Revoke',
+                  label: t('platformAccess.accessModule.revoke'),
                   icon: 'close',
                   kind: 'danger',
                   capability: CAP.ACCESS_POLICY_APPROVE,
@@ -2113,7 +2113,7 @@ export function AccessModule() {
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <div className="section-eyebrow" style={{ margin: 0 }}>
-                  Assignment confirmed
+                  {t('platformAccess.accessModule.assignmentConfirmed')}
                 </div>
                 <Chip label={assignmentMutationEvidence.action} kind="info" size="xs" />
                 <Chip
@@ -2124,20 +2124,20 @@ export function AccessModule() {
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                 <Chip
-                  label={`user ${assignmentMutationEvidence.userLabel}`}
+                  label={fill(t('platformAccess.accessModule.user2'), { userLabel: String(assignmentMutationEvidence.userLabel) })}
                   kind="neutral"
                   size="xs"
                   className="mono"
                 />
                 <Chip
-                  label={`role ${assignmentMutationEvidence.roleLabel}`}
+                  label={fill(t('platformAccess.accessModule.role2'), { roleLabel: String(assignmentMutationEvidence.roleLabel) })}
                   kind="neutral"
                   size="xs"
                   className="mono"
                 />
                 {assignmentMutationEvidence.assignmentId ? (
                   <Chip
-                    label={`assignment ${assignmentMutationEvidence.assignmentId}`}
+                    label={fill(t('platformAccess.accessModule.assignment'), { assignmentId: String(assignmentMutationEvidence.assignmentId) })}
                     kind="neutral"
                     size="xs"
                     className="mono"
@@ -2145,7 +2145,7 @@ export function AccessModule() {
                 ) : null}
                 {assignmentMutationEvidence.correlationId ? (
                   <Chip
-                    label="reference recorded"
+                    label={t('platformAccess.accessModule.referenceRecorded')}
                     kind="info"
                     size="xs"
                     className="mono"
@@ -2161,7 +2161,7 @@ export function AccessModule() {
           ) : null}
           {!canApprove ? (
             <p className="state__hint" style={{ padding: '0 16px 16px' }}>
-              Grant / Revoke require <code className="mono">access_policy.approve</code>.
+              {t('platformAccess.accessModule.grantRevokeRequire')} <code className="mono">{t('platformAccess.accessModule.accessPolicyApprove')}</code>.
             </p>
           ) : null}
         </div>
@@ -2170,17 +2170,17 @@ export function AccessModule() {
       {/* ------------------------ Tab: Templates ----------------------- */}
       {tab === 'templates' ? (
         <div data-testid="access-templates-pane">
-          <div className="section-eyebrow">Global role templates</div>
+          <div className="section-eyebrow">{t('platformAccess.accessModule.globalRoleTemplates')}</div>
           {!accessRead ? (
             <StateView
               kind="denied"
               capability={CAP.ACCESS_POLICY_READ}
-              hint="Template list requires access policy permission."
+              hint={t('platformAccess.accessModule.templateListRequiresAccess')}
             />
           ) : templatesQuery.error ? (
             <StateView
               kind="error"
-              title="Role templates unavailable"
+              title={t('platformAccess.accessModule.roleTemplatesUnavailable')}
               hint={accessQueryErrorHint(
                 templatesQuery.error,
                 'Could not load role templates.',
@@ -2198,7 +2198,7 @@ export function AccessModule() {
                 onRowClick={openTemplateDrawer}
                 rowActions={[
                   {
-                    label: 'Apply',
+                    label: t('platformAccess.accessModule.apply'),
                     icon: 'check',
                     kind: 'primary',
                     capability: CAP.ACCESS_POLICY_APPROVE,
@@ -2222,14 +2222,14 @@ export function AccessModule() {
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                     <div className="section-eyebrow" style={{ margin: 0 }}>
-                      Template application confirmed
+                      {t('platformAccess.accessModule.templateApplicationConfirmed')}
                     </div>
                     {templateApplyEvidence.organization_id ? (
-                      <Chip label="Organization recorded" kind="neutral" size="xs" />
+                      <Chip label={t('platformAccess.accessModule.organizationRecorded')} kind="neutral" size="xs" />
                     ) : null}
                     {templateApplyEvidence.correlation_id ? (
                       <Chip
-                        label="reference recorded"
+                        label={t('platformAccess.accessModule.referenceRecorded')}
                         kind="info"
                         size="xs"
                         className="mono"
@@ -2245,13 +2245,13 @@ export function AccessModule() {
                         >
                           <Dot kind={role.created ? 'good' : 'info'} />
                           <code className="mono" style={{ fontSize: '11px' }}>
-                            {role.template_key ?? 'template'}
+                            {role.template_key ?? t('platformAccess.accessModule.template')}
                           </code>
                           <span className="mono" style={{ fontSize: '11px', color: 'var(--mute)' }}>
-                            {role.role_id ?? 'role pending'}
+                            {role.role_id ?? t('platformAccess.accessModule.rolePending')}
                           </span>
                           <Chip
-                            label={role.created ? 'created' : 'existing role refreshed'}
+                            label={role.created ? t('platformAccess.accessModule.created2') : t('platformAccess.accessModule.existingRoleRefreshed')}
                             kind={role.created ? 'good' : 'neutral'}
                             size="xs"
                           />
@@ -2260,7 +2260,7 @@ export function AccessModule() {
                     </ul>
                   ) : (
                     <p className="state__hint" style={{ margin: 0 }}>
-                      Saved template request confirmed; visible role rows are refreshing in place.
+                      {t('platformAccess.accessModule.savedTemplateRequestConfirmed')}
                     </p>
                   )}
                 </div>
@@ -2274,7 +2274,7 @@ export function AccessModule() {
                 {(templatesQuery.data?.rows ?? []).map((tpl) => (
                   <span key={tpl.id} data-testid={`rbac-template-apply-${tpl.key}`}>
                     <Button
-                      label={`Apply · ${tpl.key}`}
+                      label={fill(t('platformAccess.accessModule.apply2'), { key: String(tpl.key) })}
                       kind="ghost"
                       size="sm"
                       capability={CAP.ACCESS_POLICY_APPROVE}
@@ -2287,7 +2287,7 @@ export function AccessModule() {
           )}
           {!canApprove ? (
             <p className="state__hint" style={{ padding: '0 16px 16px' }}>
-              Apply template requires <code className="mono">access_policy.approve</code>.
+              {t('platformAccess.accessModule.applyTemplateRequires')} <code className="mono">{t('platformAccess.accessModule.accessPolicyApprove')}</code>.
             </p>
           ) : null}
         </div>
@@ -2296,17 +2296,17 @@ export function AccessModule() {
       {/* ------------------------ Tab: Requests ----------------------- */}
       {tab === 'requests' ? (
         <div data-testid="access-requests-pane">
-          <div className="section-eyebrow">Access requests</div>
+          <div className="section-eyebrow">{t('platformAccess.accessModule.accessRequests')}</div>
           {!accessRead ? (
             <StateView
               kind="denied"
               capability={CAP.ACCESS_POLICY_READ}
-              hint="Access request review requires access policy permission."
+              hint={t('platformAccess.accessModule.accessRequestReviewRequires')}
             />
           ) : grantRequestsQuery.error ? (
             <StateView
               kind="error"
-              title="Access requests unavailable"
+              title={t('platformAccess.accessModule.accessRequestsUnavailable')}
               hint={accessQueryErrorHint(
                 grantRequestsQuery.error,
                 'Could not load access requests.',
@@ -2317,8 +2317,8 @@ export function AccessModule() {
           ) : (grantRequestsQuery.data?.rows ?? []).length === 0 ? (
             <StateView
               kind="empty"
-              title="No access requests"
-              hint="Submitted capability requests will appear here for approval or denial."
+              title={t('platformAccess.accessModule.noAccessRequests')}
+              hint={t('platformAccess.accessModule.submittedCapabilityRequestsWill')}
             />
           ) : (
             <DataTable<CapabilityGrantRequestRow>
@@ -2328,7 +2328,7 @@ export function AccessModule() {
               entityKind="capability_grant_requests"
               rowActions={[
                 {
-                  label: 'Approve',
+                  label: t('platformAccess.accessModule.approve'),
                   icon: 'check',
                   kind: 'primary',
                   capability: CAP.ACCESS_POLICY_APPROVE,
@@ -2337,7 +2337,7 @@ export function AccessModule() {
                   onClick: (request) => openReviewAccessRequest(request, 'approved'),
                 },
                 {
-                  label: 'Deny',
+                  label: t('platformAccess.accessModule.deny'),
                   icon: 'close',
                   kind: 'danger',
                   capability: CAP.ACCESS_POLICY_APPROVE,
@@ -2362,7 +2362,7 @@ export function AccessModule() {
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <div className="section-eyebrow" style={{ margin: 0 }}>
-                  Access request review confirmed
+                  {t('platformAccess.accessModule.accessRequestReviewConfirmed')}
                 </div>
                 {accessRequestReviewEvidence.status ? (
                   <Chip
@@ -2383,7 +2383,7 @@ export function AccessModule() {
                 ) : null}
                 {accessRequestReviewEvidence.capability_grant_request_id ? (
                   <Chip
-                    label={`request ${accessRequestReviewEvidence.capability_grant_request_id}`}
+                    label={fill(t('platformAccess.accessModule.request2'), { capability_grant_request_id: String(accessRequestReviewEvidence.capability_grant_request_id) })}
                     kind="neutral"
                     size="xs"
                     className="mono"
@@ -2391,7 +2391,7 @@ export function AccessModule() {
                 ) : null}
                 {accessRequestReviewEvidence.rbac_role_id ? (
                   <Chip
-                    label={`role ${accessRequestReviewEvidence.rbac_role_id}`}
+                    label={fill(t('platformAccess.accessModule.role3'), { rbac_role_id: String(accessRequestReviewEvidence.rbac_role_id) })}
                     kind="neutral"
                     size="xs"
                     className="mono"
@@ -2399,7 +2399,7 @@ export function AccessModule() {
                 ) : null}
                 {accessRequestReviewEvidence.rbac_user_role_assignment_id ? (
                   <Chip
-                    label={`assignment ${accessRequestReviewEvidence.rbac_user_role_assignment_id}`}
+                    label={fill(t('platformAccess.accessModule.assignment2'), { rbac_user_role_assignment_id: String(accessRequestReviewEvidence.rbac_user_role_assignment_id) })}
                     kind="neutral"
                     size="xs"
                     className="mono"
@@ -2407,7 +2407,7 @@ export function AccessModule() {
                 ) : null}
                 {accessRequestReviewEvidence.correlation_id ? (
                   <Chip
-                    label="reference recorded"
+                    label={t('platformAccess.accessModule.referenceRecorded')}
                     kind="info"
                     size="xs"
                     className="mono"
@@ -2423,7 +2423,7 @@ export function AccessModule() {
           ) : null}
           {!canApprove ? (
             <p className="state__hint" style={{ padding: '0 16px 16px' }}>
-              Approve / Deny require <code className="mono">access_policy.approve</code>.
+              {t('platformAccess.accessModule.approveDenyRequire')} <code className="mono">{t('platformAccess.accessModule.accessPolicyApprove')}</code>.
             </p>
           ) : null}
         </div>

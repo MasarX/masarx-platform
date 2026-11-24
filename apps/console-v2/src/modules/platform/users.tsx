@@ -68,6 +68,7 @@ import type { UserSecurityActionRow } from '@/lib/api';
 import { hostedInviteRedirect } from '@/lib/hosted-redirect';
 import { readAuthorizedTenantOrganizationOverride } from '@/lib/scope-url';
 import { readUrlParam } from '@/lib/url-params';
+import { fill, useI18n, type Translate } from '@/lib/i18n';
 
 // Canonical user projection — mirrors public.users column shape (only the
 // columns surfaced to the operator UI; the production projection includes
@@ -126,16 +127,18 @@ export interface UserDirectoryRow extends Record<string, unknown> {
 // The table role chip still renders the immutable users.user_type lookup, while
 // grant/invite choices come from tenant RBAC roles through
 // ui_list_tenant_invitable_roles_v1.
-const COLUMNS: DataTableColumn<UserRow>[] = [
-  { key: 'full_name', label: 'Name', sortable: true, filterable: true },
-  { key: 'email', label: 'Email', mono: true, sortable: true, filterable: true },
-  { key: 'user_type', label: 'Role', sortable: true, filterable: true, lookup: 'user_type' },
-  { key: 'access_scope_type', label: 'Scope', sortable: true, filterable: true },
-  { key: 'access_scope_id', label: 'Scope ID', mono: true, sortable: true, filterable: true },
-  { key: 'status', label: 'Status', sortable: true, filterable: true, lookup: 'user_status' },
-  { key: 'last_login_at', label: 'Last login', format: 'datetime', sortable: true },
-  { key: 'created_at', label: 'Created', format: 'datetime', sortable: true },
-];
+function userColumns(t: Translate): DataTableColumn<UserRow>[] {
+  return [
+    { key: 'full_name', label: t('platformUsers.usersModule.name'), sortable: true, filterable: true },
+    { key: 'email', label: t('platformUsers.usersModule.email'), mono: true, sortable: true, filterable: true },
+    { key: 'user_type', label: t('platformUsers.usersModule.role'), sortable: true, filterable: true, lookup: 'user_type' },
+    { key: 'access_scope_type', label: t('platformUsers.usersModule.scope'), sortable: true, filterable: true },
+    { key: 'access_scope_id', label: t('platformUsers.usersModule.scopeId'), mono: true, sortable: true, filterable: true },
+    { key: 'status', label: t('platformUsers.usersModule.status'), sortable: true, filterable: true, lookup: 'user_status' },
+    { key: 'last_login_at', label: t('platformUsers.usersModule.lastLogin'), format: 'datetime', sortable: true },
+    { key: 'created_at', label: t('platformUsers.usersModule.created'), format: 'datetime', sortable: true },
+  ];
+}
 
 interface RoleCatalogRow extends Record<string, unknown> {
   id?: string;
@@ -328,32 +331,32 @@ function formatSecurityActionTimestamp(value: string | null | undefined): string
   return date.toLocaleString();
 }
 
-function securityActionLabel(row: UserSecurityActionRow): string {
+function securityActionLabel(row: UserSecurityActionRow, t: Translate): string {
   const inviteEmailSent =
     row.invite_email_sent === 'true' ||
     row.decision_inputs?.invite_email_sent === true ||
     row.decision_inputs?.invite_email_sent === 'true';
   switch (row.decision_point) {
     case 'force_password_reset_v1':
-      return 'Password reset requested';
+      return t('platformUsers.securityAction.passwordResetRequested');
     case 'tenant_user_invite_apply_v1':
       return row.decision_outcome === 'idempotent_existing_assignment' && inviteEmailSent
-        ? 'Invite email resent'
-        : 'Invite decision recorded';
+        ? t('platformUsers.securityAction.inviteEmailResent')
+        : t('platformUsers.securityAction.inviteDecisionRecorded');
     case 'tenant_user_invite_accept_v1':
-      return 'Invite accepted';
+      return t('platformUsers.securityAction.inviteAccepted');
     case 'grant_user_role_v1':
-      return 'Role granted';
+      return t('platformUsers.securityAction.roleGranted');
     case 'revoke_user_role_v1':
-      return 'Role revoked';
+      return t('platformUsers.securityAction.roleRevoked');
     case 'revoke_session_v1':
-      return 'Session revoke requested';
+      return t('platformUsers.securityAction.sessionRevokeRequested');
     case 'suspend_user_v1':
-      return 'User suspended';
+      return t('platformUsers.securityAction.userSuspended');
     case 'reactivate_user_v1':
-      return 'User reactivated';
+      return t('platformUsers.securityAction.userReactivated');
     default:
-      return String(row.decision_point ?? row.decision_category ?? 'User security action');
+      return String(row.decision_point ?? row.decision_category ?? t('platformUsers.securityAction.userSecurityAction'));
   }
 }
 
@@ -374,13 +377,15 @@ function securityOutcomeTone(outcome: unknown): 'good' | 'warn' | 'danger' | 'in
 type StatusFilter = string;
 
 type DrawerTabId = 'profile' | 'roles' | 'capabilities' | 'devices' | 'sessions';
-const DRAWER_TABS: Array<{ id: DrawerTabId; label: string }> = [
-  { id: 'profile', label: 'Profile' },
-  { id: 'roles', label: 'Roles' },
-  { id: 'capabilities', label: 'Capabilities' },
-  { id: 'devices', label: 'Devices' },
-  { id: 'sessions', label: 'Sessions' },
-];
+function drawerTabs(t: Translate): Array<{ id: DrawerTabId; label: string }> {
+  return [
+    { id: 'profile', label: t('platformUsers.usersDrawerBody.profile') },
+    { id: 'roles', label: t('platformUsers.usersDrawerBody.roles') },
+    { id: 'capabilities', label: t('platformUsers.usersDrawerBody.capabilities') },
+    { id: 'devices', label: t('platformUsers.usersDrawerBody.devices') },
+    { id: 'sessions', label: t('platformUsers.usersDrawerBody.sessions') },
+  ];
+}
 
 // ─── Profile tab — KvGrid summary of the canonical user projection ──────
 //
@@ -397,60 +402,61 @@ function ProfileTab({
   user: UserRow;
   directory?: UserDirectoryRow;
 }) {
+  const { t } = useI18n();
   const rows: KvRow[] = [
-    { key: 'id', label: 'User ID', value: user.id, mono: true, editable: false },
-    { key: 'email', label: 'Email', value: user.email, mono: true, editable: false },
-    { key: 'full_name', label: 'Name', value: user.full_name, editable: false },
+    { key: 'id', label: t('platformUsers.profileTab.userId'), value: user.id, mono: true, editable: false },
+    { key: 'email', label: t('platformUsers.profileTab.email'), value: user.email, mono: true, editable: false },
+    { key: 'full_name', label: t('platformUsers.profileTab.name'), value: user.full_name, editable: false },
     {
       key: 'user_type',
-      label: 'Role',
+      label: t('platformUsers.profileTab.role'),
       value: user.user_type,
       lookup: 'user_type',
       editable: false,
     },
     {
       key: 'status',
-      label: 'Status',
+      label: t('platformUsers.profileTab.status'),
       value: user.status,
       lookup: 'user_status',
       editable: false,
     },
     {
       key: 'access_scope_type',
-      label: 'Access scope',
+      label: t('platformUsers.profileTab.accessScope'),
       value: directory?.access_scope_label ?? user.access_scope_type ?? '—',
       editable: false,
     },
     {
       key: 'access_scope_id',
-      label: 'Access scope ID',
+      label: t('platformUsers.profileTab.accessScopeId'),
       value: user.access_scope_id ?? '—',
       mono: true,
       editable: false,
     },
     {
       key: 'organization',
-      label: 'Organization',
+      label: t('platformUsers.profileTab.organization'),
       value: directory?.organization_label ?? user.organization_id ?? '—',
       editable: false,
     },
     {
       key: 'organization_id',
-      label: 'Organization ID',
+      label: t('platformUsers.profileTab.organizationId'),
       value: user.organization_id ?? '—',
       mono: true,
       editable: false,
     },
     {
       key: 'last_login_at',
-      label: 'Last login',
+      label: t('platformUsers.profileTab.lastLogin'),
       value: user.last_login_at ?? '—',
       mono: true,
       editable: false,
     },
     {
       key: 'created_at',
-      label: 'Created',
+      label: t('platformUsers.profileTab.created'),
       value: user.created_at ?? '—',
       mono: true,
       editable: false,
@@ -460,7 +466,7 @@ function ProfileTab({
   const activeRoleKeys = directory?.active_role_keys ?? [];
   return (
     <div data-testid="users-drawer-profile">
-      <div className="section-eyebrow">User profile</div>
+      <div className="section-eyebrow">{t('platformUsers.profileTab.userProfile')}</div>
       <KvGrid rows={rows} />
       {directory ? (
         <div
@@ -468,10 +474,9 @@ function ProfileTab({
           data-testid="users-drawer-active-roles"
           style={{ padding: '8px 14px 12px', fontSize: 11.5 }}
         >
-          <span>Directory profile</span> ·{' '}
+          <span>{t('platformUsers.profileTab.directoryProfile')}</span> ·{' '}
           <span data-testid="users-drawer-active-role-count">
-            {activeRoleCount} active role
-            {activeRoleCount === 1 ? '' : 's'}
+            {fill(t(activeRoleCount === 1 ? 'platformUsers.profileTab.activeRoleOne' : 'platformUsers.profileTab.activeRoleOther'), { activeRoleCount: String(activeRoleCount) })}
           </span>
           {activeRoleKeys.length > 0 ? (
             <span style={{ marginLeft: 6 }}>
@@ -490,6 +495,7 @@ function ProfileTab({
 
 // ─── Roles tab — Grant / Revoke role actions ─────────────────────────────
 function UserSecurityActions({ user }: { user: UserRow }) {
+  const { t } = useI18n();
   const actionsQuery = useUserSecurityActions(user.id, 5);
   const rows = actionsQuery.data?.rows ?? [];
 
@@ -498,24 +504,24 @@ function UserSecurityActions({ user }: { user: UserRow }) {
       data-testid="users-security-actions"
       style={{ borderTop: '1px solid var(--line)', marginTop: 6, paddingTop: 10 }}
     >
-      <div className="section-eyebrow">Security action evidence</div>
+      <div className="section-eyebrow">{t('platformUsers.userSecurityActions.securityActionEvidence')}</div>
       {actionsQuery.isLoading ? (
         <StateView kind="loading" />
       ) : actionsQuery.isError ? (
         <StateView
           kind="error"
-          title="Security action could not load"
+          title={t('platformUsers.userSecurityActions.securityActionCouldNot')}
           hint={usersReadErrorMessage(actionsQuery.error)}
         />
       ) : rows.length === 0 ? (
         <StateView
           kind="empty"
-          title="No security actions yet"
-          hint="Password resets, session revokes, user suspension, reactivation, and role changes will appear here after they are saved."
+          title={t('platformUsers.userSecurityActions.noSecurityActionsYet')}
+          hint={t('platformUsers.userSecurityActions.passwordResetsSessionRevokes')}
         />
       ) : (
         <ul
-          aria-label="User security action evidence"
+          aria-label={t('platformUsers.userSecurityActions.userSecurityActionEvidence')}
           data-testid="users-security-actions-list"
           style={{ listStyle: 'none', margin: 0, padding: '0 14px 12px' }}
         >
@@ -604,9 +610,9 @@ function UserSecurityActions({ user }: { user: UserRow }) {
                 }}
               >
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <strong style={{ fontSize: 12.5 }}>{securityActionLabel(row)}</strong>
+                  <strong style={{ fontSize: 12.5 }}>{securityActionLabel(row, t)}</strong>
                   <Chip
-                    label={String(row.decision_outcome ?? 'recorded')}
+                    label={String(row.decision_outcome ?? t('platformUsers.userSecurityActions.recorded'))}
                     kind={securityOutcomeTone(row.decision_outcome)}
                     size="xs"
                   />
@@ -617,64 +623,64 @@ function UserSecurityActions({ user }: { user: UserRow }) {
                 <div className="state__hint" style={{ fontSize: 11.5 }}>
                   {passwordResetIntentId ? (
                     <span>
-                      Intent <code className="mono">{passwordResetIntentId}</code>
+                      {t('platformUsers.userSecurityActions.intent')} <code className="mono">{passwordResetIntentId}</code>
                     </span>
                   ) : null}
                   {roleKey ? (
                     <span>
                       {passwordResetIntentId ? ' - ' : null}
-                      Role <code className="mono">{roleKey}</code>
+                      {t('platformUsers.userSecurityActions.role')} <code className="mono">{roleKey}</code>
                     </span>
                   ) : null}
                   {sessionId ? (
                     <span>
                       {passwordResetIntentId || roleKey ? ' - ' : null}
-                      Session <code className="mono">{sessionId}</code>
+                      {t('platformUsers.userSecurityActions.session')} <code className="mono">{sessionId}</code>
                     </span>
                   ) : null}
                   {inviteEmail ? (
                     <span>
                       {passwordResetIntentId || roleKey || sessionId ? ' - ' : null}
-                      Invite <code className="mono">{inviteEmail}</code>
+                      {t('platformUsers.userSecurityActions.invite')} <code className="mono">{inviteEmail}</code>
                     </span>
                   ) : null}
                   {sendInviteEmailRequested ? (
                     <span>
                       {passwordResetIntentId || roleKey || sessionId || inviteEmail ? ' - ' : null}
-                      Email requested: {sendInviteEmailRequested}
+                      {fill(t('platformUsers.userSecurityActions.emailRequested'), { value: String(sendInviteEmailRequested) })}
                     </span>
                   ) : null}
                   {inviteEmailSent ? (
                     <span>
                       {passwordResetIntentId || roleKey || sessionId || inviteEmail || sendInviteEmailRequested ? ' - ' : null}
-                      Sent: {inviteEmailSent}
+                      {fill(t('platformUsers.userSecurityActions.sent'), { value: String(inviteEmailSent) })}
                     </span>
                   ) : null}
                   {hasInviteRedirectEvidence ? (
                     <span>
                       {passwordResetIntentId || roleKey || sessionId || inviteEmail || sendInviteEmailRequested || inviteEmailSent ? ' - ' : null}
-                      Redirect: {inviteRedirectRecorded ? inviteRedirectTo ?? 'not requested' : 'not recorded'}
+                      {fill(t('platformUsers.userSecurityActions.redirect'), { value: String(inviteRedirectRecorded ? inviteRedirectTo ?? t('platformUsers.userSecurityActions.notRequested') : t('platformUsers.userSecurityActions.notRecorded')) })}
                     </span>
                   ) : null}
                   {inviteAcceptedFrom || inviteAcceptedTo ? (
                     <span>
                       {passwordResetIntentId || roleKey || sessionId || inviteEmail || sendInviteEmailRequested || inviteEmailSent || hasInviteRedirectEvidence ? ' - ' : null}
-                      Access: {inviteAcceptedFrom ?? 'invited'} to {inviteAcceptedTo ?? 'active'}
+                      {fill(t('platformUsers.userSecurityActions.accessTo'), { from: String(inviteAcceptedFrom ?? t('platformUsers.userSecurityActions.invited')), to: String(inviteAcceptedTo ?? t('platformUsers.userSecurityActions.active')) })}
                     </span>
                   ) : null}
                   {reason ? (
                     <span>
                       {passwordResetIntentId || roleKey || sessionId || inviteEmail || sendInviteEmailRequested || inviteEmailSent || hasInviteRedirectEvidence || inviteAcceptedFrom || inviteAcceptedTo ? ' - ' : null}
-                      Reason: {reason}
+                      {fill(t('platformUsers.userSecurityActions.reason'), { reason: String(reason) })}
                     </span>
                   ) : null}
                   {!passwordResetIntentId && !roleKey && !sessionId && !inviteEmail && !sendInviteEmailRequested && !inviteEmailSent && !hasInviteRedirectEvidence && !inviteAcceptedFrom && !inviteAcceptedTo && !reason ? (
-                    <span>Decision evidence recorded.</span>
+                    <span>{t('platformUsers.userSecurityActions.decisionEvidenceRecorded')}</span>
                   ) : null}
                 </div>
                 {row.correlation_id ? (
                   <div className="mono" style={{ color: 'var(--ink-3)', fontSize: 11 }}>
-                    Request trail recorded
+                    {t('platformUsers.userSecurityActions.requestTrailRecorded')}
                   </div>
                 ) : null}
               </li>
@@ -701,29 +707,30 @@ function RolesTab({
   onRevoke: (roleKey: string) => void;
   pending: boolean;
 }) {
+  const { t } = useI18n();
   const effectiveActiveRoleKeys = activeRoleKeys;
 
   return (
     <div data-testid="users-drawer-roles">
-      <div className="section-eyebrow">Active roles - role lifecycle</div>
+      <div className="section-eyebrow">{t('platformUsers.rolesTab.activeRolesRoleLifecycle')}</div>
       <p className="state__hint" style={{ padding: '4px 14px 8px', fontSize: 11.5 }}>
-        Active roles:{' '}
+        {t('platformUsers.rolesTab.activeRoles')}{' '}
         <code className="mono" data-testid="users-active-role-rollup">
-          {effectiveActiveRoleKeys.length > 0 ? effectiveActiveRoleKeys.join(', ') : 'No active RBAC roles'}
+          {effectiveActiveRoleKeys.length > 0 ? effectiveActiveRoleKeys.join(', ') : t('platformUsers.rolesTab.noActiveRbacRoles')}
         </code>
-        . Revoke detaches the selected role without altering identity. Grant attaches the role
-        with the canonical lifecycle capability set.
+        .{' '}
+        {t('platformUsers.rolesTab.revokeDetachesTheSelected')}
       </p>
       {roleOptions.length === 0 ? (
         <StateView
           kind="error"
-          title="Tenant role catalog missing"
-          hint="The tenant role catalog must load before role lifecycle actions can run."
+          title={t('platformUsers.rolesTab.tenantRoleCatalogMissing')}
+          hint={t('platformUsers.rolesTab.theTenantRoleCatalog')}
         />
       ) : null}
       <ul
         style={{ listStyle: 'none', padding: '0 14px', margin: 0 }}
-        aria-label="Role catalog"
+        aria-label={t('platformUsers.rolesTab.roleCatalog')}
         data-testid="users-roles-list"
       >
         {roleOptions.map((role) => {
@@ -747,7 +754,7 @@ function RolesTab({
                 <span style={{ color: 'var(--ink-3)' }}> · {roleKey}</span>
               </span>
               {isActive ? (
-                <Chip label="active" kind="good" size="xs" />
+                <Chip label={t('platformUsers.rolesTab.active')} kind="good" size="xs" />
               ) : (
                 <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
                   —
@@ -755,13 +762,13 @@ function RolesTab({
               )}
               <div style={{ display: 'flex', gap: 6 }}>
                 <Button
-                  label={isActive ? 'Revoke' : 'Grant'}
+                  label={isActive ? t('platformUsers.rolesTab.revoke') : t('platformUsers.rolesTab.grant')}
                   size="sm"
                   kind={isActive ? 'danger' : 'primary'}
                   capability={CAP.USERS_MANAGE}
                   disabled={!canManage || pending}
                   onClick={() => (isActive ? onRevoke(roleKey) : onGrant(roleKey))}
-                  ariaLabel={`${isActive ? 'Revoke' : 'Grant'} role ${roleKey}`}
+                  ariaLabel={fill(t(isActive ? 'platformUsers.rolesTab.revokeRole' : 'platformUsers.rolesTab.grantRole'), { roleKey: String(roleKey) })}
                 />
               </div>
             </li>
@@ -804,6 +811,7 @@ function CapabilitiesTab({
   user: UserRow;
   activeRoleKeys: string[];
 }) {
+  const { t } = useI18n();
   const canReadAccessPolicy = useCapability(CAP.ACCESS_POLICY_READ);
   // Resolve the access policy at the user's effective scope so the capability
   // catalog matches what the backend actually evaluates against. Mirrors the
@@ -851,12 +859,12 @@ function CapabilitiesTab({
 
   return (
     <div data-testid="users-drawer-capabilities">
-      <div className="section-eyebrow">Effective permissions</div>
+      <div className="section-eyebrow">{t('platformUsers.capabilitiesTab.effectivePermissions')}</div>
       {!canReadAccessPolicy ? (
         <StateView
           kind="denied"
           capability={CAP.ACCESS_POLICY_READ}
-          hint="Capability catalog inspection requires access policy permission."
+          hint={t('platformUsers.capabilitiesTab.capabilityCatalogInspectionRequires')}
         />
       ) : (
         <>
@@ -864,28 +872,28 @@ function CapabilitiesTab({
         <div className="dt-tb-search">
           <input
             type="text"
-            placeholder="Filter capabilities..."
+            placeholder={t('platformUsers.capabilitiesTab.filterCapabilities')}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             data-testid="users-capabilities-filter"
-            aria-label="Filter capabilities"
+            aria-label={t('platformUsers.capabilitiesTab.filterCapabilities2')}
           />
         </div>
         <span className="dt-tb-spacer" />
-        <span className="dt-tb-count mono">{`${filtered.length} permissions`}</span>
+        <span className="dt-tb-count mono">{fill(t('platformUsers.capabilitiesTab.permissions'), { length: String(filtered.length) })}</span>
       </div>
       {access.isLoading ? (
         <StateView kind="loading" />
       ) : capKeys.length === 0 ? (
         <StateView
           kind="empty"
-          title="No capability catalog"
-          hint="The resolved policy does not declare any capabilities at this scope."
+          title={t('platformUsers.capabilitiesTab.noCapabilityCatalog')}
+          hint={t('platformUsers.capabilitiesTab.theResolvedPolicyDoes')}
         />
       ) : (
         <ul
           style={{ listStyle: 'none', padding: '0 14px', margin: 0 }}
-          aria-label="Capability matrix"
+          aria-label={t('platformUsers.capabilitiesTab.capabilityMatrix')}
           data-testid="users-capabilities-list"
         >
           {filtered.map((cap) => (
@@ -924,18 +932,20 @@ function CapabilitiesTab({
 
 // Device tab - wraps the shared backend-backed user-device roster.
 function DevicesTab({ user }: { user: UserRow }) {
+  const { t } = useI18n();
   return (
     <div data-testid="users-drawer-devices">
-      <div className="section-eyebrow">Registered devices</div>
+      <div className="section-eyebrow">{t('platformUsers.devicesTab.registeredDevices')}</div>
       <UserDevicesList userId={user.id} hideTitle title="" />
     </div>
   );
 }
 
 function SessionsTab({ user }: { user: UserRow }) {
+  const { t } = useI18n();
   return (
     <div data-testid="users-drawer-sessions">
-      <div className="section-eyebrow">Active sessions</div>
+      <div className="section-eyebrow">{t('platformUsers.sessionsTab.activeSessions')}</div>
       <SessionsList userId={user.id} hideTitle title="" />
     </div>
   );
@@ -991,6 +1001,7 @@ function InviteUserForm({
   onCancel,
   onSubmit,
 }: InviteUserFormProps) {
+  const { t } = useI18n();
   const scopeRows = useMemo(
     () => accessScopeOptions.slice().sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0)),
     [accessScopeOptions],
@@ -1095,52 +1106,52 @@ function InviteUserForm({
 
   return (
     <div data-testid="tenant-user-invite-form">
-      <div className="section-eyebrow">User invitation - tenant invite</div>
+      <div className="section-eyebrow">{t('platformUsers.inviteUserForm.userInvitationTenantInvite')}</div>
       {catalogLoading ? (
         <StateView
           kind="loading"
-          title="Loading invite catalogs"
-          hint="Role and access-scope choices are loading."
+          title={t('platformUsers.inviteUserForm.loadingInviteCatalogs')}
+          hint={t('platformUsers.inviteUserForm.roleAndAccessScope')}
         />
       ) : null}
       {catalogError ? (
         <StateView
           kind="error"
-          title="Invite catalog unavailable"
+          title={t('platformUsers.inviteUserForm.inviteCatalogUnavailable')}
           hint={catalogError}
         />
       ) : null}
       {scopeCatalogMissing ? (
         <StateView
           kind="error"
-          title="Access-scope catalog missing"
-          hint="The access_scope_type lookup is required before tenant users can be invited."
+          title={t('platformUsers.inviteUserForm.accessScopeCatalogMissing')}
+          hint={t('platformUsers.inviteUserForm.theAccessScopeType')}
         />
       ) : null}
       {roleCatalogMissing ? (
         <StateView
           kind="error"
-          title="Tenant role catalog missing"
-          hint="The tenant role catalog must load before users can be invited."
+          title={t('platformUsers.inviteUserForm.tenantRoleCatalogMissing')}
+          hint={t('platformUsers.inviteUserForm.theTenantRoleCatalog')}
         />
       ) : null}
       {scopeReferenceMissing ? (
         <StateView
           kind="error"
-          title={`${scopeReferenceType === 'client' ? 'Client' : 'Sender'} references missing`}
-          hint={`Select a saved ${scopeReferenceType} reference before inviting a ${scopeReferenceType}-scoped user.`}
+          title={t(scopeReferenceType === 'client' ? 'platformUsers.inviteUserForm.clientReferencesMissing' : 'platformUsers.inviteUserForm.senderReferencesMissing')}
+          hint={fill(t('platformUsers.inviteUserForm.selectASavedReference'), { scopeReferenceType: String(scopeReferenceType), scopeReferenceType2: String(scopeReferenceType) })}
         />
       ) : null}
       {!hasActiveTenant ? (
         <StateView
           kind="denied"
-          title="Select a tenant first"
-          hint="Use the tenant picker before inviting users so the invite is tied to the correct organization."
+          title={t('platformUsers.inviteUserForm.selectATenantFirst')}
+          hint={t('platformUsers.inviteUserForm.useTheTenantPicker')}
         />
       ) : null}
       {!canSendInviteEmail ? (
         <p className="state__hint" style={{ padding: '0 4px', fontSize: 11.5 }}>
-          Hosted invite email is disabled in this runtime because no hosted auth redirect is configured.
+          {t('platformUsers.inviteUserForm.hostedInviteEmailIs')}
         </p>
       ) : null}
       <div
@@ -1152,7 +1163,7 @@ function InviteUserForm({
           padding: '0 4px',
         }}
       >
-        <label className="mono" htmlFor="invite-user-email">Email</label>
+        <label className="mono" htmlFor="invite-user-email">{t('platformUsers.inviteUserForm.email')}</label>
         <input
           id="invite-user-email"
           className="dt-inline-input"
@@ -1163,14 +1174,14 @@ function InviteUserForm({
           value={draft.email}
           onChange={(e) => setDraft((s) => ({ ...s, email: e.target.value }))}
         />
-        <label className="mono" htmlFor="invite-user-name">Name</label>
+        <label className="mono" htmlFor="invite-user-name">{t('platformUsers.inviteUserForm.name')}</label>
         <input
           id="invite-user-name"
           className="dt-inline-input"
           value={draft.full_name}
           onChange={(e) => setDraft((s) => ({ ...s, full_name: e.target.value }))}
         />
-        <label className="mono" htmlFor="invite-user-role">Role</label>
+        <label className="mono" htmlFor="invite-user-role">{t('platformUsers.inviteUserForm.role')}</label>
         <select
           id="invite-user-role"
           className="dt-inline-input"
@@ -1182,7 +1193,7 @@ function InviteUserForm({
             <option key={role.key} value={role.key}>{role.label} ({role.key})</option>
           ))}
         </select>
-        <label className="mono" htmlFor="invite-user-scope-type">Access scope</label>
+        <label className="mono" htmlFor="invite-user-scope-type">{t('platformUsers.inviteUserForm.accessScope')}</label>
         <select
           id="invite-user-scope-type"
           className="dt-inline-input"
@@ -1201,18 +1212,18 @@ function InviteUserForm({
         {scopeReferenceType ? (
           <>
             <label className="mono" htmlFor="invite-user-scope-reference-search">
-              {scopeReferenceType === 'client' ? 'Client search' : 'Sender search'}
+              {scopeReferenceType === 'client' ? t('platformUsers.inviteUserForm.clientSearch') : t('platformUsers.inviteUserForm.senderSearch')}
             </label>
             <input
               id="invite-user-scope-reference-search"
               className="dt-inline-input"
               value={scopeReferenceSearch}
               disabled={catalogLoading || scopeReferenceLoading || scopeReferenceOptions.length === 0}
-              placeholder={scopeReferenceType === 'client' ? 'Search clients' : 'Search senders'}
+              placeholder={scopeReferenceType === 'client' ? t('platformUsers.inviteUserForm.searchClients') : t('platformUsers.inviteUserForm.searchSenders')}
               onChange={(e) => setScopeReferenceSearch(e.target.value)}
             />
             <label className="mono" htmlFor="invite-user-scope-reference">
-              {scopeReferenceType === 'client' ? 'Client' : 'Sender'}
+              {scopeReferenceType === 'client' ? t('platformUsers.inviteUserForm.client') : t('platformUsers.inviteUserForm.sender')}
             </label>
             <select
               id="invite-user-scope-reference"
@@ -1223,8 +1234,8 @@ function InviteUserForm({
             >
               <option value="">
                 {scopeReferenceLoading
-                  ? `Loading ${scopeReferenceType} references`
-                  : `Select ${scopeReferenceType}`}
+                  ? fill(t('platformUsers.inviteUserForm.loadingReferences'), { scopeReferenceType: String(scopeReferenceType) })
+                  : fill(t('platformUsers.inviteUserForm.select'), { scopeReferenceType: String(scopeReferenceType) })}
               </option>
               {filteredScopeReferenceOptions.map((option) => (
                 <option key={option.id} value={option.id}>
@@ -1235,7 +1246,7 @@ function InviteUserForm({
           </>
         ) : (
           <>
-            <label className="mono" htmlFor="invite-user-scope-id">Scope ID</label>
+            <label className="mono" htmlFor="invite-user-scope-id">{t('platformUsers.inviteUserForm.scopeId')}</label>
             <input
               id="invite-user-scope-id"
               className="dt-inline-input"
@@ -1245,7 +1256,7 @@ function InviteUserForm({
             />
           </>
         )}
-        <label className="mono" htmlFor="invite-user-send-email">Invite email</label>
+        <label className="mono" htmlFor="invite-user-send-email">{t('platformUsers.inviteUserForm.inviteEmail')}</label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <input
             id="invite-user-send-email"
@@ -1254,13 +1265,13 @@ function InviteUserForm({
             disabled={!canSendInviteEmail}
             onChange={(e) => setDraft((s) => ({ ...s, send_invite_email: canSendInviteEmail && e.target.checked }))}
           />
-          <span className="state__hint">Send an invite email</span>
+          <span className="state__hint">{t('platformUsers.inviteUserForm.sendAnInviteEmail')}</span>
         </label>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onCancel} />
+        <Button label={t('platformUsers.inviteUserForm.cancel')} kind="ghost" onClick={onCancel} />
         <Button
-          label="Send invite"
+          label={t('platformUsers.inviteUserForm.sendInvite')}
           iconName="user_in"
           kind="primary"
           capability={CAP.USERS_MANAGE}
@@ -1401,6 +1412,7 @@ function UsersDrawerBody({
   pending,
   lifecycleReadback,
 }: UsersDrawerBodyProps) {
+  const { t } = useI18n();
   const [tab, setTab] = useState<DrawerTabId>('profile');
   // W71-Platform (Cycle F-R-11) closure — suspended-status gate resolves
   // through canonical `user_status.metadata.is_suspended` instead of an
@@ -1411,19 +1423,19 @@ function UsersDrawerBody({
 
   return (
     <div data-testid="users-drawer">
-      <div className="tabs" role="tablist" aria-label="User drawer tabs">
-        {DRAWER_TABS.map((t) => (
+      <div className="tabs" role="tablist" aria-label={t('platformUsers.usersDrawerBody.userDrawerTabs')}>
+        {drawerTabs(t).map((entry) => (
           <button
-            key={t.id}
+            key={entry.id}
             role="tab"
-            aria-selected={tab === t.id}
+            aria-selected={tab === entry.id}
             type="button"
-            className={`tabs__tab ${tab === t.id ? 'is-active' : ''}`}
-            onClick={() => setTab(t.id)}
-            data-key={t.id}
-            data-testid={`users-drawer-tab-${t.id}`}
+            className={`tabs__tab ${tab === entry.id ? 'is-active' : ''}`}
+            onClick={() => setTab(entry.id)}
+            data-key={entry.id}
+            data-testid={`users-drawer-tab-${entry.id}`}
           >
-            {t.label}
+            {entry.label}
           </button>
         ))}
       </div>
@@ -1452,7 +1464,7 @@ function UsersDrawerBody({
         style={{ marginTop: 12 }}
         data-testid="users-drawer-actions-eyebrow"
       >
-        Lifecycle actions - suspend, reactivate, and password reset
+        {t('platformUsers.usersDrawerBody.lifecycleActionsSuspendReactivate')}
       </div>
       <div
         style={{ display: 'flex', gap: 8, padding: '6px 14px 16px', flexWrap: 'wrap' }}
@@ -1460,7 +1472,7 @@ function UsersDrawerBody({
       >
         {isSuspended ? (
           <Button
-            label="Reactivate"
+            label={t('platformUsers.usersDrawerBody.reactivate')}
             iconName="check"
             kind="primary"
             capability={CAP.USERS_MANAGE}
@@ -1469,7 +1481,7 @@ function UsersDrawerBody({
           />
         ) : (
           <Button
-            label="Suspend"
+            label={t('platformUsers.usersDrawerBody.suspend')}
             iconName="close"
             kind="danger"
             capability={CAP.USERS_MANAGE}
@@ -1478,7 +1490,7 @@ function UsersDrawerBody({
           />
         )}
         <Button
-          label="Force password reset"
+          label={t('platformUsers.usersDrawerBody.forcePasswordReset')}
           iconName="lock"
           kind="ghost"
           capability={CAP.USERS_MANAGE}
@@ -1487,7 +1499,7 @@ function UsersDrawerBody({
         />
         {isInvited ? (
           <Button
-            label="Resend invite"
+            label={t('platformUsers.usersDrawerBody.resendInvite')}
             iconName="user_in"
             kind="ghost"
             capability={CAP.USERS_MANAGE}
@@ -1517,6 +1529,8 @@ function UsersDrawerBody({
 
 // ─── Top-level module ───────────────────────────────────────────────────
 export function UsersModule() {
+  const { t } = useI18n();
+  const columns = useMemo(() => userColumns(t), [t]);
   const identity = useIdentity();
   const { scope } = identity;
   const tenantId = scope.tenant?.id;
@@ -1619,12 +1633,12 @@ export function UsersModule() {
       (r) => statusLookupByValue.get(r.status ?? '')?.metadata?.is_invited === true,
     ).length;
     return [
-      { key: 'total', label: 'Total users', value: total, tone: 'neutral' as const },
-      { key: 'active', label: 'Active', value: active, tone: 'good' as const },
-      { key: 'invited', label: 'Invited', value: invited, tone: 'info' as const },
-      { key: 'suspended', label: 'Suspended', value: suspended, tone: 'danger' as const },
+      { key: 'total', label: t('platformUsers.usersModule.totalUsers'), value: total, tone: 'neutral' as const },
+      { key: 'active', label: t('platformUsers.usersModule.active'), value: active, tone: 'good' as const },
+      { key: 'invited', label: t('platformUsers.usersModule.invited'), value: invited, tone: 'info' as const },
+      { key: 'suspended', label: t('platformUsers.usersModule.suspended'), value: suspended, tone: 'danger' as const },
     ];
-  }, [statusLookupByValue, usersQuery.data]);
+  }, [statusLookupByValue, usersQuery.data, t]);
 
   // Mutations — the hooks invalidate list-query prefixes so tenant-filtered
   // reads refresh after an invite, role, or lifecycle action.
@@ -1703,7 +1717,7 @@ export function UsersModule() {
         onSuccess: () =>
           pushToast(`grant_user_role_v1 - ${user.email} - ${roleKey}`, 'good'),
         onError: (err: Error) =>
-          pushToast('Role grant could not be saved. Review the role and try again.', 'danger'),
+          pushToast(t('platformUsers.usersModule.roleGrantCouldNot'), 'danger'),
       },
     );
   }
@@ -1715,36 +1729,37 @@ export function UsersModule() {
         onSuccess: () =>
           pushToast(`revoke_user_role_v1 - ${user.email} - ${roleKey}`, 'warn'),
         onError: (err: Error) =>
-          pushToast('Role revoke could not be saved. Review the role and try again.', 'danger'),
+          pushToast(t('platformUsers.usersModule.roleRevokeCouldNot'), 'danger'),
       },
     );
   }
 
   function handleSuspendUser(user: UserRow) {
     function SuspendUserConfirm() {
+      const { t } = useI18n();
       const [reason, setReason] = useState('');
       const valid = reason.trim().length > 0;
       return (
         <div data-testid="users-suspend-confirm">
           <p className="state__hint">
-            Suspending this user blocks Console access and records the operator reason through suspend_user_v1.
+            {t('platformUsers.suspendUserConfirm.suspendingThisUserBlocks')}
           </p>
           <div className="field">
             <label className="field__label" htmlFor="users-suspend-reason">
-              Reason
+              {t('platformUsers.suspendUserConfirm.reason')}
             </label>
             <textarea
               id="users-suspend-reason"
               rows={3}
               value={reason}
               onChange={(event) => setReason(event.target.value)}
-              placeholder="Role ended, security review, or temporary access pause"
+              placeholder={t('platformUsers.suspendUserConfirm.roleEndedSecurityReview')}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('platformUsers.suspendUserConfirm.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label={suspendMutation.isPending ? 'Suspending...' : 'Confirm suspend'}
+              label={suspendMutation.isPending ? t('platformUsers.suspendUserConfirm.suspending') : t('platformUsers.suspendUserConfirm.confirmSuspend')}
               kind="danger"
               capability={CAP.USERS_MANAGE}
               disabled={!valid || suspendMutation.isPending}
@@ -1759,10 +1774,10 @@ export function UsersModule() {
                         ...previous,
                         [user.id]: `Saved data confirms ${user.email} is suspended in this drawer.`,
                       }));
-                      pushToast(`User suspended: ${user.email}`, 'warn');
+                      pushToast(fill(t('platformUsers.suspendUserConfirm.userSuspended'), { email: String(user.email) }), 'warn');
                     },
                     onError: (err: Error) =>
-                      pushToast('User suspension could not be saved. Review the user and try again.', 'danger'),
+                      pushToast(t('platformUsers.suspendUserConfirm.userSuspensionCouldNot'), 'danger'),
                   },
                 );
               }}
@@ -1772,7 +1787,7 @@ export function UsersModule() {
       );
     }
     modal.open({
-      title: `Suspend user - ${user.email}`,
+      title: fill(t('platformUsers.usersModule.suspendUser'), { email: String(user.email) }),
       body: <SuspendUserConfirm />,
     });
   }
@@ -1787,39 +1802,40 @@ export function UsersModule() {
             ...previous,
             [user.id]: `Saved data confirms ${user.email} is active in this drawer.`,
           }));
-          pushToast(`User reactivated: ${user.email}`, 'good');
+          pushToast(fill(t('platformUsers.usersModule.userReactivated'), { email: String(user.email) }), 'good');
         },
         onError: (err: Error) =>
-          pushToast('User reactivation could not be saved. Review the user and try again.', 'danger'),
+          pushToast(t('platformUsers.usersModule.userReactivationCouldNot'), 'danger'),
       },
     );
   }
 
   function handleForcePasswordReset(user: UserRow) {
     function ForcePasswordResetConfirm() {
+      const { t } = useI18n();
       const [reason, setReason] = useState('');
       const valid = reason.trim().length > 0;
       return (
         <div data-testid="users-force-password-reset-confirm">
           <p className="state__hint">
-            Password reset requests are saved and visible in the security action stream.
+            {t('platformUsers.forcePasswordResetConfirm.passwordResetRequestsAre')}
           </p>
           <div className="field">
             <label className="field__label" htmlFor="users-force-password-reset-reason">
-              Reason
+              {t('platformUsers.forcePasswordResetConfirm.reason')}
             </label>
             <textarea
               id="users-force-password-reset-reason"
               rows={3}
               value={reason}
               onChange={(event) => setReason(event.target.value)}
-              placeholder="Security review, user request, or credential rotation"
+              placeholder={t('platformUsers.forcePasswordResetConfirm.securityReviewUserRequest')}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('platformUsers.forcePasswordResetConfirm.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label={forceResetMutation.isPending ? 'Requesting...' : 'Confirm reset'}
+              label={forceResetMutation.isPending ? t('platformUsers.forcePasswordResetConfirm.requesting') : t('platformUsers.forcePasswordResetConfirm.confirmReset')}
               kind="danger"
               capability={CAP.USERS_MANAGE}
               disabled={!valid || forceResetMutation.isPending}
@@ -1830,12 +1846,12 @@ export function UsersModule() {
                     onSuccess: () => {
                       modal.close();
                       pushToast(
-                        `Password reset started · ${user.email}`,
+                        fill(t('platformUsers.forcePasswordResetConfirm.passwordResetStarted'), { email: String(user.email) }),
                         'good',
                       );
                     },
                     onError: (err: Error) =>
-                      pushToast('Password reset could not be started. Review the user and try again.', 'danger'),
+                      pushToast(t('platformUsers.forcePasswordResetConfirm.passwordResetCouldNot'), 'danger'),
                   },
                 );
               }}
@@ -1845,25 +1861,25 @@ export function UsersModule() {
       );
     }
     modal.open({
-      title: `Force password reset - ${user.email}`,
+      title: fill(t('platformUsers.usersModule.forcePasswordReset'), { email: String(user.email) }),
       body: <ForcePasswordResetConfirm />,
     });
   }
 
   async function handleResendInvite(user: UserRow) {
     if (!canManage) {
-      pushToast('Invite resend requires user management permission', 'danger');
+      pushToast(t('platformUsers.usersModule.inviteResendRequiresUser'), 'danger');
       return;
     }
     const inviteRedirectTo = hostedInviteRedirect();
     if (!inviteRedirectTo) {
-      pushToast('Hosted invite resend requires an auth callback URL', 'danger');
+      pushToast(t('platformUsers.usersModule.hostedInviteResendRequires'), 'danger');
       return;
     }
     const directory = userDirectoryById.get(user.id);
     const roleKey = directory?.active_role_keys?.[0];
     if (!roleKey) {
-      pushToast(`Invite resend failed - no active role is visible for ${user.email}`, 'danger');
+      pushToast(fill(t('platformUsers.usersModule.inviteResendFailedNo'), { email: String(user.email) }), 'danger');
       return;
     }
     const accessScopeType = user.access_scope_type ?? 'tenant';
@@ -1890,11 +1906,11 @@ export function UsersModule() {
       }));
       const sent = result.invite_email_sent === true || result.invite_email_sent === 'true';
       pushToast(
-        sent ? `Invite resent to ${user.email}` : `Invite resend requested for ${user.email}`,
+        sent ? fill(t('platformUsers.usersModule.inviteResentTo'), { email: String(user.email) }) : fill(t('platformUsers.usersModule.inviteResendRequestedFor'), { email: String(user.email) }),
         sent ? 'good' : 'warn',
       );
     } catch (err) {
-      pushToast('Invite email could not be resent. Review the user and try again.', 'danger');
+      pushToast(t('platformUsers.usersModule.inviteEmailCouldNot'), 'danger');
     }
   }
 
@@ -1911,7 +1927,7 @@ export function UsersModule() {
   // `users.manage`.
   const bulkSuspend = (rows: UserRow[]) => {
     if (!canManage) {
-      pushToast('Suspend requires user management permission', 'danger');
+      pushToast(t('platformUsers.usersModule.suspendRequiresUserManagement'), 'danger');
       return;
     }
     void Promise.allSettled(rows.map((r) => suspendMutation.mutateAsync({ target_user_id: r.id }))).then(
@@ -1920,20 +1936,20 @@ export function UsersModule() {
         results.forEach((result, index) => {
           if (result.status === 'rejected') {
             pushToast(
-              `Suspend failed for ${rows[index]?.email ?? 'selected user'} - ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+              fill(t('platformUsers.usersModule.suspendFailedFor'), { value: String(rows[index]?.email ?? t('platformUsers.usersModule.selectedUser')), value2: String(result.reason instanceof Error ? result.reason.message : String(result.reason)) }),
               'danger',
             );
           }
         });
         const succeeded = results.length - failed.length;
         if (succeeded > 0) pushToast(`${succeeded}/${rows.length} user(s) suspended`, 'warn');
-        if (failed.length > 0) pushToast(`${failed.length}/${rows.length} user(s) were not suspended`, 'danger');
+        if (failed.length > 0) pushToast(fill(t('platformUsers.usersModule.userSWereNot'), { length: String(failed.length), length2: String(rows.length) }), 'danger');
       },
     );
   };
   const bulkReactivate = (rows: UserRow[]) => {
     if (!canManage) {
-      pushToast('Reactivate requires user management permission', 'danger');
+      pushToast(t('platformUsers.usersModule.reactivateRequiresUserManagement'), 'danger');
       return;
     }
     void Promise.allSettled(rows.map((r) => reactivateMutation.mutateAsync({ target_user_id: r.id }))).then(
@@ -1942,20 +1958,21 @@ export function UsersModule() {
         results.forEach((result, index) => {
           if (result.status === 'rejected') {
             pushToast(
-              `Reactivate failed for ${rows[index]?.email ?? 'selected user'} - ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+              fill(t('platformUsers.usersModule.reactivateFailedFor'), { value: String(rows[index]?.email ?? t('platformUsers.usersModule.selectedUser')), value2: String(result.reason instanceof Error ? result.reason.message : String(result.reason)) }),
               'danger',
             );
           }
         });
         const succeeded = results.length - failed.length;
         if (succeeded > 0) pushToast(`${succeeded}/${rows.length} user(s) reactivated`, 'good');
-        if (failed.length > 0) pushToast(`${failed.length}/${rows.length} user(s) were not reactivated`, 'danger');
+        if (failed.length > 0) pushToast(fill(t('platformUsers.usersModule.userSWereNot2'), { length: String(failed.length), length2: String(rows.length) }), 'danger');
       },
     );
   };
 
   const openInviteUser = () => {
     function InviteBody() {
+      const { t } = useI18n();
       return (
         <InviteUserModalBody
           organizationId={activeOrganizationId}
@@ -1985,35 +2002,35 @@ export function UsersModule() {
                   : {}),
                 [invitedEmail]: `Invite decision was saved for ${args.email}.`,
               }));
-              pushToast(`Invite sent to ${args.email}`, 'good');
+              pushToast(fill(t('platformUsers.inviteBody.inviteSentTo'), { email: String(args.email) }), 'good');
             } catch (err) {
-              pushToast('Invite could not be sent. Review the user details and try again.', 'danger');
+              pushToast(t('platformUsers.inviteBody.inviteCouldNotBe'), 'danger');
             }
           }}
         />
       );
     }
 
-    modal.open({ title: 'Invite user', body: <InviteBody /> });
+    modal.open({ title: t('platformUsers.usersModule.inviteUser'), body: <InviteBody /> });
   };
 
   if (!canRead) {
     return (
       <div className="page" data-testid="users-page">
         <PageHeader
-          eyebrow="Platform"
-          titleAccent="Users"
-          titlePlain="management"
+          eyebrow={t('platformUsers.usersModule.platform')}
+          titleAccent={t('platformUsers.usersModule.titleAccent')}
+          titlePlain={t('platformUsers.usersModule.titlePlain')}
           pills={[
             <span key="cap" className="chip chip--xs mono">
-              User access · user management
+              {t('platformUsers.usersModule.userAccessUserManagement')}
             </span>,
           ] as ReactNode[]}
         />
         <StateView
           kind="denied"
           capability={CAP.USERS_READ}
-          hint="User management requires user access permission."
+          hint={t('platformUsers.usersModule.userManagementRequiresUser')}
         />
       </div>
     );
@@ -2022,23 +2039,23 @@ export function UsersModule() {
   return (
     <div className="page" data-testid="users-page">
       <PageHeader
-        eyebrow="Platform"
-        titleAccent="Users"
-        titlePlain="management"
+        eyebrow={t('platformUsers.usersModule.platform')}
+        titleAccent={t('platformUsers.usersModule.titleAccent')}
+        titlePlain={t('platformUsers.usersModule.titlePlain')}
         pills={[
           activeOrganizationId ? (
             <span key="org" className="chip chip--xs">
-              {requestedOrganizationId ? 'Tenant handoff active' : 'Tenant scope active'}
+              {requestedOrganizationId ? t('platformUsers.usersModule.tenantHandoffActive') : t('platformUsers.usersModule.tenantScopeActive')}
             </span>
           ) : null,
           <span key="user-access" className="chip chip--xs">
-            User access
+            {t('platformUsers.usersModule.userAccess')}
           </span>,
         ].filter(Boolean) as ReactNode[]}
         actions={[
           <Button
             key="invite"
-            label="Invite user"
+            label={t('platformUsers.usersModule.inviteUser')}
             iconName="user_in"
             kind="primary"
             capability={CAP.USERS_MANAGE}
@@ -2065,18 +2082,18 @@ export function UsersModule() {
       ) : usersReadError ? (
         <StateView
           kind="error"
-          title="Users read failed"
+          title={t('platformUsers.usersModule.usersReadFailed')}
           hint={usersReadErrorMessage(usersReadError)}
         />
       ) : statusFilters.length <= 1 ? (
         <StateView
           kind="error"
-          hint="User status options are not configured."
+          hint={t('platformUsers.usersModule.userStatusOptionsAre')}
         />
       ) : (
         <>
           <div className="dt-toolbar">
-            <span className="eyebrow">Status</span>
+            <span className="eyebrow">{t('platformUsers.usersModule.status')}</span>
             {statusFilters.map((f) => (
               <button
                 key={f}
@@ -2094,21 +2111,21 @@ export function UsersModule() {
             </span>
           </div>
           <DataTable<UserRow>
-            columns={COLUMNS}
+            columns={columns}
             rows={filteredUsers}
             viewKey="users"
             entityKind="users"
             onRowClick={openUserDrawer}
             bulkActions={[
               {
-                label: 'Suspend',
+                label: t('platformUsers.usersModule.suspend'),
                 icon: 'close',
                 kind: 'danger',
                 capability: CAP.USERS_MANAGE,
                 onClick: bulkSuspend,
               },
               {
-                label: 'Reactivate',
+                label: t('platformUsers.usersModule.reactivate'),
                 icon: 'check',
                 kind: 'primary',
                 capability: CAP.USERS_MANAGE,
@@ -2121,7 +2138,7 @@ export function UsersModule() {
       {selectedUser ? (
         <Drawer
           open
-          title={`User · ${selectedUser.full_name ?? selectedUser.email}`}
+          title={fill(t('platformUsers.usersModule.user'), { value: String(selectedUser.full_name ?? selectedUser.email) })}
           size="lg"
           onClose={closeUserDrawer}
         >
