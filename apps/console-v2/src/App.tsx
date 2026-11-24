@@ -4,7 +4,7 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { routeTree } from './routeTree.gen';
-import { I18nProvider } from './lib/i18n';
+import { I18nProvider, TenantTimeZoneSync } from './lib/i18n';
 import { IdentityProvider } from '@/lib/identity';
 import { ThemeProvider } from './lib/theme';
 import { ToastRoot } from './shell/ToastRoot';
@@ -99,6 +99,7 @@ export function App() {
         <ThemeProvider>
           <I18nProvider>
             <IdentityProvider>
+              <TenantTimeZoneSync />
               <RouterProvider router={router} />
               <ToastRoot />
             </IdentityProvider>
