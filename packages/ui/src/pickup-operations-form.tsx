@@ -289,7 +289,7 @@ export function PickupMutationForm({
       {validationError || state.status === "error" ? (
         <div
           role="alert"
-          className="rounded-2xl border border-ui-border bg-ui-surface/80 p-3 text-sm text-ui-muted"
+          className="rounded-2xl border border-ui-danger/30 bg-ui-danger/5 p-3 text-sm text-ui-ink"
           data-testid={`${testIdPrefix}-error`}
         >
           {validationError ?? state.message ?? "Pickup operation failed."}

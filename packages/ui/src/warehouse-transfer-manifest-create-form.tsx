@@ -498,7 +498,7 @@ export function WarehouseTransferManifestCreateForm({
 
       {error ? (
         <div
-          className="rounded-2xl border border-ui-border bg-ui-surface/80 p-3 text-sm text-ui-muted"
+          className="rounded-2xl border border-ui-danger/30 bg-ui-danger/5 p-3 text-sm text-ui-ink"
           data-testid={`${resolvedTestIdPrefix}-error`}
           id={errorId}
           role="alert"
