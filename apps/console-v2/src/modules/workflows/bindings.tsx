@@ -81,6 +81,7 @@ import {
   validate,
   valueSamples,
 } from './_bindings/condition-model';
+import { fill, useI18n } from '@/lib/i18n';
 
 // ---------- Domain types (UI-shaped) ----------
 //
@@ -233,6 +234,7 @@ function OperatorPicker({
   events: RecentEvent[];
   onChange: (op: Operator) => void;
 }) {
+  const { t } = useI18n();
   const samples = useMemo(() => valueSamples(field, events), [field, events]);
   const inferred = useMemo(() => inferType(samples), [samples]);
   const opts = operatorsFor(inferred);
@@ -241,7 +243,7 @@ function OperatorPicker({
       className="dt-inline-input"
       value={op}
       onChange={(e) => onChange(e.target.value as Operator)}
-      aria-label="Operator"
+      aria-label={t('workflowBindings.operatorPicker.operator')}
     >
       {opts.map((o) => (
         <option key={o} value={o}>
@@ -273,6 +275,7 @@ function ConditionRow({
   evalTotal: number;
   issue: { severity: 'error' | 'warn'; message: string } | null;
 }) {
+  const { t } = useI18n();
   const datalistId = `wf-cond-fields-${pathLabel.replace(/\W+/g, '-')}`;
   return (
     <div
@@ -285,8 +288,8 @@ function ConditionRow({
         className="dt-inline-input mono"
         value={node.field}
         onChange={(e) => onChange({ ...node, field: e.target.value })}
-        aria-label="Field"
-        placeholder="payload.field"
+        aria-label={t('workflowBindings.conditionRow.field')}
+        placeholder={t('workflowBindings.conditionRow.payloadField')}
       />
       <datalist id={datalistId}>
         {fieldOptions.map((f) => (
@@ -303,14 +306,14 @@ function ConditionRow({
         className="dt-inline-input"
         type="text"
         value={node.value}
-        placeholder={NULLARY_OPS.includes(node.op) ? 'n/a' : 'value'}
+        placeholder={NULLARY_OPS.includes(node.op) ? 'n/a' : t('workflowBindings.conditionRow.value')}
         disabled={NULLARY_OPS.includes(node.op)}
         onChange={(e) => onChange({ ...node, value: e.target.value })}
-        aria-label="Value"
+        aria-label={t('workflowBindings.conditionRow.value2')}
       />
       <div className="wf-cond-row__meta">
         <Chip
-          label={evalTotal === 0 ? 'no sample' : `${evalPass}/${evalTotal} pass`}
+          label={evalTotal === 0 ? t('workflowBindings.conditionRow.noSample') : fill(t('workflowBindings.conditionRow.pass'), { evalPass: String(evalPass), evalTotal: String(evalTotal) })}
           kind={evalTotal === 0 ? 'neutral' : evalPass === evalTotal ? 'good' : evalPass === 0 ? 'danger' : 'warn'}
           size="xs"
         />
@@ -326,8 +329,8 @@ function ConditionRow({
       <button
         type="button"
         className="icon-btn"
-        title="Remove row"
-        aria-label="Remove condition row"
+        title={t('workflowBindings.conditionRow.removeRow')}
+        aria-label={t('workflowBindings.conditionRow.removeConditionRow')}
         onClick={onRemove}
       >
         ×
@@ -364,6 +367,7 @@ function GroupBlock({
   isRoot?: boolean;
   issues: ReturnType<typeof validate>;
 }) {
+  const { t } = useI18n();
   function patchChild(idx: number, child: ConditionNode | null) {
     if (child === null) {
       onChange({ ...node, children: node.children.filter((_, i) => i !== idx) });
@@ -407,22 +411,22 @@ function GroupBlock({
           onChange={(e) =>
             onChange({ ...node, combinator: e.target.value as 'and' | 'or' | 'not' })
           }
-          aria-label="Combinator"
+          aria-label={t('workflowBindings.groupBlock.combinator')}
         >
-          <option value="and">ALL of (AND)</option>
-          <option value="or">ANY of (OR)</option>
-          <option value="not">NONE of (NOT)</option>
+          <option value="and">{t('workflowBindings.groupBlock.allOfAnd')}</option>
+          <option value="or">{t('workflowBindings.groupBlock.anyOfOr')}</option>
+          <option value="not">{t('workflowBindings.groupBlock.noneOfNot')}</option>
         </select>
         <span className="state__hint" style={{ fontSize: '11px' }}>
           {node.combinator === 'not'
-            ? 'Pass when the inner expression is false.'
+            ? t('workflowBindings.groupBlock.passWhenTheInner')
             : node.combinator === 'or'
-              ? 'Pass when at least one row passes.'
-              : 'Pass when every row passes.'}
+              ? t('workflowBindings.groupBlock.passWhenAtLeast')
+              : t('workflowBindings.groupBlock.passWhenEveryRow')}
         </span>
         <div style={{ flex: 1 }} />
         {!isRoot && onRemove ? (
-          <button type="button" className="icon-btn" onClick={onRemove} aria-label="Remove group">
+          <button type="button" className="icon-btn" onClick={onRemove} aria-label={t('workflowBindings.groupBlock.removeGroup')}>
             ×
           </button>
         ) : null}
@@ -430,7 +434,7 @@ function GroupBlock({
       <div className="wf-cond-group__body">
         {node.children.length === 0 ? (
           <div className="state__hint" style={{ padding: '6px 4px' }}>
-            Empty group — add a row.
+            {t('workflowBindings.groupBlock.emptyGroupAddA')}
           </div>
         ) : (
           node.children.map((child, idx) => {
@@ -481,16 +485,16 @@ function GroupBlock({
             onClick={addLeaf}
             disabled={node.combinator === 'not' && node.children.length >= 1}
           >
-            + Row
+            {t('workflowBindings.groupBlock.row')}
           </button>
           <button
             type="button"
             className="btn btn--ghost btn--sm"
             onClick={addGroup}
             disabled={atDepthCap || (node.combinator === 'not' && node.children.length >= 1)}
-            title={atDepthCap ? `Max depth ${maxDepth}` : 'Add nested group'}
+            title={atDepthCap ? fill(t('workflowBindings.groupBlock.maxDepth'), { maxDepth: String(maxDepth) }) : t('workflowBindings.groupBlock.addNestedGroup')}
           >
-            + Group
+            {t('workflowBindings.groupBlock.group')}
           </button>
         </div>
       </div>
@@ -499,6 +503,7 @@ function GroupBlock({
 }
 
 function ConditionBuilder({ row, events, onSave, onCancel, ladder, maxDepth }: ConditionBuilderProps) {
+  const { t } = useI18n();
   // Initialise from legacy flat shape for round-trip compatibility.
   const [tree, setTree] = useState<ConditionGroup>(() => fromLegacyFlat(row.condition));
 
@@ -526,7 +531,7 @@ function ConditionBuilder({ row, events, onSave, onCancel, ladder, maxDepth }: C
 
   function save() {
     if (errors.length) {
-      pushToast(`Fix ${errors.length} validation error${errors.length === 1 ? '' : 's'} before saving`, 'danger');
+      pushToast(fill(t(errors.length === 1 ? 'workflowBindings.conditionBuilder.fixErrorsOne' : 'workflowBindings.conditionBuilder.fixErrorsOther'), { count: errors.length }), 'danger');
       return;
     }
     // Persist legacy flat shape when possible (preserves backward compatibility);
@@ -537,12 +542,11 @@ function ConditionBuilder({ row, events, onSave, onCancel, ladder, maxDepth }: C
   return (
     <div className="wf-cond-builder">
       <p className="state__hint">
-        Build conditions visually. Groups can be ALL / ANY / NONE. Saving updates
-        the binding policy through the settings ladder.
+        {t('workflowBindings.conditionBuilder.buildConditionsVisuallyGroups')}
       </p>
       {ladder ? (
         <div className="wf-cond-builder__ladder" data-testid="wf-cond-builder-ladder">
-          <div className="section-eyebrow">Override ladder</div>
+          <div className="section-eyebrow">{t('workflowBindings.conditionBuilder.overrideLadder')}</div>
           <div style={{ padding: '0 0 4px' }}>
             <LadderViz resolution={ladder} />
           </div>
@@ -550,7 +554,7 @@ function ConditionBuilder({ row, events, onSave, onCancel, ladder, maxDepth }: C
       ) : null}
       <div className="wf-cond-builder__grid">
         <div className="wf-cond-builder__main">
-          <div className="section-eyebrow">Conditions</div>
+          <div className="section-eyebrow">{t('workflowBindings.conditionBuilder.conditions')}</div>
           <GroupBlock
             node={tree}
             path={[]}
@@ -564,13 +568,13 @@ function ConditionBuilder({ row, events, onSave, onCancel, ladder, maxDepth }: C
           />
         </div>
         <aside className="wf-cond-builder__aside">
-          <div className="section-eyebrow">Live evaluation</div>
+          <div className="section-eyebrow">{t('workflowBindings.conditionBuilder.liveEvaluation')}</div>
           <div className="wf-cond-aside__metric">
             <Chip
               label={
                 totalSample === 0
-                  ? 'No recent events for this trigger'
-                  : `${overallPass} / ${totalSample} recent events match`
+                  ? t('workflowBindings.conditionBuilder.noRecentEventsFor')
+                  : fill(t('workflowBindings.conditionBuilder.recentEventsMatch'), { overallPass: String(overallPass), totalSample: String(totalSample) })
               }
               kind={
                 totalSample === 0
@@ -584,19 +588,19 @@ function ConditionBuilder({ row, events, onSave, onCancel, ladder, maxDepth }: C
               size="xs"
             />
           </div>
-          <div className="section-eyebrow">Rule preview</div>
+          <div className="section-eyebrow">{t('workflowBindings.conditionBuilder.rulePreview')}</div>
           <div className="wf-code-block" data-testid="wf-cond-rule-preview">
             {summarizeNode(tree)}
           </div>
-          <div className="section-eyebrow">Validation</div>
+          <div className="section-eyebrow">{t('workflowBindings.conditionBuilder.validation')}</div>
           <div className="wf-cond-issues">
             {issues.length === 0 ? (
-              <div className="state__hint">All rows look good.</div>
+              <div className="state__hint">{t('workflowBindings.conditionBuilder.allRowsLookGood')}</div>
             ) : (
               issues.map((iss, k) => (
                 <div key={k} className="wf-cond-issue">
                   <Chip
-                    label={iss.severity === 'error' ? 'error' : 'warn'}
+                    label={iss.severity === 'error' ? t('workflowBindings.conditionBuilder.error') : t('workflowBindings.conditionBuilder.warn')}
                     kind={iss.severity === 'error' ? 'danger' : 'warn'}
                     size="xs"
                   />
@@ -610,10 +614,10 @@ function ConditionBuilder({ row, events, onSave, onCancel, ladder, maxDepth }: C
           </div>
         </aside>
       </div>
-      <div className="section-eyebrow">Test against recent events</div>
+      <div className="section-eyebrow">{t('workflowBindings.conditionBuilder.testAgainstRecentEvents')}</div>
       <div className="wf-recent-events">
         {recentForEvent.length === 0 ? (
-          <div className="state__hint">{`No recent events for "${row.event}"`}</div>
+          <div className="state__hint">{fill(t('workflowBindings.conditionBuilder.noRecentEventsFor2'), { event: String(row.event) })}</div>
         ) : (
           recentForEvent.slice(0, 5).map((e) => {
             const matches = evalCondition(tree, e.payload);
@@ -627,7 +631,7 @@ function ConditionBuilder({ row, events, onSave, onCancel, ladder, maxDepth }: C
                   {JSON.stringify(e.payload).slice(0, 60)}
                 </span>
                 <Chip
-                  label={matches ? 'pass' : 'fail'}
+                  label={matches ? t('workflowBindings.conditionBuilder.pass') : t('workflowBindings.conditionBuilder.fail')}
                   kind={matches ? 'good' : 'neutral'}
                   size="xs"
                 />
@@ -638,12 +642,12 @@ function ConditionBuilder({ row, events, onSave, onCancel, ladder, maxDepth }: C
       </div>
       <div className="wf-cond-builder__footer">
         <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-3)' }}>
-          {errors.length ? `${errors.length} blocker${errors.length === 1 ? '' : 's'}` : 'Ready to save'}
+          {errors.length ? fill(t(errors.length === 1 ? 'workflowBindings.conditionBuilder.blockerOne' : 'workflowBindings.conditionBuilder.blockerOther'), { count: errors.length }) : t('workflowBindings.conditionBuilder.readyToSave')}
         </span>
         <div style={{ flex: 1 }} />
-        <Button label="Cancel" kind="ghost" onClick={onCancel} />
+        <Button label={t('workflowBindings.conditionBuilder.cancel')} kind="ghost" onClick={onCancel} />
         <Button
-          label="Save"
+          label={t('workflowBindings.conditionBuilder.save')}
           kind="primary"
           // Condition policy edits persist through the settings ladder; the
           // same capability gates the visible operator action fail-closed.
@@ -663,6 +667,7 @@ interface EventTesterBodyProps {
 }
 
 function EventTesterBody({ bindings, events }: EventTesterBodyProps) {
+  const { t } = useI18n();
   const eventOptions = useMemo(
     () => Array.from(new Set(bindings.map((b) => b.event))).sort(),
     [bindings],
@@ -696,16 +701,15 @@ function EventTesterBody({ bindings, events }: EventTesterBodyProps) {
   return (
     <div>
       <p className="state__hint">
-        Pick an event + payload; see which bindings match and which one wins by
-        priority.
+        {t('workflowBindings.eventTesterBody.pickAnEventPayload')}
       </p>
-      <div className="section-eyebrow">Event</div>
+      <div className="section-eyebrow">{t('workflowBindings.eventTesterBody.event')}</div>
       <div style={{ padding: '0 14px 8px' }}>
         <select
           className="dt-inline-input"
           value={selectedEvent}
           onChange={(e) => setSelectedEvent(e.target.value)}
-          aria-label="Event"
+          aria-label={t('workflowBindings.eventTesterBody.event')}
         >
           {eventOptions.map((e) => (
             <option key={e} value={e}>
@@ -715,11 +719,11 @@ function EventTesterBody({ bindings, events }: EventTesterBodyProps) {
         </select>
       </div>
       <div className="section-eyebrow">
-        Event details
+        {t('workflowBindings.eventTesterBody.eventDetails')}
         {!parsed.ok ? (
-          <Chip label="invalid details" kind="danger" size="xs" />
+          <Chip label={t('workflowBindings.eventTesterBody.invalidDetails')} kind="danger" size="xs" />
         ) : (
-          <Chip label="valid details" kind="good" size="xs" />
+          <Chip label={t('workflowBindings.eventTesterBody.validDetails')} kind="good" size="xs" />
         )}
       </div>
       <textarea
@@ -727,7 +731,7 @@ function EventTesterBody({ bindings, events }: EventTesterBodyProps) {
         rows={5}
         value={payloadText}
         onChange={(e) => setPayloadText(e.target.value)}
-        aria-label="Event details"
+        aria-label={t('workflowBindings.eventTesterBody.eventDetails')}
       />
       <div className="wf-recent-bar">
         {events.slice(0, 4).map((e) => (
@@ -745,12 +749,12 @@ function EventTesterBody({ bindings, events }: EventTesterBodyProps) {
           </button>
         ))}
       </div>
-      <div className="section-eyebrow">Resolution</div>
+      <div className="section-eyebrow">{t('workflowBindings.eventTesterBody.resolution')}</div>
       <div className="wf-recent-events">
         {!parsed.ok ? (
-          <div className="state__hint">Invalid JSON: {parsed.err}</div>
+          <div className="state__hint">{fill(t('workflowBindings.eventTesterBody.invalidJson'), { error: String(parsed.err) })}</div>
         ) : matches.length === 0 ? (
-          <div className="state__hint">{`No bindings for "${selectedEvent}"`}</div>
+          <div className="state__hint">{fill(t('workflowBindings.eventTesterBody.noBindingsFor'), { selectedEvent: String(selectedEvent) })}</div>
         ) : (
           matches.map((b, i) => {
             const cond = legacyMatches(parsed.value, b.condition);
@@ -765,7 +769,7 @@ function EventTesterBody({ bindings, events }: EventTesterBodyProps) {
                   {summarizeFlat(b.condition)}
                 </span>
                 <Chip
-                  label={winner ? '✓ wins' : cond ? 'matches' : 'no match'}
+                  label={winner ? t('workflowBindings.eventTesterBody.wins') : cond ? t('workflowBindings.eventTesterBody.matches') : t('workflowBindings.eventTesterBody.noMatch')}
                   kind={winner ? 'good' : cond ? 'info' : 'neutral'}
                   size="xs"
                 />
@@ -786,10 +790,8 @@ function EventTesterBody({ bindings, events }: EventTesterBodyProps) {
 // deep links survive page reloads.
 type BindingsTab = 'bindings' | 'dispatches';
 
-const BINDINGS_TABS: Array<{ key: BindingsTab; label: string; aria: string }> = [
-  { key: 'bindings', label: 'Bindings', aria: 'Workflow bindings' },
-  { key: 'dispatches', label: 'Dispatches', aria: 'Workflow binding dispatches ledger' },
-];
+// Tab names and labels come from workflowBindings.tabs.<key>.
+const BINDINGS_TABS: Array<{ key: BindingsTab }> = [{ key: 'bindings' }, { key: 'dispatches' }];
 
 function bindingsRouteQuery(): Record<string, string> {
   const q = window.location.search.slice(1) || window.location.hash.split('?')[1] || '';
@@ -924,11 +926,12 @@ function readWorkflowBindingKey(row: WorkflowBinding | WorkflowBindingDirectoryR
 // silent `neutral` default. Replaces the inline switch over outcome
 // literals (AGENTS.md §2 ZERO HARDCODING + §4 SSOT).
 function DispatchOutcomeChip({ outcome }: { outcome: string }) {
+  const { t } = useI18n();
   const row = lookupRow('workflow_binding_dispatch_outcome', outcome);
   if (!row) {
     return (
       <Chip
-        label={`Missing dispatch outcome: ${workflowBindingLabel(outcome)}`}
+        label={fill(t('workflowBindings.dispatchOutcomeChip.missingDispatchOutcome'), { value: String(workflowBindingLabel(outcome)) })}
         kind="danger"
         size="xs"
       />
@@ -944,6 +947,7 @@ function DispatchOutcomeChip({ outcome }: { outcome: string }) {
 }
 
 export function BindingsModule() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const go = useConsoleNavigator();
   const drawer = useDrawer();
@@ -1049,7 +1053,7 @@ export function BindingsModule() {
 
   const tplById = useMemo(() => {
     const m = new Map<string, WorkflowTemplate>();
-    templates.forEach((t) => m.set(t.id, t));
+    templates.forEach((entry) => m.set(entry.id, entry));
     return m;
   }, [templates]);
 
@@ -1274,7 +1278,7 @@ export function BindingsModule() {
       const message = (err as Error)?.message ?? '';
       if (seedDiagnosticsEnabled) {
         patchBinding(row.id, patch);
-        pushToast(`${label} preview could not be saved · ${message}`, 'warn');
+        pushToast(fill(t('workflowBindings.bindingsModule.previewCouldNotBe'), { label: String(label), message: String(message) }), 'warn');
         return false;
       }
       pushToast(`${label} failed · ${message}`, 'danger');
@@ -1284,7 +1288,7 @@ export function BindingsModule() {
 
   function openConditionBuilder(row: DecoratedBinding) {
     modal.open({
-      title: `Condition · ${row.event}`,
+      title: fill(t('workflowBindings.bindingsModule.condition'), { event: String(row.event) }),
       body: (
         <ConditionBuilder
           row={row}
@@ -1312,17 +1316,17 @@ export function BindingsModule() {
     const tpl = tplById.get(row.template_id);
     const recentMatching = events.filter((e) => e.event === row.event);
     drawer.open({
-      title: `Binding · ${row.event}`,
+      title: fill(t('workflowBindings.bindingsModule.binding'), { event: String(row.event) }),
       size: 'lg',
       body: (
         <div>
           <div className="kvgrid">
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Event</span>
+              <span className="kvgrid__key mono">{t('workflowBindings.bindingsModule.event')}</span>
               <span className="kvgrid__val mono">{row.event}</span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Template</span>
+              <span className="kvgrid__key mono">{t('workflowBindings.bindingsModule.template')}</span>
               <span className="kvgrid__val">
                 <button
                   type="button"
@@ -1337,18 +1341,18 @@ export function BindingsModule() {
               </span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Priority</span>
+              <span className="kvgrid__key mono">{t('workflowBindings.bindingsModule.priority')}</span>
               <span className="kvgrid__val mono">{String(row.priority)}</span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Status</span>
+              <span className="kvgrid__key mono">{t('workflowBindings.bindingsModule.status')}</span>
               <span className="kvgrid__val">
                 {(() => {
                   const statusRow = lookupRow('workflow_binding_status', row.status ?? '');
                   if (!statusRow) {
                     return (
                       <Chip
-                        label={`workflow_binding_status/${row.status ?? '(unset)'} (missing)`}
+                        label={fill(t('workflowBindings.bindingsModule.workflowBindingStatusMissing'), { value: String(row.status ?? '(unset)') })}
                         kind="danger"
                         size="xs"
                       />
@@ -1365,21 +1369,21 @@ export function BindingsModule() {
               </span>
             </div>
           </div>
-          <div className="section-eyebrow">Override ladder</div>
+          <div className="section-eyebrow">{t('workflowBindings.bindingsModule.overrideLadder')}</div>
           <div style={{ padding: '0 14px 8px' }}>
             <LadderViz resolution={ladderQuery.data} />
           </div>
-          <div className="section-eyebrow">Condition</div>
+          <div className="section-eyebrow">{t('workflowBindings.bindingsModule.condition2')}</div>
           <pre className="wf-code-block" data-testid="wf-binding-cond-pre">
 {JSON.stringify(row.condition || {}, null, 2)}
           </pre>
-          <div className="section-eyebrow">Rule preview</div>
+          <div className="section-eyebrow">{t('workflowBindings.bindingsModule.rulePreview')}</div>
           <div className="wf-code-block">
             {summarizeFlat(row.condition)}
           </div>
           <div style={{ padding: '8px 14px', display: 'flex', gap: '8px' }}>
             <Button
-              label="Edit condition visually"
+              label={t('workflowBindings.bindingsModule.editConditionVisually')}
               iconName="edit"
               kind="ghost"
               // W37 — opens the condition builder modal whose Save dispatches
@@ -1391,17 +1395,17 @@ export function BindingsModule() {
               onClick={() => openConditionBuilder(row)}
             />
             <Button
-              label="Decision evidence"
+              label={t('workflowBindings.bindingsModule.decisionEvidence')}
               iconName="right"
               kind="ghost"
               onClick={() => {
                 drawer.close();
                 navigate({ to: '/insights/decisions' });
               }}
-              title="Open /insights/decisions for this binding key"
+              title={t('workflowBindings.bindingsModule.openInsightsDecisionsFor')}
             />
           </div>
-          <div className="section-eyebrow">Test against recent events</div>
+          <div className="section-eyebrow">{t('workflowBindings.bindingsModule.testAgainstRecentEvents')}</div>
           <div className="wf-recent-events">
             {recentMatching.slice(0, 6).map((e) => {
               const matches = legacyMatches(e.payload, row.condition);
@@ -1415,7 +1419,7 @@ export function BindingsModule() {
                     {JSON.stringify(e.payload).slice(0, 60)}
                   </span>
                   <Chip
-                    label={matches ? 'matches' : 'no match'}
+                    label={matches ? t('workflowBindings.bindingsModule.matches') : t('workflowBindings.bindingsModule.noMatch')}
                     kind={matches ? 'good' : 'neutral'}
                     size="xs"
                   />
@@ -1428,7 +1432,7 @@ export function BindingsModule() {
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
           <Button
-            label="View runs"
+            label={t('workflowBindings.bindingsModule.viewRuns')}
             iconName="right"
             kind="ghost"
             onClick={() => {
@@ -1458,7 +1462,7 @@ export function BindingsModule() {
             if (!toggleTo || !toggleLabel || !toggleKind) {
               return (
                 <Button
-                  label={`workflow_binding_status/${row.status} (missing toggle)`}
+                  label={fill(t('workflowBindings.bindingsModule.workflowBindingStatusMissing2'), { status: String(row.status) })}
                   kind="ghost"
                   disabled
                   capability={CAP.WORKFLOWS_WRITE}
@@ -1496,12 +1500,12 @@ export function BindingsModule() {
       (getLookups('workflow_binding_event') as Array<{ value: string }> | undefined) ?? [];
     if (eventLookup.length === 0) {
       modal.open({
-        title: 'New binding',
+        title: t('workflowBindings.bindingsModule.newBinding'),
         body: (
           <StateView
             kind="error"
-            title="Workflow event options are unavailable"
-            hint="The event catalog is still syncing. Refresh after configuration sync completes before creating new bindings."
+            title={t('workflowBindings.bindingsModule.workflowEventOptionsAre')}
+            hint={t('workflowBindings.bindingsModule.theEventCatalogIs')}
           />
         ),
         actions: [],
@@ -1518,12 +1522,12 @@ export function BindingsModule() {
       bindingDefaults.defaultScopeType === null
     ) {
       modal.open({
-        title: 'New binding',
+        title: t('workflowBindings.bindingsModule.newBinding'),
         body: (
           <StateView
             kind="error"
-            title="Binding defaults are not available"
-            hint="Default priority, stage, and scope settings must be configured before new bindings can be created."
+            title={t('workflowBindings.bindingsModule.bindingDefaultsAreNot')}
+            hint={t('workflowBindings.bindingsModule.defaultPriorityStageAnd')}
           />
         ),
         actions: [],
@@ -1537,7 +1541,7 @@ export function BindingsModule() {
     let stage = bindingDefaults.defaultStage;
     const defaultScopeType = bindingDefaults.defaultScopeType;
     modal.open({
-      title: 'New binding',
+      title: t('workflowBindings.bindingsModule.newBinding'),
       body: (
         <div>
           <div
@@ -1549,14 +1553,14 @@ export function BindingsModule() {
               padding: '0 4px',
             }}
           >
-            <label className="mono">Event</label>
+            <label className="mono">{t('workflowBindings.bindingsModule.event')}</label>
             <select
               className="dt-inline-input"
               defaultValue={event}
               onChange={(e) => {
                 event = e.target.value;
               }}
-              aria-label="Event"
+              aria-label={t('workflowBindings.bindingsModule.event')}
             >
               {eventOptions.map((e) => (
                 <option key={e} value={e}>
@@ -1564,7 +1568,7 @@ export function BindingsModule() {
                 </option>
               ))}
             </select>
-            <label className="mono">Stage</label>
+            <label className="mono">{t('workflowBindings.bindingsModule.stage')}</label>
             <input
               className="dt-inline-input mono"
               type="text"
@@ -1572,24 +1576,24 @@ export function BindingsModule() {
               onChange={(e) => {
                 stage = e.target.value;
               }}
-              aria-label="Stage key"
+              aria-label={t('workflowBindings.bindingsModule.stageKey')}
             />
-            <label className="mono">Template</label>
+            <label className="mono">{t('workflowBindings.bindingsModule.template')}</label>
             <select
               className="dt-inline-input"
               defaultValue={template_id}
               onChange={(e) => {
                 template_id = e.target.value;
               }}
-              aria-label="Template"
+              aria-label={t('workflowBindings.bindingsModule.template')}
             >
-              {templates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
+              {templates.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.name}
                 </option>
               ))}
             </select>
-            <label className="mono">Priority</label>
+            <label className="mono">{t('workflowBindings.bindingsModule.priority')}</label>
             <input
               className="dt-inline-input"
               type="number"
@@ -1597,19 +1601,19 @@ export function BindingsModule() {
               onChange={(e) => {
                 priority = e.target.value;
               }}
-              aria-label="Priority"
+              aria-label={t('workflowBindings.bindingsModule.priority')}
             />
           </div>
           <div className="state__hint" style={{ padding: '8px 4px 0' }}>
-            Creates the binding through the workflow configuration service when connected.
+            {t('workflowBindings.bindingsModule.createsTheBindingThrough')}
           </div>
         </div>
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('workflowBindings.bindingsModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Create"
+            label={t('workflowBindings.bindingsModule.create')}
             kind="primary"
             capability={CAP.WORKFLOWS_WRITE}
             onClick={async () => {
@@ -1654,11 +1658,11 @@ export function BindingsModule() {
                 });
                 modal.close();
                 pushToast(
-                  `Binding created · ${event} (${stage}) → ${tplById.get(template_id)?.name || template_id} @${finalPriority}`,
+                  fill(t('workflowBindings.bindingsModule.bindingCreated'), { event: String(event), stage: String(stage), value: String(tplById.get(template_id)?.name || template_id), finalPriority: String(finalPriority) }),
                   'good',
                 );
               } catch (err) {
-                pushToast('Workflow binding could not be saved. Review the binding and try again.', 'danger');
+                pushToast(t('workflowBindings.bindingsModule.workflowBindingCouldNot'), 'danger');
               }
             }}
           />
@@ -1669,22 +1673,22 @@ export function BindingsModule() {
 
   function openEventTester() {
     modal.open({
-      title: 'Event tester',
+      title: t('workflowBindings.bindingsModule.eventTester'),
       body: <EventTesterBody bindings={decoratedBindings} events={events} />,
       footer: (
-        <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+        <Button label={t('workflowBindings.bindingsModule.close')} kind="ghost" onClick={() => modal.close()} />
       ),
     });
   }
 
   function bulkReassignTemplate(rows: DecoratedBinding[]) {
     if (!templates.length) {
-      pushToast('No templates available', 'warn');
+      pushToast(t('workflowBindings.bindingsModule.noTemplatesAvailable'), 'warn');
       return;
     }
     let pickedId = templates[0]!.id;
     modal.open({
-      title: 'Pick template',
+      title: t('workflowBindings.bindingsModule.pickTemplate'),
       body: (
         <div style={{ padding: '8px 14px' }}>
           <select
@@ -1693,11 +1697,11 @@ export function BindingsModule() {
             onChange={(e) => {
               pickedId = e.target.value;
             }}
-            aria-label="Template"
+            aria-label={t('workflowBindings.bindingsModule.template')}
           >
-            {templates.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
+            {templates.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
               </option>
             ))}
           </select>
@@ -1705,9 +1709,9 @@ export function BindingsModule() {
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('workflowBindings.bindingsModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label={`Reassign ${rows.length}`}
+            label={fill(t('workflowBindings.bindingsModule.reassign'), { length: String(rows.length) })}
             kind="primary"
             // W37 — bulk reassign dispatches register_workflow_binding_v1 per
             // row (server-asserts workflows.write). Closes REAUDIT4 WORKFLOWS
@@ -1730,7 +1734,7 @@ export function BindingsModule() {
               modal.close();
               const ok = results.filter(Boolean).length;
               pushToast(
-                `Reassigned ${ok}/${rows.length} bindings`,
+                fill(t('workflowBindings.bindingsModule.reassignedBindings'), { ok: String(ok), length: String(rows.length) }),
                 ok === rows.length ? 'good' : 'warn',
               );
             }}
@@ -1752,30 +1756,30 @@ export function BindingsModule() {
   }, [rawBindings]);
 
   const COLUMNS: Array<DataTableColumn<DecoratedBinding>> = [
-    { key: 'event', label: 'Event', sortable: true, filterable: true, mono: true, width: '240px' },
-    { key: 'stage_key', label: 'Stage', sortable: true, filterable: true, mono: true, width: '140px' },
+    { key: 'event', label: t('workflowBindings.bindingsModule.event'), sortable: true, filterable: true, mono: true, width: '240px' },
+    { key: 'stage_key', label: t('workflowBindings.bindingsModule.stage'), sortable: true, filterable: true, mono: true, width: '140px' },
     {
       key: 'template_name',
-      label: 'Template',
+      label: t('workflowBindings.bindingsModule.template'),
       sortable: true,
       filterable: true,
       reference: {
         items: templates,
-        display: (t) => (t as WorkflowTemplate).name,
-        value: (t) => (t as WorkflowTemplate).id,
-        sub: (t) => (t as WorkflowTemplate).template_id,
+        display: (entry) => (entry as WorkflowTemplate).name,
+        value: (entry) => (entry as WorkflowTemplate).id,
+        sub: (entry) => (entry as WorkflowTemplate).template_id,
       },
     },
     {
       key: 'condition_summary',
-      label: 'Condition',
+      label: t('workflowBindings.bindingsModule.condition2'),
       sortable: false,
       filterable: false,
     },
-    { key: 'priority', label: 'Priority', align: 'right', sortable: true, type: 'number' },
+    { key: 'priority', label: t('workflowBindings.bindingsModule.priority'), align: 'right', sortable: true, type: 'number' },
     {
       key: 'status',
-      label: 'Status',
+      label: t('workflowBindings.bindingsModule.status'),
       sortable: true,
       filterable: true,
       editable: true,
@@ -1789,7 +1793,7 @@ export function BindingsModule() {
         if (!row) {
           return (
             <Chip
-              label={`Missing binding status: ${workflowBindingLabel(v)}`}
+              label={fill(t('workflowBindings.bindingsModule.missingBindingStatus'), { value: String(workflowBindingLabel(v)) })}
               kind="danger"
               size="xs"
             />
@@ -1854,18 +1858,18 @@ export function BindingsModule() {
 
   const ROW_ACTIONS: Array<DataTableAction<DecoratedBinding>> = [
     {
-      label: 'Edit condition',
+      label: t('workflowBindings.bindingsModule.editCondition'),
       icon: 'edit',
       capability: CAP.WORKFLOWS_WRITE,
       onClick: (row) => openConditionBuilder(row),
     },
     {
-      label: 'Test against recent event',
+      label: t('workflowBindings.bindingsModule.testAgainstRecentEvent'),
       icon: 'play',
       onClick: (row) => openBindingDrawer(row),
     },
     {
-      label: 'Test condition',
+      label: t('workflowBindings.bindingsModule.testCondition'),
       icon: 'play',
       capability: CAP.WORKFLOWS_WRITE,
       onClick: async (row) => {
@@ -1905,9 +1909,9 @@ export function BindingsModule() {
               : null,
             correlation_id: result.correlation_id ? String(result.correlation_id) : undefined,
           });
-          pushToast(`Simulated · ${row.event}`, 'good');
+          pushToast(fill(t('workflowBindings.bindingsModule.simulated'), { event: String(row.event) }), 'good');
         } catch (err) {
-          pushToast('Simulation could not be completed. Review the sample event and try again.', 'danger');
+          pushToast(t('workflowBindings.bindingsModule.simulationCouldNotBe'), 'danger');
         }
       },
     },
@@ -1916,7 +1920,7 @@ export function BindingsModule() {
 
   const BULK_ACTIONS: Array<DataTableBulkAction<DecoratedBinding>> = [
     {
-      label: 'Disable selected',
+      label: t('workflowBindings.bindingsModule.disableSelected'),
       icon: 'lock',
       kind: 'danger',
       // W27 Cycle D closure: bulk write affordances must declare the
@@ -1929,11 +1933,11 @@ export function BindingsModule() {
           rs.map((r) => persistBindingChange(r, { status: 'disabled' }, `Disabled ${r.event}`)),
         );
         const ok = results.filter(Boolean).length;
-        pushToast(`Disabled ${ok}/${rs.length} bindings`, ok === rs.length ? 'info' : 'warn');
+        pushToast(fill(t('workflowBindings.bindingsModule.disabledBindings'), { ok: String(ok), length: String(rs.length) }), ok === rs.length ? 'info' : 'warn');
       },
     },
     {
-      label: 'Bulk reassign template',
+      label: t('workflowBindings.bindingsModule.bulkReassignTemplate'),
       icon: 'shuffle',
       kind: 'ghost',
       capability: CAP.WORKFLOWS_WRITE,
@@ -1945,8 +1949,8 @@ export function BindingsModule() {
   // input/textarea/contentEditable is focused.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      const t = document.activeElement;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || (t as HTMLElement).isContentEditable)) return;
+      const entry = document.activeElement;
+      if (entry && (entry.tagName === 'INPUT' || entry.tagName === 'TEXTAREA' || (entry as HTMLElement).isContentEditable)) return;
       if (e.key === 'n' || e.key === 'N') {
         if (canWrite) openNewBinding();
         e.preventDefault();
@@ -1965,14 +1969,14 @@ export function BindingsModule() {
       <div className="page">
         <PageHeader
           moduleKey="wf-bindings"
-          eyebrow="Workflows"
+          eyebrow={t('workflowBindings.bindingsModule.workflows')}
           titleAccent="Bindings"
           titlePlain="& triggers"
         />
         <StateView
           kind="denied"
           capability={CAP.WORKFLOWS_READ}
-          hint="You do not have permission to view workflow bindings."
+          hint={t('workflowBindings.bindingsModule.youDoNotHave')}
         />
       </div>
     );
@@ -1983,7 +1987,7 @@ export function BindingsModule() {
       <div className="page">
         <PageHeader
           moduleKey="wf-bindings"
-          eyebrow="Workflows"
+          eyebrow={t('workflowBindings.bindingsModule.workflows')}
           titleAccent="Bindings"
           titlePlain="& triggers"
           pills={[]}
@@ -1998,7 +2002,7 @@ export function BindingsModule() {
       <div className="page">
         <PageHeader
           moduleKey="wf-bindings"
-          eyebrow="Workflows"
+          eyebrow={t('workflowBindings.bindingsModule.workflows')}
           titleAccent="Bindings"
           titlePlain="& triggers"
           pills={[]}
@@ -2009,13 +2013,13 @@ export function BindingsModule() {
   }
 
   const eventsCatalog: ReactNode = (
-    <aside className="wf-bindings-events" aria-label="Event catalog">
-      <div className="section-eyebrow">Event catalog</div>
+    <aside className="wf-bindings-events" aria-label={t('workflowBindings.bindingsModule.eventCatalog')}>
+      <div className="section-eyebrow">{t('workflowBindings.bindingsModule.eventCatalog')}</div>
       <div
         className="state__hint"
         style={{ padding: '0 14px 8px', fontSize: '11px' }}
       >
-        Drag an event to bind. Recent inbound events shown live.
+        {t('workflowBindings.bindingsModule.dragAnEventTo')}
       </div>
       {Object.entries(eventGroups).map(([root, group]) => (
         <div key={root} className="wf-evt-group">
@@ -2036,13 +2040,13 @@ export function BindingsModule() {
                 draggable
                 onDragStart={(e) => e.dataTransfer.setData('text/plain', b.event)}
                 onClick={() => decorated && openBindingDrawer(decorated)}
-                aria-label={`Open binding ${b.event}`}
+                aria-label={fill(t('workflowBindings.bindingsModule.openBinding'), { event: String(b.event) })}
               >
                 <div className="wf-evt-card__name mono">{b.event}</div>
                 <div className="wf-evt-card__meta">
-                  <Chip label={`prio ${b.priority}`} kind="info" size="xs" />
+                  <Chip label={fill(t('workflowBindings.bindingsModule.prio'), { priority: String(b.priority) })} kind="info" size="xs" />
                   <span style={{ color: 'var(--ink-3)', fontSize: '10.5px' }}>
-                    {recent.length} recent
+                    {fill(t('workflowBindings.bindingsModule.recentCount'), { count: recent.length })}
                   </span>
                 </div>
               </button>
@@ -2050,13 +2054,13 @@ export function BindingsModule() {
           })}
         </div>
       ))}
-      <div className="section-eyebrow">Live inbound</div>
+      <div className="section-eyebrow">{t('workflowBindings.bindingsModule.liveInbound')}</div>
       <div className="wf-evt-stream">
         {events.slice(0, 5).map((e) => (
           <div key={e.id} className="wf-evt-stream__row">
             <Dot kind={e.matched_template ? 'good' : 'warn'} />
             <span className="mono" style={{ fontSize: '10.5px' }}>
-              Activity recorded
+              {t('workflowBindings.bindingsModule.activityRecorded')}
             </span>
             <span
               style={{
@@ -2080,26 +2084,26 @@ export function BindingsModule() {
     <div
       className="tabs"
       role="tablist"
-      aria-label="Workflow bindings tabs"
+      aria-label={t('workflowBindings.bindingsModule.workflowBindingsTabs')}
       data-testid="wf-bindings-tabs"
     >
-      {BINDINGS_TABS.map((t) => {
+      {BINDINGS_TABS.map((entry) => {
         const count =
-          t.key === 'bindings'
+          entry.key === 'bindings'
             ? decoratedBindings.length
             : (dispatchesQuery.data?.rows ?? []).length;
         return (
           <button
-            key={t.key}
+            key={entry.key}
             type="button"
             role="tab"
-            aria-selected={activeTab === t.key}
-            aria-label={t.aria}
-            data-testid={`wf-bindings-tab-${t.key}`}
-            className={`tabs__tab ${activeTab === t.key ? 'is-active' : ''}`}
-            onClick={() => switchTab(t.key)}
+            aria-selected={activeTab === entry.key}
+            aria-label={t(`workflowBindings.tabs.${entry.key}.aria`)}
+            data-testid={`wf-bindings-tab-${entry.key}`}
+            className={`tabs__tab ${activeTab === entry.key ? 'is-active' : ''}`}
+            onClick={() => switchTab(entry.key)}
           >
-            {t.label}{' '}
+            {t(`workflowBindings.tabs.${entry.key}.label`)}{' '}
             <span className="mono" style={{ color: 'var(--ink-3)', fontSize: '11px' }}>
               · {count}
             </span>
@@ -2111,14 +2115,14 @@ export function BindingsModule() {
 
   // W11-6 columns for the dispatches ledger.
   const DISPATCH_COLUMNS: Array<DataTableColumn<WorkflowBindingDispatch>> = [
-    { key: 'created_at', label: 'When', format: 'datetime', sortable: true },
-    { key: 'binding_key', label: 'Binding', mono: true, sortable: true, filterable: true },
-    { key: 'stage_key', label: 'Stage', mono: true, filterable: true },
-    { key: 'event', label: 'Event', mono: true, sortable: true, filterable: true },
-    { key: 'template_name', label: 'Template', sortable: true, filterable: true },
+    { key: 'created_at', label: t('workflowBindings.bindingsModule.when'), format: 'datetime', sortable: true },
+    { key: 'binding_key', label: t('workflowBindings.bindingsModule.binding2'), mono: true, sortable: true, filterable: true },
+    { key: 'stage_key', label: t('workflowBindings.bindingsModule.stage'), mono: true, filterable: true },
+    { key: 'event', label: t('workflowBindings.bindingsModule.event'), mono: true, sortable: true, filterable: true },
+    { key: 'template_name', label: t('workflowBindings.bindingsModule.template'), sortable: true, filterable: true },
     {
       key: 'workflow_run_id',
-      label: 'Run',
+      label: t('workflowBindings.bindingsModule.run'),
       mono: true,
       render: (raw) => {
         const id = String(raw ?? '');
@@ -2138,24 +2142,24 @@ export function BindingsModule() {
     },
     {
       key: 'outcome',
-      label: 'Outcome',
+      label: t('workflowBindings.bindingsModule.outcome'),
       filterable: true,
       render: (raw) => <DispatchOutcomeChip outcome={String(raw ?? '')} />,
     },
-    { key: 'resolved_scope_type', label: 'Scope', filterable: true, lookup: 'workflow_trigger_scope_type' },
-    { key: 'idempotency_key', label: 'Idempotency', mono: true },
+    { key: 'resolved_scope_type', label: t('workflowBindings.bindingsModule.scope'), filterable: true, lookup: 'workflow_trigger_scope_type' },
+    { key: 'idempotency_key', label: t('workflowBindings.bindingsModule.idempotency'), mono: true },
   ];
 
   const DISPATCH_ROW_ACTIONS: Array<DataTableAction<WorkflowBindingDispatch>> = [
     {
-      label: 'Open run',
+      label: t('workflowBindings.bindingsModule.openRun'),
       icon: 'right',
       onClick: (row) => {
         go(`/workflows/runs?focus=${encodeURIComponent(row.workflow_run_id)}`);
       },
     },
     {
-      label: 'Open binding',
+      label: t('workflowBindings.bindingsModule.openBinding2'),
       icon: 'right',
       onClick: (row) => {
         // Flip back to the Bindings tab and try to open the matching binding drawer.
@@ -2172,21 +2176,21 @@ export function BindingsModule() {
     <div className="page">
       <PageHeader
         moduleKey="wf-bindings"
-        eyebrow="Workflows"
+        eyebrow={t('workflowBindings.bindingsModule.workflows')}
         titleAccent="Bindings"
         titlePlain="& triggers"
         pills={[
           <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
           <span key="src" className="chip chip--xs mono">
             {activeTab === 'bindings'
-              ? 'Binding policy · settings ladder'
-              : 'Dispatch outcomes'}
+              ? t('workflowBindings.bindingsModule.bindingPolicySettingsLadder')
+              : t('workflowBindings.bindingsModule.dispatchOutcomes')}
           </span>,
         ]}
         actions={[
           <Button
             key="test"
-            label="Test event"
+            label={t('workflowBindings.bindingsModule.testEvent')}
             iconName="play"
             kind="ghost"
             onClick={openEventTester}
@@ -2194,7 +2198,7 @@ export function BindingsModule() {
           />,
           <Button
             key="new"
-            label="New binding"
+            label={t('workflowBindings.bindingsModule.newBinding')}
             iconName="plus"
             kind="primary"
             capability={CAP.WORKFLOWS_WRITE}
@@ -2221,27 +2225,27 @@ export function BindingsModule() {
                 }}
               >
                 <div>
-                  <div className="field__label">Simulation</div>
+                  <div className="field__label">{t('workflowBindings.bindingsModule.simulation')}</div>
                   <div style={{ overflowWrap: 'anywhere' }}>
-                    {simulationReadback.workflow_binding_simulation_id ? 'Simulation recorded' : 'Pending'}
+                    {simulationReadback.workflow_binding_simulation_id ? t('workflowBindings.bindingsModule.simulationRecorded') : t('workflowBindings.bindingsModule.pending')}
                   </div>
                 </div>
                 <div>
-                  <div className="field__label">Binding</div>
+                  <div className="field__label">{t('workflowBindings.bindingsModule.binding2')}</div>
                   <div style={{ overflowWrap: 'anywhere' }}>
-                    {simulationReadback.binding_key ? 'Binding matched' : 'Pending'}
+                    {simulationReadback.binding_key ? t('workflowBindings.bindingsModule.bindingMatched') : t('workflowBindings.bindingsModule.pending')}
                   </div>
                 </div>
                 <div>
-                  <div className="field__label">Stage</div>
+                  <div className="field__label">{t('workflowBindings.bindingsModule.stage')}</div>
                   <div style={{ overflowWrap: 'anywhere' }}>
-                    {simulationReadback.stage_key ? 'Stage matched' : 'Pending'}
+                    {simulationReadback.stage_key ? t('workflowBindings.bindingsModule.stageMatched') : t('workflowBindings.bindingsModule.pending')}
                   </div>
                 </div>
                 <div>
-                  <div className="field__label">Template</div>
+                  <div className="field__label">{t('workflowBindings.bindingsModule.template')}</div>
                   <div style={{ overflowWrap: 'anywhere' }}>
-                    {simulationReadback.resolved_template_id ? 'Template resolved' : 'Not resolved'}
+                    {simulationReadback.resolved_template_id ? t('workflowBindings.bindingsModule.templateResolved') : t('workflowBindings.bindingsModule.notResolved')}
                   </div>
                 </div>
               </div>
@@ -2260,86 +2264,86 @@ export function BindingsModule() {
                 }}
               >
                 <div>
-                  <div className="field__label">Binding action</div>
+                  <div className="field__label">{t('workflowBindings.bindingsModule.bindingAction')}</div>
                   <div>{workflowBindingLabel(mutationReadback.kind)}</div>
                 </div>
                 <div>
-                  <div className="field__label">Saved result</div>
+                  <div className="field__label">{t('workflowBindings.bindingsModule.savedResult')}</div>
                   <Chip
-                    label={mutationReadback.confirmed ? 'Confirmed from saved data' : 'Waiting for saved data'}
+                    label={mutationReadback.confirmed ? t('workflowBindings.bindingsModule.confirmedFromSavedData') : t('workflowBindings.bindingsModule.waitingForSavedData')}
                     kind={mutationReadback.confirmed ? 'good' : 'warn'}
                     size="xs"
                   />
                 </div>
                 <div>
-                  <div className="field__label">Binding</div>
+                  <div className="field__label">{t('workflowBindings.bindingsModule.binding2')}</div>
                   <div className="mono" style={{ overflowWrap: 'anywhere' }}>
                     {mutationReadback.bindingKey}
                   </div>
                 </div>
                 <div>
-                  <div className="field__label">Stage</div>
+                  <div className="field__label">{t('workflowBindings.bindingsModule.stage')}</div>
                   <div className="mono">{mutationReadback.stageKey}</div>
                 </div>
                 <div>
-                  <div className="field__label">Status</div>
+                  <div className="field__label">{t('workflowBindings.bindingsModule.status')}</div>
                   <div data-testid="workflow-binding-mutation-status">
                     {workflowBindingStatusLabel(mutationReadback.confirmedStatus ?? mutationReadback.expectedStatus)}
                   </div>
                 </div>
                 <div>
-                  <div className="field__label">Template</div>
+                  <div className="field__label">{t('workflowBindings.bindingsModule.template')}</div>
                   <div style={{ overflowWrap: 'anywhere' }}>
                     {tplById.get(mutationReadback.confirmedTemplateId ?? mutationReadback.expectedTemplateId ?? '')?.name ??
                       mutationReadback.confirmedTemplateId ??
                       mutationReadback.expectedTemplateId ??
-                      'Not reported'}
+                      t('workflowBindings.bindingsModule.notReported')}
                   </div>
                 </div>
                 {mutationReadback.expectedCondition !== undefined ? (
                   <div>
-                    <div className="field__label">Condition</div>
+                    <div className="field__label">{t('workflowBindings.bindingsModule.condition2')}</div>
                     <div
                       data-testid="workflow-binding-mutation-condition"
                       style={{ overflowWrap: 'anywhere' }}
                     >
                       {mutationReadback.confirmedConditionSummary ??
                         mutationReadback.expectedConditionSummary ??
-                        'Not reported'}
+                        t('workflowBindings.bindingsModule.notReported')}
                     </div>
                   </div>
                 ) : null}
                 <div>
-                  <div className="field__label">List view</div>
+                  <div className="field__label">{t('workflowBindings.bindingsModule.listView')}</div>
                   <div data-testid="workflow-binding-mutation-visible-table">
-                    {mutationReadback.visibleInList ? 'Refreshed' : 'Pending'}
+                    {mutationReadback.visibleInList ? t('workflowBindings.bindingsModule.refreshed') : t('workflowBindings.bindingsModule.pending')}
                   </div>
                 </div>
                 <div>
-                  <div className="field__label">Workflow directory</div>
+                  <div className="field__label">{t('workflowBindings.bindingsModule.workflowDirectory')}</div>
                   <div data-testid="workflow-binding-mutation-directory">
-                    {mutationReadback.visibleInDirectory ? 'Refreshed' : 'Pending'}
+                    {mutationReadback.visibleInDirectory ? t('workflowBindings.bindingsModule.refreshed') : t('workflowBindings.bindingsModule.pending')}
                   </div>
                 </div>
                 {mutationReadback.registrationId ? (
                   <div>
-                    <div className="field__label">Registration</div>
+                    <div className="field__label">{t('workflowBindings.bindingsModule.registration')}</div>
                     <div style={{ overflowWrap: 'anywhere' }}>
-                      Registration recorded
+                      {t('workflowBindings.bindingsModule.registrationRecorded')}
                     </div>
                   </div>
                 ) : null}
                 {mutationReadback.correlationId ? (
                   <div>
-                    <div className="field__label">Reference</div>
+                    <div className="field__label">{t('workflowBindings.bindingsModule.reference')}</div>
                     <div className="mono" style={{ overflowWrap: 'anywhere' }}>
-                      Recorded
+                      {t('workflowBindings.bindingsModule.recorded')}
                     </div>
                   </div>
                 ) : null}
                 {mutationReadback.error ? (
                   <div style={{ gridColumn: '1 / -1' }}>
-                    <div className="field__label">Save note</div>
+                    <div className="field__label">{t('workflowBindings.bindingsModule.saveNote')}</div>
                     <div>{mutationReadback.error}</div>
                   </div>
                 ) : null}
