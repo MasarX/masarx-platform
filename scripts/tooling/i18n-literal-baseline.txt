@@ -121,7 +121,7 @@ apps/console-v2/src/shell/NotifsPanel.tsx 7
 apps/console-v2/src/shell/Sidenav.tsx 4
 apps/console-v2/src/shell/Statusbar.tsx 19
 apps/console-v2/src/shell/TenantPicker.tsx 11
-apps/console-v2/src/shell/Topbar.tsx 15
+apps/console-v2/src/shell/Topbar.tsx 10
 apps/console-v2/src/shell/UserMenuDrawer.tsx 20
 apps/console/app/_components/webhook-tester-page.tsx 1
 apps/console/app/integrations/plugins/[plugin_id]/page.tsx 2

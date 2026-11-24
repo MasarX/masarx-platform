@@ -5,6 +5,11 @@ export const ar = {
     role: 'مشرف',
     search: 'ابحث في الشحنات، الخطط، السائقين، الإعدادات…',
     skip: 'تخطي إلى المحتوى الرئيسي',
+    openPalette: 'فتح لوحة الأوامر',
+    switchScope: 'تبديل النطاق',
+    // Starts with the visible label of the language button (WCAG 2.5.3).
+    switchLanguage: 'EN, التبديل إلى الإنجليزية',
+    userMenu: 'قائمة المستخدم',
   },
   nav: {
     today: 'اليوم',

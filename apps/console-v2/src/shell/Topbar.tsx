@@ -45,7 +45,7 @@ export function Topbar({
   crumbs,
 }: TopbarProps) {
   const { user, scope } = useIdentity();
-  const { locale, toggleLocale } = useI18n();
+  const { locale, toggleLocale, t } = useI18n();
   const { theme, density, setTheme, cycleDensity } = useTheme();
   const location = useLocation();
 
@@ -112,13 +112,16 @@ export function Topbar({
         id="cmd-trigger"
         className="cmd-trigger"
         type="button"
-        aria-label="Open command palette"
+        // WCAG 2.5.3: the name holds all visible text (placeholder and ⌘K), then the action.
+        aria-label={`${t('app.search')} ⌘K, ${t('app.openPalette')}`}
+        aria-haspopup="dialog"
+        aria-keyshortcuts="Meta+K Control+K"
         onClick={onOpenPalette}
       >
         <span className="cmd-trigger__icon" aria-hidden="true">
           <Icon name="search" size={12} />
         </span>
-        <span className="cmd-trigger__placeholder">Search shipments, plans, drivers, settings…</span>
+        <span className="cmd-trigger__placeholder">{t('app.search')}</span>
         <Kbd>⌘K</Kbd>
       </button>
 
@@ -126,7 +129,9 @@ export function Topbar({
         className="topbar__scope"
         tabIndex={0}
         role="button"
-        aria-label="Active scope (click to switch)"
+        // WCAG 2.5.3: the name comes from the visible scope; the hint is a description.
+        aria-haspopup="dialog"
+        title={t('app.switchScope')}
         onClick={onOpenScopePalette}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -135,9 +140,9 @@ export function Topbar({
           }
         }}
       >
-        <span className="scope-pill__rank">T</span>
+        <span className="scope-pill__rank" aria-hidden="true">T</span>
         <span className="scope-pill__name">{tenantLabel}</span>
-        <span className="scope-sep">·</span>
+        <span className="scope-sep" aria-hidden="true">·</span>
         <span className="scope-pill__sub mono">{subLabel}</span>
       </div>
 
@@ -157,7 +162,8 @@ export function Topbar({
         <button
           className="icon-btn"
           type="button"
-          aria-label="Toggle language"
+          // WCAG 2.5.3: the name starts with the visible AR/EN label.
+          aria-label={t('app.switchLanguage')}
           onClick={toggleLocale}
         >
           {locale === 'en' ? 'AR' : 'EN'}
@@ -182,7 +188,8 @@ export function Topbar({
           <Icon name="bell" size={14} />
           {hasUnreadNotifs ? <span className="bell-dot" aria-hidden="true" /> : null}
         </button>
-        <button className="user-btn" type="button" aria-label="User menu" onClick={onOpenUserMenu}>
+        {/* WCAG 2.5.3: the name starts with the visible initials. */}
+        <button className="user-btn" type="button" aria-label={`${initials || 'U'}, ${t('app.userMenu')}`} onClick={onOpenUserMenu}>
           <span className="avatar" aria-hidden="true">{initials || 'U'}</span>
           <span className="caret" aria-hidden="true">▾</span>
         </button>

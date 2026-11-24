@@ -30,14 +30,14 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-3);
-  border-right: 1px solid var(--line);
+  border-inline-end: 1px solid var(--line);
   text-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
 }
-.primitive-cal__head-cell:last-child { border-right: none; }
+.primitive-cal__head-cell:last-child { border-inline-end: none; }
 .primitive-cal__head-cell.is-today {
   color: var(--accent-ink);
   background: var(--accent-soft);
@@ -50,7 +50,7 @@
   letter-spacing: -0.01em;
 }
 .primitive-cal__head-cell.is-today .primitive-cal__head-day { color: var(--accent-ink); }
-.primitive-cal__head-corner { border-right: 1px solid var(--line); background: var(--paper-2); }
+.primitive-cal__head-corner { border-inline-end: 1px solid var(--line); background: var(--paper-2); }
 
 .primitive-cal__body {
   position: relative;
@@ -60,7 +60,7 @@
   overflow: auto;
 }
 .primitive-cal__hour-col {
-  border-right: 1px solid var(--line);
+  border-inline-end: 1px solid var(--line);
   background: var(--paper-2);
   display: flex;
   flex-direction: column;
@@ -71,7 +71,7 @@
   font-family: var(--font-mono);
   font-size: 9.5px;
   color: var(--ink-3);
-  text-align: right;
+  text-align: end;
   display: flex;
   align-items: flex-start;
   justify-content: flex-end;
@@ -82,11 +82,11 @@
 }
 .primitive-cal__day-col {
   position: relative;
-  border-right: 1px solid var(--line);
+  border-inline-end: 1px solid var(--line);
   display: flex;
   flex-direction: column;
 }
-.primitive-cal__day-col:last-child { border-right: none; }
+.primitive-cal__day-col:last-child { border-inline-end: none; }
 .primitive-cal__hour-cell {
   height: 22px;
   border-bottom: 1px solid transparent;
@@ -113,8 +113,8 @@
 .primitive-cal__win-col { position: relative; }
 .primitive-cal__window {
   position: absolute;
-  left: 4px;
-  right: 4px;
+  inset-inline-start: 4px;
+  inset-inline-end: 4px;
   border-radius: var(--r-2);
   padding: 4px 6px;
   font-size: 10.5px;
@@ -171,10 +171,10 @@
 }
 .primitive-hos__seg {
   height: 100%;
-  border-right: 1px solid oklch(from var(--paper) l c h / 0.6);
+  border-inline-end: 1px solid oklch(from var(--paper) l c h / 0.6);
   transition: filter var(--dur-fast);
 }
-.primitive-hos__seg:last-child { border-right: none; }
+.primitive-hos__seg:last-child { border-inline-end: none; }
 .primitive-hos__seg:hover { filter: brightness(0.92); }
 .primitive-hos__seg--driving  { background: var(--info); }
 .primitive-hos__seg--on_duty  { background: var(--warn); }
@@ -375,7 +375,7 @@
 }
 .primitive-zonemap__attribution {
   position: absolute;
-  right: 8px;
+  inset-inline-end: 8px;
   bottom: 8px;
   z-index: 3;
   padding: 2px 6px;
@@ -422,7 +422,7 @@
 .primitive-zonemap__controls {
   position: absolute;
   top: 8px;
-  right: 8px;
+  inset-inline-end: 8px;
   z-index: 3;
   display: flex;
   flex-direction: column;
@@ -593,7 +593,7 @@
 .geo-point-map__marker--neutral { color: var(--ink-3); }
 .geo-point-map__controls {
   position: absolute;
-  left: 8px;
+  left: 8px; /* physical: the map canvas does not mirror in RTL */
   bottom: 8px;
   z-index: 4;
   display: inline-flex;
@@ -620,7 +620,7 @@
 .geo-point-map__empty {
   position: absolute;
   top: 50%;
-  left: 50%;
+  left: 50%; /* physical: centered with translate(-50%) */
   width: min(420px, calc(100% - 48px));
   transform: translate(-50%, -50%);
   z-index: 2;
@@ -635,7 +635,7 @@
 }
 .geo-point-map__attribution {
   position: absolute;
-  right: 8px;
+  right: 8px; /* physical: the map canvas does not mirror in RTL */
   top: 8px;
   z-index: 3;
   max-width: calc(100% - 16px);
@@ -684,7 +684,7 @@
   padding: 8px 12px 8px 32px;
   border: none;
   background: transparent;
-  text-align: left;
+  text-align: start;
   width: 100%;
   cursor: pointer;
   font: inherit;
@@ -696,7 +696,7 @@
 .primitive-tl__row::before {
   content: '';
   position: absolute;
-  left: 13px;
+  inset-inline-start: 13px;
   top: 0;
   bottom: 0;
   width: 1px;
@@ -707,7 +707,7 @@
 }
 .primitive-tl__bullet {
   position: absolute;
-  left: 8px;
+  inset-inline-start: 8px;
   top: 12px;
   width: 11px;
   height: 11px;
@@ -753,7 +753,7 @@
   line-height: 1.4;
 }
 .primitive-tl__expand {
-  margin-left: auto;
+  margin-inline-start: auto;
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--ink-3);
@@ -841,10 +841,10 @@
   background: var(--accent-soft);
   color: var(--accent-ink);
   border-color: oklch(from var(--accent) l c h / 0.25);
-  border-bottom-right-radius: var(--r-1);
+  border-end-end-radius: var(--r-1);
 }
 .primitive-msg__row--customer .primitive-msg__bubble {
-  border-bottom-left-radius: var(--r-1);
+  border-end-start-radius: var(--r-1);
 }
 .primitive-msg__row--system .primitive-msg__bubble {
   background: transparent;
