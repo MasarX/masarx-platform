@@ -2,17 +2,18 @@
 
 The Delivery Lead owns this file.
 
-Follows engineering standard v1.10.
+Follows engineering standard v1.26.
 
 ## Branching and merging
 
 - The `main` queue permits one concurrent build. Use it without admission caps, drains or bypasses. Keep one migration item and one non-migration item in progress at a time.
 - The manual merge hold is retired. The DEV apply guard (G1–G3) protects DEV database applies.
-- Workers push their own topic branches and open their own PRs ready under the project's agent identity. Each PR names its issue (`Closes #n` or `Refs #n`).
+- The thread that made the change pushes its topic branch and opens its own PR ready under the project's agent identity. Each PR names its issue (`Closes #n` or `Refs #n`).
 - Use the approved tree-publisher App helper for authenticated GitHub work. If the helper fails, stop and report it to Delivery. Keep installation tokens and signing material out of output and shared artifacts. The owner login is reserved for approved settings changes and release tags.
 - Never force-push, rewrite public history or push directly to `main`. Change repository or organization settings only through an approved packet naming the exact setting and target value. Record the before and after values.
-- For a non-critical change, enable auto-merge with `enablePullRequestAutoMerge`, using `SQUASH` and setting `expectedHeadOid` to the PR head. GitHub merges it on green required CI.
-- A [critical change](AGENTS.md#critical-changes-the-only-changes-that-get-a-review) opens with auto-merge off and gets one independent review of the full diff in parallel with CI. Enable auto-merge using the same settings once the verdict comment names the current PR head SHA. Disable auto-merge before another push. A push after the verdict needs a new review only when it changes a critical part again.
+- For a non-critical change, the thread that made it enables auto-merge as soon as it opens the PR. Use `enablePullRequestAutoMerge` with `SQUASH` and set `expectedHeadOid` to the PR head. GitHub merges it on green required CI.
+- A [critical change](AGENTS.md#critical-changes-the-only-changes-that-get-a-review) opens with auto-merge off and gets one independent review of the full diff in parallel with CI. Enable auto-merge using the same settings once the verdict comment names the current PR head SHA.
+- Reassess the classification before each push. Disable auto-merge or remove the PR from the merge queue before pushing again. If a non-critical PR becomes critical, follow the critical-change process. A push after the verdict needs a new review only if that push adds a new critical change.
 - Changes to `main` merge only through the merge queue, using `SQUASH`. The required checks are `ci-gate` and CodeQL code scanning. CodeQL alerts of high severity or above block merging. The Delivery Lead owns the merge queue, CI health and speed, releases, deploys, rollback and alerts.
 - At push time, assign a fresh migration timestamp block above the newest migration on `main` and keep its files in landing order. A rename-only re-stamp needs no new review. Compare the pre-stamp and re-stamped commits. Verify every migration is `R100` in `git diff -M --name-status` and has zero content lines in `git diff -M --numstat`. For a critical migration, record the existing review against the resulting SHA. The append-only and ordering gate is in [migrations.cjs](scripts/ci-hosted/migrations.cjs).
 
@@ -85,7 +86,7 @@ The v0.2.0 production deploy plan uses the same renderer signing key derivation 
   - G2: Stop applies if the latest attempt in the 30-day history was unsuccessful, until `DEV_DB_REARMED_AT` is set to a valid timestamp later than that attempt's completion and no later than the current time. Treat a completed database job with missing step records as a possible apply attempt.
   - G3: Before a manual apply, require `expected_sha`, the run SHA and the current `main` tip to match.
   - G4: Once apply starts, write a sanitized apply summary on exit, including failure, and remove the temporary environment file and raw apply log.
-- Review each release gate once and record its GO. The Portfolio Lead gives the GO for non-production gates. Once approved, the gate releases each passing change automatically and writes an audit row. A new kind of change needs a new GO.
+- Review each deploy gate once and record its GO. The Portfolio Lead gives the GO for non-production deploy gates. Once approved, the gate releases each passing change automatically and writes an audit row. A new kind of change needs a new GO.
 - The routine DEV deploy audit row is the workflow run summary. It includes the G1–G3 guard decisions, the G4 apply summary and the final job's per-surface results table.
 - Each production deploy requires the owner's explicit approval. Production deployments are paused until the production deploy gate is ready. Verify a production backup before every production deploy. Keep the previous version ready, check health after deploy and roll back immediately on failure.
 - Gap: No production rollback command or staging/production deploy audit row is defined.
@@ -100,7 +101,6 @@ The v0.2.0 production deploy plan uses the same renderer signing key derivation 
 
 | Engineering standard rule | Reason for the deviation | Review date |
 | --- | --- | --- |
-| Branches, merging and releases · High-risk review | Owner decision, 24 Nov 06:16Z. “no review unless the change is critical. Critical means production, secrets, real data, making anything public, host/network/firewall changes, repo settings and release gates. For everything else, the thread that made the change opens its own PR and merges it on green required CI. No second review, no lead sign-off.” | 2026-12-04 |
 | Design principles · Configurable environments and operational limits | The deploy workflow needs a configurable environment selector, and [apply-guard.cjs](scripts/deploy/apply-guard.cjs) needs a configurable DEV history window before the workflow can reuse the guard across environments. | 2026-12-15 |
 | Environments / Security and privacy · Staging deployment and rollback rehearsal | Staging needs a deploy gate that can run a rollback rehearsal and retain its evidence. GO: Portfolio Lead 2026-11-22, review 2026-11-29. Accepted only while production stays paused; the production rollback command and a rehearsed staging rollback must exist before the first production deploy ([#200](https://github.com/MasarX/masarx-platform/issues/200)). | 2026-11-29 |
 | Environments / Security and privacy · Production deployment and rollback | The production deploy gate, rollback command and audit recording still need implementation. GO: Portfolio Lead 2026-11-22, review 2026-11-29. Accepted only while production stays paused; the production rollback command and a rehearsed staging rollback must exist before the first production deploy ([#200](https://github.com/MasarX/masarx-platform/issues/200)). | 2026-11-29 |

@@ -56,22 +56,24 @@ MasarX helps delivery teams manage shipments and coordinate integrations, wareho
 
 ## Critical changes (the only changes that get a review)
 
-The owner's rule (24 Nov): a change gets one independent review before it lands only when it is critical. Critical means production, secrets, real data, making anything public, host/network/firewall changes, repo settings and release gates.
+The owner's rule (24 Nov): critical means production, secrets, real data, making anything public, host/network/firewall changes, repo settings and release gates.
 
 - Production: production configuration and deploys, `/scripts/deploy/`, `/supabase/config.toml` and `/config/edge/functions.json`.
 - Secrets: `/scripts/utils/load-env.js`, `/scripts/utils/env-file.js`, `/scripts/qa/qa-log.js`, and any change to how secrets are stored, passed or logged.
 - Real data:
-  - migrations that drop, delete or rewrite data;
-  - purge and retention functions, `scripts/ops/workspace/destroy.js` and `scripts/ops/workspace/delete-branch.js`;
+  - every migration in `/supabase/migrations/`;
+  - deletes, purges, retention, audit logs and history, backups and restores, including `scripts/ops/workspace/destroy.js` and `scripts/ops/workspace/delete-branch.js`;
   - the database-target selection in `/scripts/utils/pg-candidates.js` and `/scripts/utils/pg-hostaddr.js`;
-  - who can read real data and which rows or fields they receive: SQL grants, row-level security, server code in `/supabase/functions/`, `SECURITY DEFINER` function bodies, API contract views, `apps/shared/security-middleware.ts`, and the `auth/` and `access-policy/` paths of the Console, Console V2 and Portal.
+  - sign-in, permissions, and server code that decides which real data people can access. This includes SQL grants, row-level security, server code in `/supabase/functions/`, `SECURITY DEFINER` function bodies, API contract views, `apps/shared/security-middleware.ts`, and the Console, Console V2 and Portal sign-in and access-policy paths. It also covers personal data carried in exports, prints and outbound messages.
+  - safety-critical rules until end-to-end tests cover every project safety rule. Each new safety rule requires review until its end-to-end test lands.
 - Making anything public: repository, package or bucket visibility, and new public endpoints.
 - Host, network and firewall: the egress proxy and its allowlists, servers, DNS and firewall rules. Egress controls include `supabase/functions/api-caller/egress.mjs`, `supabase/functions/api-caller/proxy.mjs`, `supabase/migrations/20261123046800_validate_outbound_integration_urls.sql` and `scripts/ops/verify-api-caller-guarded-egress-proxy.js`.
-- Repo settings and release gates: rulesets and repository settings, `/CODEOWNERS`, `/.github/`, `/scripts/ci-hosted/`, `/config/ci/` (including the quarantine and accepted-failure lists), `/scripts/ops/ci/`, `/scripts/tests/run-pgtap-cloud.js`, and the `scripts` entries of `package.json` files that CI runs. This section and the [merge rules in DELIVERY.md](DELIVERY.md#branching-and-merging) define release gates. Changes to either are critical.
+- Repo settings and release gates: rulesets and repository settings, `/CODEOWNERS`, `/.github/`, `/scripts/ci-hosted/`, `/config/ci/` (including the quarantine and accepted-failure lists), `/scripts/ops/ci/`, `/scripts/tests/run-pgtap-cloud.js`, and the `scripts` entries of `package.json` files that CI runs. Deleting, skipping or weakening a test, including pgTAP authorization and contract tests, or changing the test-file guard allowlist is critical.
+- The rules in this section, the owner approvals above, [Data safety](#data-safety), [Privacy](#privacy), and the [Branching and merging](DELIVERY.md#branching-and-merging), [Releases](DELIVERY.md#releases), [Deploys](DELIVERY.md#deploys) and [Security](DELIVERY.md#security) sections of `DELIVERY.md` define release gates. Changes to these rules are critical.
 
-**Not critical on their own.** Dependencies and lockfiles, `/tooling/`, money rules and tests. Spending money still requires the owner's approval.
+**Not critical on their own.** Dependencies and lockfiles, `/tooling/`, money rules, and added or changed tests. Spending money still requires the owner's approval.
 
-One review per critical change, with no repeat rounds. A push after the verdict needs a new review only when it changes a critical part again.
+Follow the [review and merge process](DELIVERY.md#branching-and-merging).
 
 ## Data safety
 
