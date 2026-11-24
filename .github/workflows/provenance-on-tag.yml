@@ -55,6 +55,11 @@ jobs:
             echo '::error::Release requires an annotated tag.'
             exit 1
           fi
+          if ! tag_name="$(git cat-file tag "$GITHUB_REF" | sed -n '1,/^$/{s/^tag //p;}')" ||
+             [[ "$tag_name" != "$GITHUB_REF_NAME" ]]; then
+            echo '::error::Annotated tag name must match the tag ref.'
+            exit 1
+          fi
           kind=version
           if [[ "$GITHUB_REF_NAME" == *-rc.* ]]; then kind=rc; fi
           if ! sha="$(git rev-parse --verify "$GITHUB_REF^{commit}")" ||
