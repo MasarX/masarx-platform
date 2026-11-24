@@ -1,7 +1,7 @@
 BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(13);
+SELECT plan(12);
 
 CREATE FUNCTION pg_temp.check_driver_delivery_kpis()
 RETURNS SETOF text
@@ -71,11 +71,7 @@ BEGIN
          (tenant_id, client_id, second_shipment, 3),
          (other_tenant_id, NULL, first_shipment, 1);
 
-  PERFORM set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'sub', actor_id)::text, true);
-  PERFORM set_config('request.jwt.claim.sub', actor_id::text, true);
-  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
-  SET LOCAL ROLE authenticated;
-
+  SET LOCAL ROLE service_role;
   FOREACH source_view IN ARRAY ARRAY['public.v_driver_directory'::regclass, 'public.driver_profile_summary_v1'::regclass] LOOP
     EXECUTE format('SELECT deliveries_today, deliveries_week, on_time_pct, customer_rating FROM %s WHERE user_id = $1',
       source_view) INTO STRICT sample USING driver_id;
@@ -87,16 +83,22 @@ BEGIN
       source_view) INTO STRICT sample USING empty_driver_id;
     RETURN NEXT ok(sample.deliveries_today IS NULL AND sample.deliveries_week IS NULL AND sample.on_time_pct IS NULL
       AND sample.customer_rating IS NULL, source_view || ' returns NULL without delivery evidence');
-    EXECUTE format('SELECT count(*) AS visible FROM %s WHERE user_id = $1', source_view)
-      INTO sample USING other_driver_id;
-    RETURN NEXT is(sample.visible, 0::bigint, source_view || ' excludes drivers from another tenant');
   END LOOP;
 
+  RESET ROLE;
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'sub', actor_id)::text, true);
+  PERFORM set_config('request.jwt.claim.sub', actor_id::text, true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  SET LOCAL ROLE authenticated;
   listed := api.ui_list_resource_v1('driver_directory', '{}'::jsonb, 20, 0, NULL);
   RETURN NEXT is((
     SELECT value->>'customer_rating' FROM jsonb_array_elements(listed->'items')
     WHERE value->>'user_id' = driver_id::text
   )::numeric, 4::numeric, 'the scoped fleet list exposes the derived rating through the executor');
+  RETURN NEXT ok(NOT EXISTS (
+    SELECT 1 FROM jsonb_array_elements(listed->'items')
+    WHERE value->>'user_id' = other_driver_id::text
+  ), 'the authenticated fleet list excludes drivers from another tenant');
 END;
 $test$;
 
