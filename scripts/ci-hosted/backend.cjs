@@ -592,25 +592,74 @@ async function qualify(diagnostic) {
         throw new Error('pg_cron launch isolation failed during migration replay');
       }
       console.log(`Migration cron isolation: ${JSON.stringify(summary.cron)}`);
-      await db.query('BEGIN READ ONLY');
-      await db.query('SET LOCAL search_path = pg_catalog');
-      const { rows } = await db.query(`
-        SELECT format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes)) AS signature,
-               coalesce(p.proacl, acldefault('f', p.proowner))::text AS acl
-        FROM pg_proc AS p
-        JOIN pg_namespace AS n ON n.oid = p.pronamespace
-        WHERE n.nspname IN ('public', 'api') AND p.prokind <> 'p'
-          AND NOT EXISTS (
-            SELECT FROM pg_depend AS d
-            WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.objsubid = 0
-              AND d.refclassid = 'pg_extension'::regclass AND d.deptype = 'e'
-          )
-        ORDER BY signature
+      const migration = fs.readFileSync('supabase/migrations/20261124120000_revoke_public_function_execute.sql', 'utf8');
+      const targets = migration.match(/^REVOKE EXECUTE ON FUNCTION([\s\S]+)\nFROM PUBLIC;$/m)?.[1];
+      if (!targets) throw new Error('Reviewed function target list missing');
+      await db.query('BEGIN');
+      try {
+        await db.query('SET LOCAL search_path TO pg_catalog');
+        await db.query('GRANT EXECUTE ON FUNCTION' + targets + '\nTO PUBLIC');
+        await db.query(`
+  CREATE TEMP TABLE scoped_functions AS
+  SELECT p.oid AS function_oid, p.proowner AS owner, p.pronamespace AS namespace,
+         format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes)) AS signature
+  FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+  WHERE n.nspname IN ('public','api') AND p.prokind <> 'p'
+    AND NOT EXISTS (SELECT 1 FROM pg_depend d
+      WHERE d.classid='pg_proc'::regclass AND d.objid=p.oid AND d.objsubid=0
+        AND d.refclassid='pg_extension'::regclass AND d.deptype='e');
+  CREATE TEMP TABLE effective_before AS
+  SELECT r.oid AS role_oid, f.function_oid, has_function_privilege(r.oid,f.function_oid,'EXECUTE') AS executable,
+         has_schema_privilege(r.oid,f.namespace,'USAGE') AS schema_usage
+  FROM pg_roles r CROSS JOIN pg_temp.scoped_functions f;
+  CREATE TEMP TABLE executor_before AS
+  SELECT object_id FROM public.ui_rpc_executor_privilege_plan_v1()
+  WHERE object_kind='function' AND privilege='EXECUTE';
       `);
-      await db.query('ROLLBACK');
-      if (!rows.length) throw new Error('Empty replayed function ACL catalog');
-      fs.writeFileSync('ci-reports/function-acls.json', JSON.stringify(rows, null, 2));
-      console.log('Captured ACLs for %d application functions.', rows.length);
+        await db.query('REVOKE EXECUTE ON FUNCTION' + targets + '\nFROM PUBLIC');
+        const plan = await db.query(`
+  SELECT f.signature,
+         ARRAY[makeaclitem('ui_rpc_executor'::regrole::oid, f.owner, 'EXECUTE', false)]::text AS acl
+  FROM public.ui_rpc_executor_privilege_plan_v1() p
+  JOIN pg_temp.scoped_functions f ON f.function_oid=p.object_id
+  WHERE p.object_kind='function' AND p.privilege='EXECUTE'
+    AND NOT EXISTS (SELECT 1 FROM pg_temp.executor_before b WHERE b.object_id=p.object_id)
+    AND NOT EXISTS (SELECT 1 FROM pg_proc v CROSS JOIN LATERAL aclexplode(v.proacl) a
+      WHERE v.oid=p.object_id AND a.grantee='ui_rpc_executor'::regrole::oid AND a.privilege_type='EXECUTE')
+  ORDER BY f.signature
+      `);
+        const losses = await db.query(`
+  SELECT f.signature, array_agg(makeaclitem(b.role_oid, f.owner, 'EXECUTE', false) ORDER BY r.rolname)::text AS acl
+  FROM pg_temp.effective_before b JOIN pg_temp.scoped_functions f USING (function_oid)
+  JOIN pg_roles r ON r.oid=b.role_oid
+  WHERE b.executable AND NOT has_function_privilege(b.role_oid,b.function_oid,'EXECUTE')
+  GROUP BY f.signature
+  ORDER BY f.signature
+      `);
+        const usable = await db.query(`
+  SELECT f.signature, array_agg(makeaclitem(b.role_oid, f.owner, 'EXECUTE', false) ORDER BY r.rolname)::text AS acl
+  FROM pg_temp.effective_before b JOIN pg_temp.scoped_functions f USING (function_oid)
+  JOIN pg_roles r ON r.oid=b.role_oid
+  WHERE b.executable AND NOT has_function_privilege(b.role_oid,b.function_oid,'EXECUTE')
+  AND b.schema_usage
+  GROUP BY f.signature
+  ORDER BY f.signature
+      `);
+        const count = await db.query(`
+  SELECT count(*) AS pairs, count(DISTINCT role_oid) AS roles, count(DISTINCT function_oid) AS functions,
+         count(*) FILTER (WHERE executable AND NOT has_function_privilege(role_oid,function_oid,'EXECUTE')) AS lost
+  FROM pg_temp.effective_before
+      `);
+        for (const [name, result] of Object.entries({
+          'executor-plan-delta': plan, 'effective-execute-losses': losses, 'effective-losses-with-schema-usage': usable,
+        })) fs.writeFileSync('ci-reports/' + name + '.json', JSON.stringify(result.rows, null, 2));
+        console.log('Compared catalog role/function pairs:', count.rows[0]);
+        console.log('Executor plan gains %d direct grants.', plan.rowCount);
+        const history = await db.query("SELECT cardinality(statements) AS statements, EXISTS (" +
+          "SELECT 1 FROM unnest(statements) AS statement WHERE statement LIKE '%REVOKE EXECUTE ON FUNCTION%FROM PUBLIC%'" +
+          ") AS exact_statement_present FROM supabase_migrations.schema_migrations WHERE name = 'revoke_public_function_execute'");
+        console.log('Closure migration history evidence:', history.rows[0]);
+      } finally { await db.query('ROLLBACK'); }
     } finally { await db.end(); }
     if (shard) {
       if (selected.includes('0zz_label_renderer_url_policy_v1.sql')) {
