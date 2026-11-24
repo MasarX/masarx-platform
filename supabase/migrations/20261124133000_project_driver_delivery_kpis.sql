@@ -2,27 +2,6 @@ BEGIN;
 SET LOCAL search_path TO public, extensions, pg_temp;
 SET LOCAL lock_timeout = '10s';
 
-GRANT SELECT (organization_id, client_id, sender_id, shipment_id, rating, submitted_at)
-  ON public.feedback_events TO ui_rpc_executor;
-CREATE POLICY feedback_events_executor_select ON public.feedback_events
-  FOR SELECT TO ui_rpc_executor USING (
-    public.is_platform_user()
-    OR (
-      public.current_user_scope_type() = 'tenant'
-      AND organization_id = public.current_user_org_id()
-    )
-    OR (
-      public.current_user_scope_type() = 'client'
-      AND client_id IS NOT NULL
-      AND client_id = public.current_user_client_id()
-    )
-    OR (
-      public.current_user_scope_type() = 'sender'
-      AND sender_id IS NOT NULL
-      AND sender_id = public.current_user_sender_id()
-    )
-  );
-
 CREATE INDEX idx_shipments_delivered_at_org
   ON public.shipments (delivered_at, organization_id)
   WHERE delivered_at IS NOT NULL;
@@ -57,87 +36,15 @@ BEGIN
         count(*)::int AS deliveries_week,
         avg((delivered_at <= planned_window_end_at)::int) AS on_time_pct
       FROM delivery_evidence GROUP BY organization_id, user_id
-    ), rating_kpis AS (
-      SELECT delivery.organization_id, delivery.user_id, avg(feedback.rating) AS customer_rating
-      FROM delivery_evidence AS delivery
-      JOIN public.feedback_events AS feedback
-        ON feedback.organization_id = delivery.organization_id AND feedback.client_id = delivery.client_id
-        AND feedback.shipment_id = delivery.shipment_id AND feedback.submitted_at >= delivery.delivered_at
-      GROUP BY delivery.organization_id, delivery.user_id
     )
-    SELECT driver.*, completion.deliveries_today, completion.deliveries_week, completion.on_time_pct, ratings.customer_rating
+    SELECT driver.*, completion.deliveries_today, completion.deliveries_week, completion.on_time_pct,
+      NULL::numeric AS customer_rating
     FROM (%s) AS driver
     LEFT JOIN completion_kpis AS completion USING (organization_id, user_id)
-    LEFT JOIN rating_kpis AS ratings USING (organization_id, user_id)
   $view$, original_view);
 
 END;
 $directory$;
-
-DO $receipt$
-DECLARE
-  plan_function constant regprocedure := 'public.ui_rpc_executor_privilege_plan_v1()'::regprocedure;
-  feedback_columns constant text[] := ARRAY['organization_id', 'client_id', 'sender_id', 'shipment_id', 'rating', 'submitted_at'];
-  relation_projection constant text := $sql$r.oid AS object_id, 'SELECT'::text AS privilege, NULL::text AS column_name
-      FROM relations r JOIN pg_class c ON c.oid=r.oid WHERE NOT EXISTS ($sql$;
-  scoped_projection constant text := $sql$r.oid AS object_id, 'SELECT'::text AS privilege, selected.column_name
-      FROM relations r JOIN pg_class c ON c.oid=r.oid
-      CROSS JOIN LATERAL unnest(CASE WHEN r.oid='public.feedback_events'::regclass
-        THEN %L::text[] ELSE ARRAY[NULL::text] END) selected(column_name)
-      WHERE NOT EXISTS ($sql$;
-  definition text := pg_get_functiondef(plan_function);
-  prior_seal text;
-  prior_before jsonb;
-  prior_after jsonb;
-  dependencies jsonb;
-  current_plan jsonb;
-  expected_plan jsonb;
-  digest text;
-BEGIN
-  LOCK TABLE public.marketplace_review_readback_state_v1 IN EXCLUSIVE MODE;
-  IF (SELECT relowner FROM pg_class WHERE oid = 'public.marketplace_review_readback_state_v1'::regclass)
-      IS DISTINCT FROM current_user::regrole::oid THEN
-    RAISE EXCEPTION 'Driver feedback receipt requires the existing receipt owner' USING ERRCODE = '42501';
-  END IF;
-  prior_seal := obj_description('public.marketplace_review_readback_state_v1'::regclass, 'pg_class');
-  SELECT encode(sha256(convert_to(jsonb_object_agg(key, value ORDER BY key)::text, 'UTF8')), 'hex')
-    INTO digest FROM public.marketplace_review_readback_state_v1;
-  IF prior_seal IS DISTINCT FROM 'marketplace_review_readback_state_v1:sha256:' || digest
-     OR cardinality(string_to_array(definition, relation_projection)) <> 2 THEN
-    RAISE EXCEPTION 'Unexpected executor receipt or relation projection before adding driver feedback';
-  END IF;
-
-  SELECT value INTO STRICT prior_before FROM public.marketplace_review_readback_state_v1 WHERE key = 'plan_before';
-  SELECT value INTO STRICT prior_after FROM public.marketplace_review_readback_state_v1 WHERE key = 'plan_after';
-  EXECUTE replace(definition, relation_projection, format(scoped_projection, feedback_columns));
-  SELECT jsonb_agg(jsonb_build_object('object_kind', 'relation', 'object_id', 'public.feedback_events'::regclass::oid,
-    'privilege', 'SELECT', 'column_name', column_name)) INTO dependencies
-  FROM unnest(feedback_columns) AS selected(column_name);
-
-  SELECT jsonb_agg(to_jsonb(p) ORDER BY object_kind, object_id, privilege, column_name) INTO current_plan
-  FROM public.ui_rpc_executor_privilege_plan_v1() p;
-  SELECT jsonb_agg(entry ORDER BY entry->>'object_kind', (entry->>'object_id')::oid,
-    entry->>'privilege', entry->>'column_name') INTO expected_plan
-  FROM jsonb_array_elements(prior_after || dependencies) entry;
-  IF current_plan IS DISTINCT FROM expected_plan THEN
-    RAISE EXCEPTION 'Only the scoped driver feedback columns may extend the executor receipt';
-  END IF;
-
-  INSERT INTO public.marketplace_review_readback_state_v1(key, value)
-  VALUES ('driver_feedback_extension_v1', jsonb_build_object('predecessor_seal', prior_seal,
-    'plan_before', prior_before, 'plan_after', prior_after, 'added', dependencies));
-  UPDATE public.marketplace_review_readback_state_v1 SET value = (
-    SELECT jsonb_agg(entry ORDER BY entry->>'object_kind', (entry->>'object_id')::oid,
-      entry->>'privilege', entry->>'column_name')
-    FROM jsonb_array_elements(value || dependencies) entry
-  ) WHERE key IN ('plan_before', 'plan_after');
-
-  SELECT encode(sha256(convert_to(jsonb_object_agg(key, value ORDER BY key)::text, 'UTF8')), 'hex')
-    INTO digest FROM public.marketplace_review_readback_state_v1;
-  EXECUTE format('COMMENT ON TABLE public.marketplace_review_readback_state_v1 IS %L',
-    'marketplace_review_readback_state_v1:sha256:' || digest);
-END;
-$receipt$;
 
 CREATE OR REPLACE VIEW public.driver_profile_summary_v1 WITH (security_invoker = true) AS
 WITH active_assignment AS (
@@ -239,6 +146,6 @@ LEFT JOIN public.v_driver_directory directory
 COMMENT ON COLUMN public.v_driver_directory.deliveries_today IS 'Attributed deliveries completed since the beginning of the UTC day.';
 COMMENT ON COLUMN public.v_driver_directory.deliveries_week IS 'Attributed deliveries completed since the beginning of the UTC ISO week.';
 COMMENT ON COLUMN public.v_driver_directory.on_time_pct IS 'Fraction of weekly deliveries with a known planned end completed by that end.';
-COMMENT ON COLUMN public.v_driver_directory.customer_rating IS 'Mean same-scope rating from feedback for the attributed weekly deliveries.';
+COMMENT ON COLUMN public.v_driver_directory.customer_rating IS 'Unavailable until scoped feedback is supported by the executor privilege plan.';
 
 COMMIT;

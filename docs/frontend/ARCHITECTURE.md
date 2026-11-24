@@ -143,7 +143,7 @@ All values have sensible defaults and can be overridden per-deployment via envir
 
 ## Fleet delivery KPIs
 
-The driver directory and profile summary use completed shipments and route assignments for delivery counts. Today starts at UTC midnight, and this week starts at Monday midnight UTC. The weekly on-time ratio uses deliveries with a planned stop end. The weekly rating averages matched customer feedback. A metric is unavailable when its source has no visible evidence.
+The driver directory and profile summary use completed shipments and route assignments for delivery counts. Today starts at UTC midnight, and this week starts at Monday midnight UTC. The weekly on-time ratio uses deliveries with a planned stop end. A delivery metric is unavailable when its source has no visible evidence. Customer rating is unavailable until the executor can read scoped shipment feedback.
 
 ## Shared Packages
 

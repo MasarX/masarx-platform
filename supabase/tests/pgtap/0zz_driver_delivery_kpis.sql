@@ -1,7 +1,7 @@
 BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(12);
+SELECT plan(13);
 
 CREATE FUNCTION pg_temp.check_driver_delivery_kpis()
 RETURNS SETOF text
@@ -23,6 +23,7 @@ DECLARE
   source_view regclass;
   sample record;
   listed jsonb;
+  projected_driver jsonb;
 BEGIN
   PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
   INSERT INTO public.organizations (id, name, slug)
@@ -66,11 +67,6 @@ BEGIN
           completed_at + interval '1 hour', completed_at - interval '1 hour'),
          (tenant_id, route_run_id, client_id, second_shipment, 'delivery', 2,
           completed_at - interval '15 minutes', completed_at - interval '1 hour');
-  INSERT INTO public.feedback_events (organization_id, client_id, shipment_id, rating)
-  VALUES (tenant_id, client_id, first_shipment, 5),
-         (tenant_id, client_id, second_shipment, 3),
-         (other_tenant_id, NULL, first_shipment, 1);
-
   SET LOCAL ROLE service_role;
   FOREACH source_view IN ARRAY ARRAY['public.v_driver_directory'::regclass, 'public.driver_profile_summary_v1'::regclass] LOOP
     EXECUTE format('SELECT deliveries_today, deliveries_week, on_time_pct, customer_rating FROM %s WHERE user_id = $1',
@@ -78,7 +74,7 @@ BEGIN
     RETURN NEXT is(sample.deliveries_today, 2, source_view || ' counts completed deliveries today');
     RETURN NEXT is(sample.deliveries_week, 2, source_view || ' counts completed deliveries this week');
     RETURN NEXT is(sample.on_time_pct, 0.5::numeric, source_view || ' derives the on-time ratio from planned windows');
-    RETURN NEXT is(sample.customer_rating, 4::numeric, source_view || ' derives ratings from matched shipment feedback');
+    RETURN NEXT is(sample.customer_rating, NULL::numeric, source_view || ' leaves customer rating unavailable');
     EXECUTE format('SELECT deliveries_today, deliveries_week, on_time_pct, customer_rating FROM %s WHERE user_id = $1',
       source_view) INTO STRICT sample USING empty_driver_id;
     RETURN NEXT ok(sample.deliveries_today IS NULL AND sample.deliveries_week IS NULL AND sample.on_time_pct IS NULL
@@ -91,10 +87,14 @@ BEGIN
   PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
   SET LOCAL ROLE authenticated;
   listed := api.ui_list_resource_v1('driver_directory', '{}'::jsonb, 20, 0, NULL);
-  RETURN NEXT is((
-    SELECT value->>'customer_rating' FROM jsonb_array_elements(listed->'items')
-    WHERE value->>'user_id' = driver_id::text
-  )::numeric, 4::numeric, 'the scoped fleet list exposes the derived rating through the executor');
+  SELECT value INTO STRICT projected_driver
+  FROM jsonb_array_elements(listed->'items')
+  WHERE value->>'user_id' = driver_id::text;
+  RETURN NEXT is(jsonb_build_array(projected_driver->'deliveries_today',
+    projected_driver->'deliveries_week', projected_driver->'on_time_pct'), '[2,2,0.5]'::jsonb,
+    'the scoped fleet list projects all three derived delivery KPIs through the executor');
+  RETURN NEXT is(projected_driver->'customer_rating', 'null'::jsonb,
+    'the scoped fleet list projects customer rating as unavailable');
   RETURN NEXT ok(NOT EXISTS (
     SELECT 1 FROM jsonb_array_elements(listed->'items')
     WHERE value->>'user_id' = other_driver_id::text
