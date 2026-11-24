@@ -56,8 +56,10 @@ BEGIN
   INSERT INTO public.route_runs (id, organization_id, driver_user_id)
   VALUES (route_run_id, tenant_id, driver_id);
   INSERT INTO public.route_run_assignments
-    (organization_id, route_run_id, driver_user_id, assignment_mode, assignment_status, assigned_at)
-  VALUES (tenant_id, route_run_id, driver_id, 'internal_driver', 'accepted', completed_at - interval '1 day');
+    (organization_id, route_run_id, driver_user_id, assignment_mode, assignment_status, assigned_at,
+     responded_by_user_id, acknowledged_at, accepted_at)
+  VALUES (tenant_id, route_run_id, driver_id, 'internal_driver', 'accepted', completed_at - interval '1 day',
+          driver_id, completed_at - interval '2 hours', completed_at - interval '1 hour');
   INSERT INTO public.route_stops
     (organization_id, route_run_id, client_id, shipment_id, stop_kind, sequence_order, planned_window_end_at, created_at)
   VALUES (tenant_id, route_run_id, client_id, first_shipment, 'delivery', 1,
@@ -66,7 +68,8 @@ BEGIN
           completed_at - interval '15 minutes', completed_at - interval '1 hour');
   INSERT INTO public.feedback_events (organization_id, client_id, shipment_id, rating)
   VALUES (tenant_id, client_id, first_shipment, 5),
-         (tenant_id, client_id, second_shipment, 3);
+         (tenant_id, client_id, second_shipment, 3),
+         (other_tenant_id, NULL, first_shipment, 1);
 
   PERFORM set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'sub', actor_id)::text, true);
   PERFORM set_config('request.jwt.claim.sub', actor_id::text, true);

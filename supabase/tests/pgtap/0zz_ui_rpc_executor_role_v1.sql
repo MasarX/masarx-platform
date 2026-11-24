@@ -325,8 +325,10 @@ SELECT ok(EXISTS (
     AND executor.polroles=ARRAY['ui_rpc_executor'::regrole::oid]
     AND executor.polwithcheck IS NULL AND executor.polpermissive=browser.polpermissive
     AND pg_get_expr(executor.polqual,executor.polrelid)=pg_get_expr(browser.polqual,browser.polrelid)
-    AND NOT has_table_privilege('ui_rpc_executor',browser.polrelid,'INSERT,UPDATE,DELETE')
-), 'driver feedback adds only an executor read policy with the existing authenticated scope');
+    AND NOT has_table_privilege('ui_rpc_executor',browser.polrelid,'SELECT,INSERT,UPDATE,DELETE')
+    AND NOT has_column_privilege('ui_rpc_executor',browser.polrelid,'comment','SELECT')
+    AND has_column_privilege('ui_rpc_executor',browser.polrelid,'rating','SELECT')
+), 'driver feedback limits executor reads to the required columns under the authenticated scope');
 WITH planned AS (SELECT DISTINCT object_id FROM pg_temp.executor_initial_privilege_plan WHERE object_kind='relation')
 SELECT is((SELECT count(*) FROM pg_policy p JOIN planned r ON r.object_id=p.polrelid
   WHERE 'authenticated'::regrole::oid=ANY(p.polroles) AND NOT 'ui_rpc_executor'::regrole::oid=ANY(p.polroles)
