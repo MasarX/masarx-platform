@@ -60,6 +60,12 @@ Follows engineering standard v1.10.
 - `prod` is configured for production data and approved releases. Production deployments are paused.
 - Keep each environment's data separate. Use generated fixtures for tests.
 
+### DEV Management API credentials
+
+Use fine-grained tokens scoped to the single DEV project. The DEV environment secret `SUPABASE_DIAGNOSTICS_ACCESS_TOKEN` serves the API schema and Edge log diagnostics with Data API Config Read (`data_api_config_read`) and Logs Read (`analytics_logs_read`) only.
+
+`SUPABASE_ACCESS_TOKEN` is shared by [Deploy DEV](.github/workflows/deploy.yml), the [DEV outbound probe](.github/workflows/dev-outbound-probe.yml), and the [signed-in DEV sweep](.github/workflows/dev-sweep-users.yml). The shared credential needs Project Settings Read, API Keys Read, API Key Secrets Read, Connection Pooling Read, Edge Functions Read-write, Edge Function Secrets Read-write, Auth Config Read, and Database Read-write. The Delivery Lead rotates it before expiry, with a maximum validity of 90 days, and verifies the sweep and a subsequent DEV deploy before retiring the previous credential.
+
 ### Signed-in DEV sweep
 
 Dispatch [DEV design sweep users](.github/workflows/dev-sweep-users.yml) from `main` with `environment=dev`. Each successful dispatch refreshes the passwords for all three accounts. Use the successful run ID before the encrypted artifact expires after one day.
