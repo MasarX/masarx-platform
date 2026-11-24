@@ -1,0 +1,86 @@
+// Platform auth email URL policy: Console V2 copy in English and Arabic (issue #302).
+import type { CatalogShape } from '@/lib/i18n';
+
+export const en = {
+  platformAuthEmail: {
+    copyableUrl: {
+      copyUrl: 'Copy URL',
+      copy: 'copy',
+    },
+    authEmailModule: {
+      platform: 'Platform',
+      youDoNotHave: 'You do not have permission to view the auth-email URL policy.',
+      readOnly: 'read-only',
+      managedByPlatformRelease: 'Managed by platform release controls',
+      copyRawJson: 'Copy raw JSON',
+      environment: 'Environment',
+      audit: 'audit {audit_status}',
+      lastReviewed: 'Last reviewed: {last_audit_at}',
+      managedThroughPlatformRelease: 'Managed through platform release controls.',
+      copyPolicyReference: 'Copy policy reference',
+      copy: 'copy',
+      callbackUrls: 'Callback URLs · {length}',
+      redirectUrls: 'Redirect URLs · {length}',
+      policySummary: 'Policy summary',
+      copy2: 'Copy',
+      auditStatus: 'Audit status',
+      lastReviewed2: 'Last reviewed',
+      callbackUrls2: 'Callback URLs',
+      redirectUrls2: 'Redirect URLs',
+      hostedCallbackUrlsAre: 'Hosted callback URLs are governed by platform release controls. This page is read-only; changes are reviewed outside the console before promotion.',
+      titleAccent: 'Auth email',
+      titlePlain: 'URL policy',
+    },
+    copy: {
+      copied: 'Copied · {label}',
+      copyFailed: 'Copy failed',
+      clipboardUnavailable: 'Clipboard unavailable',
+      url: 'URL',
+      rawPolicyJson: 'raw policy JSON',
+      policyReference: 'policy reference',
+      policySummary: 'policy summary',
+    },
+  },
+};
+
+export const ar: CatalogShape<typeof en> = {
+  platformAuthEmail: {
+    copyableUrl: {
+      copyUrl: 'نسخ الرابط',
+      copy: 'نسخ',
+    },
+    authEmailModule: {
+      platform: 'المنصة',
+      youDoNotHave: 'ليس لديك إذن لعرض سياسة روابط بريد المصادقة.',
+      readOnly: 'للقراءة فقط',
+      managedByPlatformRelease: 'تُدار عبر ضوابط إصدار المنصّة',
+      copyRawJson: 'نسخ JSON الخام',
+      environment: 'البيئة',
+      audit: 'التدقيق {audit_status}',
+      lastReviewed: 'آخر مراجعة: {last_audit_at}',
+      managedThroughPlatformRelease: 'تُدار عبر ضوابط إصدار المنصّة.',
+      copyPolicyReference: 'نسخ مرجع السياسة',
+      copy: 'نسخ',
+      callbackUrls: 'روابط الاستدعاء · {length}',
+      redirectUrls: 'روابط إعادة التوجيه · {length}',
+      policySummary: 'ملخص السياسة',
+      copy2: 'نسخ',
+      auditStatus: 'حالة التدقيق',
+      lastReviewed2: 'آخر مراجعة',
+      callbackUrls2: 'روابط الاستدعاء',
+      redirectUrls2: 'روابط إعادة التوجيه',
+      hostedCallbackUrlsAre: 'تخضع روابط الاستدعاء المستضافة لضوابط إصدار المنصّة. هذه الصفحة للقراءة فقط؛ وتُراجع التغييرات خارج وحدة التحكم قبل الترقية.',
+      titleAccent: 'سياسة روابط',
+      titlePlain: 'بريد المصادقة',
+    },
+    copy: {
+      copied: 'تم النسخ · {label}',
+      copyFailed: 'فشل النسخ',
+      clipboardUnavailable: 'الحافظة غير متاحة',
+      url: 'الرابط',
+      rawPolicyJson: 'JSON الخام للسياسة',
+      policyReference: 'مرجع السياسة',
+      policySummary: 'ملخص السياسة',
+    },
+  },
+};

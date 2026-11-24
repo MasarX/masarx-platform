@@ -85,6 +85,7 @@ import {
   validate,
   valueSamples,
 } from '@/modules/workflows/_bindings/condition-model';
+import { fill, useI18n } from '@/lib/i18n';
 
 // ---------- Domain types (UI-shaped) ----------
 //
@@ -349,10 +350,11 @@ function OperatorPicker({
   triggers: AlertTrigger[];
   onChange: (op: Operator) => void;
 }) {
+  const { t } = useI18n();
   // Treat trigger payloads as the field-discovery and type-inference corpus,
   // mirroring the bindings editor's `recent_workflow_events` source.
   const eventsLike = useMemo(
-    () => triggers.map((t) => ({ payload: t.payload })),
+    () => triggers.map((entry) => ({ payload: entry.payload })),
     [triggers],
   );
   const samples = useMemo(() => valueSamples(field, eventsLike), [field, eventsLike]);
@@ -363,7 +365,7 @@ function OperatorPicker({
       className="dt-inline-input"
       value={op}
       onChange={(e) => onChange(e.target.value as Operator)}
-      aria-label="Operator"
+      aria-label={t('platformAlerts.operatorPicker.operator')}
     >
       {opts.map((o) => (
         <option key={o} value={o}>
@@ -395,6 +397,7 @@ function ConditionRow({
   evalTotal: number;
   issue: { severity: 'error' | 'warn'; message: string } | null;
 }) {
+  const { t } = useI18n();
   const datalistId = `alerts-cond-fields-${pathLabel.replace(/\W+/g, '-')}`;
   return (
     <div
@@ -407,8 +410,8 @@ function ConditionRow({
         className="dt-inline-input mono"
         value={node.field}
         onChange={(e) => onChange({ ...node, field: e.target.value })}
-        aria-label="Field"
-        placeholder="payload.field"
+        aria-label={t('platformAlerts.conditionRow.field')}
+        placeholder={t('platformAlerts.conditionRow.payloadField')}
       />
       <datalist id={datalistId}>
         {fieldOptions.map((f) => (
@@ -425,14 +428,14 @@ function ConditionRow({
         className="dt-inline-input"
         type="text"
         value={node.value}
-        placeholder={NULLARY_OPS.includes(node.op) ? 'n/a' : 'value'}
+        placeholder={NULLARY_OPS.includes(node.op) ? 'n/a' : t('platformAlerts.conditionRow.value')}
         disabled={NULLARY_OPS.includes(node.op)}
         onChange={(e) => onChange({ ...node, value: e.target.value })}
-        aria-label="Value"
+        aria-label={t('platformAlerts.conditionRow.value2')}
       />
       <div className="wf-cond-row__meta">
         <Chip
-          label={evalTotal === 0 ? 'no sample' : `${evalPass}/${evalTotal} pass`}
+          label={evalTotal === 0 ? t('platformAlerts.conditionRow.noSample') : fill(t('platformAlerts.conditionRow.pass'), { evalPass: String(evalPass), evalTotal: String(evalTotal) })}
           kind={evalTotal === 0 ? 'neutral' : evalPass === evalTotal ? 'good' : evalPass === 0 ? 'danger' : 'warn'}
           size="xs"
         />
@@ -448,8 +451,8 @@ function ConditionRow({
       <button
         type="button"
         className="icon-btn"
-        title="Remove row"
-        aria-label="Remove condition row"
+        title={t('platformAlerts.conditionRow.removeRow')}
+        aria-label={t('platformAlerts.conditionRow.removeConditionRow')}
         onClick={onRemove}
       >
         ×
@@ -479,6 +482,7 @@ function GroupBlock({
   isRoot?: boolean;
   issues: ReturnType<typeof validate>;
 }) {
+  const { t } = useI18n();
   function patchChild(idx: number, child: ConditionNode | null) {
     if (child === null) {
       onChange({ ...node, children: node.children.filter((_, i) => i !== idx) });
@@ -511,22 +515,22 @@ function GroupBlock({
           onChange={(e) =>
             onChange({ ...node, combinator: e.target.value as 'and' | 'or' | 'not' })
           }
-          aria-label="Combinator"
+          aria-label={t('platformAlerts.groupBlock.combinator')}
         >
-          <option value="and">ALL of (AND)</option>
-          <option value="or">ANY of (OR)</option>
-          <option value="not">NONE of (NOT)</option>
+          <option value="and">{t('platformAlerts.groupBlock.allOfAnd')}</option>
+          <option value="or">{t('platformAlerts.groupBlock.anyOfOr')}</option>
+          <option value="not">{t('platformAlerts.groupBlock.noneOfNot')}</option>
         </select>
         <span className="state__hint" style={{ fontSize: '11px' }}>
           {node.combinator === 'not'
-            ? 'Pass when the inner expression is false.'
+            ? t('platformAlerts.groupBlock.passWhenTheInner')
             : node.combinator === 'or'
-              ? 'Pass when at least one row passes.'
-              : 'Pass when every row passes.'}
+              ? t('platformAlerts.groupBlock.passWhenAtLeast')
+              : t('platformAlerts.groupBlock.passWhenEveryRow')}
         </span>
         <div style={{ flex: 1 }} />
         {!isRoot && onRemove ? (
-          <button type="button" className="icon-btn" onClick={onRemove} aria-label="Remove group">
+          <button type="button" className="icon-btn" onClick={onRemove} aria-label={t('platformAlerts.groupBlock.removeGroup')}>
             ×
           </button>
         ) : null}
@@ -534,7 +538,7 @@ function GroupBlock({
       <div className="wf-cond-group__body">
         {node.children.length === 0 ? (
           <div className="state__hint" style={{ padding: '6px 4px' }}>
-            Empty group — add a row.
+            {t('platformAlerts.groupBlock.emptyGroupAddA')}
           </div>
         ) : (
           node.children.map((child, idx) => {
@@ -560,7 +564,7 @@ function GroupBlock({
                 />
               );
             }
-            const passCount = triggers.filter((t) => evalCondition(child, t.payload)).length;
+            const passCount = triggers.filter((entry) => evalCondition(child, entry.payload)).length;
             return (
               <ConditionRow
                 key={idx}
@@ -584,16 +588,16 @@ function GroupBlock({
             onClick={addLeaf}
             disabled={node.combinator === 'not' && node.children.length >= 1}
           >
-            + Row
+            {t('platformAlerts.groupBlock.row')}
           </button>
           <button
             type="button"
             className="btn btn--ghost btn--sm"
             onClick={addGroup}
             disabled={depth >= MAX_DEPTH || (node.combinator === 'not' && node.children.length >= 1)}
-            title={depth >= MAX_DEPTH ? `Max depth ${MAX_DEPTH}` : 'Add nested group'}
+            title={depth >= MAX_DEPTH ? fill(t('platformAlerts.groupBlock.maxDepth'), { MAX_DEPTH: String(MAX_DEPTH) }) : t('platformAlerts.groupBlock.addNestedGroup')}
           >
-            + Group
+            {t('platformAlerts.groupBlock.group')}
           </button>
         </div>
       </div>
@@ -602,13 +606,14 @@ function GroupBlock({
 }
 
 function ConditionEditor({ rule, triggers, onSave, onCancel }: ConditionBuilderProps) {
+  const { t } = useI18n();
   const [tree, setTree] = useState<ConditionGroup>(() => fromLegacyFlat(rule.condition));
 
-  const sourceTriggers = triggers.filter((t) => t.rule_id === rule.id);
+  const sourceTriggers = triggers.filter((entry) => entry.rule_id === rule.id);
   const recentForRule = sourceTriggers.length ? sourceTriggers : triggers;
 
   const fieldOptions = useMemo(
-    () => discoverFields(recentForRule.map((t) => ({ payload: t.payload }))),
+    () => discoverFields(recentForRule.map((entry) => ({ payload: entry.payload }))),
     [recentForRule],
   );
 
@@ -619,13 +624,13 @@ function ConditionEditor({ rule, triggers, onSave, onCancel }: ConditionBuilderP
 
   const totalSample = recentForRule.length;
   const overallPass = useMemo(
-    () => recentForRule.filter((t) => evalCondition(tree, t.payload)).length,
+    () => recentForRule.filter((entry) => evalCondition(tree, entry.payload)).length,
     [tree, recentForRule],
   );
 
   function save() {
     if (errors.length) {
-      pushToast(`Fix ${errors.length} validation error${errors.length === 1 ? '' : 's'} before saving`, 'danger');
+      pushToast(fill(t(errors.length === 1 ? 'platformAlerts.conditionEditor.fixValidationErrorOne' : 'platformAlerts.conditionEditor.fixValidationErrorOther'), { length: String(errors.length) }), 'danger');
       return;
     }
     onSave(flatLegacy ?? { jsonlogic }, jsonlogic);
@@ -634,14 +639,14 @@ function ConditionEditor({ rule, triggers, onSave, onCancel }: ConditionBuilderP
   return (
     <div className="wf-cond-builder" data-testid="alerts-cond-builder">
       <p className="state__hint">
-        Visual condition builder (AND / OR / NOT). Conditions are stored as
-        legacy flat shape on <span className="mono">alert_rules.condition</span>{' '}
-        when round-trippable, otherwise as JSONLogic. Same primitive used by{' '}
-        <span className="mono">workflow_bindings</span>.
+        {t('platformAlerts.conditionEditor.visualConditionBuilder')}{' '}
+        <span className="mono">{t('platformAlerts.conditionEditor.alertRulesCondition')}</span>{' '}
+        {t('platformAlerts.conditionEditor.whenRoundTrippable')}{' '}
+        <span className="mono">{t('platformAlerts.conditionEditor.workflowBindings')}</span>.
       </p>
       <div className="wf-cond-builder__grid">
         <div className="wf-cond-builder__main">
-          <div className="section-eyebrow">Conditions</div>
+          <div className="section-eyebrow">{t('platformAlerts.conditionEditor.conditions')}</div>
           <GroupBlock
             node={tree}
             path={[]}
@@ -654,13 +659,13 @@ function ConditionEditor({ rule, triggers, onSave, onCancel }: ConditionBuilderP
           />
         </div>
         <aside className="wf-cond-builder__aside">
-          <div className="section-eyebrow">Live evaluation</div>
+          <div className="section-eyebrow">{t('platformAlerts.conditionEditor.liveEvaluation')}</div>
           <div className="wf-cond-aside__metric">
             <Chip
               label={
                 totalSample === 0
-                  ? 'No recent triggers for this rule'
-                  : `${overallPass} / ${totalSample} recent triggers match`
+                  ? t('platformAlerts.conditionEditor.noRecentTriggersFor')
+                  : fill(t('platformAlerts.conditionEditor.recentTriggersMatch'), { overallPass: String(overallPass), totalSample: String(totalSample) })
               }
               kind={
                 totalSample === 0
@@ -674,14 +679,14 @@ function ConditionEditor({ rule, triggers, onSave, onCancel }: ConditionBuilderP
               size="xs"
             />
           </div>
-          <div className="section-eyebrow">Rule preview</div>
+          <div className="section-eyebrow">{t('platformAlerts.conditionEditor.rulePreview')}</div>
           <div className="wf-code-block" data-testid="alerts-cond-rule-preview">
             {summarizeNode(tree)}
           </div>
-          <div className="section-eyebrow">Validation</div>
+          <div className="section-eyebrow">{t('platformAlerts.conditionEditor.validation')}</div>
           <div className="wf-cond-issues">
             {issues.length === 0 ? (
-              <div className="state__hint">All rows look good.</div>
+              <div className="state__hint">{t('platformAlerts.conditionEditor.allRowsLookGood')}</div>
             ) : (
               issues.map((iss, k) => (
                 <div key={k} className="wf-cond-issue">
@@ -700,24 +705,24 @@ function ConditionEditor({ rule, triggers, onSave, onCancel }: ConditionBuilderP
           </div>
         </aside>
       </div>
-      <div className="section-eyebrow">Test against recent triggers</div>
+      <div className="section-eyebrow">{t('platformAlerts.conditionEditor.testAgainstRecentTriggers')}</div>
       <div className="wf-recent-events">
         {recentForRule.length === 0 ? (
-          <div className="state__hint">No recent triggers for this rule</div>
+          <div className="state__hint">{t('platformAlerts.conditionEditor.noRecentTriggersFor')}</div>
         ) : (
-          recentForRule.slice(0, 5).map((t) => {
-            const matches = evalCondition(tree, t.payload);
+          recentForRule.slice(0, 5).map((entry) => {
+            const matches = evalCondition(tree, entry.payload);
             return (
-              <div key={t.id} className="wf-recent-event-row" data-testid="alerts-cond-test-row">
+              <div key={entry.id} className="wf-recent-event-row" data-testid="alerts-cond-test-row">
                 <Dot kind={matches ? 'good' : 'danger'} />
                 <span className="mono" style={{ width: '110px' }}>
-                  {t.id}
+                  {entry.id}
                 </span>
                 <span style={{ flex: 1, fontSize: '11.5px', color: 'var(--ink-2)' }}>
-                  {JSON.stringify(t.payload).slice(0, 60)}
+                  {JSON.stringify(entry.payload).slice(0, 60)}
                 </span>
                 <Chip
-                  label={matches ? 'pass' : 'fail'}
+                  label={matches ? t('platformAlerts.conditionEditor.pass') : t('platformAlerts.conditionEditor.fail')}
                   kind={matches ? 'good' : 'neutral'}
                   size="xs"
                 />
@@ -728,11 +733,11 @@ function ConditionEditor({ rule, triggers, onSave, onCancel }: ConditionBuilderP
       </div>
       <div className="wf-cond-builder__footer">
         <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-3)' }}>
-          {errors.length ? `${errors.length} blocker${errors.length === 1 ? '' : 's'}` : 'Ready to save'}
+          {errors.length ? fill(t(errors.length === 1 ? 'platformAlerts.conditionEditor.blockerOne' : 'platformAlerts.conditionEditor.blockerOther'), { length: String(errors.length) }) : t('platformAlerts.conditionEditor.readyToSave')}
         </span>
         <div style={{ flex: 1 }} />
-        <Button label="Cancel" kind="ghost" onClick={onCancel} />
-        <Button label="Save" kind="primary" capability={CAP.ALERTS_WRITE} onClick={save} />
+        <Button label={t('platformAlerts.conditionEditor.cancel')} kind="ghost" onClick={onCancel} />
+        <Button label={t('platformAlerts.conditionEditor.save')} kind="primary" capability={CAP.ALERTS_WRITE} onClick={save} />
       </div>
     </div>
   );
@@ -746,7 +751,8 @@ interface TestRuleBodyProps {
 }
 
 function TestRuleBody({ rule, triggers }: TestRuleBodyProps) {
-  const ruleTriggers = triggers.filter((t) => t.rule_id === rule.id);
+  const { t } = useI18n();
+  const ruleTriggers = triggers.filter((entry) => entry.rule_id === rule.id);
   // W-Cycle-E2 (P2 #7) — sample payload resolves strictly through canonical
   // `alert_rule_test_payload_template` policy. When the policy is missing
   // (no inline fallback), the modal surfaces a `(missing-policy)` chip and
@@ -784,40 +790,39 @@ function TestRuleBody({ rule, triggers }: TestRuleBodyProps) {
   return (
     <div data-testid="alerts-test-rule">
       <p className="state__hint">
-        Read-only evaluation against the persisted rule condition. Pick a recent
-        trigger payload or paste your own; preview-only (no mutation).
+        {t('platformAlerts.testRuleBody.readOnlyEvaluationAgainst')}
       </p>
-      <div className="section-eyebrow">Recent trigger payloads</div>
+      <div className="section-eyebrow">{t('platformAlerts.testRuleBody.recentTriggerPayloads')}</div>
       <div className="wf-recent-bar">
-        {ruleTriggers.slice(0, 4).map((t) => (
+        {ruleTriggers.slice(0, 4).map((entry) => (
           <button
-            key={t.id}
+            key={entry.id}
             type="button"
             className="wf-recent-bar__btn"
-            onClick={() => setPayloadText(JSON.stringify(t.payload, null, 2))}
+            onClick={() => setPayloadText(JSON.stringify(entry.payload, null, 2))}
           >
-            <span className="mono">{t.id}</span>
-            <span style={{ opacity: 0.6 }}>{relativeFromNow(t.fired_at)}</span>
+            <span className="mono">{entry.id}</span>
+            <span style={{ opacity: 0.6 }}>{relativeFromNow(entry.fired_at)}</span>
           </button>
         ))}
         {ruleTriggers.length === 0 ? (
-          <div className="state__hint">No prior triggers for this rule.</div>
+          <div className="state__hint">{t('platformAlerts.testRuleBody.noPriorTriggersFor')}</div>
         ) : null}
       </div>
       <div className="section-eyebrow">
-        Payload
+        {t('platformAlerts.testRuleBody.payload')}
         {policyMissing ? (
           <Chip
-            label="alert_rule_test_payload_template (missing-policy)"
+            label={t('platformAlerts.testRuleBody.alertRuleTestPayload')}
             kind="danger"
             size="xs"
             className="mono"
           />
         ) : null}
         {!parsed.ok ? (
-          <Chip label="invalid details" kind="danger" size="xs" />
+          <Chip label={t('platformAlerts.testRuleBody.invalidDetails')} kind="danger" size="xs" />
         ) : (
-          <Chip label="valid details" kind="good" size="xs" />
+          <Chip label={t('platformAlerts.testRuleBody.validDetails')} kind="good" size="xs" />
         )}
       </div>
       <textarea
@@ -825,16 +830,16 @@ function TestRuleBody({ rule, triggers }: TestRuleBodyProps) {
         rows={8}
         value={payloadText}
         onChange={(e) => setPayloadText(e.target.value)}
-        aria-label="Trigger details"
+        aria-label={t('platformAlerts.testRuleBody.triggerDetails')}
       />
-      <div className="section-eyebrow">Result</div>
+      <div className="section-eyebrow">{t('platformAlerts.testRuleBody.result')}</div>
       <div style={{ padding: '4px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
         {matches === null ? (
-          <Chip label="invalid payload" kind="danger" size="sm" />
+          <Chip label={t('platformAlerts.testRuleBody.invalidPayload')} kind="danger" size="sm" />
         ) : matches ? (
-          <Chip label="PASS · would fire" kind="good" size="sm" />
+          <Chip label={t('platformAlerts.testRuleBody.passWouldFire')} kind="good" size="sm" />
         ) : (
-          <Chip label="FAIL · would not fire" kind="neutral" size="sm" />
+          <Chip label={t('platformAlerts.testRuleBody.failWouldNotFire')} kind="neutral" size="sm" />
         )}
         <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-3)' }}>
           {summarizeFlat(rule.condition)}
@@ -847,6 +852,7 @@ function TestRuleBody({ rule, triggers }: TestRuleBodyProps) {
 // ---------- Module ----------
 
 export function AlertsModule() {
+  const { t } = useI18n();
   const drawer = useDrawer();
   const modal = useModal();
   const [focusedRuleId, setFocusedRuleId] = useState<string | null>(null);
@@ -926,10 +932,10 @@ export function AlertsModule() {
   const decoratedRules = useMemo<DecoratedRule[]>(() => {
     return rawRules.map((r) => {
       const merged = r as AlertRule;
-      const ruleTriggers = triggers.filter((t) => t.rule_id === r.id);
+      const ruleTriggers = triggers.filter((entry) => entry.rule_id === r.id);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const triggered_today = ruleTriggers.filter((t) => Date.parse(t.fired_at) >= today.getTime()).length;
+      const triggered_today = ruleTriggers.filter((entry) => Date.parse(entry.fired_at) >= today.getTime()).length;
       // W14-7 — derive the canonical "last triggered" from the alert_triggers
       // sibling reads (MAX(fired_at) per rule_id) instead of the dropped
       // FE-fictional `AlertRule.last_triggered_at` column.
@@ -967,15 +973,15 @@ export function AlertsModule() {
     const enabled = decoratedRules.filter((r) => r.enabled).length;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const triggeredToday = triggers.filter((t) => Date.parse(t.fired_at) >= today.getTime()).length;
+    const triggeredToday = triggers.filter((entry) => Date.parse(entry.fired_at) >= today.getTime()).length;
     const openOps = opsAlerts.filter((a) => !resolvedAtOf(a)).length;
     const triggeredWarn = kpiThresholds?.triggered_today_warn_threshold;
     const openDanger = kpiThresholds?.open_ops_danger_threshold;
     return [
-      { label: 'Alert rules', key: 'total', value: total, tone: 'neutral' as const },
-      { label: 'Enabled', key: 'enabled', value: enabled, tone: 'good' as const, delta: `${total - enabled} paused` },
+      { label: t('platformAlerts.alertsModule.alertRules'), key: 'total', value: total, tone: 'neutral' as const },
+      { label: t('platformAlerts.alertsModule.enabled'), key: 'enabled', value: enabled, tone: 'good' as const, delta: `${total - enabled} paused` },
       {
-        label: 'Triggered today',
+        label: t('platformAlerts.alertsModule.triggeredToday'),
         key: 'today',
         value: triggeredToday,
         tone:
@@ -986,7 +992,7 @@ export function AlertsModule() {
               : ('info' as const),
       },
       {
-        label: 'Open ops alerts',
+        label: t('platformAlerts.alertsModule.openOpsAlerts'),
         key: 'open',
         value: openOps,
         tone:
@@ -997,13 +1003,13 @@ export function AlertsModule() {
               : ('good' as const),
       },
     ];
-  }, [decoratedRules, triggers, opsAlerts, kpiThresholds]);
+  }, [decoratedRules, triggers, opsAlerts, kpiThresholds, t]);
 
   // ---- Drawer / modal openers ----
 
   function openConditionEditor(rule: DecoratedRule) {
     modal.open({
-      title: `Condition · ${rule.name}`,
+      title: fill(t('platformAlerts.alertsModule.condition'), { name: String(rule.name) }),
       body: (
         <ConditionEditor
           rule={rule}
@@ -1014,7 +1020,7 @@ export function AlertsModule() {
             updateMutation.mutate(
               { alert_rule_id: rule.id, trigger_conditions: cond as Record<string, unknown> },
               {
-                onSuccess: () => pushToast(`update_alert_rule_v1 · condition saved · ${rule.name}`, 'good'),
+                onSuccess: () => pushToast(fill(t('platformAlerts.alertsModule.updateAlertRuleV1'), { name: String(rule.name) }), 'good'),
                 onError: (err: Error) => pushToast(err.message, 'danger'),
               },
             );
@@ -1026,13 +1032,13 @@ export function AlertsModule() {
 
   function openTestRule(rule: DecoratedRule) {
     modal.open({
-      title: `Test rule · ${rule.name}`,
+      title: fill(t('platformAlerts.alertsModule.testRule'), { name: String(rule.name) }),
       body: <TestRuleBody rule={rule} triggers={triggers} />,
       footer: (
         <div style={{ display: 'flex', gap: 8 }}>
-          <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('platformAlerts.alertsModule.close')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Fire server test"
+            label={t('platformAlerts.alertsModule.fireServerTest')}
             iconName="play"
             kind="primary"
             capability={CAP.ALERTS_READ}
@@ -1040,7 +1046,7 @@ export function AlertsModule() {
               testMutation.mutate(
                 { alert_rule_id: rule.id },
                 {
-                  onSuccess: () => pushToast(`Rule test completed - ${rule.name}`, 'good'),
+                  onSuccess: () => pushToast(fill(t('platformAlerts.alertsModule.ruleTestCompleted'), { name: String(rule.name) }), 'good'),
                   onError: (err: Error) => pushToast(err.message, 'danger'),
                 },
               );
@@ -1053,17 +1059,17 @@ export function AlertsModule() {
 
   function openRuleDrawer(rule: DecoratedRule) {
     setFocusedRuleId(rule.id);
-    const ruleTriggers = triggers.filter((t) => t.rule_id === rule.id);
+    const ruleTriggers = triggers.filter((entry) => entry.rule_id === rule.id);
     const ruleOpsAlerts = opsAlerts.filter((a) => sourceToRuleId(a.source) === rule.id);
     drawer.open({
-      title: `Rule · ${rule.name}`,
+      title: fill(t('platformAlerts.alertsModule.rule'), { name: String(rule.name) }),
       size: 'lg',
       onClose: () => setFocusedRuleId(null),
       body: (
         <div data-testid="alerts-rule-drawer">
           <div className="kvgrid">
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Severity</span>
+              <span className="kvgrid__key mono">{t('platformAlerts.alertsModule.severity')}</span>
               <span className="kvgrid__val">
                 {/* W54-D — severity tone resolves through canonical
                     `alert_severity` lookup row (info/warn/critical →
@@ -1077,38 +1083,38 @@ export function AlertsModule() {
               </span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Channel</span>
+              <span className="kvgrid__key mono">{t('platformAlerts.alertsModule.channel')}</span>
               <span className="kvgrid__val mono" data-testid="alerts-rule-drawer-channel-value">
                 {rule.channel}
               </span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Enabled</span>
+              <span className="kvgrid__key mono">{t('platformAlerts.alertsModule.enabled')}</span>
               <span className="kvgrid__val">
                 <Chip
-                  label={rule.enabled ? 'enabled' : 'paused'}
+                  label={rule.enabled ? t('platformAlerts.alertsModule.enabled2') : t('platformAlerts.alertsModule.paused')}
                   kind={rule.enabled ? 'good' : 'neutral'}
                   size="xs"
                 />
               </span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Last triggered</span>
+              <span className="kvgrid__key mono">{t('platformAlerts.alertsModule.lastTriggered')}</span>
               <span className="kvgrid__val mono">
                 {rule.last_triggered_relative}
               </span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Created</span>
+              <span className="kvgrid__key mono">{t('platformAlerts.alertsModule.created')}</span>
               <span className="kvgrid__val mono">
                 {rule.created_at?.split('T')[0] ?? '—'}
               </span>
             </div>
           </div>
 
-          <div className="section-eyebrow">Severity & channel</div>
+          <div className="section-eyebrow">{t('platformAlerts.alertsModule.severityChannel')}</div>
           <div style={{ padding: '0 14px 8px', display: 'grid', gridTemplateColumns: '120px 1fr', gap: 10, alignItems: 'center' }}>
-            <label className="mono">Severity</label>
+            <label className="mono">{t('platformAlerts.alertsModule.severity')}</label>
             <div style={{ display: 'flex', gap: 8 }}>
               {severityOptions().map((opt) => (
                 <label key={opt.value} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -1117,7 +1123,7 @@ export function AlertsModule() {
                     name={`alerts-severity-${rule.id}`}
                     value={opt.value}
                     defaultChecked={rule.severity === opt.value}
-                    aria-label={`Severity ${opt.label}`}
+                    aria-label={fill(t('platformAlerts.alertsModule.severity2'), { label: String(opt.label) })}
                     disabled={!canWrite}
                     onChange={() => {
                       updateMutation.mutate(
@@ -1133,11 +1139,11 @@ export function AlertsModule() {
                 </label>
               ))}
             </div>
-            <label className="mono">Channel</label>
+            <label className="mono">{t('platformAlerts.alertsModule.channel')}</label>
             <select
               className="dt-inline-input"
               defaultValue={rule.channel}
-              aria-label="Channel"
+              aria-label={t('platformAlerts.alertsModule.channel')}
               disabled={!canWrite}
               onChange={(e) => {
                 const nextChannel = e.target.value;
@@ -1158,32 +1164,32 @@ export function AlertsModule() {
             </select>
           </div>
 
-          <div className="section-eyebrow">Condition</div>
+          <div className="section-eyebrow">{t('platformAlerts.alertsModule.condition2')}</div>
           <div className="wf-code-block" data-testid="alerts-rule-cond-summary">
             {summarizeFlat(rule.condition)}
           </div>
           <div style={{ padding: '8px 14px', display: 'flex', gap: '8px' }}>
             <Button
-              label="Edit condition (visual builder)"
+              label={t('platformAlerts.alertsModule.editConditionVisualBuilder')}
               iconName="edit"
               kind="ghost"
               capability={CAP.ALERTS_WRITE}
               onClick={() => openConditionEditor(rule)}
             />
             <Button
-              label="Test rule"
+              label={t('platformAlerts.alertsModule.testRule2')}
               iconName="play"
               kind="ghost"
               onClick={() => openTestRule(rule)}
             />
           </div>
 
-          <div className="section-eyebrow">Triggers history · alert_triggers</div>
+          <div className="section-eyebrow">{t('platformAlerts.alertsModule.triggersHistoryAlertTriggers')}</div>
           <div className="wf-recent-events" data-testid="alerts-triggers-history">
             {ruleTriggers.length === 0 ? (
-              <div className="state__hint">No prior triggers.</div>
+              <div className="state__hint">{t('platformAlerts.alertsModule.noPriorTriggers')}</div>
             ) : (
-              ruleTriggers.slice(0, 8).map((t) => {
+              ruleTriggers.slice(0, 8).map((entry) => {
                 // W27-cycle-D §4 — alert_triggers lifecycle (fired|acknowledged|
                 // resolved|silenced) drives both the leading status Dot and
                 // the trailing label Chip. Tones resolve through the canonical
@@ -1192,7 +1198,7 @@ export function AlertsModule() {
                 // DotKind share the same tone vocabulary (good/warn/danger/
                 // info/neutral) so a single resolved tone drives both
                 // surfaces.
-                const triggerToneRaw = lookupRow('alert_trigger_status', t.status)?.tone as
+                const triggerToneRaw = lookupRow('alert_trigger_status', entry.status)?.tone as
                   | string
                   | undefined;
                 const dotTone: DotKind =
@@ -1200,15 +1206,15 @@ export function AlertsModule() {
                 const chipTone: ChipKind =
                   (triggerToneRaw as ChipKind | undefined) ?? 'neutral';
                 return (
-                  <div key={t.id} className="wf-recent-event-row">
+                  <div key={entry.id} className="wf-recent-event-row">
                     <Dot kind={dotTone} />
-                    <span className="mono" style={{ width: 110 }}>{t.id}</span>
+                    <span className="mono" style={{ width: 110 }}>{entry.id}</span>
                     <span style={{ flex: 1, fontSize: 11.5, color: 'var(--ink-2)' }}>
-                      {JSON.stringify(t.payload).slice(0, 60)}
+                      {JSON.stringify(entry.payload).slice(0, 60)}
                     </span>
-                    <Chip label={t.status} kind={chipTone} size="xs" />
+                    <Chip label={entry.status} kind={chipTone} size="xs" />
                     <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)', marginLeft: 6 }}>
-                      {relativeFromNow(t.fired_at)}
+                      {relativeFromNow(entry.fired_at)}
                     </span>
                   </div>
                 );
@@ -1216,10 +1222,10 @@ export function AlertsModule() {
             )}
           </div>
 
-          <div className="section-eyebrow">Active alerts · ops_alerts (open + resolved)</div>
+          <div className="section-eyebrow">{t('platformAlerts.alertsModule.activeAlertsOpsAlerts')}</div>
           <div className="wf-recent-events" data-testid="alerts-active-ops-alerts">
             {ruleOpsAlerts.length === 0 ? (
-              <div className="state__hint">No ops alerts have been opened from this rule.</div>
+              <div className="state__hint">{t('platformAlerts.alertsModule.noOpsAlertsHave')}</div>
             ) : (
               ruleOpsAlerts.map((a) => {
                 // Read canonical top-level `resolved_at` first; older rows can
@@ -1234,13 +1240,13 @@ export function AlertsModule() {
                       {a.message}
                     </span>
                     <Chip
-                      label={resolvedAt ? 'resolved' : acknowledged ? 'acknowledged' : 'open'}
+                      label={resolvedAt ? t('platformAlerts.alertsModule.resolved') : acknowledged ? t('platformAlerts.alertsModule.acknowledged') : t('platformAlerts.alertsModule.open')}
                       kind={resolvedAt ? 'good' : acknowledged ? 'warn' : 'danger'}
                       size="xs"
                     />
                     {!resolvedAt && !acknowledged ? (
                       <Button
-                        label="Ack"
+                        label={t('platformAlerts.alertsModule.ack')}
                         kind="ghost"
                         size="sm"
                         capability={CAP.ALERTS_WRITE}
@@ -1248,7 +1254,7 @@ export function AlertsModule() {
                           void (async () => {
                             try {
                               await ackOpsMutation.mutateAsync({ ops_alert_id: a.id });
-                              pushToast(`Ops alert acknowledged - ${a.id}`, 'good');
+                              pushToast(fill(t('platformAlerts.alertsModule.opsAlertAcknowledged'), { id: String(a.id) }), 'good');
                             } catch (err) {
                               const message = err instanceof Error ? err.message : 'Unable to acknowledge ops alert';
                               pushToast(message, 'danger');
@@ -1259,7 +1265,7 @@ export function AlertsModule() {
                     ) : null}
                     {!resolvedAt ? (
                       <Button
-                        label="Resolve"
+                        label={t('platformAlerts.alertsModule.resolve')}
                         kind="ghost"
                         size="sm"
                         capability={CAP.ALERTS_WRITE}
@@ -1284,7 +1290,7 @@ export function AlertsModule() {
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
           <Button
-            label={rule.enabled ? 'Pause' : 'Resume'}
+            label={rule.enabled ? t('platformAlerts.alertsModule.pause') : t('platformAlerts.alertsModule.resume')}
             iconName={rule.enabled ? 'pause' : 'play'}
             kind={rule.enabled ? 'ghost' : 'primary'}
             capability={CAP.ALERTS_WRITE}
@@ -1303,7 +1309,7 @@ export function AlertsModule() {
             }}
           />
           <Button
-            label="Delete"
+            label={t('platformAlerts.alertsModule.delete')}
             iconName="trash"
             kind="danger"
             capability={CAP.ALERTS_WRITE}
@@ -1342,7 +1348,7 @@ export function AlertsModule() {
     let severity: AlertRule['severity'] = 'warn';
     let channel: AlertRule['channel'] = 'slack';
     modal.open({
-      title: 'New alert rule',
+      title: t('platformAlerts.alertsModule.newAlertRule'),
       body: (
         <div>
           <div
@@ -1354,7 +1360,7 @@ export function AlertsModule() {
               padding: '0 4px',
             }}
           >
-            <label className="mono">Name</label>
+            <label className="mono">{t('platformAlerts.alertsModule.name')}</label>
             <input
               className="dt-inline-input"
               type="text"
@@ -1362,29 +1368,29 @@ export function AlertsModule() {
               onChange={(e) => {
                 name = e.target.value;
               }}
-              aria-label="Rule name"
+              aria-label={t('platformAlerts.alertsModule.ruleName')}
             />
-            <label className="mono">Severity</label>
+            <label className="mono">{t('platformAlerts.alertsModule.severity')}</label>
             <select
               className="dt-inline-input"
               defaultValue={severity}
               onChange={(e) => {
                 severity = e.target.value as AlertRule['severity'];
               }}
-              aria-label="Severity"
+              aria-label={t('platformAlerts.alertsModule.severity')}
             >
               {severityOptions().map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
-            <label className="mono">Channel</label>
+            <label className="mono">{t('platformAlerts.alertsModule.channel')}</label>
             <select
               className="dt-inline-input"
               defaultValue={channel}
               onChange={(e) => {
                 channel = e.target.value as AlertRule['channel'];
               }}
-              aria-label="Channel"
+              aria-label={t('platformAlerts.alertsModule.channel')}
             >
               {channelOptions().map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
@@ -1392,18 +1398,17 @@ export function AlertsModule() {
             </select>
           </div>
           <div className="state__hint" style={{ padding: '8px 4px 0' }}>
-            Routes through{' '}
-            <span className="mono">alerts.create_rule</span> when connected;
-            preview-only in this build. After create, open the Editor drawer
-            and use the visual condition builder.
+            {t('platformAlerts.alertsModule.routesThrough')}{' '}
+            <span className="mono">{t('platformAlerts.alertsModule.alertsCreateRule')}</span>{' '}
+            {t('platformAlerts.alertsModule.whenConnectedPreviewOnly')}
           </div>
         </div>
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('platformAlerts.alertsModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Create"
+            label={t('platformAlerts.alertsModule.create')}
             kind="primary"
             capability={CAP.ALERTS_WRITE}
             onClick={() => {
@@ -1435,8 +1440,8 @@ export function AlertsModule() {
   // Keyboard surface — `n` opens new rule, `t` opens test (against first row).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      const t = document.activeElement;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || (t as HTMLElement).isContentEditable)) return;
+      const entry = document.activeElement;
+      if (entry && (entry.tagName === 'INPUT' || entry.tagName === 'TEXTAREA' || (entry as HTMLElement).isContentEditable)) return;
       if ((e.key === 'n' || e.key === 'N') && canWrite) {
         openNewRule();
         e.preventDefault();
@@ -1454,15 +1459,15 @@ export function AlertsModule() {
     return (
       <div className="page">
         <PageHeader
-          eyebrow="Platform"
-          titleAccent="Alerts"
+          eyebrow={t('platformAlerts.alertsModule.platform')}
+          titleAccent={t('platformAlerts.alertsModule.titleAccent')}
           titlePlain=""
-          pills={[<span key="src" className="chip chip--xs">Rules / triggers / operations alerts</span>]}
+          pills={[<span key="src" className="chip chip--xs">{t('platformAlerts.alertsModule.rulesTriggersOperationsAlerts')}</span>]}
         />
         <StateView
           kind="denied"
           capability={CAP.ALERTS_READ}
-          hint="Alerts management requires the alerts.read capability."
+          hint={t('platformAlerts.alertsModule.alertsManagementRequiresThe')}
         />
       </div>
     );
@@ -1472,10 +1477,10 @@ export function AlertsModule() {
     return (
       <div className="page">
         <PageHeader
-          eyebrow="Platform"
-          titleAccent="Alerts"
+          eyebrow={t('platformAlerts.alertsModule.platform')}
+          titleAccent={t('platformAlerts.alertsModule.titleAccent')}
           titlePlain=""
-          pills={[<span key="src" className="chip chip--xs">Rules / triggers / operations alerts</span>]}
+          pills={[<span key="src" className="chip chip--xs">{t('platformAlerts.alertsModule.rulesTriggersOperationsAlerts')}</span>]}
         />
         <StateView kind="loading" />
       </div>
@@ -1486,8 +1491,8 @@ export function AlertsModule() {
     return (
       <div className="page">
         <PageHeader
-          eyebrow="Platform"
-          titleAccent="Alerts"
+          eyebrow={t('platformAlerts.alertsModule.platform')}
+          titleAccent={t('platformAlerts.alertsModule.titleAccent')}
           titlePlain=""
           pills={[]}
         />
@@ -1500,7 +1505,7 @@ export function AlertsModule() {
   const COLUMNS: Array<DataTableColumn<DecoratedRule>> = [
     {
       key: 'name',
-      label: 'Name',
+      label: t('platformAlerts.alertsModule.name'),
       sortable: true,
       filterable: true,
       width: '240px',
@@ -1515,7 +1520,7 @@ export function AlertsModule() {
     },
     {
       key: 'severity',
-      label: 'Severity',
+      label: t('platformAlerts.alertsModule.severity'),
       sortable: true,
       filterable: true,
       lookup: 'alert_severity',
@@ -1536,7 +1541,7 @@ export function AlertsModule() {
     },
     {
       key: 'channel',
-      label: 'Channel',
+      label: t('platformAlerts.alertsModule.channel'),
       sortable: true,
       filterable: true,
       lookup: 'alert_channel',
@@ -1547,7 +1552,7 @@ export function AlertsModule() {
     },
     {
       key: 'last_triggered_at',
-      label: 'Last triggered',
+      label: t('platformAlerts.alertsModule.lastTriggered'),
       sortable: true,
       render: (_raw, row) => {
         const age = ageChip(row.last_triggered_at, ageThresholds);
@@ -1565,7 +1570,7 @@ export function AlertsModule() {
     // before backend aggregation runs).
     {
       key: 'trigger_count_24h',
-      label: 'Fires 24h',
+      label: t('platformAlerts.alertsModule.fires24h'),
       mono: true,
       align: 'right',
       sortable: true,
@@ -1585,14 +1590,14 @@ export function AlertsModule() {
     },
     {
       key: 'enabled',
-      label: 'Enabled',
+      label: t('platformAlerts.alertsModule.enabled'),
       sortable: true,
       filterable: true,
       render: (_raw, row) => (
         <button
           type="button"
           className={`btn btn--sm ${row.enabled ? 'btn--ghost' : ''}`}
-          aria-label={row.enabled ? 'Pause rule' : 'Resume rule'}
+          aria-label={row.enabled ? t('platformAlerts.alertsModule.pauseRule') : t('platformAlerts.alertsModule.resumeRule')}
           disabled={!canWrite}
           onClick={(e) => {
             e.stopPropagation();
@@ -1608,7 +1613,7 @@ export function AlertsModule() {
             );
           }}
         >
-          {row.enabled ? 'Enabled' : 'Paused'}
+          {row.enabled ? t('platformAlerts.alertsModule.enabled') : t('platformAlerts.alertsModule.paused2')}
         </button>
       ),
     },
@@ -1616,18 +1621,18 @@ export function AlertsModule() {
 
   const ROW_ACTIONS: Array<DataTableAction<DecoratedRule>> = [
     {
-      label: 'Edit condition',
+      label: t('platformAlerts.alertsModule.editCondition'),
       icon: 'edit',
       capability: CAP.ALERTS_WRITE,
       onClick: (row) => openConditionEditor(row),
     },
     {
-      label: 'Test rule',
+      label: t('platformAlerts.alertsModule.testRule2'),
       icon: 'play',
       onClick: (row) => openTestRule(row),
     },
     {
-      label: 'Pause',
+      label: t('platformAlerts.alertsModule.pause'),
       icon: 'pause',
       capability: CAP.ALERTS_WRITE,
       onClick: (row) => {
@@ -1641,7 +1646,7 @@ export function AlertsModule() {
       },
     },
     {
-      label: 'Delete',
+      label: t('platformAlerts.alertsModule.delete'),
       icon: 'trash',
       kind: 'danger',
       capability: CAP.ALERTS_WRITE,
@@ -1668,33 +1673,33 @@ export function AlertsModule() {
     return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
   });
   const headerPills: ReactNode[] = [
-    <span key="src" className="chip chip--xs">Rules / triggers / operations alerts</span>,
+    <span key="src" className="chip chip--xs">{t('platformAlerts.alertsModule.rulesTriggersOperationsAlerts')}</span>,
     <span
       key="dir"
       className="chip chip--xs"
-      title="Rule analytics view derives severity, condition summary, recent trigger counts, and throttle state"
+      title={t('platformAlerts.alertsModule.ruleAnalyticsViewDerives')}
     >
-      Rule analytics
+      {t('platformAlerts.alertsModule.ruleAnalytics')}
     </span>,
     directoryThrottledCount > 0 ? (
       <span key="throttle" className="chip chip--xs chip--warn">
-        {`${directoryThrottledCount} throttled`}
+        {fill(t('platformAlerts.alertsModule.throttled'), { directoryThrottledCount: String(directoryThrottledCount) })}
       </span>
     ) : null,
-    <span key="parity" className="chip chip--xs mono" title="Datadog/PagerDuty/Sentry parity">parity · DD/PD/Sentry</span>,
+    <span key="parity" className="chip chip--xs mono" title={t('platformAlerts.alertsModule.datadogPagerdutySentryParity')}>{t('platformAlerts.alertsModule.parityDdPdSentry')}</span>,
   ].filter(Boolean) as ReactNode[];
 
   return (
     <div className="page">
       <PageHeader
-        eyebrow="Platform"
-        titleAccent="Alerts"
-        titlePlain="management"
+        eyebrow={t('platformAlerts.alertsModule.platform')}
+        titleAccent={t('platformAlerts.alertsModule.manageTitleAccent')}
+        titlePlain={t('platformAlerts.alertsModule.manageTitlePlain')}
         pills={headerPills}
         actions={[
           <Button
             key="test"
-            label="Test rule"
+            label={t('platformAlerts.alertsModule.testRule2')}
             iconName="play"
             kind="ghost"
             onClick={() => decoratedRules[0] && openTestRule(decoratedRules[0])}
@@ -1703,7 +1708,7 @@ export function AlertsModule() {
           />,
           <Button
             key="new"
-            label="New rule"
+            label={t('platformAlerts.alertsModule.newRule')}
             iconName="plus"
             kind="primary"
             capability={CAP.ALERTS_WRITE}
@@ -1728,13 +1733,13 @@ export function AlertsModule() {
         rowActions={ROW_ACTIONS}
       />
 
-      <section aria-label="Operations alerts" data-testid="alerts-global-ops-alerts">
+      <section aria-label={t('platformAlerts.alertsModule.operationsAlerts')} data-testid="alerts-global-ops-alerts">
         <div className="section-eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>
-          Operations alerts
+          {t('platformAlerts.alertsModule.operationsAlerts')}
         </div>
         <div className="wf-recent-events" style={{ padding: 0, maxHeight: 260 }}>
           {recentOpsAlerts.length === 0 ? (
-            <div className="state__hint">No active operations alerts.</div>
+            <div className="state__hint">{t('platformAlerts.alertsModule.noActiveOperationsAlerts')}</div>
           ) : (
             recentOpsAlerts.map((alert) => {
               const resolvedAt = resolvedAtOf(alert);
@@ -1751,7 +1756,7 @@ export function AlertsModule() {
                     {alert.message}
                   </span>
                   <Chip
-                    label={resolvedAt ? 'resolved' : acknowledged ? 'acknowledged' : 'open'}
+                    label={resolvedAt ? t('platformAlerts.alertsModule.resolved') : acknowledged ? t('platformAlerts.alertsModule.acknowledged') : t('platformAlerts.alertsModule.open')}
                     kind={resolvedAt ? 'good' : acknowledged ? 'warn' : 'danger'}
                     size="xs"
                   />
@@ -1760,7 +1765,7 @@ export function AlertsModule() {
                   </span>
                   {!resolvedAt && !acknowledged ? (
                     <Button
-                      label="Ack"
+                      label={t('platformAlerts.alertsModule.ack')}
                       kind="ghost"
                       size="sm"
                       capability={CAP.ALERTS_WRITE}
@@ -1768,7 +1773,7 @@ export function AlertsModule() {
                         void (async () => {
                           try {
                             await ackOpsMutation.mutateAsync({ ops_alert_id: alert.id });
-                            pushToast(`Ops alert acknowledged - ${alert.id}`, 'good');
+                            pushToast(fill(t('platformAlerts.alertsModule.opsAlertAcknowledged'), { id: String(alert.id) }), 'good');
                           } catch (err) {
                             const message = err instanceof Error ? err.message : 'Unable to acknowledge ops alert';
                             pushToast(message, 'danger');
@@ -1779,7 +1784,7 @@ export function AlertsModule() {
                   ) : null}
                   {!resolvedAt ? (
                     <Button
-                      label="Resolve"
+                      label={t('platformAlerts.alertsModule.resolve')}
                       kind="ghost"
                       size="sm"
                       capability={CAP.ALERTS_WRITE}

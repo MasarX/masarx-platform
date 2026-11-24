@@ -24,6 +24,7 @@ import { useModal } from '@/hooks/useOverlay';
 import { pushToast } from '@/components/toastStore';
 import { getLookups } from '@/lib/api';
 import type { Scope, SettingsResolution, ScopeType } from '@/types/domain';
+import { fill, useI18n, type Translate } from '@/lib/i18n';
 
 // W-Cycle-E2 (P2 #11) — resolves the canonical scope identifier for a given
 // ladder tier from the active identity scope chain. Mirrors the helper at
@@ -47,18 +48,20 @@ function formatResolutionReference(value: string | null | undefined): string {
 
 // 10 canonical policy categories. Attestation is included so the
 // CLAUDE.md mobile attestation contract is visible without leaving the page.
-const CATEGORIES = [
-  { key: 'mobile_visibility_policy', label: 'Visibility', resolver: 'resolve_mobile_visibility_policy' },
-  { key: 'mobile_diagnostics_policy', label: 'Diagnostics', resolver: 'resolve_mobile_diagnostics_policy' },
-  { key: 'device_policy', label: 'Device', resolver: 'resolve_device_policy' },
-  { key: 'navigation_policy', label: 'Navigation', resolver: 'resolve_navigation_policy' },
-  { key: 'map_policy', label: 'Map', resolver: 'resolve_map_policy' },
-  { key: 'communication_policy', label: 'Communication', resolver: 'resolve_communication_policy' },
-  { key: 'address_policy', label: 'Address', resolver: 'resolve_address_policy' },
-  { key: 'driver_safety_policy', label: 'Driver safety', resolver: 'resolve_driver_safety_policy' },
-  { key: 'ux_safety_policy', label: 'UX safety', resolver: 'resolve_ux_safety_policy' },
-  { key: 'mobile_attestation_policy', label: 'Attestation', resolver: 'resolve_mobile_attestation_policy' },
-] as const;
+function policyCategories(t: Translate) {
+  return [
+    { key: 'mobile_visibility_policy', label: t('platformMobilePolicy.mobilePolicyModule.categoryVisibility'), resolver: 'resolve_mobile_visibility_policy' },
+    { key: 'mobile_diagnostics_policy', label: t('platformMobilePolicy.mobilePolicyModule.categoryDiagnostics'), resolver: 'resolve_mobile_diagnostics_policy' },
+    { key: 'device_policy', label: t('platformMobilePolicy.mobilePolicyModule.categoryDevice'), resolver: 'resolve_device_policy' },
+    { key: 'navigation_policy', label: t('platformMobilePolicy.mobilePolicyModule.categoryNavigation'), resolver: 'resolve_navigation_policy' },
+    { key: 'map_policy', label: t('platformMobilePolicy.mobilePolicyModule.categoryMap'), resolver: 'resolve_map_policy' },
+    { key: 'communication_policy', label: t('platformMobilePolicy.mobilePolicyModule.categoryCommunication'), resolver: 'resolve_communication_policy' },
+    { key: 'address_policy', label: t('platformMobilePolicy.mobilePolicyModule.categoryAddress'), resolver: 'resolve_address_policy' },
+    { key: 'driver_safety_policy', label: t('platformMobilePolicy.mobilePolicyModule.categoryDriverSafety'), resolver: 'resolve_driver_safety_policy' },
+    { key: 'ux_safety_policy', label: t('platformMobilePolicy.mobilePolicyModule.categoryUxSafety'), resolver: 'resolve_ux_safety_policy' },
+    { key: 'mobile_attestation_policy', label: t('platformMobilePolicy.mobilePolicyModule.categoryAttestation'), resolver: 'resolve_mobile_attestation_policy' },
+  ] as const;
+}
 
 // SCHEMA-DRIFT NOTE (Wave 6 / W6-6, updated W13-3 + W14-7 — see
 // __audit__/SCHEMA-DRIFT/PLATFORM.md §5):
@@ -166,43 +169,45 @@ type AttestationFilter = string;
 // columns; the `render` callbacks fall through `modelOf` /
 // `attestationStatusOf` so legacy seed rows that still nest the values
 // under `metadata.*` continue to render identically.
-const DEVICE_COLUMNS: DataTableColumn<DeviceRow>[] = [
-  { key: 'device_id', label: 'Device', mono: true, sortable: true, filterable: true },
-  { key: 'user_id', label: 'User', mono: true, sortable: true, filterable: true },
-  { key: 'platform', label: 'Platform', sortable: true, filterable: true },
-  {
-    key: 'model',
-    label: 'Model',
-    sortable: true,
-    filterable: true,
-    render: (_raw, row) => modelOf(row) ?? '—',
-  },
-  { key: 'os_version', label: 'OS', sortable: true },
-  {
-    key: 'attestation_status',
-    label: 'Attestation',
-    sortable: true,
-    filterable: true,
-    render: (_raw, row) => attestationStatusOf(row) ?? '—',
-  },
-  {
-    key: 'access_state',
-    label: 'Access',
-    sortable: true,
-    filterable: true,
-    render: (_raw, row) => deviceAccessStateOf(row),
-  },
-  {
-    key: 'revoked_reason',
-    label: 'Revocation',
-    filterable: true,
-    render: (_raw, row) => {
-      if (!isDeviceRevoked(row)) return 'not revoked';
-      return row.revoked_reason ?? 'Revoked by backend';
+function deviceColumns(t: Translate): DataTableColumn<DeviceRow>[] {
+  return [
+    { key: 'device_id', label: t('platformMobilePolicy.mobilePolicyModule.colDevice'), mono: true, sortable: true, filterable: true },
+    { key: 'user_id', label: t('platformMobilePolicy.mobilePolicyModule.colUser'), mono: true, sortable: true, filterable: true },
+    { key: 'platform', label: t('platformMobilePolicy.mobilePolicyModule.colPlatform'), sortable: true, filterable: true },
+    {
+      key: 'model',
+      label: t('platformMobilePolicy.mobilePolicyModule.colModel'),
+      sortable: true,
+      filterable: true,
+      render: (_raw, row) => modelOf(row) ?? '—',
     },
-  },
-  { key: 'last_seen_at', label: 'Last seen', format: 'datetime', sortable: true },
-];
+    { key: 'os_version', label: t('platformMobilePolicy.mobilePolicyModule.colOs'), sortable: true },
+    {
+      key: 'attestation_status',
+      label: t('platformMobilePolicy.mobilePolicyModule.colAttestation'),
+      sortable: true,
+      filterable: true,
+      render: (_raw, row) => attestationStatusOf(row) ?? '—',
+    },
+    {
+      key: 'access_state',
+      label: t('platformMobilePolicy.mobilePolicyModule.colAccess'),
+      sortable: true,
+      filterable: true,
+      render: (_raw, row) => deviceAccessStateOf(row),
+    },
+    {
+      key: 'revoked_reason',
+      label: t('platformMobilePolicy.mobilePolicyModule.colRevocation'),
+      filterable: true,
+      render: (_raw, row) => {
+        if (!isDeviceRevoked(row)) return t('platformMobilePolicy.mobilePolicyModule.notRevoked');
+        return row.revoked_reason ?? t('platformMobilePolicy.mobilePolicyModule.revokedByBackend');
+      },
+    },
+    { key: 'last_seen_at', label: t('platformMobilePolicy.mobilePolicyModule.colLastSeen'), format: 'datetime', sortable: true },
+  ];
+}
 
 interface PolicyResolutionShape {
   category: string;
@@ -239,6 +244,7 @@ function ChangeRequestForm({
   resolverName: string;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const propose = useProposeSettingsChange();
   const { scope } = useIdentity();
   const tenantId = scope.tenant?.id ?? '';
@@ -281,17 +287,17 @@ function ChangeRequestForm({
       );
       if (!dryRun) onClose();
     } catch (err) {
-      pushToast(`Propose failed · ${(err as Error)?.message || 'invalid JSON'}`, 'danger');
+      pushToast(fill(t('platformMobilePolicy.changeRequestForm.proposeFailed'), { value: String((err as Error)?.message || 'invalid JSON') }), 'danger');
     }
   };
 
   return (
     <div>
       <p className="state__hint">
-        {`Submits via request_settings_change_v1. Resolver chain: ${resolverName} -> resolve_settings_row_from_policy_context_v1.`}
+        {fill(t('platformMobilePolicy.changeRequestForm.submitsViaRequestSettings'), { resolverName: String(resolverName) })}
       </p>
       <div className="field">
-        <label className="field__label">Scope</label>
+        <label className="field__label">{t('platformMobilePolicy.changeRequestForm.scope')}</label>
         <select className="field" value={scopeType} onChange={(e) => setScopeType(e.target.value as ScopeType)}>
           {scopeOptions.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -301,7 +307,7 @@ function ChangeRequestForm({
         </select>
       </div>
       <div className="field">
-        <label className="field__label">Proposed value (JSON · validated server-side)</label>
+        <label className="field__label">{t('platformMobilePolicy.changeRequestForm.proposedValueJsonValidated')}</label>
         <textarea
           rows={5}
           style={{ fontFamily: 'var(--font-mono)', fontSize: '11.5px', width: '100%' }}
@@ -310,25 +316,25 @@ function ChangeRequestForm({
         />
       </div>
       <div className="field">
-        <label className="field__label">Justification</label>
+        <label className="field__label">{t('platformMobilePolicy.changeRequestForm.justification')}</label>
         <input
           type="text"
           value={justification}
           onChange={(e) => setJustification(e.target.value)}
-          placeholder="Required by KSA driver-safety review"
+          placeholder={t('platformMobilePolicy.changeRequestForm.requiredByKsaDriver')}
         />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
-        <Button label="Cancel" kind="ghost" onClick={onClose} />
+        <Button label={t('platformMobilePolicy.changeRequestForm.cancel')} kind="ghost" onClick={onClose} />
         <Button
-          label="Preview impact (dry-run)"
+          label={t('platformMobilePolicy.changeRequestForm.previewImpactDryRun')}
           iconName="search"
           kind="primary"
           capability={CAP.SETTINGS_WRITE}
           onClick={() => submit(true)}
         />
         <Button
-          label="Submit"
+          label={t('platformMobilePolicy.changeRequestForm.submit')}
           iconName="check"
           kind="primary"
           capability={CAP.SETTINGS_WRITE}
@@ -346,6 +352,7 @@ function DeviceRevokeForm({
   row: DeviceRow;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const revokeDevice = useRevokeDevice();
   const [reason, setReason] = useState('');
   const deviceId = String(row.device_id ?? row.device_identifier_sha256 ?? row.id);
@@ -353,7 +360,7 @@ function DeviceRevokeForm({
 
   const submit = async () => {
     if (!trimmedReason) {
-      pushToast('Revocation reason required', 'warn');
+      pushToast(t('platformMobilePolicy.deviceRevokeForm.revocationReasonRequired'), 'warn');
       return;
     }
     try {
@@ -361,29 +368,29 @@ function DeviceRevokeForm({
       pushToast(`ui_execute_user_device_revoke_v1 - ${deviceId} - revoked`, 'good');
       onClose();
     } catch (err) {
-      pushToast(`Revoke failed - ${(err as Error)?.message || 'unknown error'}`, 'danger');
+      pushToast(fill(t('platformMobilePolicy.deviceRevokeForm.revokeFailed'), { value: String((err as Error)?.message || t('platformMobilePolicy.deviceRevokeForm.unknownError')) }), 'danger');
     }
   };
 
   return (
     <div className="form-grid" data-testid="mobile-device-revoke-form">
       <p className="state__hint">
-        Revoke backend access for <span className="mono">{deviceId}</span>. The devices table refreshes
-        from the backend registry after confirmation.
+        {t('platformMobilePolicy.deviceRevokeForm.revokeBackendAccessFor')} <span className="mono">{deviceId}</span>
+        {t('platformMobilePolicy.deviceRevokeForm.theDevicesTableRefreshes')}
       </p>
       <label className="field__label" htmlFor={`mobile-device-revoke-reason-${row.id}`}>
-        Revocation reason
+        {t('platformMobilePolicy.deviceRevokeForm.revocationReason')}
       </label>
       <input
         id={`mobile-device-revoke-reason-${row.id}`}
         value={reason}
         onChange={(event) => setReason(event.target.value)}
-        placeholder="Lost device, replaced scanner, or security review"
+        placeholder={t('platformMobilePolicy.deviceRevokeForm.lostDeviceReplacedScanner')}
       />
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-        <Button label="Cancel" kind="ghost" onClick={onClose} />
+        <Button label={t('platformMobilePolicy.deviceRevokeForm.cancel')} kind="ghost" onClick={onClose} />
         <Button
-          label={revokeDevice.isPending ? 'Revoking...' : 'Confirm revoke'}
+          label={revokeDevice.isPending ? t('platformMobilePolicy.deviceRevokeForm.revoking') : t('platformMobilePolicy.deviceRevokeForm.confirmRevoke')}
           kind="danger"
           capability={CAP.USER_DEVICES_WRITE}
           disabled={!trimmedReason || revokeDevice.isPending}
@@ -409,6 +416,7 @@ function PolicyEditorCard({
   scope: Scope;
   onRequestChange: () => void;
 }) {
+  const { t } = useI18n();
   const { data, isLoading } = useResolveMobilePolicy(category);
   const resolved = data as PolicyResolutionShape | undefined;
 
@@ -449,13 +457,13 @@ function PolicyEditorCard({
         />
         {overrides ? (
           <Chip
-            label={`${resolvedFrom} overrides ${overrides}`}
+            label={fill(t('platformMobilePolicy.policyEditorCard.overrides'), { resolvedFrom: String(resolvedFrom), overrides: String(overrides) })}
             kind="warn"
             size="xs"
           />
         ) : null}
         <Button
-          label="Request change"
+          label={t('platformMobilePolicy.policyEditorCard.requestChange')}
           iconName="edit"
           kind="ghost"
           size="sm"
@@ -467,7 +475,7 @@ function PolicyEditorCard({
       {isLoading ? (
         <StateView kind="loading" />
       ) : !resolved ? (
-        <StateView kind="empty" hint="No policy resolved." />
+        <StateView kind="empty" hint={t('platformMobilePolicy.policyEditorCard.noPolicyResolved')} />
       ) : rows.length ? (
         <KvGrid rows={rows} />
       ) : (
@@ -488,7 +496,7 @@ function PolicyEditorCard({
 
       {resolved?.ladder_path?.length ? (
         <>
-          <div className="eyebrow" style={{ marginTop: '10px', fontSize: '10.5px' }}>Scope ladder</div>
+          <div className="eyebrow" style={{ marginTop: '10px', fontSize: '10.5px' }}>{t('platformMobilePolicy.policyEditorCard.scopeLadder')}</div>
           <LadderViz resolution={resolved as unknown as SettingsResolution} />
         </>
       ) : null}
@@ -501,6 +509,7 @@ function PolicyEditorCard({
 }
 
 function MobileShellPreview() {
+  const { t } = useI18n();
   const { data: visibility } = useResolveMobilePolicy('mobile_visibility_policy');
   const { data: safety } = useResolveMobilePolicy('driver_safety_policy');
   const visRes = visibility as PolicyResolutionShape | undefined;
@@ -516,15 +525,15 @@ function MobileShellPreview() {
   const lockKph = (() => {
     const v = safetyRes?.value;
     if (v && typeof v === 'object' && !Array.isArray(v)) {
-      const t = (v as Record<string, unknown>)['lock_threshold_kph'];
-      if (typeof t === 'number') return t;
+      const entry = (v as Record<string, unknown>)['lock_threshold_kph'];
+      if (typeof entry === 'number') return entry;
     }
     return null;
   })();
 
   return (
     <div className="mobile-preview" style={{ display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' }}>
-      <div className="eyebrow">Resolved-view preview</div>
+      <div className="eyebrow">{t('platformMobilePolicy.mobileShellPreview.resolvedViewPreview')}</div>
       <div
         style={{
           width: '280px',
@@ -547,15 +556,15 @@ function MobileShellPreview() {
             textAlign: 'center',
           }}
         >
-          Field Ops
+          {t('platformMobilePolicy.mobileShellPreview.fieldOps')}
         </div>
         <div className="mono" style={{ fontSize: '10.5px', color: 'var(--ink-3)', textAlign: 'center' }}>
-          driver · Khalid Al-Otaibi
+          {t('platformMobilePolicy.mobileShellPreview.driverKhalidAlOtaibi')}
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '12px' }}>
           {surfaces.length === 0 ? (
             <div className="mono" style={{ fontSize: '10.5px', color: 'var(--ink-3)', textAlign: 'center' }}>
-              No surfaces resolved.
+              {t('platformMobilePolicy.mobileShellPreview.noSurfacesResolved')}
             </div>
           ) : (
             surfaces.map((s) => (
@@ -570,17 +579,20 @@ function MobileShellPreview() {
           )}
         </div>
         <div className="mono" style={{ fontSize: '9.5px', color: 'var(--ink-3)', textAlign: 'center', marginTop: '8px' }}>
-          {lockKph != null ? `lock_threshold_kph = ${lockKph} · driver_safety_policy` : 'driver_safety_policy · pending resolve'}
+          {lockKph != null ? fill(t('platformMobilePolicy.mobileShellPreview.lockThresholdKphDriver'), { lockKph: String(lockKph) }) : t('platformMobilePolicy.mobileShellPreview.driverSafetyPolicyPending')}
         </div>
       </div>
       <p className="state__hint" style={{ textAlign: 'center', maxWidth: '300px' }}>
-        Synthetic FieldOps shell re-resolves on policy edits via canonical resolver shapes — no fabricated mobile UI behavior.
+        {t('platformMobilePolicy.mobileShellPreview.simulatedFieldopsShell')}
       </p>
     </div>
   );
 }
 
 export function MobilePolicyModule() {
+  const { t } = useI18n();
+  const categories = useMemo(() => policyCategories(t), [t]);
+  const deviceTableColumns = useMemo(() => deviceColumns(t), [t]);
   const canRead = useCapability(CAP.SETTINGS_READ);
   const canReadDevices = useCapability(CAP.USER_DEVICES_READ);
   const { scope } = useIdentity();
@@ -624,14 +636,14 @@ export function MobilePolicyModule() {
   const onRevoke = (row: DeviceRow) => {
     const deviceId = String(row.device_id ?? row.device_identifier_sha256 ?? row.id);
     modal.open({
-      title: `Revoke device - ${deviceId}`,
+      title: fill(t('platformMobilePolicy.mobilePolicyModule.revokeDevice'), { deviceId: String(deviceId) }),
       body: <DeviceRevokeForm row={row} onClose={() => modal.close()} />,
     });
   };
 
   const openRequestChange = (category: string, resolverName: string, label: string) => {
     modal.open({
-      title: `Request change · ${label}`,
+      title: fill(t('platformMobilePolicy.mobilePolicyModule.requestChange'), { label: String(label) }),
       body: (
         <ChangeRequestForm
           category={category}
@@ -643,8 +655,8 @@ export function MobilePolicyModule() {
   };
 
   const tabs: { id: string; label: string }[] = [
-    { id: 'policies', label: `Policies · ${CATEGORIES.length}` },
-    { id: 'devices', label: 'Devices' },
+    { id: 'policies', label: fill(t('platformMobilePolicy.mobilePolicyModule.policies'), { length: String(categories.length) }) },
+    { id: 'devices', label: t('platformMobilePolicy.mobilePolicyModule.devices') },
   ];
 
   if (!canRead) {
@@ -652,18 +664,18 @@ export function MobilePolicyModule() {
       <div className="page">
         <PageHeader
           moduleKey="mobilePolicy"
-          eyebrow="Platform"
-          titleAccent="Mobile"
-          titlePlain="policies"
+          eyebrow={t('platformMobilePolicy.mobilePolicyModule.platform')}
+          titleAccent={t('platformMobilePolicy.mobilePolicyModule.titleAccent')}
+          titlePlain={t('platformMobilePolicy.mobilePolicyModule.titlePlain')}
           pills={[
             <ScopePill scopeType="tenant" scopeId={tenantId} />,
-            <span className="chip chip--xs mono">{`${CATEGORIES.length} canonical categories · resolver-driven`}</span>,
+            <span className="chip chip--xs mono">{fill(t('platformMobilePolicy.mobilePolicyModule.canonicalCategoriesResolverDriven'), { length: String(categories.length) })}</span>,
           ] as ReactNode[]}
         />
         <StateView
           kind="denied"
           capability={CAP.SETTINGS_READ}
-          hint="You do not have permission to view mobile policies."
+          hint={t('platformMobilePolicy.mobilePolicyModule.youDoNotHave')}
         />
       </div>
     );
@@ -673,12 +685,12 @@ export function MobilePolicyModule() {
     <div className="page">
       <PageHeader
         moduleKey="mobilePolicy"
-        eyebrow="Platform"
-        titleAccent="Mobile"
-        titlePlain="policies"
+        eyebrow={t('platformMobilePolicy.mobilePolicyModule.platform')}
+        titleAccent={t('platformMobilePolicy.mobilePolicyModule.titleAccent')}
+        titlePlain={t('platformMobilePolicy.mobilePolicyModule.titlePlain')}
         pills={[
           <ScopePill scopeType="tenant" scopeId={tenantId} />,
-          <span className="chip chip--xs mono">{`${CATEGORIES.length} canonical categories · resolver-driven`}</span>,
+          <span className="chip chip--xs mono">{fill(t('platformMobilePolicy.mobilePolicyModule.canonicalCategoriesResolverDriven'), { length: String(categories.length) })}</span>,
         ] as ReactNode[]}
         // W38-PLATFORM closure: header-level "Revoke (synthetic)" CTA
         // removed because it called onRevoke('dev_synth') with a hardcoded
@@ -725,7 +737,7 @@ export function MobilePolicyModule() {
               gap: '10px',
             }}
           >
-            {CATEGORIES.map((c) => (
+            {categories.map((c) => (
               <PolicyEditorCard
                 key={c.key}
                 category={c.key}
@@ -754,16 +766,16 @@ export function MobilePolicyModule() {
             <StateView
               kind="denied"
               capability={CAP.USER_DEVICES_READ}
-              hint="You do not have permission to view registered device activity."
+              hint={t('platformMobilePolicy.mobilePolicyModule.youDoNotHave2')}
             />
           ) : attestationFilters.length <= 1 ? (
             <StateView
               kind="error"
-              hint="Mobile attestation status options are not configured. Finish mobile policy setup before reviewing devices."
+              hint={t('platformMobilePolicy.mobilePolicyModule.mobileAttestationStatusOptions')}
             />
           ) : (
             <div className="dt-toolbar" style={{ marginBottom: '6px' }}>
-              <span className="eyebrow">Attestation filter</span>
+              <span className="eyebrow">{t('platformMobilePolicy.mobilePolicyModule.attestationFilter')}</span>
               {attestationFilters.map((f) => (
                 <button
                   key={f}
@@ -779,24 +791,24 @@ export function MobilePolicyModule() {
               <span className="dt-tb-count mono">{`${filteredDevices.length}/${devicesQuery.data?.rows?.length ?? 0}`}</span>
             </div>
           )}
-          <div className="section-eyebrow">User devices · attestation governed</div>
+          <div className="section-eyebrow">{t('platformMobilePolicy.mobilePolicyModule.userDevicesAttestationGoverned')}</div>
           {canReadDevices ? devicesQuery.isLoading ? (
             <StateView kind="loading" />
           ) : devicesQuery.isError ? (
             <StateView
               kind="error"
-              title="Device activity unavailable"
-              hint={(devicesQuery.error as Error | undefined)?.message ?? 'The device registry could not be read.'}
+              title={t('platformMobilePolicy.mobilePolicyModule.deviceActivityUnavailable')}
+              hint={(devicesQuery.error as Error | undefined)?.message ?? t('platformMobilePolicy.mobilePolicyModule.theDeviceRegistryCould')}
             />
           ) : (
             <DataTable<DeviceRow>
-              columns={DEVICE_COLUMNS}
+              columns={deviceTableColumns}
               rows={filteredDevices}
               viewKey="user_devices"
               entityKind="user_devices"
               rowActions={[
                 {
-                  label: 'Revoke device',
+                  label: t('platformMobilePolicy.mobilePolicyModule.revokeDevice2'),
                   icon: 'lock',
                   kind: 'danger',
                   capability: CAP.USER_DEVICES_WRITE,

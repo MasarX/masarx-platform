@@ -18,6 +18,7 @@ import type {
   OnboardingReadinessPluginItem,
   UiOnboardingReadiness,
 } from '@/types/domain';
+import { fill, useI18n } from '@/lib/i18n';
 
 type ReadinessScopeType = UiOnboardingReadiness['scope_type'];
 
@@ -170,6 +171,7 @@ function BootstrapEvidencePanel({
   evidence: BootstrapResultEvidence;
   scopeLabel: string;
 }) {
+  const { t } = useI18n();
   const seededCount = evidence.scopeDefaults.seeded.length;
   const globalSeededCount = evidence.globalDefaults.seeded.length;
   const globalSkippedCount = evidence.globalDefaults.skipped.length;
@@ -179,58 +181,58 @@ function BootstrapEvidencePanel({
     <div data-testid="onboarding-bootstrap-result" style={{ display: 'grid', gap: 14 }}>
       <div className="kvgrid">
         <div className="kvgrid__row">
-          <span className="kvgrid__key">Status</span>
+          <span className="kvgrid__key">{t('platformOnboardingReadiness.bootstrapEvidencePanel.status')}</span>
           <span className="kvgrid__val">
             <Chip
-              label={evidence.ok ? (evidence.enabled ? 'Bootstrap completed' : 'Bootstrap skipped by policy') : 'Bootstrap failed'}
+              label={evidence.ok ? (evidence.enabled ? t('platformOnboardingReadiness.bootstrapEvidencePanel.bootstrapCompleted') : t('platformOnboardingReadiness.bootstrapEvidencePanel.bootstrapSkippedByPolicy')) : t('platformOnboardingReadiness.bootstrapEvidencePanel.bootstrapFailed')}
               kind={evidence.ok ? (evidence.enabled ? 'good' : 'warn') : 'danger'}
             />
           </span>
         </div>
         <div className="kvgrid__row">
-          <span className="kvgrid__key">Scope</span>
+          <span className="kvgrid__key">{t('platformOnboardingReadiness.bootstrapEvidencePanel.scope')}</span>
           <span className="kvgrid__val">{scopeLabel}</span>
         </div>
         <div className="kvgrid__row">
-          <span className="kvgrid__key">Scope id</span>
+          <span className="kvgrid__key">{t('platformOnboardingReadiness.bootstrapEvidencePanel.scopeId')}</span>
           <span className="kvgrid__val mono">{evidence.scopeId || '—'}</span>
         </div>
         <div className="kvgrid__row">
-          <span className="kvgrid__key">Scope defaults seeded</span>
+          <span className="kvgrid__key">{t('platformOnboardingReadiness.bootstrapEvidencePanel.scopeDefaultsSeeded')}</span>
           <span className="kvgrid__val mono" data-testid="bootstrap-scope-defaults-count">{seededCount}</span>
         </div>
         <div className="kvgrid__row">
-          <span className="kvgrid__key">Global defaults seeded</span>
+          <span className="kvgrid__key">{t('platformOnboardingReadiness.bootstrapEvidencePanel.globalDefaultsSeeded')}</span>
           <span className="kvgrid__val mono" data-testid="bootstrap-global-defaults-count">{globalSeededCount}</span>
         </div>
         <div className="kvgrid__row">
-          <span className="kvgrid__key">Global defaults skipped</span>
+          <span className="kvgrid__key">{t('platformOnboardingReadiness.bootstrapEvidencePanel.globalDefaultsSkipped')}</span>
           <span className="kvgrid__val mono" data-testid="bootstrap-global-defaults-skipped">{globalSkippedCount}</span>
         </div>
         <div className="kvgrid__row">
-          <span className="kvgrid__key">RBAC templates provisioned</span>
+          <span className="kvgrid__key">{t('platformOnboardingReadiness.bootstrapEvidencePanel.rbacTemplatesProvisioned')}</span>
           <span className="kvgrid__val mono" data-testid="bootstrap-rbac-templates-count">{templatesCount}</span>
         </div>
         {readiness ? (
           <div className="kvgrid__row">
-            <span className="kvgrid__key">Readiness after bootstrap</span>
+            <span className="kvgrid__key">{t('platformOnboardingReadiness.bootstrapEvidencePanel.readinessAfterBootstrap')}</span>
             <span className="kvgrid__val">{readinessLabel(readiness.overall_status, 'Unknown')}</span>
           </div>
         ) : null}
         {evidence.reason ? (
           <div className="kvgrid__row">
-            <span className="kvgrid__key">Skip reason</span>
+            <span className="kvgrid__key">{t('platformOnboardingReadiness.bootstrapEvidencePanel.skipReason')}</span>
             <span className="kvgrid__val">{readinessLabel(evidence.reason, evidence.reason)}</span>
           </div>
         ) : null}
         <div className="kvgrid__row">
-          <span className="kvgrid__key">Recorded at</span>
+          <span className="kvgrid__key">{t('platformOnboardingReadiness.bootstrapEvidencePanel.recordedAt')}</span>
           <span className="kvgrid__val mono">{evidence.generatedAt}</span>
         </div>
       </div>
       {seededCount > 0 ? (
         <div>
-          <div className="wf-insp__section-eyebrow">Scope defaults applied</div>
+          <div className="wf-insp__section-eyebrow">{t('platformOnboardingReadiness.bootstrapEvidencePanel.scopeDefaultsApplied')}</div>
           <ul style={{ margin: 0, paddingLeft: 18, fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>
             {evidence.scopeDefaults.seeded.map((category) => (
               <li key={category}>{category}</li>
@@ -240,7 +242,7 @@ function BootstrapEvidencePanel({
       ) : null}
       {templatesCount > 0 ? (
         <div>
-          <div className="wf-insp__section-eyebrow">RBAC templates provisioned</div>
+          <div className="wf-insp__section-eyebrow">{t('platformOnboardingReadiness.bootstrapEvidencePanel.rbacTemplatesProvisioned')}</div>
           <ul style={{ margin: 0, paddingLeft: 18, fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>
             {evidence.rbacTemplates.map((template) => (
               <li key={template}>{template}</li>
@@ -250,7 +252,7 @@ function BootstrapEvidencePanel({
       ) : null}
       {globalSkippedCount > 0 ? (
         <div>
-          <div className="wf-insp__section-eyebrow">Global defaults skipped</div>
+          <div className="wf-insp__section-eyebrow">{t('platformOnboardingReadiness.bootstrapEvidencePanel.globalDefaultsSkipped')}</div>
           <ul style={{ margin: 0, paddingLeft: 18, fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>
             {evidence.globalDefaults.skipped.map((entry) => (
               <li key={entry.category}>
@@ -261,7 +263,7 @@ function BootstrapEvidencePanel({
         </div>
       ) : null}
       <div>
-        <div className="wf-insp__section-eyebrow">Backend response</div>
+        <div className="wf-insp__section-eyebrow">{t('platformOnboardingReadiness.bootstrapEvidencePanel.backendResponse')}</div>
         <pre className="wf-code-block">
 {JSON.stringify(evidence.raw, null, 2)}
         </pre>
@@ -277,6 +279,7 @@ function ReadinessCard({
   title: string;
   component: OnboardingReadinessComponent;
 }) {
+  const { t } = useI18n();
   return (
     <div className="card" style={{ padding: 14, minHeight: 118 }}>
       <div className="section-eyebrow" style={{ padding: 0, marginBottom: 8 }}>{title}</div>
@@ -286,11 +289,11 @@ function ReadinessCard({
       </div>
       <div className="kvgrid" style={{ marginTop: 12 }}>
         <div className="kvgrid__row">
-          <span className="kvgrid__key">Blocking</span>
+          <span className="kvgrid__key">{t('platformOnboardingReadiness.readinessCard.blocking')}</span>
           <span className="kvgrid__val mono">{component.blocking_count ?? 0}</span>
         </div>
         <div className="kvgrid__row">
-          <span className="kvgrid__key">Warning</span>
+          <span className="kvgrid__key">{t('platformOnboardingReadiness.readinessCard.warning')}</span>
           <span className="kvgrid__val mono">{component.warning_count ?? 0}</span>
         </div>
       </div>
@@ -299,6 +302,7 @@ function ReadinessCard({
 }
 
 export function OnboardingReadinessModule() {
+  const { t } = useI18n();
   const canReadSettings = useCapability(CAP.SETTINGS_READ);
   const canWriteSettings = useCapability(CAP.SETTINGS_WRITE);
   const canWriteSystem = useCapability(CAP.SYSTEM_WRITE);
@@ -431,36 +435,36 @@ export function OnboardingReadinessModule() {
       pushToast(message, tone);
       void readiness.refetch();
       modal.open({
-        title: `Onboarding bootstrap result - ${scopeLabel}`,
+        title: fill(t('platformOnboardingReadiness.onboardingReadinessModule.onboardingBootstrapResult'), { scopeLabel: String(scopeLabel) }),
         body: <BootstrapEvidencePanel evidence={evidence} scopeLabel={scopeLabel} />,
         footer: (
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <Button label="Close" kind="primary" onClick={() => modal.close()} />
+            <Button label={t('platformOnboardingReadiness.onboardingReadinessModule.close')} kind="primary" onClick={() => modal.close()} />
           </div>
         ),
       });
     },
     onError: (error: Error) => {
-      pushToast(`Onboarding bootstrap failed - ${error.message}`, 'danger');
+      pushToast(fill(t('platformOnboardingReadiness.onboardingReadinessModule.onboardingBootstrapFailed'), { message: String(error.message) }), 'danger');
     },
   });
   const canRunBootstrap = (canWriteSettings || canWriteSystem) && scopeType !== 'global' && Boolean(effectiveScopeId);
 
   const findingColumns = useMemo<Array<DataTableColumn<OnboardingReadinessFinding>>>(() => [
-    { key: 'severity', label: 'Severity', type: 'text', render: (raw) => readinessLabel(raw, 'Severity') },
-    { key: 'component', label: 'Area', type: 'text', render: (raw) => readinessLabel(raw) },
-    { key: 'code', label: 'Finding', type: 'text', render: (raw) => readinessLabel(raw) },
-    { key: 'message', label: 'Message', type: 'text', render: (raw) => readinessMessage(raw) },
-    { key: 'action', label: 'Action', type: 'text', render: (raw) => readinessMessage(raw) },
-  ], []);
+    { key: 'severity', label: t('platformOnboardingReadiness.onboardingReadinessModule.severity'), type: 'text', render: (raw) => readinessLabel(raw, 'Severity') },
+    { key: 'component', label: t('platformOnboardingReadiness.onboardingReadinessModule.area'), type: 'text', render: (raw) => readinessLabel(raw) },
+    { key: 'code', label: t('platformOnboardingReadiness.onboardingReadinessModule.finding'), type: 'text', render: (raw) => readinessLabel(raw) },
+    { key: 'message', label: t('platformOnboardingReadiness.onboardingReadinessModule.message'), type: 'text', render: (raw) => readinessMessage(raw) },
+    { key: 'action', label: t('platformOnboardingReadiness.onboardingReadinessModule.action'), type: 'text', render: (raw) => readinessMessage(raw) },
+  ], [t]);
 
   const pluginColumns = useMemo<Array<DataTableColumn<OnboardingReadinessPluginItem>>>(() => [
-    { key: 'plugin_key', label: 'Integration', type: 'text', render: (raw) => readinessLabel(raw) },
-    { key: 'status', label: 'Status', type: 'text', render: (raw) => readinessLabel(raw, 'Unknown') },
-    { key: 'credentials_status', label: 'Credentials', type: 'text', render: (raw) => readinessLabel(raw, 'Not required') },
-    { key: 'enabled', label: 'Enabled', type: 'boolean' },
-    { key: 'blocking', label: 'Blocking', type: 'boolean' },
-  ], []);
+    { key: 'plugin_key', label: t('platformOnboardingReadiness.onboardingReadinessModule.integration'), type: 'text', render: (raw) => readinessLabel(raw) },
+    { key: 'status', label: t('platformOnboardingReadiness.onboardingReadinessModule.status'), type: 'text', render: (raw) => readinessLabel(raw, 'Unknown') },
+    { key: 'credentials_status', label: t('platformOnboardingReadiness.onboardingReadinessModule.credentials'), type: 'text', render: (raw) => readinessLabel(raw, 'Not required') },
+    { key: 'enabled', label: t('platformOnboardingReadiness.onboardingReadinessModule.enabled'), type: 'boolean' },
+    { key: 'blocking', label: t('platformOnboardingReadiness.onboardingReadinessModule.blocking'), type: 'boolean' },
+  ], [t]);
 
   const data = readiness.data;
   const pluginItems = data?.integration_plugins.items ?? [];
@@ -468,7 +472,7 @@ export function OnboardingReadinessModule() {
   if (!canReadSettings) {
     return (
       <div className="page">
-        <PageHeader eyebrow="Platform" titleAccent="Onboarding" titlePlain="readiness" />
+        <PageHeader eyebrow={t('platformOnboardingReadiness.onboardingReadinessModule.platform')} titleAccent={t('platformOnboardingReadiness.onboardingReadinessModule.titleAccent')} titlePlain={t('platformOnboardingReadiness.onboardingReadinessModule.titlePlain')} />
         <StateView kind="denied" capability={CAP.SETTINGS_READ} />
       </div>
     );
@@ -477,15 +481,15 @@ export function OnboardingReadinessModule() {
   return (
     <div className="page">
       <PageHeader
-        eyebrow="Platform"
-        titleAccent="Onboarding"
-        titlePlain="readiness"
+        eyebrow={t('platformOnboardingReadiness.onboardingReadinessModule.platform')}
+        titleAccent={t('platformOnboardingReadiness.onboardingReadinessModule.titleAccent')}
+        titlePlain={t('platformOnboardingReadiness.onboardingReadinessModule.titlePlain')}
         pills={[
-          <span key="readiness" className="chip chip--xs">readiness checks</span>,
-          <span key="settings" className="chip chip--xs mono">settings defaults</span>,
-          <span key="workflows" className="chip chip--xs mono">workflow bindings</span>,
-          <span key="plugins" className="chip chip--xs mono">integration plugins</span>,
-          <span key="labels" className="chip chip--xs mono">label design</span>,
+          <span key="readiness" className="chip chip--xs">{t('platformOnboardingReadiness.onboardingReadinessModule.readinessChecks')}</span>,
+          <span key="settings" className="chip chip--xs mono">{t('platformOnboardingReadiness.onboardingReadinessModule.settingsDefaults')}</span>,
+          <span key="workflows" className="chip chip--xs mono">{t('platformOnboardingReadiness.onboardingReadinessModule.workflowBindings')}</span>,
+          <span key="plugins" className="chip chip--xs mono">{t('platformOnboardingReadiness.onboardingReadinessModule.integrationPlugins')}</span>,
+          <span key="labels" className="chip chip--xs mono">{t('platformOnboardingReadiness.onboardingReadinessModule.labelDesign')}</span>,
         ]}
         actions={[
           <Button
@@ -496,17 +500,17 @@ export function OnboardingReadinessModule() {
             onClick={() => bootstrapMutation.mutate()}
             disabled={!canRunBootstrap || bootstrapMutation.isPending}
           >
-            {bootstrapMutation.isPending ? 'Running' : 'Run bootstrap'}
+            {bootstrapMutation.isPending ? t('platformOnboardingReadiness.onboardingReadinessModule.running') : t('platformOnboardingReadiness.onboardingReadinessModule.runBootstrap')}
           </Button>,
           <Button key="refresh" size="sm" kind="ghost" onClick={() => readiness.refetch()} disabled={!hasScope}>
-            Refresh
+            {t('platformOnboardingReadiness.onboardingReadinessModule.refresh')}
           </Button>,
         ]}
       />
 
       <div className="dt-toolbar" style={{ alignItems: 'flex-end' }}>
         <label className="field" style={{ minWidth: 180 }}>
-          <span className="field__label">Scope type</span>
+          <span className="field__label">{t('platformOnboardingReadiness.onboardingReadinessModule.scopeType')}</span>
           <select
             value={scopeType}
             onChange={(event) => {
@@ -522,14 +526,14 @@ export function OnboardingReadinessModule() {
           </select>
         </label>
         <label className="field" style={{ minWidth: 320, flex: '1 1 320px' }}>
-          <span className="field__label">Scope reference</span>
+          <span className="field__label">{t('platformOnboardingReadiness.onboardingReadinessModule.scopeReference')}</span>
           {scopeType === 'global' ? (
-            <input value="" disabled placeholder="Global readiness" />
+            <input value="" disabled placeholder={t('platformOnboardingReadiness.onboardingReadinessModule.globalReadiness')} />
           ) : scopeReferenceOptions.length > 0 ? (
             <select
               value={scopeId}
               onChange={(event) => setScopeId(event.target.value)}
-              aria-label="Scope reference"
+              aria-label={t('platformOnboardingReadiness.onboardingReadinessModule.scopeReference')}
             >
               {scopeReferenceOptions.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
@@ -539,7 +543,7 @@ export function OnboardingReadinessModule() {
             <input
               value=""
               disabled
-              placeholder="No selectable scope available"
+              placeholder={t('platformOnboardingReadiness.onboardingReadinessModule.noSelectableScopeAvailable')}
             />
           )}
         </label>
@@ -553,67 +557,67 @@ export function OnboardingReadinessModule() {
       </div>
 
       {scopeRegistryQuery.isLoading ? (
-        <StateView kind="loading" title="Loading readiness scope registry" />
+        <StateView kind="loading" title={t('platformOnboardingReadiness.onboardingReadinessModule.loadingReadinessScopeRegistry')} />
       ) : scopeRegistryQuery.isError ? (
         <StateView
           kind="error"
-          title="Readiness scope registry failed"
+          title={t('platformOnboardingReadiness.onboardingReadinessModule.readinessScopeRegistryFailed')}
           hint={queryErrorHint(scopeRegistryQuery.error, 'Scope type registry could not be loaded')}
         />
       ) : scopeOptions.length === 0 ? (
         <StateView
           kind="error"
-          title="Readiness scope registry empty"
-          hint="Configure enabled scope_type_registry rows before running onboarding readiness."
+          title={t('platformOnboardingReadiness.onboardingReadinessModule.readinessScopeRegistryEmpty')}
+          hint={t('platformOnboardingReadiness.onboardingReadinessModule.configureEnabledScopeType')}
         />
       ) : scopeType === 'tenant' && tenantReferenceQuery.isLoading ? (
-        <StateView kind="loading" title="Loading tenant scope reference" />
+        <StateView kind="loading" title={t('platformOnboardingReadiness.onboardingReadinessModule.loadingTenantScopeReference')} />
       ) : scopeType === 'tenant' && tenantReferenceQuery.isError ? (
         <StateView
           kind="error"
-          title="Tenant scope reference failed"
+          title={t('platformOnboardingReadiness.onboardingReadinessModule.tenantScopeReferenceFailed')}
           hint={queryErrorHint(tenantReferenceQuery.error, 'Tenant scope reference could not be loaded')}
         />
       ) : !hasScope ? (
         <StateView
           kind="empty"
-          title="Select a scope"
-          hint="Choose the tenant, client, or sender record to inspect readiness before traffic starts."
+          title={t('platformOnboardingReadiness.onboardingReadinessModule.selectAScope')}
+          hint={t('platformOnboardingReadiness.onboardingReadinessModule.chooseTheTenantClient')}
         />
       ) : readiness.isLoading ? (
-        <StateView kind="loading" title="Checking onboarding readiness" />
+        <StateView kind="loading" title={t('platformOnboardingReadiness.onboardingReadinessModule.checkingOnboardingReadiness')} />
       ) : readiness.isError ? (
         <StateView
           kind="error"
-          title="Readiness check failed"
-          hint={readiness.error instanceof Error ? readiness.error.message : 'Readiness checks could not be loaded'}
+          title={t('platformOnboardingReadiness.onboardingReadinessModule.readinessCheckFailed')}
+          hint={readiness.error instanceof Error ? readiness.error.message : t('platformOnboardingReadiness.onboardingReadinessModule.readinessChecksCouldNot')}
         />
       ) : data ? (
         <>
           <div className="status-grid">
-            <ReadinessCard title="Settings defaults" component={data.settings_defaults} />
-            <ReadinessCard title="Workflow bindings" component={data.workflow_bindings} />
-            <ReadinessCard title="Integration plugins" component={data.integration_plugins} />
+            <ReadinessCard title={t('platformOnboardingReadiness.onboardingReadinessModule.settingsDefaults2')} component={data.settings_defaults} />
+            <ReadinessCard title={t('platformOnboardingReadiness.onboardingReadinessModule.workflowBindings2')} component={data.workflow_bindings} />
+            <ReadinessCard title={t('platformOnboardingReadiness.onboardingReadinessModule.integrationPlugins2')} component={data.integration_plugins} />
             {data.label_design ? (
-              <ReadinessCard title="Label design" component={data.label_design} />
+              <ReadinessCard title={t('platformOnboardingReadiness.onboardingReadinessModule.labelDesign2')} component={data.label_design} />
             ) : null}
           </div>
 
-          <div className="section-eyebrow">Blocking findings</div>
+          <div className="section-eyebrow">{t('platformOnboardingReadiness.onboardingReadinessModule.blockingFindings')}</div>
           <DataTable
             viewKey="platform.onboarding-readiness.findings"
             columns={findingColumns}
             rows={data.blocking_findings}
-            emptyText="No blocking onboarding findings."
+            emptyText={t('platformOnboardingReadiness.onboardingReadinessModule.noBlockingOnboardingFindings')}
             searchKeys={['component', 'code', 'message', 'action']}
           />
 
-          <div className="section-eyebrow">Integration plugin readiness</div>
+          <div className="section-eyebrow">{t('platformOnboardingReadiness.onboardingReadinessModule.integrationPluginReadiness')}</div>
           <DataTable
             viewKey="platform.onboarding-readiness.plugins"
             columns={pluginColumns}
             rows={pluginItems}
-            emptyText="No plugin readiness rows returned."
+            emptyText={t('platformOnboardingReadiness.onboardingReadinessModule.noPluginReadinessRows')}
             searchKeys={['plugin_key', 'status', 'credentials_status']}
           />
         </>

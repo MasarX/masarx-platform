@@ -1,0 +1,98 @@
+// Platform configuration and scope ladder: Console V2 copy in English and Arabic (issue #302).
+import type { CatalogShape } from '@/lib/i18n';
+
+export const en = {
+  platformConfig: {
+    scopeBox: {
+      inherit: 'inherit',
+      resolvedFrom: 'resolved_from={resolved_from}',
+    },
+    resolvedValuePanel: {
+      largeSavedPolicyValue: 'Large saved policy value summarized for operator scanning. Full saved policy details are available below when needed.',
+      showFullSavedPolicy: 'Show full saved policy details',
+    },
+    compareScopesBody: {
+      resolvesTheSameSetting: 'Resolves the same setting at every scope this category allows. Lower scopes override higher ones; "inherit" means no row exists at that scope (fall through to ladder).',
+    },
+    configModule: {
+      compareScopes: 'Compare scopes · {category}',
+      close: 'Close',
+      compareScopesFailed: 'Compare scopes failed',
+      requestSettingsChange: 'Request settings change',
+      changePreviewReady: 'Change preview ready',
+      changeRequestSubmitted: 'Change request submitted',
+      changePreviewCouldNot: 'Change preview could not be prepared. Review the setting details and try again.',
+      settingApplied: 'Setting applied',
+      settingCouldNotBe: 'Setting could not be applied. Review the setting details and try again.',
+      platform: 'Platform',
+      policyResolver: 'Policy resolver',
+      youDoNotHave: 'You do not have permission to view configuration & scope ladder.',
+      compareScopes2: 'Compare scopes',
+      requestChange: 'Request change',
+      approvalRequired: 'approval-required',
+      noSettingsCategoriesRegistered: 'No settings categories registered.',
+      setting: 'Setting',
+      schemaIdServerSide: 'schema id (server-side ajv-validates here)',
+      autoApply: 'auto-apply',
+      scopes: 'scopes: {value}',
+      theSavedPolicySource: 'The saved policy source is missing required scope details.',
+      resolutionRecorded: 'Resolution recorded',
+      openPolicyHistory: 'Open policy history',
+      overrideReplaces: 'Override: {resolved_from} replaces {override_of}',
+      resolvedValue: 'Resolved value',
+      scopeLadder: 'Scope ladder',
+      relatedWorkflows: 'Related workflows',
+      resolvesAtTheScope: '{value} resolves at the {resolved_from} scope. Related workflows use this saved policy decision automatically.',
+      titleAccent: 'Configuration',
+      titlePlain: '— scope ladder',
+    },
+  },
+};
+
+export const ar: CatalogShape<typeof en> = {
+  platformConfig: {
+    scopeBox: {
+      inherit: 'موروث',
+      resolvedFrom: 'مصدر الحسم: resolved_from={resolved_from}',
+    },
+    resolvedValuePanel: {
+      largeSavedPolicyValue: 'تم تلخيص قيمة السياسة المحفوظة الكبيرة لتسهيل مراجعتها. تتوفر التفاصيل الكاملة للسياسة المحفوظة أدناه عند الحاجة.',
+      showFullSavedPolicy: 'عرض التفاصيل الكاملة للسياسة المحفوظة',
+    },
+    compareScopesBody: {
+      resolvesTheSameSetting: 'يحسم الإعداد نفسه في كل نطاق تسمح به هذه الفئة. النطاقات الأدنى تتجاوز الأعلى؛ و"inherit" تعني عدم وجود صف في ذلك النطاق (الانتقال إلى السلّم).',
+    },
+    configModule: {
+      compareScopes: 'مقارنة النطاقات · {category}',
+      close: 'إغلاق',
+      compareScopesFailed: 'فشلت مقارنة النطاقات',
+      requestSettingsChange: 'طلب تغيير الإعدادات',
+      changePreviewReady: 'معاينة التغيير جاهزة',
+      changeRequestSubmitted: 'تم إرسال طلب التغيير',
+      changePreviewCouldNot: 'تعذّر إعداد معاينة التغيير. راجع تفاصيل الإعداد وحاول مرة أخرى.',
+      settingApplied: 'تم تطبيق الإعداد',
+      settingCouldNotBe: 'تعذّر تطبيق الإعداد. راجع تفاصيل الإعداد وحاول مرة أخرى.',
+      platform: 'المنصة',
+      policyResolver: 'أداة حسم السياسة',
+      youDoNotHave: 'ليس لديك إذن لعرض الإعدادات وسلّم النطاق.',
+      compareScopes2: 'مقارنة النطاقات',
+      requestChange: 'طلب تغيير',
+      approvalRequired: 'يتطلب اعتمادًا',
+      noSettingsCategoriesRegistered: 'لا توجد فئات إعدادات مسجلة.',
+      setting: 'الإعداد',
+      schemaIdServerSide: 'معرّف المخطط (يتحقق منه الخادم عبر ajv هنا)',
+      autoApply: 'تطبيق تلقائي',
+      scopes: 'النطاقات: {value}',
+      theSavedPolicySource: 'مصدر السياسة المحفوظة تنقصه تفاصيل النطاق المطلوبة.',
+      resolutionRecorded: 'تم تسجيل الحسم',
+      openPolicyHistory: 'فتح سجل السياسة',
+      overrideReplaces: 'تجاوز: {resolved_from} يحل محل {override_of}',
+      resolvedValue: 'القيمة المحسومة',
+      scopeLadder: 'سلّم النطاق',
+      relatedWorkflows: 'سير العمل المرتبط',
+      resolvesAtTheScope: 'يُحسم {value} في النطاق {resolved_from}. يستخدم سير العمل المرتبط قرار السياسة المحفوظ هذا تلقائيًا.',
+      titleAccent: 'الإعدادات',
+      titlePlain: '— سلّم النطاق',
+    },
+  },
+};
