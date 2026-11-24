@@ -155,7 +155,7 @@ jobs:
           node-version: '24.22.1'
           package-manager-cache: false
       - *timing_work
-      - name: Build database from zero and run pgTAP shard
+      - name: Build database from zero and run pgTAP and integration shards
         id: qualification
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/backend.cjs
@@ -197,7 +197,9 @@ jobs:
             scripts/ci-hosted
             .github/actions/ci-timing
             config/ci/pgtap-accepted-failures.json
+            config/ci/hosted-integration-exceptions.json
             supabase/tests/pgtap
+            tests/integration
           sparse-checkout-cone-mode: false
       - *timing_begin
       - *timing_node
@@ -222,13 +224,13 @@ jobs:
           path: ci-reports/database-result/shards
           merge-multiple: false
       - *timing_work
-      - name: Require build and every pgTAP shard
+      - name: Require database build and complete shard coverage
         if: always()
         env:
           BUILD_RESULT: ${{ needs.database-build.result }}
           DATABASE_PRESENT: ${{ needs.database-build.outputs.present }}
           PGTAP_RESULT: ${{ needs.database-pgtap.result }}
-        run: node scripts/ci-hosted/database-result.cjs
+        run: node scripts/ci-hosted/database-result.cjs --integration
 
   append-only:
     name: Append-only migrations
@@ -295,6 +297,7 @@ jobs:
           node scripts/ci-hosted/shard-selfcheck.cjs
           node scripts/ci-hosted/database-selfcheck.cjs
           node --test scripts/ci-hosted/images.test.cjs
+          node --test scripts/ci-hosted/integration.test.cjs
       - name: Check deploy branch references
         timeout-minutes: 1
         run: node scripts/ci-hosted/deploy-branch-refs.cjs
