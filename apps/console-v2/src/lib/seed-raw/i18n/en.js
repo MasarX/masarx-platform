@@ -5,6 +5,11 @@ export const en = {
     role: 'admin',
     search: 'Search shipments, plans, drivers, settings…',
     skip: 'Skip to main content',
+    openPalette: 'open command palette',
+    switchScope: 'Switch scope',
+    // Starts with the visible label of the language button (WCAG 2.5.3).
+    switchLanguage: 'AR, switch to Arabic',
+    userMenu: 'user menu',
   },
   nav: {
     today: 'Today',
