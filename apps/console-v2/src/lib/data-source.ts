@@ -6454,6 +6454,7 @@ export async function ui_list_resource_v1<T = ResourceRow>(key: string, opts: Li
     return normalizeLiveListResult<T>(live.data, page, page_size);
   }
 
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_list_resource_v1');
   await sleep(40);
   // Wave 6 W6-3 + W54-F — registry-driven capability gate (fail-closed).
   // Every registered resource enforces the `capability_read` declared on
@@ -6588,6 +6589,7 @@ export async function ui_get_resource_v1<T = ResourceRow>(key: string, id: strin
     return firstRpcRow<T>(live.data);
   }
 
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_get_resource_v1');
   await sleep(20);
   const list = RESOURCE_DATA()[key] || [];
   const row = list.find((r) => {
@@ -6618,6 +6620,7 @@ export async function ui_resource_metrics_v1(key: string, _opts: ListOpts = {}):
     };
   }
 
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_resource_metrics_v1');
   await sleep(30);
   const list = RESOURCE_DATA()[key] || [];
   return { total: list.length };
@@ -6928,7 +6931,9 @@ export async function compute_kpi_rollup_v1(
       const row = rows[0];
       if (row) return row as KpiRollupResolution;
     }
+    if (!SEED_MODE_ENABLED) throw new Error(`KPI rollup did not return a row for ${args.definition_key}`);
   }
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC compute_kpi_rollup_v1');
   await sleep(20);
 
   const orgId = args.scope?.organization_id ?? state.user.organization_id ?? null;
@@ -7042,7 +7047,9 @@ export async function compute_bank_account_balance_v1(
     });
     if (error) throw new Error(error.message);
     if (data) return data as BankAccountBalanceResult;
+    if (!SEED_MODE_ENABLED) throw new Error(`Bank balance did not return a row for ${args.bank_account_id}`);
   }
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC compute_bank_account_balance_v1');
   await sleep(20);
 
   // Fallback: project from seed bank_accounts + finance_events_bank_statement
@@ -10543,6 +10550,7 @@ export async function ui_route_plan_execution_pack_v1(
     };
   }
 
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_route_plan_execution_pack_v1');
   await sleep(80);
   const plan = ((RESOURCE_DATA().route_plans ?? []) as Record<string, unknown>[])
     .find((row) => row.id === planId || row.plan_id === planId);
@@ -14126,6 +14134,7 @@ export async function ui_list_tenant_invitable_roles_v1(
   });
   if (live) return normalizeLiveListResult<ResourceRow>(live.data, 0, 200);
 
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_list_tenant_invitable_roles_v1');
   await sleep(30);
   if (!hasCapability('users.manage')) {
     const err = new Error('Capability denied: users.manage') as Error & {
