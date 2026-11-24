@@ -1,6 +1,6 @@
 BEGIN;
 SET LOCAL search_path TO public, extensions, pg_temp;
-SELECT plan(9);
+SELECT plan(11);
 
 CREATE FUNCTION pg_temp.test_workflow_approval_outcomes()
 RETURNS SETOF TEXT LANGUAGE plpgsql AS $test$
@@ -10,8 +10,12 @@ DECLARE
   v_requester uuid := gen_random_uuid();
   v_reviewer uuid := gen_random_uuid();
   v_settings_version uuid;
+  v_settings_run_id uuid := gen_random_uuid();
   v_task uuid := gen_random_uuid();
+  v_run_linked_task uuid := gen_random_uuid();
+  v_zone_task uuid := gen_random_uuid();
   v_zone_request uuid := gen_random_uuid();
+  v_zone_run_id uuid := gen_random_uuid();
   v_run public.workflow_runs;
   v_other_run public.workflow_runs;
   v_step public.workflow_run_steps;
@@ -42,8 +46,18 @@ BEGIN
     );
   EXECUTE 'RESET ROLE';
 
-  INSERT INTO public.workflow_runs (workflow_template_id, workflow_template_version, entry_point, context)
-  SELECT id, version, 'manual', jsonb_build_object('organization_id', v_org)
+  PERFORM set_config('app.workflow_run_id', v_settings_run_id::text, true);
+  INSERT INTO public.workflow_runs (id, workflow_template_id, workflow_template_version, entry_point, context)
+  SELECT v_settings_run_id, id, version, 'manual',
+         jsonb_build_object('organization_id', v_org, 'resource_id', v_settings_version)
+    FROM public.workflow_templates
+   WHERE name = 'settings_change_approval_v1' AND status = 'active' AND scope_type = 'global' AND scope_id IS NULL
+   ORDER BY version DESC LIMIT 1
+   RETURNING id INTO STRICT v_settings_run_id;
+
+  PERFORM set_config('app.workflow_run_id', v_zone_run_id::text, true);
+  INSERT INTO public.workflow_runs (id, workflow_template_id, workflow_template_version, entry_point, context)
+  SELECT v_zone_run_id, id, version, 'manual', jsonb_build_object('organization_id', v_org)
     FROM public.workflow_templates
    WHERE name = 'zone_override_approval_v1' AND status = 'active' AND scope_type = 'global' AND scope_id IS NULL
    ORDER BY version DESC LIMIT 1
@@ -51,12 +65,21 @@ BEGIN
 
   INSERT INTO public.manual_review_tasks (id, organization_id, client_id, task_type, resource_type, resource_id, metadata)
   VALUES (v_task, v_org, v_client, 'settings_approval', 'settings_version', v_settings_version,
+          jsonb_build_object('workflow_run_id', v_run.id)),
+         (v_run_linked_task, v_org, v_client, 'settings_approval', NULL, NULL,
+          jsonb_build_object('workflow_run_id', v_settings_run_id)),
+         (v_zone_task, v_org, v_client, 'zone_override_approval', 'zone_override_request', v_zone_request,
           jsonb_build_object('workflow_run_id', v_run.id));
   EXECUTE 'SET LOCAL ROLE authenticated';
   RETURN NEXT throws_ok(
     format('SELECT api.resolve_manual_review_task_v1(%L::uuid, %L, %L)', v_task, 'approved', 'Self review'),
     '42501', 'resolve_manual_review_task_v1 cannot resolve your own request',
     'settings requester with review capability cannot resolve the same task'
+  );
+  RETURN NEXT throws_ok(
+    format('SELECT api.resolve_manual_review_task_v1(%L::uuid, %L, %L)', v_run_linked_task, 'approved', 'Self review'),
+    '42501', 'resolve_manual_review_task_v1 cannot resolve your own request',
+    'settings requester cannot approve a task linked only through the workflow run'
   );
   PERFORM set_config('request.jwt.claim.sub', v_reviewer::text, true);
   PERFORM set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'sub', v_reviewer)::text, true);
@@ -87,9 +110,21 @@ BEGIN
 
   INSERT INTO public.zone_override_requests (
     id, organization_id, shipment_id, shipment_client_id, source_exception_id, requested_zone_id,
-    request_reason, status, workflow_run_id, requested_by, reviewed_by, resolution_outcome
+    request_reason, status, workflow_run_id, requested_by
   ) VALUES (v_zone_request, v_org, gen_random_uuid(), v_client, gen_random_uuid(), gen_random_uuid(),
-            'Synthetic zone decision', 'rejected', v_run.id, v_requester, v_reviewer, 'rejected');
+            'Synthetic zone decision', 'pending', v_run.id, v_requester);
+  PERFORM set_config('request.jwt.claim.sub', v_requester::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'sub', v_requester)::text, true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  RETURN NEXT throws_ok(
+    format('SELECT api.resolve_manual_review_task_v1(%L::uuid, %L, %L)', v_zone_task, 'approved', 'Self review'),
+    '42501', 'resolve_manual_review_task_v1 cannot resolve your own request',
+    'zone override requester cannot approve their own override'
+  );
+  EXECUTE 'RESET ROLE';
+  UPDATE public.zone_override_requests
+     SET status = 'rejected', reviewed_by = v_reviewer, resolution_outcome = 'rejected'
+   WHERE id = v_zone_request;
 
   v_run.context := jsonb_build_object('zone_override_request_id', v_zone_request);
   v_response := workflow_handlers.execute_zone_override_apply_v1(v_step, v_run, '{"resolution_outcome":"approved"}');
