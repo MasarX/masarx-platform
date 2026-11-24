@@ -1306,7 +1306,12 @@
       "description": "Dynamic resource view driven by ui_read_registry.",
       "unavailable": {
         "title": "Resource view unavailable.",
-        "action": "Confirm the UI registry and resource read RPCs are provisioned for this scope."
+        "action": "Refresh the page or try again later."
+      },
+      "authRequired": {
+        "title": "This page isn’t available right now.",
+        "action": "Sign in or try again later.",
+        "signIn": "Sign in"
       },
       "timeout": {
         "title": "Resource view timed out.",
