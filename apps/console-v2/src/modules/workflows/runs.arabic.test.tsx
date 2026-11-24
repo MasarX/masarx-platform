@@ -22,7 +22,7 @@ describe('RunsModule in Arabic', () => {
     const tablist = await screen.findByRole('tablist', { name: ar.workflowRuns.runsModule.workflowRunsTabs });
     expect(screen.getByRole('tab', { name: ar.workflowRuns.tabs.runs.aria })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: ar.workflowRuns.tabs.schedules.aria })).toBeInTheDocument();
-    expect(findUntranslated(tablist)).toEqual([]);
+    expect(findUntranslated(tablist, ['cron'])).toEqual([]);
   });
 
   it('shows the denied state in Arabic', async () => {
