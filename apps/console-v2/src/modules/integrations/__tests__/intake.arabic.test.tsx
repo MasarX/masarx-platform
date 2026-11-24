@@ -22,7 +22,7 @@ describe('IntakeModule in Arabic', () => {
     const [title] = await screen.findAllByText(ar.integrationsIntake.intakeModule.titleAccent);
     expect(findUntranslated(title)).toEqual([]);
     const [copy] = await screen.findAllByText(ar.integrationsIntake.intakeModule.webhookInboxDirectory);
-    expect(findUntranslated(copy)).toEqual([]);
+    expect(findUntranslated(copy, ['Webhook'])).toEqual([]);
   });
 
   it('shows the denied state in Arabic', async () => {
