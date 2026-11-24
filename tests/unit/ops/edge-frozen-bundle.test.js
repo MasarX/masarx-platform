@@ -47,7 +47,11 @@ test('stages only the frozen Edge entry point and its verified digest', () => {
   expect(fs.readdirSync(path.join(workdir, 'supabase/functions/fixture-edge'))).toEqual(['index.ts']);
   expect(fs.readFileSync(path.join(workdir, entry), 'utf8')).toBe(bundle);
   const digest = createHash('sha256').update(bundle).digest('hex');
-  expect(fs.readFileSync(path.join(workdir, 'SHA256SUMS'), 'utf8')).toBe(`${digest}  ${entry}\n`);
+  const config = fs.readFileSync(path.join(workdir, 'supabase/config.toml'));
+  const configDigest = createHash('sha256').update(config).digest('hex');
+  expect(fs.readFileSync(path.join(workdir, 'SHA256SUMS'), 'utf8')).toBe(
+    `${digest}  ${entry}\n${configDigest}  supabase/config.toml\n`,
+  );
 });
 
 test('a rejected frozen build leaves no deployable Edge checksum manifest', () => {
@@ -74,13 +78,14 @@ test('DEV checks the bundle manifest before writes and limits the upload to that
   const deploy = database.steps.find(step => step.id === 'deploy');
   expect(database.env.EDGE_FROZEN_WORKDIR).toBeTruthy();
   expect(deploy.if).toContain("steps.edge_lock.outcome == 'success'");
-  const verify = deploy.run.indexOf('sha256sum --strict --check SHA256SUMS');
+  const verify = deploy.run.indexOf('bash scripts/edge/verify-frozen-manifest.sh');
   expect(verify).toBeGreaterThan(-1);
   expect(verify).toBeLessThan(deploy.run.indexOf(' db push '));
   const manifest = deploy.run.indexOf('mapfile -t edge_deploy < edge-deploy.tsv');
-  const recheck = deploy.run.lastIndexOf('sha256sum --strict --check SHA256SUMS');
+  const recheck = deploy.run.lastIndexOf('bash scripts/edge/verify-frozen-manifest.sh');
   expect(manifest).toBeGreaterThan(verify);
-  expect(recheck).toBeGreaterThan(manifest);
+  expect(manifest).toBeLessThan(deploy.run.indexOf(' db push '));
+  expect(recheck).toBeGreaterThan(deploy.run.indexOf(' db push '));
   expect(recheck).toBeLessThan(deploy.run.indexOf(' functions deploy '));
   expect(deploy.run).toMatch(/functions deploy[^\n]*--workdir "\$EDGE_FROZEN_WORKDIR"/);
 });

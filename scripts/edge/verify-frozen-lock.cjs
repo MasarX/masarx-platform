@@ -58,7 +58,9 @@ function verify(workdir = process.env.EDGE_FROZEN_WORKDIR) {
       }
     }
     if (workdir) {
-      fs.writeFileSync(path.join(workdir, 'supabase/config.toml'), 'project_id = "frozen-edge"\n');
+      const config = 'project_id = "frozen-edge"\n';
+      fs.writeFileSync(path.join(workdir, 'supabase/config.toml'), config);
+      checksums.push(`${createHash('sha256').update(config).digest('hex')}  supabase/config.toml`);
       fs.writeFileSync(path.join(workdir, 'SHA256SUMS'), `${checksums.join('\n')}\n`);
     }
     console.log(`${workdir ? 'Frozen Edge bundles built and resolved offline' : 'Edge frozen lock verified'}. Enabled functions: ${enabled.length}.`);

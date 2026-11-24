@@ -389,9 +389,22 @@ jobs:
           export PATH="$RUNNER_TEMP/edge-tools:$PATH"
           export EDGE_FROZEN_WORKDIR="$RUNNER_TEMP/edge-frozen"
           node scripts/edge/verify-frozen-lock.cjs
-          (cd "$EDGE_FROZEN_WORKDIR" && sha256sum --strict --check SHA256SUMS)
+          bash scripts/edge/verify-frozen-manifest.sh "$EDGE_FROZEN_WORKDIR"
           env -u EDGE_FROZEN_WORKDIR node --experimental-vm-modules node_modules/jest/bin/jest.js \
             --config config/tooling/jest.config.unit.js --runInBand --runTestsByPath tests/unit/ops/edge-frozen-lock.test.js
+          EDGE_FROZEN_WORKDIR=.edge-frozen node --experimental-vm-modules node_modules/jest/bin/jest.js \
+            --config config/tooling/jest.config.unit.js --runInBand --runTestsByPath tests/unit/ops/edge-frozen-lock.test.js
+          printf 'void import("npm:qrcode-generator@1.5.2");\n' > "$RUNNER_TEMP/leak.ts"
+          if (cd "$RUNNER_TEMP" && DENO_DIR="$RUNNER_TEMP/leak-cache" deno cache --no-config --no-lock --no-remote --no-npm --node-modules-dir=none ./leak.ts) > "$RUNNER_TEMP/leak.log" 2>&1; then
+            echo '::error::The offline Edge check accepted a dynamic npm import.'
+            exit 1
+          fi
+          grep -F 'npm:qrcode-generator@1.5.2' "$RUNNER_TEMP/leak.log"
+          touch "$EDGE_FROZEN_WORKDIR/supabase/unexpected.ts"
+          if bash scripts/edge/verify-frozen-manifest.sh "$EDGE_FROZEN_WORKDIR"; then
+            echo '::error::The frozen Edge manifest accepted an unexpected file.'
+            exit 1
+          fi
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs lint
