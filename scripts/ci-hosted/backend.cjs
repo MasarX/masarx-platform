@@ -9,7 +9,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { targetFile, git } = require('./target-policy.cjs');
 const { sanitize, environmentSecrets } = require('./diagnostics.cjs');
 const { run, stage, writeReport } = require('./process.cjs');
-const { captureDatabaseLog, collectStackDiagnostics, isHostedPgtap } = require('./stack-diagnostics.cjs');
+const { captureDatabaseLog, collectStackDiagnostics, isHostedPgtap, needsHostedDatabaseInit } = require('./stack-diagnostics.cjs');
 const { shardFiles, shardEnvironment, shardResults, hostedBatches } = require('./pgtap.cjs');
 
 const { prepareImages } = require('./images.cjs');
@@ -417,6 +417,7 @@ async function qualify(diagnostic) {
   const shard = process.env.PGTAP_SHARD;
   const disposableShard = isHostedPgtap(process.env);
   if (disposableShard && pinState.qualificationOnly) throw new Error('Hosted pgTAP database init requires the digest-pinned Docker guard');
+  const useDatabaseInit = !pinState.qualificationOnly && needsHostedDatabaseInit(process.env);
   const workers = process.env.PGTAP_WORKERS || 'nproc';
   if (disposableShard) hostedWorkerLimit(workers, PGTAP_WORKER_CAP);
   const selected = shard ? shardFiles(fs.readdirSync('supabase/tests/pgtap'), shard) : undefined;
@@ -477,7 +478,7 @@ async function qualify(diagnostic) {
     if (!pinState.qualificationOnly) {
       diskFloor(dockerRoot);
       diagnostic.stage = 'image-guard';
-      guard = await imageGuard(pins, path.join(temp, 'runtime-image-pins.json'), env, disposableShard ? databaseContainer : undefined);
+      guard = await imageGuard(pins, path.join(temp, 'runtime-image-pins.json'), env, useDatabaseInit ? databaseContainer : undefined);
       cliEnv = guard.env;
     }
     diagnostic.stage = 'cli-download';
@@ -511,7 +512,7 @@ async function qualify(diagnostic) {
     started = true; // A partial start must also be stopped.
     console.log(`Stack service exclusions: ${lane.exclude.join(',')}`);
     await timed('stack-start', () => checked(cli, ['start', '--debug', '--workdir', temp, '-x', lane.exclude.join(',')], cliEnv, 6 * 60000));
-    if (disposableShard) {
+    if (useDatabaseInit) {
       summary.databasePid1 = await timed('database-init', () => verifyHostedDatabaseInit(checked, env, databaseContainer));
     }
     diagnostic.stage = 'stack-status';
