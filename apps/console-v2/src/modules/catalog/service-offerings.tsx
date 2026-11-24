@@ -46,7 +46,7 @@ import {
   useAssignBranchZone,
 } from '@/lib/queries';
 import { useIdentity, useCapability } from '@/lib/identity';
-import { useI18n } from '@/lib/i18n';
+import { englishT, fill, useI18n, type Translate } from '@/lib/i18n';
 import { useDrawer, useModal } from '@/hooks/useOverlay';
 import { pushToast } from '@/components/toastStore';
 import { CAP } from '@/lib/capabilities';
@@ -80,14 +80,15 @@ export function serviceOfferingDisplay(
   offering: ServiceOfferingRow,
   level?: ServiceLevelRow,
   branch?: BranchRow,
+  t: Translate = englishT,
 ): { name: string; slug: string } {
   const display = offering.metadata?.display;
   const name = display?.name?.trim()
     || [level?.name, branch?.name].filter(Boolean).join(' · ')
-    || 'Service offering display pending';
+    || t('catalogServiceOfferings.serviceOfferingDisplay.serviceOfferingDisplayPending');
   const slug = display?.slug?.trim()
     || [level?.name, branch?.city ?? branch?.name].filter(Boolean).join(' · ')
-    || 'Display slug pending';
+    || t('catalogServiceOfferings.serviceOfferingDisplay.displaySlugPending');
   return { name, slug };
 }
 
@@ -129,11 +130,11 @@ function serviceLevelChipLabel(level: ServiceLevelRow | undefined, fallback: str
   return level?.name ?? `${fallback} (missing)`;
 }
 
-function serviceLevelChipTitle(level: ServiceLevelRow | undefined, label: string): string {
-  if (!level) return `Service level ${label} is not linked`;
+function serviceLevelChipTitle(level: ServiceLevelRow | undefined, label: string, t: Translate): string {
+  if (!level) return fill(t('catalogServiceOfferings.serviceLevelChipTitle.serviceLevelLabelNotLinked'), { label });
   return tierTone(level)
-    ? `Service level ${label}`
-    : `Service level ${label} is linked but has no display tone configured`;
+    ? fill(t('catalogServiceOfferings.serviceLevelChipTitle.serviceLevelLabel'), { label: String(label) })
+    : fill(t('catalogServiceOfferings.serviceLevelChipTitle.serviceLevelLabelIs'), { label: String(label) });
 }
 
 // AGENTS.md §2 + §4 (W34c): status chip tone resolves strictly from
@@ -262,14 +263,14 @@ function formatSla(minutes: number | undefined): string {
   return `${minutes}m`;
 }
 
-function serviceLevelOptionLabel(level: ServiceLevelRow): string {
+function serviceLevelOptionLabel(level: ServiceLevelRow, t: Translate): string {
   const slaLabel =
     typeof level.sla_label === 'string' && level.sla_label.trim()
       ? level.sla_label.trim()
       : typeof level.metadata?.sla_label === 'string' && level.metadata.sla_label.trim()
         ? level.metadata.sla_label.trim()
         : null;
-  return [level.name, slaLabel ? `SLA ${slaLabel}` : null].filter(Boolean).join(' · ');
+  return [level.name, slaLabel ? fill(t('catalogServiceOfferings.serviceLevelOptionLabel.slaSlalabel'), { slaLabel: String(slaLabel) }) : null].filter(Boolean).join(' · ');
 }
 
 function serviceLevelKeyFromName(name: string): string {
@@ -302,7 +303,7 @@ interface EditPriceDraft {
 
 export function ServiceOfferingsModule() {
   const { scope, currentTenantId } = useIdentity();
-  const { fmtNumber, fmtCurrency, fmtDateTime } = useI18n();
+  const { t, fmtNumber, fmtCurrency, fmtDateTime } = useI18n();
   const drawer = useDrawer();
   const modal = useModal();
   const canRead = useCapability(CAP.SERVICE_OFFERINGS_READ);
@@ -492,14 +493,14 @@ export function ServiceOfferingsModule() {
       const lv = levelById.get(levelId);
       return {
         id: levelId,
-        label: lv?.name ?? 'Service level not linked',
+        label: lv?.name ?? t('catalogServiceOfferings.serviceOfferingsModule.serviceLevelNotLinked'),
         rank: lv?.metadata?.priority_rank,
         level: lv,
         count,
         pct: Math.round((count / total) * 100),
       };
     }).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
-  }, [offerings, levelById]);
+  }, [offerings, levelById, t]);
 
   const tenantId = scope.tenant?.id;
   const isLoading = offeringsQuery.isLoading || levelsQuery.isLoading;
@@ -517,7 +518,7 @@ export function ServiceOfferingsModule() {
     ]);
     const refreshed = offeringsResult.data?.rows.find((row) => row.id === offeringId);
     if (!refreshed || (validate && !validate(refreshed))) {
-      throw new Error('The updated service offering was not available yet.');
+      throw new Error(t('catalogServiceOfferings.serviceOfferingsModule.theUpdatedServiceOffering'));
     }
     return refreshed;
   }
@@ -535,7 +536,7 @@ export function ServiceOfferingsModule() {
     const rows = offeringsResult.data?.rows ?? [];
     const refreshed = offeringIds.map((id) => rows.find((row) => row.id === id));
     if (refreshed.some((row) => !row || !validate(row))) {
-      throw new Error('The updated service offering was not available yet.');
+      throw new Error(t('catalogServiceOfferings.serviceOfferingsModule.theUpdatedServiceOffering'));
     }
     return refreshed as ServiceOfferingRow[];
   }
@@ -563,17 +564,17 @@ export function ServiceOfferingsModule() {
       ? zonesResult.data?.rows.find((row) => row.id === zoneId) ?? null
       : null;
     const offering = offeringsResult.data?.rows.find((row) => row.id === offeringId);
-    if (!level) throw new Error('The service level was not available after setup.');
-    if (!branch) throw new Error('The branch was not available after setup.');
-    if (zoneId && !zone) throw new Error('The zone was not available after setup.');
-    if (!offering) throw new Error('The service offering was not available after setup.');
+    if (!level) throw new Error(t('catalogServiceOfferings.serviceOfferingsModule.theServiceLevelWas'));
+    if (!branch) throw new Error(t('catalogServiceOfferings.serviceOfferingsModule.theBranchWasNot'));
+    if (zoneId && !zone) throw new Error(t('catalogServiceOfferings.serviceOfferingsModule.theZoneWasNot'));
+    if (!offering) throw new Error(t('catalogServiceOfferings.serviceOfferingsModule.theServiceOfferingWas'));
     return { level, branch, zone, offering };
   }
 
   function openProductContextSetup() {
     if (!canWrite || !canWriteLevels || !canWriteBranches) return;
     modal.open({
-      title: 'Product context setup',
+      title: t('catalogServiceOfferings.serviceOfferingsModule.productContextSetup'),
       body: (
         <ProductContextSetupForm
           levels={levels}
@@ -590,7 +591,7 @@ export function ServiceOfferingsModule() {
           assignBranchZone={(args) => assignBranchZoneMut.mutateAsync(args)}
           createOffering={(args) => createMut.mutateAsync(args)}
           refetchReadback={refetchProductContextSetupReadback}
-          serviceLevelOptionLabel={serviceLevelOptionLabel}
+          serviceLevelOptionLabel={(level) => serviceLevelOptionLabel(level, t)}
           serviceLevelKeyFromName={serviceLevelKeyFromName}
           isOfferingActive={isOfferingActive}
           offeringStatusDefault={defaultOfferingStatus()}
@@ -621,7 +622,7 @@ export function ServiceOfferingsModule() {
   }
   async function bulkToggleAvailability() {
     if (!canWrite || offerings.length === 0) return;
-    setBulkPending(`Toggling availability across ${offerings.length} offerings…`);
+    setBulkPending(fill(t('catalogServiceOfferings.serviceOfferingsModule.togglingAvailabilityAcross'), { count: String(offerings.length) }));
     try {
       // Each toggle is its own canonical RPC call (matches backend semantics).
       const results = await Promise.allSettled(
@@ -643,8 +644,8 @@ export function ServiceOfferingsModule() {
           },
         );
       }
-      setBulkPending(`Toggled ${ok} of ${offerings.length} offerings${fail ? ` (${fail} failed)` : ''}.`);
-      pushToast(`Toggled availability · ${ok}/${offerings.length}`, fail ? 'warn' : 'good');
+      setBulkPending(fill(t(fail ? 'catalogServiceOfferings.serviceOfferingsModule.toggledOfferingsWithFailures' : 'catalogServiceOfferings.serviceOfferingsModule.toggledOfferings'), { ok: String(ok), count: String(offerings.length), fail: String(fail) }));
+      pushToast(fill(t('catalogServiceOfferings.serviceOfferingsModule.toggledAvailabilityOkLength'), { ok: String(ok), length: String(offerings.length) }), fail ? 'warn' : 'good');
     } catch (err) {
       pushToast((err as Error).message, 'danger');
     }
@@ -657,10 +658,10 @@ export function ServiceOfferingsModule() {
     // catalog-offerings.js) instead of inline literal compare.
     const targets = offerings.filter((o) => isOfferingActive(o));
     if (targets.length === 0) {
-      pushToast('No active offerings to archive', 'info');
+      pushToast(t('catalogServiceOfferings.serviceOfferingsModule.noActiveOfferingsTo'), 'info');
       return;
     }
-    setBulkPending(`Archiving ${targets.length} active offerings…`);
+    setBulkPending(fill(t('catalogServiceOfferings.serviceOfferingsModule.archivingActiveOfferings'), { count: String(targets.length) }));
     try {
       const results = await Promise.allSettled(
         targets.map((o) => archiveMut.mutateAsync({ service_offering_id: o.id, reason: 'bulk_archive' })),
@@ -676,8 +677,8 @@ export function ServiceOfferingsModule() {
           (row) => !isOfferingActive(row),
         );
       }
-      setBulkPending(`Archived ${ok} of ${targets.length} offerings${fail ? ` (${fail} failed)` : ''}.`);
-      pushToast(`Archived · ${ok}/${targets.length}`, fail ? 'warn' : 'good');
+      setBulkPending(fill(t(fail ? 'catalogServiceOfferings.serviceOfferingsModule.archivedOfferingsWithFailures' : 'catalogServiceOfferings.serviceOfferingsModule.archivedOfferings'), { ok: String(ok), count: String(targets.length), fail: String(fail) }));
+      pushToast(fill(t('catalogServiceOfferings.serviceOfferingsModule.archivedOkLength'), { ok: String(ok), length: String(targets.length) }), fail ? 'warn' : 'good');
     } catch (err) {
       pushToast((err as Error).message, 'danger');
     }
@@ -698,8 +699,7 @@ export function ServiceOfferingsModule() {
       return (
         <div data-testid="manage-levels-body">
           <p className="state__hint">
-            Lists service tiers used by shipment creation and client pricing. Edit updates the
-            selected tier; New creates an additional tier; archiving removes a tier from new use.
+            {t('catalogServiceOfferings.serviceOfferingsModule.listsServiceTiersUsed')}
           </p>
           <div
             style={{
@@ -711,11 +711,11 @@ export function ServiceOfferingsModule() {
               overflowY: 'auto',
             }}
             role="list"
-            aria-label="Service levels"
+            aria-label={t('catalogServiceOfferings.serviceOfferingsModule.serviceLevels')}
           >
             {levels.length === 0 ? (
               <span className="state__hint" style={{ fontSize: '12px' }}>
-                No service levels — create the first via "New level".
+                {t('catalogServiceOfferings.serviceOfferingsModule.noServiceLevelsCreate')}
               </span>
             ) : (
               levels.map((lv) => (
@@ -773,7 +773,7 @@ export function ServiceOfferingsModule() {
                       );
                     })()}
                     <Button
-                      label="Edit"
+                      label={t('catalogServiceOfferings.serviceOfferingsModule.edit')}
                       kind="ghost"
                       size="sm"
                       capability={CAP.AGREEMENTS_WRITE}
@@ -785,9 +785,9 @@ export function ServiceOfferingsModule() {
             )}
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('catalogServiceOfferings.serviceOfferingsModule.close')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="New level"
+              label={t('catalogServiceOfferings.serviceOfferingsModule.newLevel')}
               iconName="plus"
               kind="primary"
               capability={CAP.AGREEMENTS_WRITE}
@@ -797,7 +797,7 @@ export function ServiceOfferingsModule() {
         </div>
       );
     }
-    modal.open({ title: 'Manage service levels', body: <ManageLevelsBody /> });
+    modal.open({ title: t('catalogServiceOfferings.serviceOfferingsModule.manageServiceLevels'), body: <ManageLevelsBody /> });
   }
 
   interface NewLevelDraft {
@@ -823,8 +823,7 @@ export function ServiceOfferingsModule() {
       return (
         <div>
           <p className="state__hint">
-            Creates a service tier that can be attached to priced offerings, SLA rules, and
-            shipment creation.
+            {t('catalogServiceOfferings.serviceOfferingsModule.createsAServiceTier')}
           </p>
           <div
             style={{
@@ -836,31 +835,31 @@ export function ServiceOfferingsModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="new-lv-name">Name</label>
+            <label className="mono" htmlFor="new-lv-name">{t('catalogServiceOfferings.serviceOfferingsModule.name')}</label>
             <input
               id="new-lv-name"
               className="dt-inline-input"
-              placeholder="e.g. Premium"
+              placeholder={t('catalogServiceOfferings.serviceOfferingsModule.eGPremium')}
               value={draft.name}
               onChange={(e) => setDraft((s) => ({ ...s, name: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-lv-desc">Description</label>
+            <label className="mono" htmlFor="new-lv-desc">{t('catalogServiceOfferings.serviceOfferingsModule.description')}</label>
             <input
               id="new-lv-desc"
               className="dt-inline-input"
-              placeholder="optional"
+              placeholder={t('catalogServiceOfferings.serviceOfferingsModule.optional')}
               value={draft.description}
               onChange={(e) => setDraft((s) => ({ ...s, description: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-lv-tier">Tier</label>
+            <label className="mono" htmlFor="new-lv-tier">{t('catalogServiceOfferings.serviceOfferingsModule.tier')}</label>
             <input
               id="new-lv-tier"
               className="dt-inline-input"
-              placeholder="e.g. premium"
+              placeholder={t('catalogServiceOfferings.serviceOfferingsModule.eGPremium2')}
               value={draft.tier}
               onChange={(e) => setDraft((s) => ({ ...s, tier: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-lv-rank">Priority rank</label>
+            <label className="mono" htmlFor="new-lv-rank">{t('catalogServiceOfferings.serviceOfferingsModule.priorityRank')}</label>
             <input
               id="new-lv-rank"
               type="number"
@@ -869,7 +868,7 @@ export function ServiceOfferingsModule() {
               value={draft.priority_rank}
               onChange={(e) => setDraft((s) => ({ ...s, priority_rank: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-lv-sla-min">SLA minutes</label>
+            <label className="mono" htmlFor="new-lv-sla-min">{t('catalogServiceOfferings.serviceOfferingsModule.slaMinutes')}</label>
             <input
               id="new-lv-sla-min"
               type="number"
@@ -878,7 +877,7 @@ export function ServiceOfferingsModule() {
               value={draft.sla_minutes}
               onChange={(e) => setDraft((s) => ({ ...s, sla_minutes: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-lv-sla-label">SLA label</label>
+            <label className="mono" htmlFor="new-lv-sla-label">{t('catalogServiceOfferings.serviceOfferingsModule.slaLabel')}</label>
             <input
               id="new-lv-sla-label"
               className="dt-inline-input"
@@ -888,16 +887,16 @@ export function ServiceOfferingsModule() {
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('catalogServiceOfferings.serviceOfferingsModule.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Create"
+              label={t('catalogServiceOfferings.serviceOfferingsModule.create')}
               kind="primary"
               capability={CAP.AGREEMENTS_WRITE}
               onClick={async () => {
                 const name = draft.name.trim();
                 const key = serviceLevelKeyFromName(name);
                 if (!name || !key) {
-                  pushToast('Name is required', 'warn');
+                  pushToast(t('catalogServiceOfferings.serviceOfferingsModule.nameIsRequired'), 'warn');
                   return;
                 }
                 const metadata: Record<string, unknown> = {};
@@ -916,7 +915,7 @@ export function ServiceOfferingsModule() {
                     metadata,
                   });
                   modal.close();
-                  pushToast('Service level created', 'good');
+                  pushToast(t('catalogServiceOfferings.serviceOfferingsModule.serviceLevelCreated'), 'good');
                 } catch (err) {
                   pushToast((err as Error).message, 'danger');
                 }
@@ -926,7 +925,7 @@ export function ServiceOfferingsModule() {
         </div>
       );
     }
-    modal.open({ title: 'New service level', body: <NewLevelForm /> });
+    modal.open({ title: t('catalogServiceOfferings.serviceOfferingsModule.newServiceLevel'), body: <NewLevelForm /> });
   }
 
   interface EditLevelDraft {
@@ -955,7 +954,7 @@ export function ServiceOfferingsModule() {
       return (
         <div>
           <p className="state__hint">
-            Updates this service tier. Unchecking Active archives the tier for future offerings.
+            {t('catalogServiceOfferings.serviceOfferingsModule.updatesThisServiceTier')}
           </p>
           <div
             style={{
@@ -967,21 +966,21 @@ export function ServiceOfferingsModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="edit-lv-name">Name</label>
+            <label className="mono" htmlFor="edit-lv-name">{t('catalogServiceOfferings.serviceOfferingsModule.name')}</label>
             <input
               id="edit-lv-name"
               className="dt-inline-input"
               value={draft.name}
               onChange={(e) => setDraft((s) => ({ ...s, name: e.target.value }))}
             />
-            <label className="mono" htmlFor="edit-lv-desc">Description</label>
+            <label className="mono" htmlFor="edit-lv-desc">{t('catalogServiceOfferings.serviceOfferingsModule.description')}</label>
             <input
               id="edit-lv-desc"
               className="dt-inline-input"
               value={draft.description}
               onChange={(e) => setDraft((s) => ({ ...s, description: e.target.value }))}
             />
-            <label className="mono" htmlFor="edit-lv-active">Active</label>
+            <label className="mono" htmlFor="edit-lv-active">{t('catalogServiceOfferings.serviceOfferingsModule.active')}</label>
             <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <input
                 id="edit-lv-active"
@@ -990,17 +989,17 @@ export function ServiceOfferingsModule() {
                 onChange={(e) => setDraft((s) => ({ ...s, is_active: e.target.checked }))}
               />
               <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-                Unchecking archives this level while preserving its history.
+                {t('catalogServiceOfferings.serviceOfferingsModule.uncheckingArchivesThisLevel')}
               </span>
             </label>
-            <label className="mono" htmlFor="edit-lv-tier">Tier</label>
+            <label className="mono" htmlFor="edit-lv-tier">{t('catalogServiceOfferings.serviceOfferingsModule.tier')}</label>
             <input
               id="edit-lv-tier"
               className="dt-inline-input"
               value={draft.tier}
               onChange={(e) => setDraft((s) => ({ ...s, tier: e.target.value }))}
             />
-            <label className="mono" htmlFor="edit-lv-rank">Priority rank</label>
+            <label className="mono" htmlFor="edit-lv-rank">{t('catalogServiceOfferings.serviceOfferingsModule.priorityRank')}</label>
             <input
               id="edit-lv-rank"
               type="number"
@@ -1008,7 +1007,7 @@ export function ServiceOfferingsModule() {
               value={draft.priority_rank}
               onChange={(e) => setDraft((s) => ({ ...s, priority_rank: e.target.value }))}
             />
-            <label className="mono" htmlFor="edit-lv-sla-min">SLA minutes</label>
+            <label className="mono" htmlFor="edit-lv-sla-min">{t('catalogServiceOfferings.serviceOfferingsModule.slaMinutes')}</label>
             <input
               id="edit-lv-sla-min"
               type="number"
@@ -1016,7 +1015,7 @@ export function ServiceOfferingsModule() {
               value={draft.sla_minutes}
               onChange={(e) => setDraft((s) => ({ ...s, sla_minutes: e.target.value }))}
             />
-            <label className="mono" htmlFor="edit-lv-sla-label">SLA label</label>
+            <label className="mono" htmlFor="edit-lv-sla-label">{t('catalogServiceOfferings.serviceOfferingsModule.slaLabel')}</label>
             <input
               id="edit-lv-sla-label"
               className="dt-inline-input"
@@ -1025,15 +1024,15 @@ export function ServiceOfferingsModule() {
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('catalogServiceOfferings.serviceOfferingsModule.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Save"
+              label={t('catalogServiceOfferings.serviceOfferingsModule.save')}
               kind="primary"
               capability={CAP.AGREEMENTS_WRITE}
               onClick={async () => {
                 const name = draft.name.trim();
                 if (!name) {
-                  pushToast('Name is required', 'warn');
+                  pushToast(t('catalogServiceOfferings.serviceOfferingsModule.nameIsRequired'), 'warn');
                   return;
                 }
                 const metadata: Record<string, unknown> = {};
@@ -1052,7 +1051,7 @@ export function ServiceOfferingsModule() {
                     metadata,
                   });
                   modal.close();
-                  pushToast(`Service level updated · ${name}`, 'good');
+                  pushToast(fill(t('catalogServiceOfferings.serviceOfferingsModule.serviceLevelUpdatedName'), { name: String(name) }), 'good');
                 } catch (err) {
                   pushToast((err as Error).message, 'danger');
                 }
@@ -1062,7 +1061,7 @@ export function ServiceOfferingsModule() {
         </div>
       );
     }
-    modal.open({ title: `Edit level · ${level.name}`, body: <EditLevelForm /> });
+    modal.open({ title: fill(t('catalogServiceOfferings.serviceOfferingsModule.editLevelName'), { name: String(level.name) }), body: <EditLevelForm /> });
   }
 
   function openCreate() {
@@ -1095,11 +1094,11 @@ export function ServiceOfferingsModule() {
           <div>
             <StateView
               kind="error"
-              title="Default offering status is missing"
-              hint="Add the default service offering status before creating new offerings."
+              title={t('catalogServiceOfferings.serviceOfferingsModule.defaultOfferingStatusIs')}
+              hint={t('catalogServiceOfferings.serviceOfferingsModule.addTheDefaultService')}
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-              <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+              <Button label={t('catalogServiceOfferings.serviceOfferingsModule.close')} kind="ghost" onClick={() => modal.close()} />
             </div>
           </div>
         );
@@ -1107,8 +1106,7 @@ export function ServiceOfferingsModule() {
       return (
         <div>
           <p className="state__hint">
-            Creates an operator-facing service option for the selected service tier, branch, and
-            optional zone.
+            {t('catalogServiceOfferings.serviceOfferingsModule.createsAnOperatorFacing')}
           </p>
           <div
             style={{
@@ -1120,7 +1118,7 @@ export function ServiceOfferingsModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="new-of-level">Service level</label>
+            <label className="mono" htmlFor="new-of-level">{t('catalogServiceOfferings.serviceOfferingsModule.serviceLevel')}</label>
             <select
               id="new-of-level"
               className="dt-inline-input"
@@ -1128,10 +1126,10 @@ export function ServiceOfferingsModule() {
               onChange={(e) => setDraft((s) => ({ ...s, service_level_id: e.target.value }))}
             >
               {levels.map((lv) => (
-                <option key={lv.id} value={lv.id}>{serviceLevelOptionLabel(lv)}</option>
+                <option key={lv.id} value={lv.id}>{serviceLevelOptionLabel(lv, t)}</option>
               ))}
             </select>
-            <label className="mono" htmlFor="new-of-branch">Branch</label>
+            <label className="mono" htmlFor="new-of-branch">{t('catalogServiceOfferings.serviceOfferingsModule.branch')}</label>
             <select
               id="new-of-branch"
               className="dt-inline-input"
@@ -1142,19 +1140,19 @@ export function ServiceOfferingsModule() {
                 <option key={b.id} value={b.id}>{b.name}</option>
               ))}
             </select>
-            <label className="mono" htmlFor="new-of-zone">Zone (optional)</label>
+            <label className="mono" htmlFor="new-of-zone">{t('catalogServiceOfferings.serviceOfferingsModule.zoneOptional')}</label>
             <select
               id="new-of-zone"
               className="dt-inline-input"
               value={draft.zone_id}
               onChange={(e) => setDraft((s) => ({ ...s, zone_id: e.target.value }))}
             >
-              <option value="">All branch zones</option>
+              <option value="">{t('catalogServiceOfferings.serviceOfferingsModule.allBranchZones')}</option>
               {zones.map((z) => (
                 <option key={z.id} value={z.id}>{z.name}</option>
               ))}
             </select>
-            <label className="mono" htmlFor="new-of-priority">Priority</label>
+            <label className="mono" htmlFor="new-of-priority">{t('catalogServiceOfferings.serviceOfferingsModule.priority')}</label>
             <input
               id="new-of-priority"
               type="number"
@@ -1162,23 +1160,23 @@ export function ServiceOfferingsModule() {
               value={draft.priority}
               onChange={(e) => setDraft((s) => ({ ...s, priority: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-of-name">Display name</label>
+            <label className="mono" htmlFor="new-of-name">{t('catalogServiceOfferings.serviceOfferingsModule.displayName')}</label>
             <input
               id="new-of-name"
               className="dt-inline-input"
-              placeholder="e.g. Same-Day Express"
+              placeholder={t('catalogServiceOfferings.serviceOfferingsModule.eGSameDay')}
               value={draft.display_name}
               onChange={(e) => setDraft((s) => ({ ...s, display_name: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-of-slug">Display slug</label>
+            <label className="mono" htmlFor="new-of-slug">{t('catalogServiceOfferings.serviceOfferingsModule.displaySlug')}</label>
             <input
               id="new-of-slug"
               className="dt-inline-input"
-              placeholder="e.g. same-day-express"
+              placeholder={t('catalogServiceOfferings.serviceOfferingsModule.eGSameDay2')}
               value={draft.display_slug}
               onChange={(e) => setDraft((s) => ({ ...s, display_slug: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-of-price">Base price</label>
+            <label className="mono" htmlFor="new-of-price">{t('catalogServiceOfferings.serviceOfferingsModule.basePrice')}</label>
             <input
               id="new-of-price"
               type="number"
@@ -1187,14 +1185,14 @@ export function ServiceOfferingsModule() {
               value={draft.base_price}
               onChange={(e) => setDraft((s) => ({ ...s, base_price: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-of-currency">Currency</label>
+            <label className="mono" htmlFor="new-of-currency">{t('catalogServiceOfferings.serviceOfferingsModule.currency')}</label>
             <input
               id="new-of-currency"
               className="dt-inline-input"
               value={draft.currency}
               onChange={(e) => setDraft((s) => ({ ...s, currency: e.target.value.toUpperCase() }))}
             />
-            <label className="mono" htmlFor="new-of-weight">Max weight (kg)</label>
+            <label className="mono" htmlFor="new-of-weight">{t('catalogServiceOfferings.serviceOfferingsModule.maxWeightKg')}</label>
             <input
               id="new-of-weight"
               type="number"
@@ -1205,14 +1203,14 @@ export function ServiceOfferingsModule() {
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('catalogServiceOfferings.serviceOfferingsModule.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Create"
+              label={t('catalogServiceOfferings.serviceOfferingsModule.create')}
               kind="primary"
               capability={CAP.SERVICE_OFFERINGS_WRITE}
               onClick={async () => {
                 if (!draft.service_level_id) {
-                  pushToast('Service level is required', 'warn');
+                  pushToast(t('catalogServiceOfferings.serviceOfferingsModule.serviceLevelIsRequired'), 'warn');
                   return;
                 }
                 // W56-A closure: branch is REQUIRED for offering create. The
@@ -1220,11 +1218,11 @@ export function ServiceOfferingsModule() {
                 // the FE create surface must guard the operator path so an
                 // empty `<select>` does not silently submit a null branch.
                 if (!draft.branch_id) {
-                  pushToast('Branch is required', 'warn');
+                  pushToast(t('catalogServiceOfferings.serviceOfferingsModule.branchIsRequired'), 'warn');
                   return;
                 }
                 if (!draft.display_name.trim() || !draft.display_slug.trim()) {
-                  pushToast('Display name and slug are required', 'warn');
+                  pushToast(t('catalogServiceOfferings.serviceOfferingsModule.displayNameAndSlug'), 'warn');
                   return;
                 }
                 const metadata: Record<string, unknown> = {
@@ -1263,7 +1261,7 @@ export function ServiceOfferingsModule() {
                   );
                   modal.close();
                   openOfferingDrawer(refreshed);
-                  pushToast(`Offering created · ${displayName}`, 'good');
+                  pushToast(fill(t('catalogServiceOfferings.serviceOfferingsModule.offeringCreatedDisplayname'), { displayName: String(displayName) }), 'good');
                 } catch (err) {
                   pushToast((err as Error).message, 'danger');
                 }
@@ -1273,7 +1271,7 @@ export function ServiceOfferingsModule() {
         </div>
       );
     }
-    modal.open({ title: 'New service offering', body: <NewOfferingForm /> });
+    modal.open({ title: t('catalogServiceOfferings.serviceOfferingsModule.newServiceOffering'), body: <NewOfferingForm /> });
   }
   function openEditPrice(offering: ServiceOfferingRow) {
     if (!canWrite) return;
@@ -1286,7 +1284,7 @@ export function ServiceOfferingsModule() {
       return (
         <div>
           <p className="state__hint">
-            Updates the price and currency operators see when selecting this service option.
+            {t('catalogServiceOfferings.serviceOfferingsModule.updatesThePriceAnd')}
           </p>
           <div
             style={{
@@ -1298,7 +1296,7 @@ export function ServiceOfferingsModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="edit-price-amount">Base price</label>
+            <label className="mono" htmlFor="edit-price-amount">{t('catalogServiceOfferings.serviceOfferingsModule.basePrice')}</label>
             <input
               id="edit-price-amount"
               type="number"
@@ -1306,7 +1304,7 @@ export function ServiceOfferingsModule() {
               value={draft.base_price}
               onChange={(e) => setDraft((s) => ({ ...s, base_price: e.target.value }))}
             />
-            <label className="mono" htmlFor="edit-price-currency">Currency</label>
+            <label className="mono" htmlFor="edit-price-currency">{t('catalogServiceOfferings.serviceOfferingsModule.currency')}</label>
             <input
               id="edit-price-currency"
               className="dt-inline-input"
@@ -1315,15 +1313,15 @@ export function ServiceOfferingsModule() {
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('catalogServiceOfferings.serviceOfferingsModule.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Save"
+              label={t('catalogServiceOfferings.serviceOfferingsModule.save')}
               kind="primary"
               capability={CAP.SERVICE_OFFERINGS_WRITE}
               onClick={async () => {
                 const priceNum = Number(draft.base_price);
                 if (!Number.isFinite(priceNum) || priceNum <= 0) {
-                  pushToast('Base price must be a positive number', 'warn');
+                  pushToast(t('catalogServiceOfferings.serviceOfferingsModule.basePriceMustBe'), 'warn');
                   return;
                 }
                 try {
@@ -1341,7 +1339,7 @@ export function ServiceOfferingsModule() {
                   );
                   modal.close();
                   openOfferingDrawer(refreshed, 'pricing');
-                  pushToast(`Price updated · ${offering.metadata?.display?.name ?? 'service offering'}`, 'good');
+                  pushToast(fill(t('catalogServiceOfferings.serviceOfferingsModule.priceUpdatedValue'), { value: String(offering.metadata?.display?.name ?? t('catalogServiceOfferings.serviceOfferingsModule.serviceOffering')) }), 'good');
                 } catch (err) {
                   pushToast((err as Error).message, 'danger');
                 }
@@ -1352,7 +1350,7 @@ export function ServiceOfferingsModule() {
       );
     }
     modal.open({
-      title: `Edit price · ${offering.metadata?.display?.name ?? 'service offering'}`,
+      title: fill(t('catalogServiceOfferings.serviceOfferingsModule.editPriceValue'), { value: String(offering.metadata?.display?.name ?? t('catalogServiceOfferings.serviceOfferingsModule.serviceOffering')) }),
       body: <EditPriceForm />,
     });
   }
@@ -1365,7 +1363,7 @@ export function ServiceOfferingsModule() {
   ) {
     setSelectedId(offering.id);
     drawer.open({
-      title: `Offering · ${offering.metadata?.display?.name ?? 'service offering'}`,
+      title: fill(t('catalogServiceOfferings.serviceOfferingsModule.offeringValue'), { value: String(offering.metadata?.display?.name ?? t('catalogServiceOfferings.serviceOfferingsModule.serviceOffering')) }),
       size: 'lg',
       deepLink: `/catalog/service-offerings?focus=${encodeURIComponent(offering.id)}`,
       body: renderDrawerBody(offering, tab, related),
@@ -1374,7 +1372,7 @@ export function ServiceOfferingsModule() {
   }
   function switchTab(offering: ServiceOfferingRow, next: DrawerTabKey) {
     drawer.open({
-      title: `Offering · ${offering.metadata?.display?.name ?? 'service offering'}`,
+      title: fill(t('catalogServiceOfferings.serviceOfferingsModule.offeringValue'), { value: String(offering.metadata?.display?.name ?? t('catalogServiceOfferings.serviceOfferingsModule.serviceOffering')) }),
       size: 'lg',
       deepLink: `/catalog/service-offerings?focus=${encodeURIComponent(offering.id)}`,
       body: renderDrawerBody(offering, next),
@@ -1428,14 +1426,14 @@ export function ServiceOfferingsModule() {
             // the SSOT. Missing canonical row surfaces a `danger` chip with
             // `(missing)` marker so operators see the gap rather than a
             // silent neutral default.
-            const lvLabel = lv?.name ?? 'Service level not linked';
+            const lvLabel = lv?.name ?? t('catalogServiceOfferings.serviceOfferingsModule.serviceLevelNotLinked');
             return (
               <Chip
                 label={serviceLevelChipLabel(lv, lvLabel)}
                 kind={serviceLevelChipTone(lv)}
                 size="xs"
                 className="mono"
-                title={serviceLevelChipTitle(lv, lvLabel)}
+                title={serviceLevelChipTitle(lv, lvLabel, t)}
               />
             );
           })()}
@@ -1451,7 +1449,7 @@ export function ServiceOfferingsModule() {
 
         <div
           role="tablist"
-          aria-label="Offering details"
+          aria-label={t('catalogServiceOfferings.serviceOfferingsModule.offeringDetails')}
           data-testid="offering-drawer-tabs"
           style={{
             display: 'flex',
@@ -1462,20 +1460,20 @@ export function ServiceOfferingsModule() {
             flexWrap: 'wrap',
           }}
         >
-          {DRAWER_TABS.map((t) => {
-            const isActive = t.key === tab;
+          {drawerTabs(t).map((entry) => {
+            const isActive = entry.key === tab;
             return (
               <button
-                key={t.key}
+                key={entry.key}
                 type="button"
                 role="tab"
                 aria-selected={isActive}
-                data-testid={`offering-tab-${t.key}`}
+                data-testid={`offering-tab-${entry.key}`}
                 className={`btn btn--sm ${isActive ? 'btn--primary' : 'btn--ghost'}`}
                 style={{ fontSize: '12px' }}
-                onClick={() => switchTab(offering, t.key)}
+                onClick={() => switchTab(offering, entry.key)}
               >
-                {t.label}
+                {entry.label}
               </button>
             );
           })}
@@ -1520,7 +1518,7 @@ export function ServiceOfferingsModule() {
   const headerActions: ReactNode[] = [
     <Button
       key="setup"
-      label="Product setup"
+      label={t('catalogServiceOfferings.serviceOfferingsModule.productSetup')}
       iconName="settings"
       kind="ghost"
       capabilities={[CAP.SERVICE_OFFERINGS_WRITE, CAP.AGREEMENTS_WRITE, CAP.BRANCHES_WRITE]}
@@ -1528,7 +1526,7 @@ export function ServiceOfferingsModule() {
     />,
     <Button
       key="new"
-      label="New offering"
+      label={t('catalogServiceOfferings.serviceOfferingsModule.newOffering')}
       iconName="plus"
       kind="primary"
       capability={CAP.SERVICE_OFFERINGS_WRITE}
@@ -1536,7 +1534,7 @@ export function ServiceOfferingsModule() {
     />,
     <Button
       key="manage-levels"
-      label="Manage levels"
+      label={t('catalogServiceOfferings.serviceOfferingsModule.manageLevels')}
       iconName="edit"
       kind="ghost"
       capability={CAP.AGREEMENTS_WRITE}
@@ -1544,7 +1542,7 @@ export function ServiceOfferingsModule() {
     />,
     <Button
       key="toggle"
-      label="Toggle availability"
+      label={t('catalogServiceOfferings.serviceOfferingsModule.toggleAvailability')}
       iconName="rotate"
       kind="ghost"
       capability={CAP.SERVICE_OFFERINGS_WRITE}
@@ -1552,7 +1550,7 @@ export function ServiceOfferingsModule() {
     />,
     <Button
       key="archive"
-      label="Archive"
+      label={t('catalogServiceOfferings.serviceOfferingsModule.archive')}
       iconName="trash"
       kind="ghost"
       capability={CAP.SERVICE_OFFERINGS_WRITE}
@@ -1564,14 +1562,14 @@ export function ServiceOfferingsModule() {
     return (
       <div className="page">
         <PageHeader
-          eyebrow="Catalog"
-          titleAccent="Service"
-          titlePlain="offerings — pricing & SLA catalog"
+          eyebrow={t('catalogServiceOfferings.serviceOfferingsModule.catalog')}
+          titleAccent={t('catalogServiceOfferings.serviceOfferingsModule.service')}
+          titlePlain={t('catalogServiceOfferings.serviceOfferingsModule.offeringsPricingSlaCatalog')}
         />
         <StateView
           kind="denied"
           capability={CAP.SERVICE_OFFERINGS_READ}
-          hint="You do not have permission to view service offerings."
+          hint={t('catalogServiceOfferings.serviceOfferingsModule.youDoNotHave')}
         />
       </div>
     );
@@ -1580,21 +1578,21 @@ export function ServiceOfferingsModule() {
   return (
     <div className="page">
       <PageHeader
-        eyebrow="Catalog"
-        titleAccent="Service"
-        titlePlain="offerings — pricing & SLA catalog"
+        eyebrow={t('catalogServiceOfferings.serviceOfferingsModule.catalog')}
+        titleAccent={t('catalogServiceOfferings.serviceOfferingsModule.service')}
+        titlePlain={t('catalogServiceOfferings.serviceOfferingsModule.offeringsPricingSlaCatalog')}
         pills={[
           <ScopePill key="scope" scopeType="tenant" scopeId={tenantId} />,
           <Chip
             key="src"
-            label="Service tiers · service options"
+            label={t('catalogServiceOfferings.serviceOfferingsModule.serviceTiersServiceOptions')}
             kind="neutral"
             size="xs"
             className="mono"
           />,
           <Chip
             key="cap"
-            label="Catalog access · catalog update"
+            label={t('catalogServiceOfferings.serviceOfferingsModule.catalogAccessCatalogUpdate')}
             kind="neutral"
             size="xs"
             className="mono"
@@ -1620,20 +1618,20 @@ export function ServiceOfferingsModule() {
       ) : null}
 
       {isError ? (
-        <StateView kind="error" hint="Could not load service catalog." />
+        <StateView kind="error" hint={t('catalogServiceOfferings.serviceOfferingsModule.couldNotLoadService')} />
       ) : isLoading ? (
-        <StateView kind="loading" hint="Loading offerings…" />
+        <StateView kind="loading" hint={t('catalogServiceOfferings.serviceOfferingsModule.loadingOfferings')} />
       ) : (
         <>
           <div className="kpi-strip" data-testid="offerings-kpi-strip">
             <KPICard
-              label="Total offerings"
+              label={t('catalogServiceOfferings.serviceOfferingsModule.totalOfferings')}
               value={fmtNumber(totalOfferings)}
-              delta="across all tiers"
+              delta={t('catalogServiceOfferings.serviceOfferingsModule.acrossAllTiers')}
               tone="info"
             />
             <KPICard
-              label="Active"
+              label={t('catalogServiceOfferings.serviceOfferingsModule.active')}
               value={fmtNumber(activeOfferings)}
               delta={`${fmtNumber(totalOfferings - activeOfferings)} non-active`}
               tone={
@@ -1645,9 +1643,9 @@ export function ServiceOfferingsModule() {
               }
             />
             <KPICard
-              label="Archived"
+              label={t('catalogServiceOfferings.serviceOfferingsModule.archived')}
               value={fmtNumber(archivedOfferings)}
-              delta="historical roster"
+              delta={t('catalogServiceOfferings.serviceOfferingsModule.historicalRoster')}
               tone={
                 catalogKpiThresholds?.archived_offerings_max != null
                   ? archivedOfferings <= catalogKpiThresholds.archived_offerings_max
@@ -1657,13 +1655,13 @@ export function ServiceOfferingsModule() {
               }
             />
             <KPICard
-              label="Price range"
+              label={t('catalogServiceOfferings.serviceOfferingsModule.priceRange')}
               value={
                 priceRange
                   ? `${fmtCurrency(priceRange.min, priceRange.ccy)} – ${fmtCurrency(priceRange.max, priceRange.ccy)}`
                   : '—'
               }
-              delta="active offerings"
+              delta={t('catalogServiceOfferings.serviceOfferingsModule.activeOfferings')}
               tone="neutral"
             />
           </div>
@@ -1677,12 +1675,12 @@ export function ServiceOfferingsModule() {
             style={{ padding: '0 16px 6px' }}
           >
             <div className="section-eyebrow" style={{ marginTop: '6px' }}>
-              Service-level distribution
+              {t('catalogServiceOfferings.serviceOfferingsModule.serviceLevelDistribution')}
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' }}>
               {distribution.length === 0 ? (
                 <span className="state__hint" style={{ fontSize: '12px' }}>
-                  No active offerings yet.
+                  {t('catalogServiceOfferings.serviceOfferingsModule.noActiveOfferingsYet')}
                 </span>
               ) : (
                 distribution.map((d) => {
@@ -1700,7 +1698,7 @@ export function ServiceOfferingsModule() {
                       }
                       kind={dTone}
                       size="xs"
-                      title={`${serviceLevelChipTitle(d.level, d.label)}: ${d.count} active offerings`}
+                      title={fill(t('catalogServiceOfferings.serviceOfferingsModule.valueCountActiveOfferings'), { value: String(serviceLevelChipTitle(d.level, d.label, t)), count: String(d.count) })}
                     />
                   );
                 })
@@ -1712,7 +1710,7 @@ export function ServiceOfferingsModule() {
             className="offerings-grid"
             data-testid="offerings-grid"
             role="list"
-            aria-label="Service offerings"
+            aria-label={t('catalogServiceOfferings.serviceOfferingsModule.serviceOfferings')}
             style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
@@ -1725,13 +1723,13 @@ export function ServiceOfferingsModule() {
               const branch = branchById.get(o.branch_id);
               const status = effectiveStatus(o);
               const m = o.metadata ?? {};
-              const display = serviceOfferingDisplay(o, lv, branch);
+              const display = serviceOfferingDisplay(o, lv, branch, t);
               const isFocused = o.id === selectedId;
               const features = m.included_features ?? [];
               // Strict canonical resolver — `service_levels.metadata.tone`
               // is the SSOT. Missing canonical row surfaces a `danger` chip
               // with `(missing)` marker rather than a silent default.
-              const lvLabel = lv?.name ?? 'Service level not linked';
+              const lvLabel = lv?.name ?? t('catalogServiceOfferings.serviceOfferingsModule.serviceLevelNotLinked');
               return (
                 <article
                   key={o.id}
@@ -1771,7 +1769,7 @@ export function ServiceOfferingsModule() {
                       kind={serviceLevelChipTone(lv)}
                       size="xs"
                       className="mono"
-                      title={serviceLevelChipTitle(lv, lvLabel)}
+                      title={serviceLevelChipTitle(lv, lvLabel, t)}
                     />
                     <Chip label={lookupDisplayLabel('service_offering_status', status)} kind={statusTone(status)} size="xs" />
                   </header>
@@ -1829,7 +1827,7 @@ export function ServiceOfferingsModule() {
                       }
                       kind={serviceLevelChipTone(lv)}
                       size="xs"
-                      title={lv?.metadata?.sla_label ?? 'No SLA target set'}
+                      title={lv?.metadata?.sla_label ?? t('catalogServiceOfferings.serviceOfferingsModule.noSlaTargetSet')}
                     />
                     {(() => {
                       // W58-Catalog+Customers REDO closure: chip cap is
@@ -1879,13 +1877,13 @@ export function ServiceOfferingsModule() {
                       color: 'var(--ink-3)',
                     }}
                   >
-                    <span className="mono" title={branch?.name ?? 'Branch not linked'}>
-                      {branch?.city ?? branch?.name ?? 'Branch not linked'}
+                    <span className="mono" title={branch?.name ?? t('catalogServiceOfferings.serviceOfferingsModule.branchNotLinked')}>
+                      {branch?.city ?? branch?.name ?? t('catalogServiceOfferings.serviceOfferingsModule.branchNotLinked')}
                     </span>
                     {!canWrite ? (
                       <CapabilityLock capability={CAP.SERVICE_OFFERINGS_WRITE} />
                     ) : (
-                      <span className="mono">priority {o.priority}</span>
+                      <span className="mono">{fill(t('catalogServiceOfferings.serviceOfferingsModule.priorityPriority'), { priority: String(o.priority) })}</span>
                     )}
                   </footer>
                 </article>
@@ -1897,11 +1895,11 @@ export function ServiceOfferingsModule() {
             <div>
               <StateView
                 kind="empty"
-                hint="No service offerings configured for this tenant yet."
+                hint={t('catalogServiceOfferings.serviceOfferingsModule.noServiceOfferingsConfigured')}
               />
               <div style={{ display: 'flex', justifyContent: 'center', marginTop: 10 }}>
                 <Button
-                  label="Product setup"
+                  label={t('catalogServiceOfferings.serviceOfferingsModule.productSetup')}
                   iconName="settings"
                   kind="primary"
                   capabilities={[CAP.SERVICE_OFFERINGS_WRITE, CAP.AGREEMENTS_WRITE, CAP.BRANCHES_WRITE]}
@@ -1921,15 +1919,17 @@ export function ServiceOfferingsModule() {
 
 // ---------- Drawer tabs ----------
 
-const DRAWER_TABS = [
-  { key: 'profile', label: 'Profile' },
-  { key: 'pricing', label: 'Pricing' },
-  { key: 'sla', label: 'SLA terms' },
-  { key: 'coverage', label: 'Coverage zones' },
-  { key: 'subscriptions', label: 'Active subscriptions' },
-] as const;
+function drawerTabs(t: Translate) {
+  return [
+  { key: 'profile', label: t('catalogServiceOfferings.drawerTabs.profile') },
+  { key: 'pricing', label: t('catalogServiceOfferings.drawerTabs.pricing') },
+  { key: 'sla', label: t('catalogServiceOfferings.drawerTabs.slaTerms') },
+  { key: 'coverage', label: t('catalogServiceOfferings.drawerTabs.coverageZones') },
+  { key: 'subscriptions', label: t('catalogServiceOfferings.drawerTabs.activeSubscriptions') },
+  ] as const;
+}
 
-type DrawerTabKey = (typeof DRAWER_TABS)[number]['key'];
+type DrawerTabKey = ReturnType<typeof drawerTabs>[number]['key'];
 
 interface ProfileTabProps {
   offering: ServiceOfferingRow;
@@ -1949,31 +1949,32 @@ interface ProfileTabProps {
 }
 
 function ProfileTab({ offering, level, branch, zone, fmtDateTime, tenantCurrencyIso }: ProfileTabProps) {
+  const { t } = useI18n();
   const m = offering.metadata ?? {};
-  const display = serviceOfferingDisplay(offering, level, branch);
+  const display = serviceOfferingDisplay(offering, level, branch, t);
   const displayStatus = lookupDisplayLabel('service_offering_status', effectiveStatus(offering));
   const rows: KvRow[] = [
-    { key: 'name', label: 'Name', value: display.name },
-    { key: 'slug', label: 'Slug', value: display.slug, mono: true },
+    { key: 'name', label: t('catalogServiceOfferings.profileTab.name'), value: display.name },
+    { key: 'slug', label: t('catalogServiceOfferings.profileTab.slug'), value: display.slug, mono: true },
     {
       key: 'service_level',
-      label: 'Service level',
-      value: level?.name ?? 'Service level not linked',
+      label: t('catalogServiceOfferings.profileTab.serviceLevel'),
+      value: level?.name ?? t('catalogServiceOfferings.profileTab.serviceLevelNotLinked'),
     },
-    { key: 'branch', label: 'Branch', value: branch?.name ?? 'Branch not linked', mono: Boolean(branch) },
+    { key: 'branch', label: t('catalogServiceOfferings.profileTab.branch'), value: branch?.name ?? t('catalogServiceOfferings.profileTab.branchNotLinked'), mono: Boolean(branch) },
     {
       key: 'zone',
-      label: 'Zone',
-      value: zone ? `${zone.name}${zone.slug ? ` (${zone.slug})` : ''}` : 'All branch zones',
+      label: t('catalogServiceOfferings.profileTab.zone'),
+      value: zone ? `${zone.name}${zone.slug ? ` (${zone.slug})` : ''}` : t('catalogServiceOfferings.profileTab.allBranchZones'),
       mono: true,
     },
     {
       key: 'base_price',
-      label: 'Base price',
+      label: t('catalogServiceOfferings.profileTab.basePrice'),
       value: m.base_price != null ? `${m.base_price} ${m.currency ?? tenantCurrencyIso ?? '—'}` : '—',
       mono: true,
     },
-    { key: 'currency', label: 'Currency', value: m.currency ?? '—', mono: true },
+    { key: 'currency', label: t('catalogServiceOfferings.profileTab.currency'), value: m.currency ?? '—', mono: true },
     {
       key: 'sla_minutes',
       label: 'SLA',
@@ -1982,18 +1983,18 @@ function ProfileTab({ offering, level, branch, zone, fmtDateTime, tenantCurrency
         : '—',
       mono: true,
     },
-    { key: 'max_weight_kg', label: 'Max weight (kg)', value: m.max_weight_kg ?? '—', mono: true },
+    { key: 'max_weight_kg', label: t('catalogServiceOfferings.profileTab.maxWeightKg'), value: m.max_weight_kg ?? '—', mono: true },
     {
       key: 'effective',
-      label: 'Effective',
+      label: t('catalogServiceOfferings.profileTab.effective'),
       value: `${fmtDateTime(offering.effective_from)} → ${
-        offering.effective_to ? fmtDateTime(offering.effective_to) : 'no end'
+        offering.effective_to ? fmtDateTime(offering.effective_to) : t('catalogServiceOfferings.profileTab.noEnd')
       }`,
       mono: true,
     },
-    { key: 'priority', label: 'Priority', value: offering.priority, mono: true },
-    { key: 'is_active', label: 'Active', value: offering.is_active ? 'Yes' : 'No' },
-    { key: 'status', label: 'Status', value: displayStatus },
+    { key: 'priority', label: t('catalogServiceOfferings.profileTab.priority'), value: offering.priority, mono: true },
+    { key: 'is_active', label: t('catalogServiceOfferings.profileTab.active'), value: offering.is_active ? t('catalogServiceOfferings.profileTab.yes') : t('catalogServiceOfferings.profileTab.no') },
+    { key: 'status', label: t('catalogServiceOfferings.profileTab.status'), value: displayStatus },
   ];
   return <KvGrid rows={rows} />;
 }
@@ -2014,6 +2015,7 @@ interface PricingTabProps {
 }
 
 function PricingTab({ offering, fmtCurrency, canWrite, onEditPrice, tenantCurrencyIso }: PricingTabProps) {
+  const { t } = useI18n();
   const m = offering.metadata ?? {};
   const breakpoints = m.pricing_breakpoints ?? [];
   return (
@@ -2035,7 +2037,7 @@ function PricingTab({ offering, fmtCurrency, canWrite, onEditPrice, tenantCurren
         />
         <div style={{ flex: 1 }} />
         <Button
-          label="Edit price"
+          label={t('catalogServiceOfferings.pricingTab.editPrice')}
           iconName="edit"
           kind="primary"
           capability={CAP.SERVICE_OFFERINGS_WRITE}
@@ -2045,10 +2047,10 @@ function PricingTab({ offering, fmtCurrency, canWrite, onEditPrice, tenantCurren
         />
       </div>
       <div className="section-eyebrow" style={{ marginTop: '8px' }}>
-        Pricing breakpoints
+        {t('catalogServiceOfferings.pricingTab.pricingBreakpoints')}
       </div>
       {breakpoints.length === 0 ? (
-        <StateView kind="empty" hint="No weight-tier breakpoints configured." />
+        <StateView kind="empty" hint={t('catalogServiceOfferings.pricingTab.noWeightTierBreakpoints')} />
       ) : (
         <ul style={{ listStyle: 'none', padding: 0, margin: '6px 0 0', display: 'grid', gap: '4px' }}>
           {breakpoints.map((bp, i) => (
@@ -2065,7 +2067,7 @@ function PricingTab({ offering, fmtCurrency, canWrite, onEditPrice, tenantCurren
                 fontSize: '12px',
               }}
             >
-              <span className="mono">up to {bp.up_to_kg} kg</span>
+              <span className="mono">{fill(t('catalogServiceOfferings.pricingTab.upToUpTo'), { up_to_kg: String(bp.up_to_kg) })}</span>
               <span className="mono" style={{ fontWeight: 600 }}>
                 {fmtCurrency(bp.price, m.currency ?? tenantCurrencyIso ?? '')}
               </span>
@@ -2084,30 +2086,31 @@ interface SlaTabProps {
 }
 
 function SlaTab({ offering, level, fmtDateTime }: SlaTabProps) {
+  const { t } = useI18n();
   if (!level) {
-    return <StateView kind="empty" hint="Service tier details are not available." />;
+    return <StateView kind="empty" hint={t('catalogServiceOfferings.slaTab.serviceTierDetailsAre')} />;
   }
   const lm = level.metadata ?? {};
   const slaRows: KvRow[] = [
-    { key: 'tier', label: 'Tier', value: lookupDisplayLabel('service_level_tier', lm.tier), mono: true },
+    { key: 'tier', label: t('catalogServiceOfferings.slaTab.tier'), value: lookupDisplayLabel('service_level_tier', lm.tier), mono: true },
     {
       key: 'sla_minutes',
-      label: 'SLA promise',
+      label: t('catalogServiceOfferings.slaTab.slaPromise'),
       value: lm.sla_minutes != null
         ? `${formatSla(lm.sla_minutes)} (${lm.sla_minutes} minutes)`
         : '—',
       mono: true,
     },
-    { key: 'sla_label', label: 'SLA label', value: lm.sla_label ?? '—' },
-    { key: 'priority_rank', label: 'Priority rank', value: lm.priority_rank ?? '—', mono: true },
+    { key: 'sla_label', label: t('catalogServiceOfferings.slaTab.slaLabel'), value: lm.sla_label ?? '—' },
+    { key: 'priority_rank', label: t('catalogServiceOfferings.slaTab.priorityRank'), value: lm.priority_rank ?? '—', mono: true },
   ];
   const lvRows: KvRow[] = [
-    { key: 'name', label: 'Name', value: level.name },
-    { key: 'description', label: 'Description', value: level.description ?? '—' },
-    { key: 'is_active', label: 'Active', value: level.is_active ? 'Yes' : 'No' },
+    { key: 'name', label: t('catalogServiceOfferings.slaTab.name'), value: level.name },
+    { key: 'description', label: t('catalogServiceOfferings.slaTab.description'), value: level.description ?? '—' },
+    { key: 'is_active', label: t('catalogServiceOfferings.slaTab.active'), value: level.is_active ? t('catalogServiceOfferings.slaTab.yes') : t('catalogServiceOfferings.slaTab.no') },
     {
       key: 'updated_at',
-      label: 'Updated',
+      label: t('catalogServiceOfferings.slaTab.updated'),
       value: level.updated_at ? fmtDateTime(level.updated_at) : '—',
       mono: true,
     },
@@ -2115,11 +2118,11 @@ function SlaTab({ offering, level, fmtDateTime }: SlaTabProps) {
   return (
     <div>
       <div className="section-eyebrow" style={{ marginTop: 0, marginBottom: '4px' }}>
-        SLA promise
+        {t('catalogServiceOfferings.slaTab.slaPromise')}
       </div>
       <KvGrid rows={slaRows} />
       <div className="section-eyebrow" style={{ marginTop: '12px', marginBottom: '4px' }}>
-        Service level
+        {t('catalogServiceOfferings.slaTab.serviceLevel')}
       </div>
       <KvGrid rows={lvRows} />
     </div>
@@ -2133,25 +2136,26 @@ interface CoverageTabProps {
 }
 
 function CoverageTab({ offering, branch, zone }: CoverageTabProps) {
+  const { t } = useI18n();
   const m = offering.metadata ?? {};
   const summary = m.coverage_summary;
   return (
     <div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
         <Chip
-          label={<span className="mono">branch · {branch?.name ?? 'Branch not linked'}</span>}
+          label={<span className="mono">{fill(t('catalogServiceOfferings.coverageTab.branchName'), { name: branch?.name ?? t('catalogServiceOfferings.coverageTab.branchNotLinked') })}</span>}
           kind="info"
           size="xs"
         />
         {zone ? (
           <Chip
-            label={<span className="mono">zone · {zone.name}</span>}
+            label={<span className="mono">{fill(t('catalogServiceOfferings.coverageTab.zoneName'), { name: String(zone.name) })}</span>}
             kind="good"
             size="xs"
           />
         ) : (
           <Chip
-            label={<span className="mono">all branch zones</span>}
+            label={<span className="mono">{t('catalogServiceOfferings.coverageTab.allBranchZones')}</span>}
             kind="neutral"
             size="xs"
           />
@@ -2179,6 +2183,7 @@ interface SubscriptionsTabProps {
 }
 
 function SubscriptionsTab({
+  const { t } = useI18n();
   offering,
   registryAvailable,
   liveCount,
@@ -2197,21 +2202,21 @@ function SubscriptionsTab({
           {value != null ? fmtNumber(value) : '—'}
         </span>
         <span className="mono" style={{ fontSize: '12px', color: 'var(--ink-3)' }}>
-          active subscriptions
+          {t('catalogServiceOfferings.subscriptionsTab.activeSubscriptions')}
         </span>
         {!registryAvailable ? (
           <Chip
-            label="Unavailable"
+            label={t('catalogServiceOfferings.subscriptionsTab.unavailable')}
             kind="danger"
             size="xs"
-            title="Live subscription count is not available"
+            title={t('catalogServiceOfferings.subscriptionsTab.liveSubscriptionCountIs')}
           />
         ) : null}
       </div>
       <p className="state__hint" style={{ marginTop: '8px', fontSize: '12px' }}>
         {registryAvailable
-          ? 'Live count derived from active subscriptions linked to this offering.'
-          : 'Live subscription count is not available for this environment.'}
+          ? t('catalogServiceOfferings.subscriptionsTab.liveCountDerivedFrom')
+          : t('catalogServiceOfferings.subscriptionsTab.liveSubscriptionCountIs2')}
       </p>
     </div>
   );

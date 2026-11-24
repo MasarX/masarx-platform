@@ -49,6 +49,7 @@ import {
   useArchiveLookupValue,
   usePromoteLookupValue,
 } from '@/lib/queries';
+import { fill, useI18n } from '@/lib/i18n';
 
 type ToneValue = 'good' | 'warn' | 'danger' | 'info' | 'neutral' | 'ink' | undefined;
 
@@ -217,6 +218,7 @@ function defaultLookupValueStatus(): string | undefined {
 }
 
 export function LookupsModule() {
+  const { t } = useI18n();
   const modal = useModal();
   const canRead = useCapability(CAP.LOOKUPS_READ);
   const createDefMut = useCreateLookupDefinition();
@@ -354,7 +356,7 @@ export function LookupsModule() {
       return record.category === category && record.value === value && (validate ? validate(record) : true);
     });
     if (!found) {
-      throw new Error(`Updated lookup value ${category}.${value} was not available yet.`);
+      throw new Error(fill(t('catalogLookups.lookupsModule.updatedLookupValueCategory'), { category: String(category), value: String(value) }));
     }
     setOverrides((prev) => {
       const { [category]: _stale, ...rest } = prev;
@@ -397,11 +399,11 @@ export function LookupsModule() {
           <div>
             <StateView
               kind="error"
-              title="Required catalog options are missing"
-              hint={`Seed the ${missing} options before creating a new lookup definition.`}
+              title={t('catalogLookups.lookupsModule.requiredCatalogOptionsAre')}
+              hint={fill(t('catalogLookups.lookupsModule.seedTheMissingOptions'), { missing: String(missing) })}
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-              <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+              <Button label={t('catalogLookups.lookupsModule.close')} kind="ghost" onClick={() => modal.close()} />
             </div>
           </div>
         );
@@ -409,8 +411,7 @@ export function LookupsModule() {
       return (
         <div>
           <p className="state__hint">
-            Creates a governed lookup category. System-managed categories are locked from tenant
-            extension; tenant-extensible categories can receive new values from this screen.
+            {t('catalogLookups.lookupsModule.createsGovernedLookupCategory')}
           </p>
           <div
             style={{
@@ -422,15 +423,15 @@ export function LookupsModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="new-cat-category">Category</label>
+            <label className="mono" htmlFor="new-cat-category">{t('catalogLookups.lookupsModule.category')}</label>
             <input
               id="new-cat-category"
               className="dt-inline-input"
-              placeholder="e.g. dispute_resolution"
+              placeholder={t('catalogLookups.lookupsModule.eGDisputeResolution')}
               value={draft.category}
               onChange={(e) => setDraft((s) => ({ ...s, category: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-cat-owner">Owner role</label>
+            <label className="mono" htmlFor="new-cat-owner">{t('catalogLookups.lookupsModule.ownerRole')}</label>
             <select
               id="new-cat-owner"
               className="dt-inline-input"
@@ -441,7 +442,7 @@ export function LookupsModule() {
                 <option key={role} value={role}>{role}</option>
               ))}
             </select>
-            <label className="mono" htmlFor="new-cat-approval">Approval policy</label>
+            <label className="mono" htmlFor="new-cat-approval">{t('catalogLookups.lookupsModule.approvalPolicy')}</label>
             <select
               id="new-cat-approval"
               className="dt-inline-input"
@@ -452,7 +453,7 @@ export function LookupsModule() {
                 <option key={p} value={p}>{p}</option>
               ))}
             </select>
-            <label className="mono" htmlFor="new-cat-mutable">Tenant-extensible</label>
+            <label className="mono" htmlFor="new-cat-mutable">{t('catalogLookups.lookupsModule.tenantExtensible')}</label>
             <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <input
                 id="new-cat-mutable"
@@ -461,24 +462,24 @@ export function LookupsModule() {
                 onChange={(e) => setDraft((s) => ({ ...s, is_mutable: e.target.checked }))}
               />
               <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-                When unchecked the category is system-only and tenants cannot extend its values.
+                {t('catalogLookups.lookupsModule.whenUncheckedTheCategory')}
               </span>
             </label>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('catalogLookups.lookupsModule.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Create"
+              label={t('catalogLookups.lookupsModule.create')}
               kind="primary"
               capability={WRITE_CAP}
               onClick={async () => {
                 const key = draft.category.trim().toLowerCase();
                 if (!key) {
-                  pushToast('Category name is required', 'warn');
+                  pushToast(t('catalogLookups.lookupsModule.categoryNameIsRequired'), 'warn');
                   return;
                 }
                 if (definitions.some((d) => d.category === key)) {
-                  pushToast(`Category "${key}" already exists`, 'warn');
+                  pushToast(fill(t('catalogLookups.lookupsModule.categoryKeyAlreadyExists'), { key: String(key) }), 'warn');
                   return;
                 }
                 try {
@@ -506,7 +507,7 @@ export function LookupsModule() {
                   ]);
                   setSelected(key);
                   modal.close();
-                  pushToast(`Definition created · ${key}`, 'good');
+                  pushToast(fill(t('catalogLookups.lookupsModule.definitionCreatedKey'), { key: String(key) }), 'good');
                 } catch (err) {
                   pushToast((err as Error).message, 'danger');
                 }
@@ -516,16 +517,16 @@ export function LookupsModule() {
         </div>
       );
     }
-    modal.open({ title: 'New lookup definition', body: <NewDefinitionForm /> });
+    modal.open({ title: t('catalogLookups.lookupsModule.newLookupDefinition'), body: <NewDefinitionForm /> });
   }
 
   function openNewValue() {
     if (!active) {
-      pushToast('Select a definition first', 'warn');
+      pushToast(t('catalogLookups.lookupsModule.selectADefinitionFirst'), 'warn');
       return;
     }
     if (!isMutable) {
-      pushToast(`${active.category} is system-managed and cannot accept new values`, 'warn');
+      pushToast(fill(t('catalogLookups.lookupsModule.categoryIsSystemManaged'), { category: String(active.category) }), 'warn');
       return;
     }
     const category = active.category;
@@ -539,7 +540,7 @@ export function LookupsModule() {
     const lookupDefinitionId = active.id;
     if (!lookupDefinitionId) {
       pushToast(
-        `Definition ${category} is not ready yet. Refresh and retry.`,
+        fill(t('catalogLookups.lookupsModule.definitionNotReadyYet'), { category }),
         'warn',
       );
       return;
@@ -577,11 +578,11 @@ export function LookupsModule() {
           <div>
             <StateView
               kind="error"
-              title="Lookup colors are not configured"
-              hint="Configure the lookup color options before adding values."
+              title={t('catalogLookups.lookupsModule.lookupColorsAreNot')}
+              hint={t('catalogLookups.lookupsModule.configureTheLookupColor')}
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-              <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+              <Button label={t('catalogLookups.lookupsModule.close')} kind="ghost" onClick={() => modal.close()} />
             </div>
           </div>
         );
@@ -599,23 +600,23 @@ export function LookupsModule() {
               marginTop: '8px',
             }}
           >
-            <label className="mono" htmlFor="new-val-value">Value</label>
+            <label className="mono" htmlFor="new-val-value">{t('catalogLookups.lookupsModule.value')}</label>
             <input
               id="new-val-value"
               className="dt-inline-input"
-              placeholder="snake_case"
+              placeholder={t('catalogLookups.lookupsModule.snakeCase')}
               value={draft.value}
               onChange={(e) => setDraft((s) => ({ ...s, value: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-val-label">Label</label>
+            <label className="mono" htmlFor="new-val-label">{t('catalogLookups.lookupsModule.label')}</label>
             <input
               id="new-val-label"
               className="dt-inline-input"
-              placeholder="Display label"
+              placeholder={t('catalogLookups.lookupsModule.displayLabel')}
               value={draft.label}
               onChange={(e) => setDraft((s) => ({ ...s, label: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-val-tone">Tone</label>
+            <label className="mono" htmlFor="new-val-tone">{t('catalogLookups.lookupsModule.tone')}</label>
             <select
               id="new-val-tone"
               className="dt-inline-input"
@@ -626,29 +627,29 @@ export function LookupsModule() {
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
-            <label className="mono" htmlFor="new-val-sort-order">Sort order</label>
+            <label className="mono" htmlFor="new-val-sort-order">{t('catalogLookups.lookupsModule.sortOrder')}</label>
             <input
               id="new-val-sort-order"
               className="dt-inline-input"
               type="number"
-              placeholder="optional"
+              placeholder={t('catalogLookups.lookupsModule.optional')}
               value={draft.sort_order}
               onChange={(e) => setDraft((s) => ({ ...s, sort_order: e.target.value }))}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('catalogLookups.lookupsModule.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Add value"
+              label={t('catalogLookups.lookupsModule.addValue')}
               kind="primary"
               capability={WRITE_CAP}
               onClick={async () => {
                 if (!draft.value.trim() || !draft.label.trim()) {
-                  pushToast('Value and label are required', 'warn');
+                  pushToast(t('catalogLookups.lookupsModule.valueAndLabelAre'), 'warn');
                   return;
                 }
                 if (!/^[a-z][a-z0-9_]*$/.test(draft.value.trim())) {
-                  pushToast('Value must be snake_case (lowercase letters/digits/underscore)', 'warn');
+                  pushToast(t('catalogLookups.lookupsModule.valueMustBeSnake'), 'warn');
                   return;
                 }
                 // W56-A closure: NO inline 'neutral' fallback. The canonical
@@ -670,7 +671,7 @@ export function LookupsModule() {
                 if (draft.sort_order.trim()) next.sort_order = Number(draft.sort_order);
                 const current = definitions.find((d) => d.category === category)?.values ?? [];
                 if (current.some((v) => v.value === next.value)) {
-                  pushToast(`Value "${next.value}" already exists in ${category}`, 'warn');
+                  pushToast(fill(t('catalogLookups.lookupsModule.valueValueAlreadyExists'), { value: String(next.value), category: String(category) }), 'warn');
                   return;
                 }
                 const metadata: Record<string, unknown> = {};
@@ -704,7 +705,7 @@ export function LookupsModule() {
                     );
                   }
                   modal.close();
-                  pushToast(`Added · ${next.value}`, 'good');
+                  pushToast(fill(t('catalogLookups.lookupsModule.addedValue'), { value: String(next.value) }), 'good');
                 } catch (err) {
                   pushToast((err as Error).message, 'danger');
                 }
@@ -714,16 +715,16 @@ export function LookupsModule() {
         </div>
       );
     }
-    modal.open({ title: `Add value · ${category}`, body: <NewValueForm /> });
+    modal.open({ title: fill(t('catalogLookups.lookupsModule.addValueCategory'), { category: String(category) }), body: <NewValueForm /> });
   }
 
   const valueColumns: Array<DataTableColumn<LookupValueRow>> = [
-    { key: 'value', label: 'Value', mono: true, sortable: true, filterable: true, editable: false },
-    { key: 'label', label: 'Label', sortable: true, filterable: true, editable: isMutable },
-    { key: 'status', label: 'Status', sortable: true, filterable: true, lookup: 'lookup_value_status', editable: false },
+    { key: 'value', label: t('catalogLookups.lookupsModule.value'), mono: true, sortable: true, filterable: true, editable: false },
+    { key: 'label', label: t('catalogLookups.lookupsModule.label'), sortable: true, filterable: true, editable: isMutable },
+    { key: 'status', label: t('catalogLookups.lookupsModule.status'), sortable: true, filterable: true, lookup: 'lookup_value_status', editable: false },
     {
       key: 'tone',
-      label: 'Tone',
+      label: t('catalogLookups.lookupsModule.tone'),
       sortable: true,
       filterable: true,
       editable: isMutable,
@@ -733,10 +734,10 @@ export function LookupsModule() {
         return <Chip label={tone} kind={tone} size="xs" />;
       },
     },
-    { key: 'sort_order', label: 'Sort order', align: 'right', sortable: true, editable: isMutable },
+    { key: 'sort_order', label: t('catalogLookups.lookupsModule.sortOrder'), align: 'right', sortable: true, editable: isMutable },
     {
       key: 'is_default',
-      label: 'Default',
+      label: t('catalogLookups.lookupsModule.default'),
       align: 'right',
       type: 'boolean',
       sortable: true,
@@ -744,24 +745,24 @@ export function LookupsModule() {
     },
     {
       key: 'effective_from',
-      label: 'From',
+      label: t('catalogLookups.lookupsModule.from'),
       mono: true,
       sortable: true,
       render: (raw) => (raw ? <span className="mono">{String(raw)}</span> : <span style={{ color: 'var(--ink-3)' }}>—</span>),
     },
     {
       key: 'effective_until',
-      label: 'Until',
+      label: t('catalogLookups.lookupsModule.until'),
       mono: true,
       sortable: true,
-      render: (raw) => (raw ? <span className="mono">{String(raw)}</span> : <span style={{ color: 'var(--ink-3)' }}>open</span>),
+      render: (raw) => (raw ? <span className="mono">{String(raw)}</span> : <span style={{ color: 'var(--ink-3)' }}>{t('catalogLookups.lookupsModule.open')}</span>),
     },
   ];
 
   const pills: ReactNode[] = [
-      <Chip key="cap" label="Reference access · reference update" kind="info" size="xs" />,
+      <Chip key="cap" label={t('catalogLookups.lookupsModule.referenceAccessReferenceUpdate')} kind="info" size="xs" />,
     <span key="seam" className="chip chip--xs mono">
-          Reference categories · values
+          {t('catalogLookups.lookupsModule.referenceCategoriesValues')}
     </span>,
   ];
 
@@ -770,14 +771,14 @@ export function LookupsModule() {
       <div className="page">
         <PageHeader
           moduleKey="lookups"
-          eyebrow="Catalog"
-          titleAccent="Reference"
-          titlePlain="data"
+          eyebrow={t('catalogLookups.lookupsModule.catalog')}
+          titleAccent={t('catalogLookups.lookupsModule.reference')}
+          titlePlain={t('catalogLookups.lookupsModule.data')}
         />
         <StateView
           kind="denied"
           capability={CAP.LOOKUPS_READ}
-          hint="You do not have permission to view reference data."
+          hint={t('catalogLookups.lookupsModule.youDoNotHave')}
         />
       </div>
     );
@@ -787,14 +788,14 @@ export function LookupsModule() {
     <div className="page">
       <PageHeader
         moduleKey="lookups"
-        eyebrow="Catalog"
-        titleAccent="Reference"
-        titlePlain="data"
+        eyebrow={t('catalogLookups.lookupsModule.catalog')}
+        titleAccent={t('catalogLookups.lookupsModule.reference')}
+        titlePlain={t('catalogLookups.lookupsModule.data')}
         pills={pills}
         actions={[
           <Button
             key="new-def"
-            label="New definition"
+            label={t('catalogLookups.lookupsModule.newDefinition')}
             iconName="plus"
             kind="ghost"
             capability={WRITE_CAP}
@@ -802,7 +803,7 @@ export function LookupsModule() {
           />,
           <Button
             key="new-val"
-            label="New value"
+            label={t('catalogLookups.lookupsModule.newValue')}
             iconName="plus"
             kind="primary"
             capability={WRITE_CAP}
@@ -827,7 +828,7 @@ export function LookupsModule() {
         >
           <div className="card" style={{ padding: 0, overflow: 'hidden', maxHeight: '70vh' }}>
             <div className="section-eyebrow" style={{ padding: '10px 12px 4px' }}>
-              {`Definitions · ${definitions.length}`}
+              {fill(t('catalogLookups.lookupsModule.definitionsCount'), { count: String(definitions.length) })}
             </div>
             <div style={{ overflowY: 'auto' }}>
               {definitions.map((def) => {
@@ -839,7 +840,7 @@ export function LookupsModule() {
                     type="button"
                     onClick={() => setSelected(def.category)}
                     aria-current={isActive ? 'true' : undefined}
-                    aria-label={`Select ${def.category}${locked ? ' (system-managed, locked)' : ''}`}
+                    aria-label={fill(t(locked ? 'catalogLookups.lookupsModule.selectCategoryLocked' : 'catalogLookups.lookupsModule.selectCategory'), { category: String(def.category) })}
                     className={isActive ? 'is-selected' : undefined}
                     style={{
                       display: 'flex',
@@ -861,8 +862,8 @@ export function LookupsModule() {
                       {def.category}
                     </span>
                     {locked ? (
-                      <span title="System-managed" aria-label="system-managed" className="chip chip--xs">
-                        Locked
+                      <span title={t('catalogLookups.lookupsModule.systemManaged')} aria-label={t('catalogLookups.lookupsModule.systemManaged2')} className="chip chip--xs">
+                        {t('catalogLookups.lookupsModule.locked')}
                       </span>
                     ) : null}
                     <span style={{ fontSize: '10.5px', color: 'var(--ink-3)' }}>{def.values.length}</span>
@@ -891,9 +892,9 @@ export function LookupsModule() {
                       : <Chip label={`approval · ${active.approval_policy}`} kind={tone} size="xs" />;
                   })() : null}
                   {active.is_mutable === false ? (
-                    <Chip label="system-managed" kind="warn" size="xs" />
+                    <Chip label={t('catalogLookups.lookupsModule.systemManaged2')} kind="warn" size="xs" />
                   ) : (
-                    <Chip label="tenant-extensible" kind="good" size="xs" />
+                    <Chip label={t('catalogLookups.lookupsModule.tenantExtensible2')} kind="good" size="xs" />
                   )}
                   {!isMutable ? <CapabilityLock capability={WRITE_CAP} /> : null}
                 </div>
@@ -905,7 +906,7 @@ export function LookupsModule() {
                   rows={active.values}
                   viewKey={`lookup_values_${active.category}`}
                   entityKind="lookup_value"
-                  emptyText={isMutable ? 'No values yet — add the first via New value.' : 'No values defined for this system-managed category.'}
+                  emptyText={isMutable ? t('catalogLookups.lookupsModule.noValuesYetAdd') : t('catalogLookups.lookupsModule.noValuesDefinedFor')}
                   onCellEdit={isMutable ? async (row, key, val) => {
                     let nextVal: unknown = val;
                     if (key === 'sort_order') {
@@ -956,7 +957,7 @@ export function LookupsModule() {
                   } : undefined}
                   rowActions={isMutable ? [
                     {
-                      label: 'Promote draft',
+                      label: t('catalogLookups.lookupsModule.promoteDraft'),
                       icon: 'check',
                       capability: WRITE_CAP,
                       onClick: async (r) => {
@@ -995,14 +996,14 @@ export function LookupsModule() {
                               ),
                             );
                           }
-                          pushToast(`Promoted · ${r.value}`, 'good');
+                          pushToast(fill(t('catalogLookups.lookupsModule.promotedValue'), { value: String(r.value) }), 'good');
                         } catch (err) {
                           pushToast((err as Error).message, 'danger');
                         }
                       },
                     },
                     {
-                      label: 'Archive',
+                      label: t('catalogLookups.lookupsModule.archive'),
                       icon: 'lock',
                       kind: 'danger',
                       capability: WRITE_CAP,
@@ -1040,7 +1041,7 @@ export function LookupsModule() {
                               ),
                             );
                           }
-                          pushToast(`Archived · ${r.value}`, 'info');
+                          pushToast(fill(t('catalogLookups.lookupsModule.archivedValue'), { value: String(r.value) }), 'info');
                         } catch (err) {
                           pushToast((err as Error).message, 'danger');
                         }
@@ -1050,7 +1051,7 @@ export function LookupsModule() {
                 />
               </>
             ) : (
-              <StateView kind="empty" hint="Select a definition on the left." />
+              <StateView kind="empty" hint={t('catalogLookups.lookupsModule.selectADefinitionOn')} />
             )}
           </div>
         </div>
