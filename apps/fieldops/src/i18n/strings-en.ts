@@ -17,6 +17,7 @@ export const EN_STRINGS = {
     unavailable: "Customer signing is unavailable for this delivery.",
     openFailed: "Could not open the customer signing link.",
     showQr: "Show customer signing QR code",
+    qrLabel: "Customer signing QR code",
     shareLink: "Share customer signing link",
     received: "Customer signature received.",
   },

@@ -6058,7 +6058,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                   customerSigningResults.data !== true ? (
                   <>
                     {signingLink ? (
-                      <ContactlessPodQR signingUrl={signingLink.url} testID="mobile-customer-signing-qr" />
+                      <ContactlessPodQR signingUrl={signingLink.url} accessibilityLabel={strings.customerSigning.qrLabel} testID="mobile-customer-signing-qr" />
                     ) : (
                       <Pressable accessibilityRole="button"
                         testID="mobile-show-customer-signing-qr"
