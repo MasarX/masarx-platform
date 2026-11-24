@@ -3,10 +3,16 @@
    Every token is consumable across modules; modules MUST NOT redefine palette colors. */
 
 :root {
-  /* Typography stacks — Geist (Vercel) for readability + clean modern feel */
-  --font-ui: 'Geist', 'IBM Plex Sans Arabic', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-display: 'Geist', 'IBM Plex Sans Arabic', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Typography stacks — Geist (Vercel) for readability + clean modern feel.
+     Console V2 sets the shared --app-font-* inputs (packages/ui/src/styles.css), so
+     --font-display and --font-mono mean what they mean there: a stack built from those inputs. */
+  --app-font-sans: 'Geist';
+  --app-font-sans-arabic: 'IBM Plex Sans Arabic';
+  --app-font-display: 'Geist';
+  --app-font-mono: 'Geist Mono';
+  --font-ui: var(--app-font-sans), var(--app-font-sans-arabic), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: var(--app-font-display), var(--app-font-sans-arabic), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: var(--app-font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Type scale (slightly bumped for readability) */
   --text-2xs: 11px;
@@ -62,33 +68,47 @@
 
 /* ---------- Light theme (default) ---------- */
 :root[data-theme="light"] {
-  --paper: oklch(0.992 0.003 80);       /* warm cream — base surface */
+  /* Console V2 override of the shared --ui-* tokens (packages/ui/src/styles.css).
+     Each value is the sRGB channel form of the OKLCH colour in its comment. The V2 names
+     below alias these. --accent stays OKLCH: the light accent is outside sRGB, so the
+     shared channel format cannot carry it. */
+  --ui-paper: 253.44 252.18 250.15;       /* oklch(0.992 0.003 80) */
+  --ui-surface: 255 255 255;              /* oklch(1 0 0) */
+  --ui-ink: 17.98 22.53 27.37;            /* oklch(0.20 0.012 250) */
+  --ui-muted: 61.67 66.98 72.66;          /* oklch(0.38 0.012 250) */
+  --ui-border: 226.92 224.86 221.55;      /* oklch(0.91 0.005 80) */
+  --ui-accent-soft: 208.4 245.99 222.61;  /* oklch(0.94 0.05 158) */
+  --ui-warning: 213.84 128.69 46.42;      /* oklch(0.68 0.14 60) */
+  --ui-danger: 207.36 65.58 55.81;        /* oklch(0.58 0.18 28) */
+  --ui-info: 22.99 119.05 183.67;         /* oklch(0.55 0.13 245) */
+
+  --paper: rgb(var(--ui-paper));        /* warm cream — base surface */
   --paper-2: oklch(0.978 0.004 80);     /* app bg */
   --paper-3: oklch(0.962 0.005 80);     /* sunken */
-  --paper-raise: oklch(1 0 0);          /* card lift */
+  --paper-raise: rgb(var(--ui-surface)); /* card lift */
 
-  --ink: oklch(0.20 0.012 250);
-  --ink-2: oklch(0.38 0.012 250);
+  --ink: rgb(var(--ui-ink));
+  --ink-2: rgb(var(--ui-muted));
   --ink-3: oklch(0.46 0.012 250);       /* darkened from 0.58 → 0.46 for WCAG 2 AA on --paper (small text) */
   --ink-inv: oklch(0.99 0 0);
 
-  --line: oklch(0.91 0.005 80);
+  --line: rgb(var(--ui-border));
   --line-2: oklch(0.86 0.006 80);
   --line-strong: oklch(0.78 0.008 80);
 
   --accent: oklch(0.45 0.13 158);       /* route-green signature — darkened from 0.55 → 0.45 so white text passes WCAG 2 AA */
-  --accent-soft: oklch(0.94 0.05 158);
+  --accent-soft: rgb(var(--ui-accent-soft));
   --accent-ink: oklch(0.32 0.10 158);
 
-  --warn: oklch(0.68 0.14 60);
+  --warn: rgb(var(--ui-warning));
   --warn-soft: oklch(0.96 0.05 80);
   --warn-ink: oklch(0.40 0.12 60);
 
-  --danger: oklch(0.58 0.18 28);
+  --danger: rgb(var(--ui-danger));
   --danger-soft: oklch(0.96 0.04 28);
   --danger-ink: oklch(0.42 0.16 28);
 
-  --info: oklch(0.55 0.13 245);
+  --info: rgb(var(--ui-info));
   --info-soft: oklch(0.96 0.03 245);
   --info-ink: oklch(0.38 0.12 245);
 
@@ -114,33 +134,44 @@
 
 /* ---------- Dark theme (parity) ---------- */
 :root[data-theme="dark"] {
-  --paper: oklch(0.16 0.008 250);
+  /* Console V2 override of the shared --ui-* tokens; see the light theme. */
+  --ui-paper: 10.71 13.57 16.62;          /* oklch(0.16 0.008 250) */
+  --ui-surface: 16.81 20.17 23.75;        /* oklch(0.19 0.009 250) */
+  --ui-ink: 226.04 228.79 231.75;         /* oklch(0.92 0.005 250) */
+  --ui-muted: 167.07 171.24 175.73;       /* oklch(0.74 0.008 250) */
+  --ui-border: 32.44 36.47 40.78;         /* oklch(0.26 0.010 250) */
+  --ui-accent-soft: 5.76 49.51 29.12;     /* oklch(0.28 0.06 158) */
+  --ui-warning: 239.89 165.97 69.55;      /* oklch(0.78 0.14 70) */
+  --ui-danger: 241.45 113.71 100.19;      /* oklch(0.70 0.16 28) */
+  --ui-info: 87.78 165.43 227.88;         /* oklch(0.70 0.12 245) */
+
+  --paper: rgb(var(--ui-paper));
   --paper-2: oklch(0.13 0.008 250);
   --paper-3: oklch(0.11 0.008 250);
-  --paper-raise: oklch(0.19 0.009 250);
+  --paper-raise: rgb(var(--ui-surface));
 
-  --ink: oklch(0.92 0.005 250);
-  --ink-2: oklch(0.74 0.008 250);
+  --ink: rgb(var(--ui-ink));
+  --ink-2: rgb(var(--ui-muted));
   --ink-3: oklch(0.58 0.008 250);
   --ink-inv: oklch(0.10 0.008 250);
 
-  --line: oklch(0.26 0.010 250);
+  --line: rgb(var(--ui-border));
   --line-2: oklch(0.32 0.010 250);
   --line-strong: oklch(0.42 0.012 250);
 
   --accent: oklch(0.68 0.13 158);
-  --accent-soft: oklch(0.28 0.06 158);
+  --accent-soft: rgb(var(--ui-accent-soft));
   --accent-ink: oklch(0.85 0.12 158);
 
-  --warn: oklch(0.78 0.14 70);
+  --warn: rgb(var(--ui-warning));
   --warn-soft: oklch(0.30 0.08 70);
   --warn-ink: oklch(0.88 0.12 70);
 
-  --danger: oklch(0.70 0.16 28);
+  --danger: rgb(var(--ui-danger));
   --danger-soft: oklch(0.30 0.10 28);
   --danger-ink: oklch(0.85 0.14 28);
 
-  --info: oklch(0.70 0.12 245);
+  --info: rgb(var(--ui-info));
   --info-soft: oklch(0.28 0.06 245);
   --info-ink: oklch(0.85 0.10 245);
 
