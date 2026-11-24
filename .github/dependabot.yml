@@ -13,8 +13,70 @@ updates:
         patterns: ['*']
         update-types: [minor, patch]
       npm-major:
-        patterns: ['*']
+        patterns: ['react-day-picker', 'web-vitals', 'dotenv']
         update-types: [major]
+    ignore:
+      # Babel 8 presets need Babel core 8. The build and test toolchain uses Babel 7.
+      - dependency-name: '@babel/preset-env'
+        versions: ['^8.0.0']
+      - dependency-name: '@babel/preset-react'
+        versions: ['^8.0.0']
+      - dependency-name: '@babel/preset-typescript'
+        versions: ['^8.0.0']
+      # Keep npm and the explicit Edge imports and Deno lock on the same versions.
+      - dependency-name: '@supabase/supabase-js'
+        versions: ['>2.119.0']
+      - dependency-name: bwip-js
+        versions: ['>4.11.2']
+      # Console and Portal use the same next-intl pin, verified by CI.
+      - dependency-name: next-intl
+        versions: ['>4.15.1']
+      # FieldOps and mobile-core use Expo SDK 55 with React Native 0.83 and React 19.2.
+      - dependency-name: react-native
+        versions: ['>=0.84.0 <1.0.0']
+      - dependency-name: react
+        versions: ['>=19.3.0 <20.0.0']
+      - dependency-name: react-dom
+        versions: ['>=19.3.0 <20.0.0']
+      - dependency-name: '@types/react'
+        versions: ['>=19.3.0 <20.0.0']
+      - dependency-name: '@types/react-dom'
+        versions: ['>=19.3.0 <20.0.0']
+      # Expo SDK 56 and later need a coordinated upgrade of the native packages.
+      - dependency-name: expo
+        versions: ['>=56.0.0']
+      - dependency-name: '@expo/app-integrity'
+        versions: ['>=56.0.0']
+      - dependency-name: babel-preset-expo
+        versions: ['>=56.0.0']
+      - dependency-name: expo-asset
+        versions: ['>=56.0.0']
+      - dependency-name: expo-camera
+        versions: ['>=56.0.0']
+      - dependency-name: expo-constants
+        versions: ['>=56.0.0']
+      - dependency-name: expo-crypto
+        versions: ['>=56.0.0']
+      - dependency-name: expo-dev-client
+        versions: ['>=56.0.0']
+      - dependency-name: expo-device
+        versions: ['>=56.0.0']
+      - dependency-name: expo-location
+        versions: ['>=56.0.0']
+      - dependency-name: expo-modules-core
+        versions: ['>=56.0.0']
+      - dependency-name: expo-network
+        versions: ['>=56.0.0']
+      - dependency-name: expo-notifications
+        versions: ['>=56.0.0']
+      - dependency-name: expo-secure-store
+        versions: ['>=56.0.0']
+      - dependency-name: expo-sqlite
+        versions: ['>=56.0.0']
+      - dependency-name: expo-status-bar
+        versions: ['>=56.0.0']
+      - dependency-name: expo-task-manager
+        versions: ['>=56.0.0']
 
   - package-ecosystem: npm
     directory: /tooling/apps/deploy
