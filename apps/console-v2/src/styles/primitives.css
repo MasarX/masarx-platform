@@ -593,7 +593,7 @@
 .geo-point-map__marker--neutral { color: var(--ink-3); }
 .geo-point-map__controls {
   position: absolute;
-  inset-inline-start: 8px;
+  left: 8px; /* physical: the map canvas does not mirror in RTL */
   bottom: 8px;
   z-index: 4;
   display: inline-flex;
@@ -635,7 +635,7 @@
 }
 .geo-point-map__attribution {
   position: absolute;
-  inset-inline-end: 8px;
+  right: 8px; /* physical: the map canvas does not mirror in RTL */
   top: 8px;
   z-index: 3;
   max-width: calc(100% - 16px);
