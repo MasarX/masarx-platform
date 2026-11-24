@@ -16,6 +16,8 @@ Follows engineering standard v1.10.
 - Changes to `main` merge only through the merge queue, using `SQUASH`. The required checks are `ci-gate` and CodeQL code scanning. CodeQL alerts of high severity or above block merging. The Delivery Lead owns the merge queue, CI health and speed, releases, deploys, rollback and alerts.
 - At push time, assign a fresh migration timestamp block above the newest migration on `main` and keep its files in landing order. A rename-only re-stamp needs no new review. Compare the pre-stamp and re-stamped commits. Verify every migration is `R100` in `git diff -M --name-status` and has zero content lines in `git diff -M --numstat`. Record the existing review against the resulting SHA. The append-only and ordering gate is in [migrations.cjs](scripts/ci-hosted/migrations.cjs).
 
+- Use the independent review comment as the queue admission record. Include the verdict, full commit SHA, reviewer model and a public-safe summary of findings.
+
 ## Checks
 
 | Workflow | Work | Job limits (minutes) |
