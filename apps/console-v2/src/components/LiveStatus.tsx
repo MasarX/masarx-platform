@@ -81,7 +81,7 @@ export function LiveChip({ live }: { live: LiveConnection }) {
       >
         <span className={DOT_CLASS[state]} aria-hidden="true" />
         <span role="status">{t(`live.state.${state}`)}</span>
-        {detail ? <span>&nbsp;· {detail}</span> : null}
+        {detail ? <span>· {detail}</span> : null}
       </span>
       {isStale(state) ? <Button kind="ghost" label={t('common.retry')} onClick={live.retry} /> : null}
     </span>
