@@ -6,7 +6,7 @@
 - Board (private): https://github.com/orgs/MasarX/projects/9 · Project brief: the board README
 - Environments: `ci` and `dev` are active. `stg` and `prod` are configured. See [delivery environments](DELIVERY.md#environments).
 - Release plan: [repository milestones](https://github.com/MasarX/masarx-platform/milestones).
-- Leads (thread titles): "MasarX Master", "MasarX Delivery", "MasarX Design"
+- Leads (thread titles): "MasarX Master", "MasarX Delivery", "MasarX QA", "MasarX Design"
 - UI project: yes
 - Other repos: none
 - Links: [DELIVERY.md](DELIVERY.md), [DESIGN.md](DESIGN.md), the portfolio engineering standard and the portfolio orchestration skill.

@@ -6,14 +6,14 @@ Follows engineering standard v1.10.
 
 ## Branching and merging
 
-- The `main` queue permits one concurrent build. Use it without admission caps, drains or bypasses. Keep one migration item and one non-migration item in progress at a time.
+- The `main` queue permits four concurrent builds. Use it without admission caps, drains or bypasses. Keep one migration item and one non-migration item in progress at a time.
 - The manual merge hold is retired. The DEV apply guard (G1–G3) protects DEV database applies.
 - Workers push their own topic branches and open PRs under the project's agent identity. Each PR names its issue (`Closes #n` or `Refs #n`).
 - Use the approved tree-publisher App helper for authenticated GitHub work. If the helper fails, stop and report it to Delivery. Keep installation tokens and signing material out of output and shared artifacts. The owner login is reserved for approved settings changes and release tags.
 - Never force-push, rewrite public history or push directly to `main`. Change repository or organization settings only through an approved packet naming the exact setting and target value. Record the before and after values.
 - A PR that touches none of the [risk paths in AGENTS.md](AGENTS.md#risk-paths-high-risk-only-need-one-independent-review-before-landing) merges on green CI. The worker opens it ready and immediately enables auto-merge with `enablePullRequestAutoMerge`, using `SQUASH` and setting `expectedHeadOid` to the PR head.
 - A high-risk change gets one independent review of the full diff in parallel with CI. The worker enables auto-merge using the same settings once the reviewer's verdict comment names the current PR head SHA. Keep that head fixed while auto-merge is on. If another push is needed, turn auto-merge off first. Tests check fixes and later pushes. Only a fix or later push that touches a risk path needs a new verdict.
-- Changes to `main` merge only through the merge queue, using `SQUASH`. The required checks are `ci-gate` and CodeQL code scanning. CodeQL alerts of high severity or above block merging. The Delivery Lead owns the merge queue, CI health and speed, releases, deploys, rollback and alerts.
+- Changes to `main` merge only through the merge queue, using `SQUASH`. The required checks are `ci-gate` and CodeQL code scanning. CodeQL alerts of high severity or above block merging. The Delivery Lead owns the merge queue, merge gates, pipeline faults, CI health and speed, releases, deploys, rollback and alerts.
 - At push time, assign a fresh migration timestamp block above the newest migration on `main` and keep its files in landing order. A rename-only re-stamp needs no new review. Compare the pre-stamp and re-stamped commits. Verify every migration is `R100` in `git diff -M --name-status` and has zero content lines in `git diff -M --numstat`. Record the existing review against the resulting SHA. The append-only and ordering gate is in [migrations.cjs](scripts/ci-hosted/migrations.cjs).
 
 - Use the independent review comment as the queue admission record. Include the verdict, full commit SHA, reviewer model and a public-safe summary of findings.
@@ -44,7 +44,8 @@ Follows engineering standard v1.10.
 
 ## Test policy
 
-- Test each changed behavior with a regression that fails before the fix. Use unit tests for logic, integration tests for affected database, queue and API boundaries, and end-to-end tests for core user jobs. Freeze clocks and wait for observable state. Preserve product guards when fixing tests. Trunk test edits need a recorded Master exception. A replacement preserves the existing assertions or identifies the design decision that retired them. Removal also requires two weeks of evidence that the test only detects change. Keep authorization, privacy, migration and concurrency tests.
+- MasarX QA owns tests, the pre-release sweep and nightly test triage.
+- Test each changed behavior with a regression that fails before the fix. Use unit tests for logic, integration tests for affected database, queue and API boundaries, and end-to-end tests for core user jobs. Freeze clocks and wait for observable state. Preserve product guards when fixing tests. Trunk test edits require an exception that the MasarX QA Lead decides and records on the issue or PR. A replacement preserves the existing assertions or identifies the design decision that retired them. Removal also requires two weeks of evidence that the test only detects change. Keep authorization, privacy, migration and concurrency tests.
 - Fix failures at their source. New failures block landing. Never rerun an unchanged failure or use retries, skips or longer timeouts to turn a failing check green. The existing exceptions are listed under [Deviations](#deviations).
 - Use local services and mocks for routine tests. The cloud qualification checks are listed under [Deviations](#deviations).
 - Hosted Jest ([jest.cjs](scripts/ci-hosted/jest.cjs)) reads the target-base known-failure baseline at `config/ci/known-failures.txt`. A missing baseline is empty. The file is absent on `main`. A candidate can retain or remove target-base entries.
