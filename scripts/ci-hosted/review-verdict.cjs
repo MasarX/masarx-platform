@@ -118,7 +118,8 @@ function matchesCriticalPath(policy, filename) {
 }
 
 function isTestPath(filename) {
-  return /(?:^|\/)(?:tests|__tests__)\//.test(filename) || /\.(?:test|spec)\.[^/.]+$/.test(filename);
+  return /(?:^|\/)(?:test|tests|__tests__|fixtures|__fixtures__|__mocks__|__snapshots__)\//.test(filename) ||
+    /\.(?:test|spec)\.[^/.]+$/.test(filename) || filename.endsWith('.snap');
 }
 
 function newestVerdict(comments, identities) {
@@ -257,6 +258,7 @@ async function checkVerdicts(temp) {
   const renameFile = 'scripts/deploy/rename.sh';
   const scopeFile = 'scripts/deploy/scope.sh';
   const testFile = 'tests/fixture.test.js';
+  const mockFile = 'apps/example/src/__mocks__/fixture.js';
   const write = (filename, content) => writeFileSync(path.join(source, filename), content);
   const stage = (filename, content) => {
     write(filename, content);
@@ -272,6 +274,8 @@ async function checkVerdicts(temp) {
   stage(renameFile, 'synthetic rename source\n');
   stage(scopeFile, 'scope\n');
   stage(testFile, 'synthetic test\n');
+  mkdirSync(path.dirname(path.join(source, mockFile)), { recursive: true });
+  stage(mockFile, 'synthetic test double\n');
   stage('package.json', '{}\n');
   const base = commit('Fixture base');
   git(['switch', '--detach', base]);
@@ -298,6 +302,8 @@ async function checkVerdicts(temp) {
   const testRemoved = buildCase('test-removed', () => git(['rm', '--', testFile]), base);
   const testRenamed = buildCase('test-renamed', () => git(['mv', '--', testFile, 'moved-test.js']), base);
   const testEdited = buildCase('test-edited', () => stage(testFile, 'updated synthetic test\n'), base);
+  const mockRemoved = buildCase('mock-removed', () => git(['rm', '--', mockFile]), base);
+  const mockEdited = buildCase('mock-edited', () => stage(mockFile, 'updated test double\n'), base);
   const scopeChanged = buildCase('scope-change', () => stage(scopeFile, 'scope expanded\n'));
   const nonCritical = buildCase('non-critical', () => stage('note.md', 'synthetic note\n'), base);
   const manifestOnly = buildCase('manifest-metadata', () => stage('package.json', '{"private":true}\n'), base);
@@ -383,6 +389,8 @@ async function checkVerdicts(temp) {
   await assert.rejects(check({ candidate: testRenamed }), /Missing review verdict/);
   await assert.rejects(check({ candidate: testRenamed, comments: [comment('VERDICT: GO ' + testRemoved.head)] }), /stale/);
   assert.match(await check({ candidate: testEdited }), /No critical/);
+  await assert.rejects(check({ candidate: mockRemoved }), /Missing review verdict/);
+  assert.match(await check({ candidate: mockEdited }), /No critical/);
   await assert.rejects(check({ comments: [comment('VERDICT: GO ' + head), comment('VERDICT: GO abc')] }), /Malformed/);
   await assert.rejects(check({ comments: [comment('VERDICT: GO ' + head + '\nVERDICT: NO_GO ' + head)] }), /Malformed/);
   await assert.rejects(check({ comments: [comment('VERDICT: GO ' + head, 12)] }), /Missing/);

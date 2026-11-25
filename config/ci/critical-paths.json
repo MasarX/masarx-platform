@@ -22,7 +22,21 @@
       "scripts/ops/workspace/ensure-edge-role-api-keys.js",
       "scripts/ops/workspace/jwt-rest-auth.js",
       "scripts/ops/workspace/local-proof-auth.js",
-      "scripts/ops/workspace/supabase-admin-keys.js"
+      "scripts/ops/workspace/supabase-admin-keys.js",
+      "apps/console-v2/src/lib/external-intake-token-handoff.ts",
+      "apps/console-v2/src/modules/integrations/_credentials/derive.ts",
+      "apps/console-v2/src/modules/integrations/credentials.tsx",
+      "apps/console/app/integrations/provider-auth/page.tsx",
+      "apps/console/app/security/token-rotation/page.tsx",
+      "scripts/clients/provision-client.js",
+      "scripts/clients/provision-webhook-source.js",
+      "scripts/ops/migrate-deploy-env-vars.js",
+      "scripts/ops/workspace/env-bootstrap.js",
+      "scripts/ops/workspace/env-sanitize.js",
+      "scripts/ops/workspace/local-env-keys.js",
+      "scripts/ops/workspace/local-sync-env.js",
+      "scripts/ops/workspace/supabase-api.js",
+      "scripts/utils/jwt.js"
     ],
     "realData": [
       "supabase/migrations/**",
@@ -78,12 +92,30 @@
       "packages/ui/src/hooks/use-resource-delete.ts",
       "scripts/ops/backfill-ingress-persisted-redaction.js",
       "scripts/ops/prega-db-dump.js",
-      "scripts/ops/prega-reset-rollout.js"
+      "scripts/ops/prega-reset-rollout.js",
+      "apps/console-v2/src/lib/capabilities.ts",
+      "apps/fieldops/src/mobile-auth-errors.ts",
+      "apps/fieldops/src/mobile-v2-login-screen.tsx",
+      "apps/shared/tenant-user-invite-provider.ts",
+      "packages/ui/src/access-page.tsx",
+      "packages/ui/src/csrf-provider.tsx",
+      "packages/ui/src/csrf.ts",
+      "scripts/ops/audit/auth-email-url-audit.js",
+      "scripts/ops/audit/operator-access-audit.js",
+      "scripts/ops/audit/operator-access-core.js",
+      "scripts/ops/audit/prod-data-hygiene-audit.js",
+      "scripts/ops/workspace/harden-data-api.js",
+      "scripts/ops/workspace/reset.js",
+      "scripts/ops/workspace/supabase-config-overlay-admission.js",
+      "scripts/utils/resolve-db-url.js",
+      "scripts/ops/prega-rebaseline-lock.js"
     ],
     "safetyRules": [
       "apps/fieldops/src/mobile-v2-pre-shift-gate-screen.tsx",
       "apps/fieldops/src/mobile-v2-pod-policy.ts",
-      "apps/fieldops/src/mobile-v2-pod-screen.tsx"
+      "apps/fieldops/src/mobile-v2-pod-screen.tsx",
+      "apps/fieldops/src/mobile-v2-pre-shift-checklist-screen.tsx",
+      "apps/fieldops/src/vision-pod-policy.ts"
     ],
     "hostNetworkFirewall": [
       "tooling/apps/api-ingress-worker/**",
@@ -93,7 +125,9 @@
       "apps/console-v2/dev-server-allowed-hosts.ts",
       "apps/portal/next.config.js",
       "scripts/ops/auth/auth-email-url-policy.js",
-      "scripts/ops/workspace/local-auth-redirects.js"
+      "scripts/ops/workspace/local-auth-redirects.js",
+      "apps/shared/security-headers.js",
+      "apps/shared/next-dev-origins.js"
     ],
     "releaseGates": [
       "CODEOWNERS",
@@ -131,7 +165,24 @@
       "scripts/ops/github-actions-vars.js",
       "scripts/qa/smoke-edge.js",
       "scripts/tests/bootstrap/seed-integration-fixtures.js",
-      "tests/e2e/fieldops-mobile/playwright.config.ts"
+      "tests/e2e/fieldops-mobile/playwright.config.ts",
+      "apps/console-v2/src/test/setup.ts",
+      "apps/console-v2/tsconfig.app.json",
+      "apps/console-v2/tsconfig.json",
+      "apps/console-v2/tsconfig.node.json",
+      "apps/console/tsconfig.json",
+      "apps/fieldops/tsconfig.json",
+      "apps/portal/tsconfig.json",
+      "config/tooling/jest.bootstrap.js",
+      "config/tooling/jest.qa.reporter.js",
+      "config/tooling/jest.runtime-env-isolation.js",
+      "config/tooling/jest.worker-url-transformer.js",
+      "playwright.config.ts",
+      "tests/ui/setup.ts",
+      "tsconfig.base.json",
+      "tsconfig.jest.fieldops.json",
+      "tsconfig.jest.json",
+      "tsconfig.jest.unit.json"
     ]
   },
   "packageScriptFiles": [
