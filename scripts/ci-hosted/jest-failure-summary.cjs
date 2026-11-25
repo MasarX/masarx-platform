@@ -28,22 +28,24 @@ function committedTitles(sha, file) {
   }
   const ts = require('typescript');
   const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest);
-  function visit(node, scope) {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
-      const name = node.expression.text;
-      const [label, callback] = node.arguments;
-      if (name === 'describe') {
-        if (label && ts.isStringLiteralLike(label) && callback) visit(callback, [...scope, label.text]);
-        return;
-      }
-      if (name === 'test' || name === 'it') {
-        if (label && ts.isStringLiteralLike(label)) titles.add([...scope, label.text].join(' '));
-        return;
+  function collect(statements, scope) {
+    // Only literal describe blocks establish a known Jest scope.
+    for (const statement of statements) {
+      if (!ts.isExpressionStatement(statement)) continue;
+      const call = statement.expression;
+      if (!ts.isCallExpression(call) || !ts.isIdentifier(call.expression)) continue;
+      const [label, callback] = call.arguments;
+      if (!label || !ts.isStringLiteralLike(label)) continue;
+      const name = call.expression.text;
+      const title = [...scope, label.text];
+      if (name === 'test' || name === 'it') titles.add(title.join(' '));
+      else if (name === 'describe' && callback
+        && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) && ts.isBlock(callback.body)) {
+        collect(callback.body.statements, title);
       }
     }
-    ts.forEachChild(node, child => visit(child, scope));
   }
-  visit(tree, []);
+  collect(tree.statements, []);
   return titles;
 }
 

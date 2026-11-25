@@ -29,11 +29,14 @@ test('a controlled Jest failure retains its verdict and complete artifact while 
   try {
     const file = 'tests/unit/example.test.js';
     const secret = randomUUID();
+    const shortHost = ['lane', 27].join('-');
+    const collision = 'uses ' + shortHost;
+    const runtimeTitle = value => value === shortHost ? collision : 'runtime value "' + value + '"';
     const privateValues = [
       ['fixture', 'runner', 'invalid'].join('.'),
       [192, 0, 2, 10].join('.'),
       ['2001', 'db8', '', '23'].join(':'),
-      ['lane', 27].join('-'),
+      shortHost,
       secret,
     ];
     const quotedPath = '/workspace/folder with spaces/input';
@@ -42,17 +45,19 @@ test('a controlled Jest failure retains its verdict and complete artifact while 
     const scope = 'delivery group';
     const cases = [0, ...Array.from({ length: 11 }, (_, index) => index + 1)].map(index => ({
       fullName: scope + ' ' + (index === 0 ? longTitle
-        : index <= privateValues.length ? 'runtime value "' + privateValues[index - 1] + '"'
+        : index <= privateValues.length ? runtimeTitle(privateValues[index - 1])
         : index === privateValues.length + 1 ? pathTitle : 'unexpected case ' + index),
       status: 'failed',
       failureMessages: ['assertion fixture message'],
     }));
     cases.push({ fullName: 'already expected', status: 'failed', failureMessages: ['baseline message'] });
     cases.push({ fullName: 'passed assertion', status: 'passed' });
-    const addressTitles = privateValues.slice(0, 3).map(value => 'runtime value "' + value + '"');
+    const addressTitles = privateValues.slice(0, 3).map(runtimeTitle);
     const staticTitles = [longTitle, pathTitle, ...addressTitles, 'unexpected case 7', 'unexpected case 8', 'unexpected case 9'];
     const source = 'describe(' + JSON.stringify(scope) + ', () => {\n'
       + staticTitles.map(name => 'test(' + JSON.stringify(name) + ', () => {});').join('\n')
+      + '\ndescribe.each([["pending"]])("%s", () => {\n'
+      + 'test(' + JSON.stringify(collision) + ', () => {});\n});\n'
       + '});';
     const fixture = path.join(temp, 'input.json');
     const baseline = 'unit\t' + file + '\t' + identity(file, 'already expected') + '\n';
@@ -115,6 +120,7 @@ test('a controlled Jest failure retains its verdict and complete artifact while 
     expect(rows).toHaveLength(10);
     expect(rows.filter(row => row === file + ' - [name redacted]')).toHaveLength(privateValues.length + 1);
     for (const value of [...privateValues, quotedPath]) expect(summary).not.toContain(value);
+    expect(rows).not.toContain(file + ' - ' + scope + ' ' + collision);
     expect(summary).toContain('delivery group case zero &lt;details&gt;');
     expect(rows).toContain(file + ' - delivery group unexpected case 7');
     expect(summary).toContain('2 additional unexpected failures omitted.');
