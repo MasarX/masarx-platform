@@ -131,6 +131,10 @@ The suite uses zero retries and retains traces, screenshots, and video on failur
 
 Use the [E2E utilities](../../tests/e2e/utils/) for sign-in and sessions (`auth.ts`, `session.ts`), test accounts (`demo-accounts.ts`), origins and route prefixes (`base-urls.ts`, `base-paths.ts`), navigation and route coverage (`navigation.ts`, `coverage-routes.ts`), performance assertions (`performance.ts`), and runtime error checks (`error-guards.ts`, `runtime-errors.ts`).
 
+After the asserted route is ready, call `captureRouteEvidence(page, assertedLocator, { role, route, ledgerState })` from [evidence.ts](../../tests/e2e/utils/evidence.ts). Pass `rows` or `empty` for the pickup waves and requests ledgers and omit the field for Dashboard and Dispatch.
+Tag identity and record fields with `data-evidence-mask`. The helper requires `context-identity` on every route, `dashboard-identity` on Dashboard and `record-id` for populated pickup ledgers. It attaches a masked viewport PNG as `route-evidence-image` and its JSON entry as `route-evidence-record`.
+Use a sweep configuration with automatic screenshots, traces and video disabled.
+
 #### Landing E2E
 
 The `landing` project covers `tests/landing-e2e/`. By default it uses one worker and starts `dev:landing` locally with a preferred port of `3333`. Use `LANDING_BASE_URL` to select an existing environment or `LANDING_E2E_PORT` to set the preferred local port. `LANDING_E2E_WORKERS` accepts integers from `1` through `4`. [Landing Playwright config](../../playwright.landing.config.ts)
