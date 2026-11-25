@@ -1,13 +1,25 @@
 [
   {
     "match": [
+      "tests/integration/workflows/communications.test.js",
+      "tests/integration/workflows/outbound-3pl.test.js"
+    ],
+    "owner": "MasarX QA",
+    "reason": "Live communications and third-party logistics adapter certification requires isolated provider sandbox accounts and credentials (#134).",
+    "expires": "2026-12-11"
+  },
+  {
+    "match": [
       "config/tooling/jest.config.js",
       "package.json#test:integration",
       "package.json#test:integration:cloud",
-      "tests/integration/**/*.test.js"
+      "tests/integration/*.test.js",
+      "tests/integration/!(workflows)/**/*.test.js",
+      "tests/integration/workflows/!(communications|outbound-3pl).test.js",
+      "tests/integration/workflows/*/**/*.test.js"
     ],
     "owner": "MasarX QA",
-    "reason": "The integration runner requires seeded Supabase API, database, Auth and Edge services. CI currently replays the database and runs pgTAP. Live provider certification also requires isolated provider accounts and credentials (#134).",
+    "reason": "The remaining integration suites require hosted Supabase API, database, Auth and Edge services with synthetic seed fixtures (#707).",
     "expires": "2026-12-15"
   },
   {
@@ -17,8 +29,8 @@
       "tests/e2e/**/*.spec.ts"
     ],
     "owner": "MasarX QA",
-    "reason": "Signed-in Console and Portal scenarios need an isolated backend and role fixtures. The post-DEV report runs the anonymous subset (#116, #130).",
-    "expires": "2026-12-15"
+    "reason": "The post-DEV report runs the anonymous subset. Full signed-in Console and Portal coverage is tracked in #130. The two shipment amend/cancel specs (#116) require the isolated hosted lane tracked in #518.",
+    "expires": "2026-12-11"
   },
   {
     "match": [
@@ -26,7 +38,7 @@
       "package.json#test:e2e:tenant-invite"
     ],
     "owner": "MasarX QA",
-    "reason": "The invite scenarios require isolated tenant Auth fixtures and email delivery capture (#130).",
+    "reason": "The invite scenarios require isolated tenant Auth fixtures and email delivery capture (#685).",
     "expires": "2026-12-15"
   },
   {
@@ -39,7 +51,7 @@
     ],
     "owner": "MasarX QA",
     "reason": "FieldOps browser suites need the app runtime, isolated Supabase and seeded driver accounts (#130).",
-    "expires": "2026-12-15"
+    "expires": "2026-12-11"
   },
   {
     "match": [
@@ -75,7 +87,7 @@
     ],
     "owner": "MasarX QA",
     "reason": "Load tests need an isolated target with generated data and a planned rate budget (#135).",
-    "expires": "2026-12-15"
+    "expires": "2026-12-11"
   },
   {
     "match": [
@@ -92,6 +104,6 @@
     ],
     "owner": "MasarX Delivery",
     "reason": "Rollback tests need a disposable database replayed to the exact migration boundary, followed by an inverse and refusal check (#690).",
-    "expires": "2026-12-15"
+    "expires": "2026-12-11"
   }
 ]
