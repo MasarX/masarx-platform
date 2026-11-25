@@ -651,6 +651,8 @@ jobs:
     if: ${{ !cancelled() && (needs.append-only.result != 'success' || needs.append-only.outputs.e2e != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      SPEED_EVIDENCE_DIR: test-results/speed-evidence
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
@@ -675,21 +677,22 @@ jobs:
         run: node scripts/ci-hosted/tasks.cjs browser-install
       - *timing_work
       - name: Run synthetic local landing suite
+        id: landing_e2e
         if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/tasks.cjs landing-e2e
+      - name: Report Landing speed measurements
+        if: ${{ !cancelled() && (steps.landing_e2e.outcome == 'success' || steps.landing_e2e.outcome == 'failure') }}
         env:
-          SPEED_EVIDENCE_DIR: test-results/speed-evidence
+          LANDING_E2E_OUTCOME: ${{ steps.landing_e2e.outcome }}
         run: |
-          status=0
-          node scripts/ci-hosted/tasks.cjs landing-e2e || status=$?
           shopt -s nullglob
           reports=("$SPEED_EVIDENCE_DIR"/speed--*.json)
           if (( ${#reports[@]} )); then
             jq -c '{screen, route, viewport, sampleCount: (.runs | length), p75, budget, limit}' "${reports[@]}"
-          elif (( status == 0 )); then
+          elif [[ "$LANDING_E2E_OUTCOME" == success ]]; then
             echo 'Missing Landing speed measurements.' >&2
             exit 1
           fi
-          exit "$status"
       # Runs after a landing failure too, so one run reports both suites.
       - name: Run Console V2 seed-mode axe suite
         id: console_a11y
