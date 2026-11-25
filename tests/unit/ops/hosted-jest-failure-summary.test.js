@@ -33,20 +33,27 @@ test('a controlled Jest failure retains its verdict and complete artifact while 
       ['fixture', 'runner', 'invalid'].join('.'),
       [192, 0, 2, 10].join('.'),
       ['2001', 'db8', '', '23'].join(':'),
-      path.join(temp, 'folder with spaces', 'input.txt'),
-      ['host', 'lane-instance'].join('='),
+      ['lane', 27].join('-'),
+      secret,
     ];
+    const quotedPath = '/workspace/folder with spaces/input';
+    const pathTitle = 'reads "' + quotedPath + '"';
+    const longTitle = 'case zero <details> ' + 'long '.repeat(80) + 'end of long title';
+    const scope = 'delivery group';
     const cases = [0, ...Array.from({ length: 11 }, (_, index) => index + 1)].map(index => ({
-      fullName: index === 0
-        ? 'case zero <details>\n' + secret + ' ' + 'long '.repeat(80) + 'end of long title'
-        : index <= privateValues.length
-          ? 'runtime value "' + privateValues[index - 1] + '"'
-          : 'unexpected case ' + index,
+      fullName: scope + ' ' + (index === 0 ? longTitle
+        : index <= privateValues.length ? 'runtime value "' + privateValues[index - 1] + '"'
+        : index === privateValues.length + 1 ? pathTitle : 'unexpected case ' + index),
       status: 'failed',
       failureMessages: ['assertion fixture message'],
     }));
     cases.push({ fullName: 'already expected', status: 'failed', failureMessages: ['baseline message'] });
     cases.push({ fullName: 'passed assertion', status: 'passed' });
+    const addressTitles = privateValues.slice(0, 3).map(value => 'runtime value "' + value + '"');
+    const staticTitles = [longTitle, pathTitle, ...addressTitles, 'unexpected case 7', 'unexpected case 8', 'unexpected case 9'];
+    const source = 'describe(' + JSON.stringify(scope) + ', () => {\n'
+      + staticTitles.map(name => 'test(' + JSON.stringify(name) + ', () => {});').join('\n')
+      + '});';
     const fixture = path.join(temp, 'input.json');
     const baseline = 'unit\t' + file + '\t' + identity(file, 'already expected') + '\n';
     fs.mkdirSync(path.join(temp, 'config/tooling'), { recursive: true });
@@ -63,7 +70,8 @@ test('a controlled Jest failure retains its verdict and complete artifact while 
       'require("node:child_process").spawnSync = (command, args) => {',
       '  if (command === "git") {',
       '    const fixture = { "rev-parse": "a".repeat(40), "ls-tree": "config/ci/known-failures.txt\\0",',
-      '      show: process.env.JEST_FIXTURE_BASELINE };',
+      '      show: args[3].endsWith(":config/ci/known-failures.txt") ? process.env.JEST_FIXTURE_BASELINE',
+      '        : args[3].endsWith(":tests/unit/example.test.js") ? process.env.JEST_FIXTURE_SOURCE : "" };',
       '    if (Object.hasOwn(fixture, args[2])) return { status: 0, stdout: fixture[args[2]] };',
       '  }',
       '  if (command === "npm") {',
@@ -78,7 +86,7 @@ test('a controlled Jest failure retains its verdict and complete artifact while 
       cwd: temp, encoding: 'utf8', timeout: 3000,
       env: { ...process.env, GITHUB_EVENT_NAME: 'fixture', GITHUB_SHA: 'b'.repeat(40),
         JEST_SHARD: '', JEST_DIAGNOSTIC_PROPOSAL: '', JEST_FIXTURE_SECRET: secret,
-        JEST_FIXTURE_BASELINE: baseline, JEST_FIXTURE_INPUT: fixture,
+        JEST_FIXTURE_BASELINE: baseline, JEST_FIXTURE_INPUT: fixture, JEST_FIXTURE_SOURCE: source,
         GITHUB_STEP_SUMMARY: path.join(temp, 'summary.md'),
         JEST_ARTIFACT_URL: 'https://github.com/MasarX/masarx-platform/actions/runs/12/artifacts/34' },
     };
@@ -105,9 +113,10 @@ test('a controlled Jest failure retains its verdict and complete artifact while 
     const summary = fs.readFileSync(options.env.GITHUB_STEP_SUMMARY, 'utf8');
     const rows = summary.split('\n').filter(line => line.startsWith(file + ' - '));
     expect(rows).toHaveLength(10);
-    expect(rows.filter(row => row === file + ' - [name redacted]')).toHaveLength(privateValues.length);
-    for (const value of privateValues) expect(summary).not.toContain(value);
-    expect(summary).toContain('case zero &lt;details&gt; [REDACTED]');
+    expect(rows.filter(row => row === file + ' - [name redacted]')).toHaveLength(privateValues.length + 1);
+    for (const value of [...privateValues, quotedPath]) expect(summary).not.toContain(value);
+    expect(summary).toContain('delivery group case zero &lt;details&gt;');
+    expect(rows).toContain(file + ' - delivery group unexpected case 7');
     expect(summary).toContain('2 additional unexpected failures omitted.');
     expect(summary).toContain('[Complete Jest result artifact](' + options.env.JEST_ARTIFACT_URL + ')');
     for (const value of [secret, temp, 'end of long title', 'already expected', 'passed assertion', 'assertion fixture message']) {
