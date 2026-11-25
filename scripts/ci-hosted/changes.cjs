@@ -5,8 +5,9 @@ const gates = ['database', 'typecheck', 'unit', 'ui', 'build_console', 'build_po
 const state = value => Object.fromEntries(gates.map(gate => [gate, value]));
 const cdPaths = new Set([
   '.github/workflows/deploy.yml',
-  '.github/workflows/provenance-on-tag.yml',
+  '.github/workflows/release-on-tag.yml',
   'tests/unit/ops/dev-db-dry-run-workflow.test.js',
+  'tests/unit/ops/release-tag-types.test.js',
   'tests/unit/ops/release-workflow.test.js',
 ]);
 const sharedInputs = [
@@ -36,10 +37,10 @@ function select(files, event = 'pull_request') {
       } else return state(true);
     } else if (/^docs\/marketing\/(?:landing-v2|brand)\/|^scripts\/frontend\/(?:build|serve)-landing\.js$/.test(file)) {
       affected.unit = affected.build_landing = affected.e2e = true;
-    } else if (/^(?:tests\/unit|docs)\//.test(file)) affected.unit = true;
-    else if (file.startsWith('tests/ui/')) affected.ui = true;
-    else if (/^tests\/landing-e2e\/|^playwright\.landing\.config\.ts$/.test(file)) affected.e2e = true;
-    else if (!/^[^/]+\.md$/i.test(file)) return state(true);
+    } else if (/^(?:tests\/unit|docs)\//.test(file) || /^[^/]+\.md$/i.test(file)) affected.unit = true;
+    else if (file.startsWith('tests/ui/')) affected.unit = affected.ui = true;
+    else if (/^tests\/landing-e2e\/|^playwright\.landing\.config\.ts$/.test(file)) affected.unit = affected.e2e = true;
+    else return state(true);
   }
   return affected;
 }
