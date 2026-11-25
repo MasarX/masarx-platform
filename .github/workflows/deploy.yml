@@ -528,6 +528,8 @@ jobs:
   database:
     if: github.event_name == 'push' || inputs.mode == 'deploy'
     runs-on: ubuntu-24.04
+    env:
+      EDGE_FROZEN_WORKDIR: &edge-frozen-workdir .edge-frozen
     permissions:
       actions: read
       contents: read
@@ -633,6 +635,21 @@ jobs:
           PUBLIC_TRACKING_CORS_ALLOW_ORIGINS: ${{ vars.PUBLIC_TRACKING_CORS_ALLOW_ORIGINS }}
         run: |
           set -euo pipefail
+          bash scripts/edge/verify-frozen-manifest.sh "$EDGE_FROZEN_WORKDIR"
+          mapfile -t edge_deploy < edge-deploy.tsv
+          if (( ${#edge_deploy[@]} == 0 )); then
+            echo '::error::The Edge deployment list is empty.'
+            exit 1
+          fi
+          for entry in "${edge_deploy[@]}"; do
+            IFS=$'\t' read -r function_name auth_mode extra <<< "$entry"
+            if [[ ! "$function_name" =~ ^[a-z0-9-]+$ || -n "$extra" ||
+              ( "$auth_mode" != supabase_jwt && "$auth_mode" != public_no_jwt ) ]] ||
+              ! grep -Eq "^[a-f0-9]{64}  supabase/functions/$function_name/index\.ts$" "$EDGE_FROZEN_WORKDIR/SHA256SUMS"; then
+              echo '::error::The Edge deployment list does not match the frozen bundle manifest.'
+              exit 1
+            fi
+          done
           printf '::add-mask::%s\n' "$SUPABASE_PROJECT_REF"
           umask 077
           deploy_temp="$(mktemp -d)"
@@ -736,11 +753,12 @@ jobs:
             exit 1
           fi
           node scripts/deploy/guarded-egress.cjs < "$deploy_temp/edge-secret-metadata.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          bash scripts/edge/verify-frozen-manifest.sh "$EDGE_FROZEN_WORKDIR"
           while IFS=$'\t' read -r function_name auth_mode; do
             flags=()
             if [[ "$auth_mode" == public_no_jwt ]]; then flags+=(--no-verify-jwt); fi
-            "$cli" functions deploy "$function_name" --project-ref "$SUPABASE_PROJECT_REF" --use-api "${flags[@]}"
-          done < edge-deploy.tsv
+            "$cli" functions deploy "$function_name" --project-ref "$SUPABASE_PROJECT_REF" --use-api --workdir "$EDGE_FROZEN_WORKDIR" "${flags[@]}"
+          done < <(printf '%s\n' "${edge_deploy[@]}")
       - name: Record database push attempt
         if: ${{ always() && steps.deploy.outputs.attempted == 'true' }}
         run: echo 'Database push started'
@@ -752,6 +770,7 @@ jobs:
     timeout-minutes: 90
     env:
       DEV_DB_DEPLOY_TIMEOUT_MINUTES: *dev-db-deploy-timeout-minutes
+      EDGE_FROZEN_WORKDIR: *edge-frozen-workdir
     concurrency:
       group: dev-db-dry-run
       cancel-in-progress: false
@@ -785,6 +804,11 @@ jobs:
       - name: Install pinned Node.js for Edge preparation
         run: |
           version="$(cat .nvmrc)"
+          version="${version%$'\r'}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo '::error::Expected an exact Node.js version in .nvmrc.'
+            exit 1
+          fi
           archive="$RUNNER_TEMP/node.tar.xz"
           mkdir -p "$RUNNER_TEMP/edge-node"
           curl --fail --silent --show-error --location "https://nodejs.org/dist/v$version/node-v$version-linux-x64.tar.xz" --output "$archive"
@@ -801,7 +825,7 @@ jobs:
       - name: Verify Edge frozen lock
         run: *verify-edge-lock
       - name: Self-check Edge frozen lock drift
-        run: node node_modules/jest/bin/jest.js --config config/tooling/jest.config.unit.js --runInBand --runTestsByPath tests/unit/ops/edge-frozen-lock.test.js --reporters=default
+        run: env -u EDGE_FROZEN_WORKDIR node node_modules/jest/bin/jest.js --config config/tooling/jest.config.unit.js --runInBand --runTestsByPath tests/unit/ops/edge-frozen-lock.test.js --reporters=default
       - name: Install pinned Supabase CLI
         run: |
           mkdir -p "$RUNNER_TEMP/deploy-tools"
