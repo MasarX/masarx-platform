@@ -270,13 +270,15 @@ async function qualify() {
         E2E_CONSOLE_AUTH_EMAIL: account.email, E2E_CONSOLE_AUTH_PASSWORD: account.password,
         VITE_SUPABASE_URL: apiUrl, VITE_SUPABASE_ANON_KEY: status.ANON_KEY,
       }, 480_000);
-      const results = JSON.parse(output);
+      const { refreshReason, ...results } = JSON.parse(output);
       assert.deepEqual(Object.keys(results).sort(), [...checks].sort());
+      assert(refreshReason === null || (refreshReason === 'REFRESH_NOT_OBSERVED' && results.refresh === 'NOT_RUN'));
       for (const name of checks) {
         const allowed = ['PASS', 'FAIL', 'NOT_RUN', ...(name === 'mfa' ? ['UNSUPPORTED'] : [])];
         assert(allowed.includes(results[name]));
       }
-      report.qa = results;
+      report.qa = { ...results, startupP75: 'NOT_RUN' };
+      if (refreshReason) report.qaRefreshReason = refreshReason;
       const budget = readSpeedBudgets().find(row => row.screen === 'Console V2 Dashboard `/`');
       assert(budget);
       const limit = {
@@ -292,8 +294,9 @@ async function qualify() {
         return record.result;
       });
       const speedStatus = measured.includes('FAIL') ? 'FAIL' : measured.includes('NOT_RUN') ? 'NOT_RUN' : 'PASS';
+      report.qa.startupP75 = speedStatus;
       assert.equal(results.startupP75, speedStatus);
-      assert(Object.values(results).every(result => result === 'PASS' || result === 'UNSUPPORTED'));
+      assert(Object.values(report.qa).every(result => result === 'PASS' || result === 'UNSUPPORTED'));
     });
     if (bundleFailed) throw new Error('bundle budget');
   } catch {
@@ -309,6 +312,10 @@ async function qualify() {
     try {
       const remaining = networkCreated ? await quiet('docker', ['network', 'ls', '--format', '{{.Name}}']) : '';
       if (remaining.split('\n').includes(project)) await quiet('docker', ['network', 'rm', project]);
+    } catch {
+      clean = false;
+    }
+    try {
       fs.rmSync(temp, { recursive: true, force: true });
     } catch {
       clean = false;

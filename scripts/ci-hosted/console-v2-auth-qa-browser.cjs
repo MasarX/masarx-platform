@@ -126,8 +126,7 @@ async function qualification(env, result) {
   const browser = await chromium.launch();
   const exercise = async (name, work) => {
     try {
-      await work();
-      result[name] = 'PASS';
+      result[name] = (await work()) ?? 'PASS';
     } catch {
       result[name] = 'FAIL';
     }
@@ -207,18 +206,31 @@ async function qualification(env, result) {
         await page.bringToFront();
         const timeout = 240_000;
         const refresh = page.waitForResponse(response =>
-          responseFor(response, api, '/auth/v1/token', 'refresh_token'), { timeout }).then(async grant => {
+          responseFor(response, api, '/auth/v1/token', 'refresh_token'), { timeout }).catch(error => {
+          if (error.name !== 'TimeoutError') throw error;
+          return null;
+        }).then(async grant => {
+          if (grant === null) return null;
           assert(grant.ok());
           const { user, access_token: accessToken } = await grant.json();
           assert(user?.id === expected.id && typeof accessToken === 'string' && accessToken);
           return accessToken;
         });
-        const [, identity] = await Promise.all([
+        const [grant, identity] = await Promise.allSettled([
           refresh,
-          page.waitForResponse(async response => responseFor(response, api, '/rest/v1/rpc/ui_me_v1') &&
-            await response.request().headerValue('authorization') === 'Bearer ' + await refresh, { timeout }),
+          page.waitForResponse(async response => {
+            if (!responseFor(response, api, '/rest/v1/rpc/ui_me_v1')) return false;
+            const accessToken = await refresh;
+            return accessToken !== null &&
+              await response.request().headerValue('authorization') === 'Bearer ' + accessToken;
+          }, { timeout }),
         ]);
-        await assertIdentity(identity, expected);
+        if (grant.status === 'fulfilled' && grant.value === null) {
+          result.refreshReason = 'REFRESH_NOT_OBSERVED';
+          return 'NOT_RUN';
+        }
+        assert(grant.status === 'fulfilled' && identity.status === 'fulfilled');
+        await assertIdentity(identity.value, expected);
         await dashboard(page);
         assertStartup();
       });
@@ -249,7 +261,7 @@ async function qualification(env, result) {
   }
 }
 
-const result = Object.fromEntries(checks.map(name => [name, 'NOT_RUN']));
+const result = { ...Object.fromEntries(checks.map(name => [name, 'NOT_RUN'])), refreshReason: null };
 qualification(process.env, result).catch(() => {
   // The caller records case statuses. Errors can contain session-bearing details.
 }).finally(() => {
