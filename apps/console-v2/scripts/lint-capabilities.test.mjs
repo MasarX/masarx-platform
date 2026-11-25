@@ -51,8 +51,20 @@ describe('lint-capabilities script', () => {
 
   it('exits 0 against the real repository state (FE registry + migrations tree)', () => {
     // Default invocation — no env overrides — uses the real SSOT paths.
-    const { code, stdout } = runLint();
-    expect(code).toBe(0);
+    const { code, stdout, stderr } = runLint();
+    const [summary, ...details] = stderr.split(/\r?\n/);
+    let diagnostic = 'unclassified';
+    if (summary.startsWith('lint-capabilities: extraction failed: ')) {
+      diagnostic = 'extraction failed';
+    } else if (summary === 'lint-capabilities: SSOT drift detected between FE and backend.') {
+      const keyLine = /^    - ([a-zA-Z]\w*\.[a-z][\w.]*)(?: -> ([a-zA-Z]\w*\.[a-z][\w.]*)  \(canonical missing from backend declarations\))?$/;
+      const matches = details.filter((line) => line.startsWith('    - ')).map((line) => line.match(keyLine));
+      if (matches.length > 0 && matches.every(Boolean)) {
+        const keys = matches.flatMap((match) => match.slice(1).filter(Boolean));
+        diagnostic = `capability drift: ${keys.join(', ')}`;
+      }
+    }
+    expect(code, diagnostic).toBe(0);
     expect(stdout).toMatch(/All capabilities aligned/);
   }, 20000);
 
