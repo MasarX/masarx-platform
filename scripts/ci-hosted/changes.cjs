@@ -43,7 +43,7 @@ function select(files, event = 'pull_request') {
       affected.unit = affected.build_landing = affected.e2e = true;
     } else if (/^(?:tests\/unit|docs)\//.test(file) || /^[^/]+\.md$/i.test(file)) affected.unit = true;
     else if (file.startsWith('tests/ui/')) affected.unit = affected.ui = true;
-    else if (file.startsWith('tests/preview-sweep/')) affected.ui = true;
+    else if (file.startsWith('tests/preview-sweep/')) affected.ui ||= file !== 'tests/preview-sweep/additional-capture.spec.cjs';
     else if (/^tests\/landing-e2e\/|^playwright\.landing\.config\.ts$/.test(file)) affected.unit = affected.e2e = true;
     else return state(true);
   }
