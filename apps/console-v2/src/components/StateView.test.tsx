@@ -37,4 +37,22 @@ describe('StateView', () => {
     expect(screen.getByText(/This section could not load/i)).toBeInTheDocument();
     expect(screen.queryByText(/backend readback|VITE_SUPABASE_URL|canonical projection/i)).toBeNull();
   });
+
+  it('announces loading through a polite status region and error through an alert', () => {
+    const { unmount } = renderWithProviders(<StateView kind="loading" />);
+    expect(screen.getByRole('status')).toHaveClass('state--loading');
+    expect(screen.queryByRole('alert')).toBeNull();
+    unmount();
+
+    renderWithProviders(<StateView kind="error" />);
+    expect(screen.getByRole('alert')).toHaveTextContent(/Something went wrong/i);
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('adds no live region to the empty and denied states', () => {
+    renderWithProviders(<StateView kind="empty" />);
+    renderWithProviders(<StateView kind="denied" />);
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
 });

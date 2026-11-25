@@ -393,7 +393,7 @@ async function imageGuard(pins, file, env, initContainer) {
 }
 async function verifyHostedDatabaseInit(checked, env, container) {
   const pid1 = (await checked('docker', ['exec', container, 'cat', '/proc/1/comm'], env, 10000, { quiet: true })).trim();
-  if (pid1 !== 'docker-init') throw new Error('Hosted pgTAP database requires docker-init as PID 1');
+  if (pid1 !== 'docker-init') throw new Error('Hosted database requires docker-init as PID 1');
   return pid1;
 }
 async function backendLint(summary, commands, execute, file = 'ci-reports/db-lint.json') {
@@ -423,6 +423,7 @@ async function qualify(diagnostic) {
   diagnostic.imagePolicy = { mode: pinState.qualificationOnly ? 'qualification-only' : 'digest-pinned', decision: 'not_started', allowed: 0, denied: 0, denials: [] };
   if (process.argv[2] === 'preflight') return;
   const shard = process.env.PGTAP_SHARD;
+  const nightlyNetwork = process.env.NIGHTLY_DOCKER_NETWORK;
   const disposableShard = isHostedPgtap(process.env);
   if (disposableShard && pinState.qualificationOnly) throw new Error('Hosted pgTAP database init requires the digest-pinned Docker guard');
   const useDatabaseInit = !pinState.qualificationOnly && needsHostedDatabaseInit(process.env);
@@ -458,7 +459,15 @@ async function qualify(diagnostic) {
     serviceImagePins: pinState.qualificationOnly ? 'PIN_NEEDED' : 'resolved SHA-256 indices', imageQualificationOnly: pinState.qualificationOnly, ok: false };
   fs.mkdirSync('ci-reports', { recursive: true });
   const logFile = `ci-reports/${reportName}.log`;
-  const checked = (command, args, commandEnv, timeout, options = {}) => run(command, args, { env: commandEnv, timeout, logFile, ...options });
+  const checked = async (command, args, commandEnv, timeout, options = {}) => {
+    const settings = { env: commandEnv, timeout, logFile, ...options };
+    if (!nightlyNetwork || command !== cli || args[0] !== 'start') return run(command, args, settings);
+    const { checkDockerBindings, checkFixtureNetwork } = require('../ci/nightly-local.cjs');
+    checkFixtureNetwork(nightlyNetwork);
+    const output = await run(command, ['--network-id', nightlyNetwork, ...args], settings);
+    checkDockerBindings(project);
+    return output;
+  };
   const timed = (name, action) => { diagnostic.stage = name; return stage(summary, name, action); };
   try {
     diagnostic.stage = 'docker-preflight';
@@ -470,7 +479,8 @@ async function qualify(diagnostic) {
     }
     diagnostic.stage = 'prepare-inputs';
     const [dependencies, images] = await Promise.allSettled([
-      stage(summary, 'npm-install', () => install((command, args) => checked(command, args, env, undefined, { logPrefix: '[npm] ' }))),
+      nightlyNetwork ? undefined : stage(summary, 'npm-install', () =>
+        install((command, args) => checked(command, args, env, undefined, { logPrefix: '[npm] ' }))),
       pinState.qualificationOnly ? undefined : stage(summary, 'image-pulls', () => prepareImages(pins, {
         env, checked, timed: (name, action) => stage(summary, name, action), summary, dockerRoot, logFile, checkDisk: () => diskFloor(dockerRoot),
       })),
@@ -613,7 +623,7 @@ async function qualify(diagnostic) {
         $fixture$`);
       }
       const databasePin = pins.find(pin => pin.role === 'database');
-      local.writePsqlWrapper(bin, databasePin.runtimeId);
+      local.writePsqlWrapper(bin, databasePin.runtimeId, { rootless: Boolean(nightlyNetwork) });
       const testEnv = shardEnvironment(env, local.loadBackendLocalPgtapEnv(), project, dbPort, selected);
       diskFloor(dockerRoot);
       summary.pgtap = 'running';

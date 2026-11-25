@@ -28,7 +28,16 @@ for (const app of ['console', 'console-v2', 'portal']) {
         const baseURL = origin(ports[app]);
         const path = v2 ? '/operate/shipments' : '/resources/shipments';
         const reader = app === 'portal' ? 'sender_user' : 'dispatcher';
-        const checkpoint = stage => console.log('SWEEP', app, locale, theme, size, stage);
+        const checkpoint = stage => console.log('\nSWEEP', app, locale, theme, size, stage);
+
+        async function check(state, code, run) {
+          try {
+            await run();
+          } catch (error) {
+            console.log('\nSWEEP-FAIL', app, locale, theme, size, state, code);
+            throw error;
+          }
+        }
 
         async function withPage(role, state, capture) {
           checkpoint('session');
@@ -50,21 +59,23 @@ for (const app of ['console', 'console-v2', 'portal']) {
               await context.addInitScript(({ locale, theme, session }) => {
                 localStorage.setItem('masarx-console-v2-auth', JSON.stringify(session));
                 localStorage.setItem('console-v2.locale', locale);
-                localStorage.setItem('console-v2.theme', theme);
+                localStorage.setItem('masarx-ui-theme', theme);
               }, { locale, theme, session: account.session });
             }
             const page = await context.newPage();
-            if (!v2 && state === 'empty') {
-              // Hydrate the signed-in shell before triggering the route's streaming loading state.
-              await page.goto('/');
-              await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-              if (size === 'phone') await page.getByTestId(app + '-app-shell-mobile-open').click();
-              await page.locator('nav a[href="' + path + '"]:visible').first().click();
-              if (size === 'phone') await page.keyboard.press('Escape');
+            if (v2) {
+              await check(state, 'open-route', () => page.goto(path, { waitUntil: 'domcontentloaded' }));
             } else {
-              await page.goto(path, { waitUntil: 'domcontentloaded' });
+              // Keep the hydrated shell through the route transition for every state.
+              await check(state, 'open-shell', () => page.goto('/'));
+              await check(state, 'shell-theme', () => expect(page.locator('html')).toHaveAttribute('data-theme', theme));
+              await check(state, 'open-route', async () => {
+                if (size === 'phone') await page.getByTestId(app + '-app-shell-mobile-open').click();
+                await page.locator('nav a[href="' + path + '"]:visible').first().click();
+                if (size === 'phone') await page.keyboard.press('Escape');
+              });
+              await check(state, 'signed-in', () => expect(page.getByTestId('ui-context-strip-signed-in')).toBeVisible());
             }
-            if (!v2) await expect(page.getByTestId('ui-context-strip-signed-in')).toBeVisible();
             await capture(page, account.release);
           } finally {
             account.dispose();
@@ -74,18 +85,18 @@ for (const app of ['console', 'console-v2', 'portal']) {
 
         async function screenshot(page, state, marker) {
           checkpoint(state);
-          await expect(marker).toBeVisible();
+          await check(state, 'marker', () => expect(marker).toBeVisible());
           const root = page.locator('html');
-          await expect(root).toHaveAttribute('lang', locale);
-          await expect(root).toHaveAttribute('dir', locale === 'ar' ? 'rtl' : 'ltr');
-          await expect(root).toHaveAttribute('data-theme', theme);
-          await page.screenshot({
+          await check(state, 'language', () => expect(root).toHaveAttribute('lang', locale));
+          await check(state, 'direction', () => expect(root).toHaveAttribute('dir', locale === 'ar' ? 'rtl' : 'ltr'));
+          await check(state, 'theme', () => expect(root).toHaveAttribute('data-theme', theme));
+          await check(state, 'screenshot', () => page.screenshot({
             path: join(output, [app, locale, theme, size, state].join('-') + '.png'),
             animations: 'disabled',
             mask: ['signed-in', 'org', 'scope'].map(key => page.getByTestId('ui-context-strip-' + key)),
             maskColor: '#777777',
             style: 'nextjs-portal { display: none }',
-          });
+          }));
         }
 
         await withPage(reader, 'empty', async (page, release) => {
