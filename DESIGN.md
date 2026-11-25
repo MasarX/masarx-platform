@@ -205,14 +205,16 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 - These checks named in this file have no CI job yet:
   - The ESLint configs in section 8 (Lint). No CI task runs ESLint. [#431](https://github.com/MasarX/masarx-platform/issues/431)
   - Accessibility of Console, Console V2 and portal screens: rendered contrast, tab order and 24 by 24 pixel targets. Landing E2E covers only landing and public tracking, and CI does not run `tests/e2e`. [#301](https://github.com/MasarX/masarx-platform/issues/301), [#270](https://github.com/MasarX/masarx-platform/issues/270)
+  - Daily signed-in captures, coverage of other screens, and captures against a preview using the synthetic sweep accounts. [#432](https://github.com/MasarX/masarx-platform/issues/432)
+  - CI comparison of visual baselines. [#683](https://github.com/MasarX/masarx-platform/issues/683)
 
 ### Review and sweeps
 
 - Have the Design lead run one daily sweep across roles, viewports, themes and states.
 - File each finding as an issue and revert a change that breaks a critical user journey.
 - Delegate the hands-on checks to a worker that reads the CI and preview artifacts and returns only the findings.
-- For changed signed-in screens, read the `signed-in-previews` artifact in the PR's [CI workflow](.github/workflows/public-ci.yml) within one day. It shows Console, Console V2 and Portal shipment views in English and Arabic, light and dark, at desktop and phone widths. Each view shows loading, empty, error and permission-denied states from a runner-local synthetic fixture based on the [sweep roles](config/dev/sweep-roles.json).
-- Use the [synthetic sweep accounts](DELIVERY.md#signed-in-dev-sweep) for the scheduled DEV sweep and keep credentials out of logs, captures and issues.
+- On pull request runs selected for UI inputs, the [CI workflow](.github/workflows/public-ci.yml) captures one shipments view each for Console, Console V2 and Portal from a runner-local synthetic fixture based on the [sweep roles](config/dev/sweep-roles.json). Each view shows loading, empty, error and permission-denied states in English and Arabic, light and dark, at desktop and phone widths. The `signed-in-previews` artifact is kept for one day.
+- Sweep signed-in screens on dev only with the [synthetic sweep accounts](DELIVERY.md#signed-in-dev-sweep) and keep credentials out of logs, captures and issues.
 - For design changes, follow the [critical-change review rule](AGENTS.md#critical-changes-the-only-changes-that-get-a-review).
 
 ### Changing this file

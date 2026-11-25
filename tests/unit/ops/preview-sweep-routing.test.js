@@ -16,7 +16,7 @@ test('selects preview inputs within the existing UI job', () => {
   }
 });
 
-test('ignores unrelated changes and fails open when paths are unavailable', () => {
+test('ignores unrelated changes and runs the capture when the selector output is missing', () => {
   const unrelated = ['DESIGN.md', 'apps/fieldops/App.tsx', 'apps/landing/src/site.ts', 'tests/ui/table.test.tsx'];
   const affected = [...unrelated, 'apps/portal/app/page.tsx'];
   expect(selectPreviewSweep(affected)).toBe(true);

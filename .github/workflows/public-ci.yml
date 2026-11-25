@@ -548,6 +548,7 @@ jobs:
         run: npm run test --workspace @masarx/console-v2
       - name: Capture signed-in previews
         id: preview-sweep
+        timeout-minutes: 15
         if: ${{ !cancelled() && steps.install.outcome == 'success' && github.event_name == 'pull_request' && (needs.append-only.result != 'success' || needs.append-only.outputs.preview_sweep != 'false') }}
         env:
           FORCE_COLOR: '0'
@@ -561,7 +562,7 @@ jobs:
             SWEEP_LOCALE="$locale" node node_modules/@playwright/test/cli.js test -c scripts/ci-hosted/preview-sweep.config.cjs 2>&1 |
               sed -u -nE \
                 -e '/^SWEEP (console|console-v2|portal) (en|ar) (light|dark) (desktop|phone) (session|loading|empty|error|denied|complete)$/p' \
-                -e '/^SWEEP-FAIL (console|console-v2|portal) (en|ar) (light|dark) (desktop|phone) (loading|empty|error|denied) (open-shell|shell-theme|open-route|signed-in|marker|language|direction|theme|screenshot)$/p'
+                -e '/^SWEEP-FAIL (console|console-v2|portal) (en|ar) (light|dark) (desktop|phone) (loading|empty|error|denied) (new-session|new-context|route-guard|session-cookie|init-session|new-page|open-shell|shell-theme|open-mobile-menu|follow-route-link|close-mobile-menu|open-route|signed-in|marker|language|direction|theme|screenshot|close-context)$/p'
           done
       - name: Upload signed-in preview screenshots
         if: ${{ !cancelled() && steps.preview-sweep.outcome == 'success' }}
