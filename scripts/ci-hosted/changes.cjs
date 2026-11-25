@@ -38,7 +38,7 @@ function select(files, event = 'pull_request') {
     } else if (file === 'scripts/frontend/design-speed-budgets.cjs') {
       affected.unit = affected.build_console = affected.build_portal = affected.e2e = true;
     } else if (file.startsWith('tests/speed-e2e/')) {
-      affected.build_console = affected.build_portal = true;
+      if (file !== 'tests/speed-e2e/measure-speed.ts') affected.build_console = affected.build_portal = true;
     } else if (/^docs\/marketing\/(?:landing-v2|brand)\/|^scripts\/frontend\/(?:build|serve)-landing\.js$/.test(file)) {
       affected.unit = affected.build_landing = affected.e2e = true;
     } else if (/^(?:tests\/unit|docs)\//.test(file) || /^[^/]+\.md$/i.test(file)) affected.unit = true;
