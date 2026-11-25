@@ -6,7 +6,7 @@ Follows engineering standard v1.29.3.
 
 ## Branching and merging
 
-- The `main` queue permits one concurrent build. Use it without admission caps, drains or bypasses. Keep one migration item and one non-migration item in progress at a time.
+- The `main` queue permits four concurrent builds. Use it without admission caps, drains or bypasses. Keep one migration item and one non-migration item in progress at a time.
 - The manual merge hold is retired. The DEV apply guard (G1–G3) protects DEV database applies.
 - The thread that made the change pushes its topic branch and opens its own PR ready under the project's agent identity. Each PR names its issue (`Closes #n` or `Refs #n`).
 - Use the approved tree-publisher App helper for authenticated GitHub work. If the helper fails, stop and report it to Delivery. Keep installation tokens and signing material out of output and shared artifacts. The owner login is reserved for approved settings changes and release tags.
@@ -15,7 +15,7 @@ Follows engineering standard v1.29.3.
 - For a [critical change](AGENTS.md#critical-changes-the-only-changes-that-get-a-review), get one independent review of the full diff in parallel with CI. The deciding reviewer posts a PR comment with `VERDICT: GO <40-char sha>` or `VERDICT: NO_GO <40-char sha>` on line 1 and `Reviewer: <model>, effort <level>` on line 2, followed by a public-safe summary of findings.
 - Reassess the classification before each push. Disable auto-merge or remove the PR from the merge queue before pushing again. If a non-critical PR becomes critical, follow the critical-change process. For a PR that remains non-critical, re-enable auto-merge with the new `expectedHeadOid` after the push. A push after a GO that leaves every listed critical file as reviewed needs no new verdict, subject to the manual admission check below. A push that changes a listed critical file, and any fix after a NO_GO, gets a re-check of that push only by the same reviewer, ending in a new verdict.
 - Until the [CI verdict step](https://github.com/MasarX/masarx-platform/issues/655) is live, open critical PRs with auto-merge off. The merging thread waits for a GO naming the current head before enabling squash auto-merge with that `expectedHeadOid` or entering the merge queue. When a push leaves the reviewed critical files unchanged, the reviewer posts a GO naming the current head for manual admission without repeating the review. PRs that edit `.github/workflows/**` keep this manual check after the CI step is live, until the reviewer App's `review-verdict` status is required by the ruleset.
-- Changes to `main` merge only through the merge queue, using `SQUASH`. The required checks are `ci-gate` and CodeQL code scanning. CodeQL alerts of high severity or above block merging. The Delivery Lead owns the merge queue, CI health and speed, releases, deploys, rollback and alerts.
+- Changes to `main` merge only through the merge queue, using `SQUASH`. The required checks are `ci-gate` and CodeQL code scanning. CodeQL alerts of high severity or above block merging. The Delivery Lead owns the merge queue, merge gates, pipeline faults, CI health and speed, releases, deploys, rollback and alerts.
 - At push time, assign a fresh migration timestamp block above the newest migration on `main` and keep its files in landing order. For a rename-only re-stamp, compare the pre-stamp and re-stamped commits. Verify every migration is `R100` in `git diff -M --name-status` and has zero content lines in `git diff -M --numstat`. The append-only and ordering gate is in [migrations.cjs](scripts/ci-hosted/migrations.cjs).
 
 ## Checks
@@ -44,6 +44,7 @@ Follows engineering standard v1.29.3.
 
 ## Test policy
 
+- MasarX QA owns tests, the pre-release sweep and nightly test triage.
 - Test each changed behavior with a regression that fails before the fix. Use unit tests for logic, integration tests for affected database, queue and API boundaries, and end-to-end tests for core user jobs. Freeze clocks and wait for observable state. Preserve product guards when fixing tests. Trunk test edits need a recorded Master exception. A replacement preserves the existing assertions or identifies the design decision that retired them. Removal also requires two weeks of evidence that the test only detects change. Keep authorization, privacy, migration and concurrency tests.
 - Fix failures at their source. New failures block landing. Never rerun an unchanged failure or use retries, skips or longer timeouts to turn a failing check green. The existing exceptions are listed under [Deviations](#deviations).
 - Use local services and mocks for routine tests. The cloud qualification checks are listed under [Deviations](#deviations).
