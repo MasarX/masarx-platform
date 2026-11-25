@@ -484,6 +484,7 @@ jobs:
             node scripts/ci-hosted/jest.cjs unit
           fi
       - name: Upload unit-summary
+        id: jest_report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
         with:
@@ -495,11 +496,18 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
           include-hidden-files: false
+      - &jest_failure_summary
+        name: Report unexpected Jest assertions
+        if: ${{ always() && !cancelled() }}
+        env:
+          JEST_ARTIFACT_URL: ${{ steps.jest_report.outputs.artifact-url }}
+        run: node scripts/ci-hosted/jest-failure-summary.cjs "$HOSTED_JEST_LANE"
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2]
     env:
+      HOSTED_JEST_LANE: unit
       JEST_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
 
   ui:
@@ -546,6 +554,7 @@ jobs:
             node scripts/ci-hosted/jest.cjs ui
           fi
       - name: Upload ui-summary
+        id: jest_report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
         with:
@@ -557,6 +566,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
           include-hidden-files: false
+      - *jest_failure_summary
+    env:
+      HOSTED_JEST_LANE: ui
 
   build-console:
     name: Build (console)
