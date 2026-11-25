@@ -46,12 +46,22 @@ Follows engineering standard v1.29.3.
 
 - MasarX QA owns tests, the pre-release sweep and nightly test triage.
 - Test each changed behavior with a regression that fails before the fix. Use unit tests for logic, integration tests for affected database, queue and API boundaries, and end-to-end tests for core user jobs. Freeze clocks and wait for observable state. Preserve product guards when fixing tests. Trunk test edits need a recorded Master exception. A replacement preserves the existing assertions or identifies the design decision that retired them. Removal also requires two weeks of evidence that the test only detects change. Keep authorization, privacy, migration and concurrency tests.
+- Add property and edge-case tests for code that accepts untrusted or varied input. Exercise parsers, limits, boundaries, time zones and daylight saving transitions where they apply.
+- For every bug that reached `main`, add its failing case as a regression test or a row in the project's golden cases.
 - Fix failures at their source. New failures block landing. Never rerun an unchanged failure or use retries, skips or longer timeouts to turn a failing check green. The existing exceptions are listed under [Deviations](#deviations).
 - Use local services and mocks for routine tests. The cloud qualification checks are listed under [Deviations](#deviations).
 - Hosted Jest ([jest.cjs](scripts/ci-hosted/jest.cjs)) reads the target-base known-failure baseline at `config/ci/known-failures.txt`. A missing baseline is empty. The file is absent on `main`. A candidate can retain or remove target-base entries.
 - Only `npm run verify:cloud:e2e-gate` reads the [UI flake quarantine](config/ci/ui-flake-quarantine.json) for its cloud E2E summary outside hosted CI. Each entry carries an owner and expiry (`burn_down_by`).
 - [database-result.cjs](scripts/ci-hosted/database-result.cjs) requires all six pgTAP shards and an exact count and name match against the SQL test inventory. [database-selfcheck.cjs](scripts/ci-hosted/database-selfcheck.cjs) probes missing and incorrect coverage.
 - The digest-pinned Docker guard enables and verifies `docker-init` for the from-zero database build and pgTAP shards on GitHub-hosted runners.
+
+### Nightly full suite
+
+The **Servers nightly host** runs [nightly-full.sh](scripts/ci/nightly-full.sh) at **00:30 UTC** daily. The service serializes manual and scheduled starts and caps each run at four hours. It checks out public `main` anonymously, verifies the tested commit against public `main` at startup, and removes the checkout after copying the test result and log. The nightly never gates merges.
+
+Use the Node version in `.nvmrc`, the Supabase CLI and a dedicated rootless Docker daemon for disposable local PostgreSQL, Auth, REST, Storage and Edge services. The command starts with an allowlisted environment and job-local home and caches. It requires free fixture ports, disables Studio, and verifies that Supabase publishes fixture ports on IPv4 loopback. The first server run records listener addresses and cleanup. The command runs the existing Jest, Vitest, pgTAP and Playwright suites. [Nightly exclusions](config/ci/nightly-out-of-scope.json) record the reason and alternate coverage for each omitted suite. Unexplained skips fail the run.
+
+Servers delivers each run's private `result.json` and `nightly.log` under its UTC date. Delivery runs [nightly-report.cjs](scripts/ci/nightly-report.cjs) with the delivered results directory through the issue-scoped App. Set `GITHUB_REPOSITORY` and `NIGHTLY_DENY_CHECK` for the repository and privacy check. If needed, set `NIGHTLY_DENY_BASH` to the shell that runs the checker. The reporter verifies the run's commit against current public `main` and screens the exact text before publishing. It files a same-day Bug for a red or error result or a result missing at 06:00 UTC. Recurrences with the same failing suites go on the open Bug, once per result. Public reports carry the UTC evidence date, publishable test names and screened failure markers. Use `--dry-run` to inspect the proposed reports.
 
 ## Environments
 
