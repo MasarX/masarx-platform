@@ -195,6 +195,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             scripts/ci-hosted
+            scripts/edge/functions-registry.js
             .github/actions/ci-timing
             config/ci/pgtap-accepted-failures.json
             config/ci/hosted-integration-exceptions.json
