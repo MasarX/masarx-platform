@@ -13,7 +13,16 @@
       "scripts/utils/provider-auth-vault.js",
       "scripts/qa/qa-log.js",
       "scripts/ops/workspace/edge-db-jwt.js",
-      "apps/console-v2/src/modules/integrations/secret-redaction.ts"
+      "apps/console-v2/src/modules/integrations/secret-redaction.ts",
+      "apps/fieldops/src/mobile-jwt.ts",
+      "scripts/dev/fetch-sweep-credentials.mjs",
+      "scripts/ops/bootstrap-env-ci.js",
+      "scripts/ops/branches/gen-env.js",
+      "scripts/ops/workspace/docker-runtime/secret-policy.js",
+      "scripts/ops/workspace/ensure-edge-role-api-keys.js",
+      "scripts/ops/workspace/jwt-rest-auth.js",
+      "scripts/ops/workspace/local-proof-auth.js",
+      "scripts/ops/workspace/supabase-admin-keys.js"
     ],
     "realData": [
       "supabase/migrations/**",
@@ -59,7 +68,17 @@
       "packages/ui/src/access-policy-request-form.tsx",
       "packages/ui/src/access-policy-request-page.tsx",
       "packages/ui/src/auth-gate.tsx",
-      "packages/ui/src/auth-sign-in.tsx"
+      "packages/ui/src/auth-sign-in.tsx",
+      "apps/console-v2/src/shell/AppGuard.tsx",
+      "apps/fieldops/App.tsx",
+      "apps/fieldops/src/mobile-auth-methods.ts",
+      "apps/fieldops/src/mobile-shell-access.ts",
+      "apps/fieldops/src/mobile-v2-preview-screen.tsx",
+      "packages/ui/src/capabilities.ts",
+      "packages/ui/src/hooks/use-resource-delete.ts",
+      "scripts/ops/backfill-ingress-persisted-redaction.js",
+      "scripts/ops/prega-db-dump.js",
+      "scripts/ops/prega-reset-rollout.js"
     ],
     "safetyRules": [
       "apps/fieldops/src/mobile-v2-pre-shift-gate-screen.tsx",
@@ -69,7 +88,12 @@
     "hostNetworkFirewall": [
       "tooling/apps/api-ingress-worker/**",
       "scripts/ops/verify-api-caller-guarded-egress-proxy.js",
-      "scripts/ops/shared/api-ingress-public-host.js"
+      "scripts/ops/shared/api-ingress-public-host.js",
+      "apps/console/next.config.js",
+      "apps/console-v2/dev-server-allowed-hosts.ts",
+      "apps/portal/next.config.js",
+      "scripts/ops/auth/auth-email-url-policy.js",
+      "scripts/ops/workspace/local-auth-redirects.js"
     ],
     "releaseGates": [
       "CODEOWNERS",
@@ -95,7 +119,19 @@
       "scripts/tooling/docs-ssot-lint.js",
       "scripts/tooling/lint-frontend.js",
       "scripts/tooling/lint-npm-scripts.js",
-      "scripts/tooling/validate-api-ingress-worker.js"
+      "scripts/tooling/validate-api-ingress-worker.js",
+      "apps/console-v2/vite.config.ts",
+      "apps/console-v2/vitest.config.ts",
+      "config/tooling/jest.config.js",
+      "config/tooling/jest.config.ui.fieldops.js",
+      "config/tooling/jest.config.ui.js",
+      "config/tooling/jest.config.unit.js",
+      "playwright.dev-report.config.ts",
+      "playwright.fieldops.config.ts",
+      "scripts/ops/github-actions-vars.js",
+      "scripts/qa/smoke-edge.js",
+      "scripts/tests/bootstrap/seed-integration-fixtures.js",
+      "tests/e2e/fieldops-mobile/playwright.config.ts"
     ]
   },
   "packageScriptFiles": [
