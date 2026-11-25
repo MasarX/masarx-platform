@@ -87,6 +87,9 @@ function gitObjects(root) {
   const entry = (commit, filename) => git(['--literal-pathspecs', 'ls-tree', '-z', commit, '--', filename]);
   return {
     checkout: () => git(['rev-parse', 'HEAD'], 'utf8').trim(),
+    files: () => git(['ls-tree', '-r', '-z', '--format=%(objectmode)%x09%(path)', 'HEAD'], 'utf8').split('\0')
+      .filter(item => /^100(?:644|755)\t/.test(item))
+      .map(item => item.slice(item.indexOf('\t') + 1)),
     fetch: (...commits) => git(['fetch', '--no-tags', '--depth=1', 'origin', ...new Set(commits)]),
     same: (left, right, filename) => entry(left, filename).equals(entry(right, filename)),
     scripts(commit, filename) {
@@ -106,9 +109,16 @@ function gitObjects(root) {
   };
 }
 
+function matchesPattern(pattern, filename) {
+  return pattern.endsWith('/**') ? filename.startsWith(pattern.slice(0, -2)) : filename === pattern;
+}
+
 function matchesCriticalPath(policy, filename) {
-  return policy.patterns.some(pattern =>
-    pattern.endsWith('/**') ? filename.startsWith(pattern.slice(0, -2)) : filename === pattern);
+  return policy.patterns.some(pattern => matchesPattern(pattern, filename));
+}
+
+function isTestPath(filename) {
+  return /(?:^|\/)(?:tests|__tests__)\//.test(filename) || /\.(?:test|spec)\.[^/.]+$/.test(filename);
 }
 
 function newestVerdict(comments, identities) {
@@ -124,6 +134,9 @@ function newestVerdict(comments, identities) {
   const newest = verdicts.sort((left, right) =>
     Date.parse(right.created_at) - Date.parse(left.created_at) || right.id - left.id)[0];
   if (!newest) throw new Error('Missing review verdict');
+  if (newest.updated_at !== newest.created_at) {
+    throw new Error('Edited review verdict. Post a new verdict comment.');
+  }
   const verdict = newest.lines.length === 1 && /^VERDICT: (GO|NO_GO) ([a-f0-9]{40})$/.exec(newest.lines[0]);
   if (!verdict) throw new Error('Malformed review verdict');
   if (verdict[1] !== 'GO') throw new Error('Review verdict is NO_GO');
@@ -144,6 +157,7 @@ async function enforce(event, policy, api, objects) {
     throw new Error('Incomplete PR file inventory');
   }
   const filenames = new Set();
+  const testChanges = new Set();
   for (const file of files) {
     if (!filePath(file?.filename) || typeof file.status !== 'string' ||
       (file.status === 'renamed' && !filePath(file.previous_filename))) {
@@ -151,9 +165,14 @@ async function enforce(event, policy, api, objects) {
     }
     filenames.add(file.filename);
     if (file.status === 'renamed') filenames.add(file.previous_filename);
+    const removed = file.status === 'renamed' ? file.previous_filename : file.filename;
+    if (['removed', 'renamed'].includes(file.status) && isTestPath(removed)) {
+      testChanges.add(removed);
+      testChanges.add(file.filename);
+    }
   }
 
-  const critical = [...filenames].filter(filename => matchesCriticalPath(policy, filename));
+  const critical = [...filenames].filter(filename => testChanges.has(filename) || matchesCriticalPath(policy, filename));
   const manifests = policy.packageScriptFiles.filter(filename => filenames.has(filename));
   if (manifests.length) {
     // The PR diff is relative to its merge base, even when the target branch advanced.
@@ -189,8 +208,7 @@ async function enforce(event, policy, api, objects) {
   return critical.length ? 'Critical-file review verdict accepted' : 'No critical files changed';
 }
 
-function checkDocumentedPaths(root, policy) {
-  const docs = readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
+function checkDocumentedPaths(docs, policy) {
   const critical = docs.split(/^## /m).find(section => section.startsWith('Critical changes ('));
   assert.ok(critical, 'Missing AGENTS.md critical changes section');
   const [rules, exclusions] = critical.split(/^\*\*Not critical on their own\.\*\*/m);
@@ -201,6 +219,12 @@ function checkDocumentedPaths(root, policy) {
   const unmapped = documented.filter(filename =>
     !matchesCriticalPath(policy, filename) && !policy.packageScriptFiles.includes(filename));
   assert.deepEqual(unmapped, [], 'Unmapped critical path references in AGENTS.md: ' + unmapped.join(', '));
+}
+
+function checkPolicyPaths(policy, files) {
+  const unmatched = [...policy.patterns, ...policy.packageScriptFiles].filter(pattern =>
+    !files.some(filename => matchesPattern(pattern, filename)));
+  assert.deepEqual(unmatched, [], 'Critical policy paths absent from the candidate tree: ' + unmatched.join(', '));
 }
 
 function fixtureInventory(git, base, head) {
@@ -232,6 +256,7 @@ async function checkVerdicts(temp) {
   const criticalFile = 'scripts/deploy/run.sh';
   const renameFile = 'scripts/deploy/rename.sh';
   const scopeFile = 'scripts/deploy/scope.sh';
+  const testFile = 'tests/fixture.test.js';
   const write = (filename, content) => writeFileSync(path.join(source, filename), content);
   const stage = (filename, content) => {
     write(filename, content);
@@ -242,9 +267,11 @@ async function checkVerdicts(temp) {
     return git(['rev-parse', 'HEAD']).trim();
   };
   mkdirSync(path.join(source, 'scripts/deploy'), { recursive: true });
+  mkdirSync(path.join(source, 'tests'));
   stage(criticalFile, 'base\n');
   stage(renameFile, 'synthetic rename source\n');
   stage(scopeFile, 'scope\n');
+  stage(testFile, 'synthetic test\n');
   stage('package.json', '{}\n');
   const base = commit('Fixture base');
   git(['switch', '--detach', base]);
@@ -268,6 +295,9 @@ async function checkVerdicts(temp) {
     git(['update-index', '--chmod=+x', '--', criticalFile]);
   });
   const renamed = buildCase('renamed', () => git(['mv', '--', renameFile, 'moved.sh']));
+  const testRemoved = buildCase('test-removed', () => git(['rm', '--', testFile]), base);
+  const testRenamed = buildCase('test-renamed', () => git(['mv', '--', testFile, 'moved-test.js']), base);
+  const testEdited = buildCase('test-edited', () => stage(testFile, 'updated synthetic test\n'), base);
   const scopeChanged = buildCase('scope-change', () => stage(scopeFile, 'scope expanded\n'));
   const nonCritical = buildCase('non-critical', () => stage('note.md', 'synthetic note\n'), base);
   const manifestOnly = buildCase('manifest-metadata', () => stage('package.json', '{"private":true}\n'), base);
@@ -283,9 +313,10 @@ async function checkVerdicts(temp) {
   const objects = gitObjects(checkout);
   const head = unchanged.head;
   const event = readEvent('pull_request', { pull_request: { number: 17, base: { sha: base }, head: { sha: head } } });
-  assert.deepEqual(readEvent('merge_group', { merge_group: {
+  const groupEvent = readEvent('merge_group', { merge_group: {
     base_sha: base, head_ref: 'refs/heads/gh-readonly-queue/main/pr-17-' + old,
-  } }), { number: event.number, base });
+  } });
+  assert.deepEqual(groupEvent, { number: event.number, base });
   assert.throws(() => readEvent('merge_group', { merge_group: { base_sha: base, head_ref: 'refs/heads/main' } }),
     /Cannot identify PR/);
 
@@ -294,12 +325,23 @@ async function checkVerdicts(temp) {
     packageScriptFiles: ['package.json'],
     verdictAccountIds: [11],
   });
+  const docs = '## Critical changes (fixture)\nRecognize `scripts/deploy/`.\n**Not critical on their own.**';
+  checkDocumentedPaths(docs, policy);
+  assert.throws(() => checkDocumentedPaths(docs, { ...policy, patterns: ['.github/workflows/**'] }),
+    /Unmapped critical path references in AGENTS\.md: scripts\/deploy\//);
+  checkPolicyPaths({ ...policy, patterns: ['scripts/deploy/**', criticalFile] }, objects.files());
+  assert.throws(() => checkPolicyPaths({ ...policy, patterns: ['scripts/deploy/typo.sh'] }, objects.files()),
+    /Critical policy paths absent from the candidate tree: scripts\/deploy\/typo\.sh/);
+  assert.throws(() => checkPolicyPaths({ ...policy, patterns: ['scripts/empty/**'] }, objects.files()),
+    /Critical policy paths absent from the candidate tree: scripts\/empty\/\*\*/);
   let nextId = 0;
-  const comment = (body, author = 11) => ({
-    id: ++nextId, body, user: { id: author }, created_at: '2026-01-01T00:00:00Z',
+  const earlier = '2026-01-01T00:00:00Z';
+  const later = '2026-01-02T00:00:00Z';
+  const comment = (body, author = 11, created = earlier, updated = created) => ({
+    id: ++nextId, body, user: { id: author }, created_at: created, updated_at: updated,
   });
   async function check({ comments = [], candidate = unchanged, changedFiles = candidate.files.length,
-    secondHead = candidate.head } = {}) {
+    secondHead = candidate.head, state = 'open', request = { ...event, eventHead: candidate.head } } = {}) {
     const { number } = event;
     const endpoint = '/pulls/' + number;
     let reads = 0;
@@ -311,7 +353,7 @@ async function checkVerdicts(temp) {
         }
         assert.equal(route, endpoint);
         const currentHead = reads++ ? secondHead : candidate.head;
-        return { number, state: 'open', head: { sha: currentHead }, changed_files: changedFiles };
+        return { number, state, head: { sha: currentHead }, changed_files: changedFiles };
       },
       list: async route => {
         if (route === endpoint + '/files') return candidate.files;
@@ -319,11 +361,17 @@ async function checkVerdicts(temp) {
         return comments;
       },
     };
-    return enforce({ ...event, eventHead: candidate.head }, policy, api, objects);
+    return enforce(request, policy, api, objects);
   }
 
   await assert.rejects(check(), /Missing review verdict/);
   await assert.rejects(check({ comments: [comment('VERDICT: GO ' + head), comment('VERDICT: NO_GO ' + head)] }), /NO_GO/);
+  const laterNoGo = comment('VERDICT: NO_GO ' + head, 11, later);
+  const earlierGo = comment('VERDICT: GO ' + head);
+  await assert.rejects(check({ comments: [earlierGo, laterNoGo] }), /NO_GO/);
+  const editedGo = comment('VERDICT: GO ' + head, 11, earlier, later);
+  await assert.rejects(check({ comments: [earlierGo, editedGo] }), /Post a new verdict comment/);
+  assert.match(await check({ comments: [editedGo, comment('VERDICT: GO ' + head, 11, later)] }), /accepted/);
   const reviewed = [comment('VERDICT: GO ' + old)];
   assert.match(await check({ comments: reviewed }), /accepted/, 'unchanged critical entry');
   for (const [name, candidate] of Object.entries({ added, removed, modeChanged, renamed, scopeChanged })) {
@@ -331,12 +379,33 @@ async function checkVerdicts(temp) {
   }
   assert.match(await check({ candidate: missingInBoth, comments: [comment('VERDICT: GO ' + removed.head)] }),
     /accepted/, 'reviewed removal is still absent at the current head');
+  await assert.rejects(check({ candidate: testRemoved }), /Missing review verdict/);
+  await assert.rejects(check({ candidate: testRenamed }), /Missing review verdict/);
+  await assert.rejects(check({ candidate: testRenamed, comments: [comment('VERDICT: GO ' + testRemoved.head)] }), /stale/);
+  assert.match(await check({ candidate: testEdited }), /No critical/);
   await assert.rejects(check({ comments: [comment('VERDICT: GO ' + head), comment('VERDICT: GO abc')] }), /Malformed/);
+  await assert.rejects(check({ comments: [comment('VERDICT: GO ' + head + '\nVERDICT: NO_GO ' + head)] }), /Malformed/);
   await assert.rejects(check({ comments: [comment('VERDICT: GO ' + head, 12)] }), /Missing/);
   const brokenApi = githubClient('example/repo', String(11), async () => ({ ok: false, status: 503 }));
   await assert.rejects(enforce(event, policy, brokenApi, objects), /HTTP 503/);
+  const commentsEndpoint = '/issues/17/comments';
+  const commentsUrl = 'https://api.github.com/repos/example/repo' + commentsEndpoint + '?per_page=100&page=';
+  const pages = firstPage => githubClient('example/repo', String(11), async url => {
+    if (url === commentsUrl + '1') {
+      return new Response(JSON.stringify(firstPage), { headers: { link: '<' + commentsUrl + '2>; rel="next"' } });
+    }
+    assert.equal(url, commentsUrl + '2');
+    return new Response(JSON.stringify([laterNoGo]));
+  });
+  const firstPage = [earlierGo, ...Array.from({ length: 99 }, () => comment('Note', 12))];
+  await assert.rejects(check({ comments: await pages(firstPage).list(commentsEndpoint) }), /NO_GO/);
+  await assert.rejects(pages([earlierGo]).list(commentsEndpoint), /Incomplete GitHub API page/);
   assert.match(await check({ comments: [comment('VERDICT: GO ' + head)] }), /accepted/);
+  await assert.rejects(check({ request: groupEvent }), /Missing review verdict/);
+  assert.match(await check({ request: groupEvent, comments: [comment('VERDICT: GO ' + head)] }), /accepted/);
   assert.match(await check({ candidate: nonCritical }), /No critical/);
+  await assert.rejects(check({ request: { ...event, eventHead: old } }), /Cannot verify PR head/);
+  await assert.rejects(check({ state: 'closed' }), /Cannot verify PR head/);
   await assert.rejects(check({ changedFiles: unchanged.files.length + 1 }), /Incomplete/);
   await assert.rejects(check({ comments: [comment('VERDICT: GO ' + head)], secondHead: old }), /PR changed/);
   assert.match(await check({ candidate: manifestOnly }), /No critical/);
@@ -344,7 +413,8 @@ async function checkVerdicts(temp) {
 }
 
 async function selfCheck(root, policy) {
-  checkDocumentedPaths(root, policy);
+  checkDocumentedPaths(readFileSync(path.join(root, 'AGENTS.md'), 'utf8'), policy);
+  checkPolicyPaths(policy, gitObjects(root).files());
   const temp = mkdtempSync(path.join(tmpdir(), 'review-verdict-'));
   try {
     await checkVerdicts(temp);
