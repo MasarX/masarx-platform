@@ -9,7 +9,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { targetFile, git } = require('./target-policy.cjs');
 const { sanitize, environmentSecrets } = require('./diagnostics.cjs');
 const { run, stage, writeReport } = require('./process.cjs');
-const { captureDatabaseLog, collectStackDiagnostics, isHostedPgtap } = require('./stack-diagnostics.cjs');
+const { captureDatabaseLog, collectStackDiagnostics, isHostedPgtap, needsHostedDatabaseInit } = require('./stack-diagnostics.cjs');
 const { shardFiles, shardEnvironment, shardResults, hostedBatches } = require('./pgtap.cjs');
 
 const { prepareImages } = require('./images.cjs');
@@ -126,6 +126,12 @@ async function cloneHostedDatabases(admin, databases, created, restore = admin) 
   }
 }
 
+function timeHostedCloneCommand(summary, admin, ...commands) {
+  const clone = /^CREATE DATABASE (pgtap_worker_\d+) TEMPLATE /.exec(commands[0]);
+  if (!clone) return admin(...commands);
+  return stage(summary, `database-clone:${clone[1]}`, () => admin(...commands));
+}
+
 async function withHostedCloneIsolation(admin, restore, clone) {
   const { rolconnlimit, rolsuper, logLevel, restoreLogging } = JSON.parse(await admin(`SELECT json_build_object(
     'rolconnlimit', rolconnlimit, 'rolsuper', rolsuper, 'logLevel', setting,
@@ -240,7 +246,8 @@ async function runHostedShard({ selected, checked, testEnv, admin, summary, dock
   try {
     const [setupResult] = await Promise.allSettled([execute('setup', setup.length ? setup : selected.slice(0, 1), 'postgres', !setup.length)]);
     if (setupResult.status === 'rejected' && !fs.existsSync('ci-reports/pgtap-setup.json')) throw setupResult.reason;
-    const cloneAdmin = (...commands) => admin(Math.min(15000, remaining()), ...commands);
+    const boundedAdmin = (...commands) => admin(Math.min(15000, remaining()), ...commands);
+    const cloneAdmin = (...commands) => timeHostedCloneCommand(summary, boundedAdmin, ...commands);
     const migratedDatabaseBytes = Number((await cloneAdmin("SELECT pg_database_size('postgres')")).trim());
     if (!Number.isSafeInteger(migratedDatabaseBytes) || migratedDatabaseBytes < 1) throw new Error('Could not measure migrated database size');
     summary.migratedDatabaseBytes = migratedDatabaseBytes;
@@ -263,7 +270,8 @@ async function runHostedShard({ selected, checked, testEnv, admin, summary, dock
       diskFloor(dockerRoot);
       results = await Promise.allSettled(workers.map((files, index) => execute(`worker-${index}`, files, index === 0 ? 'postgres' : databases[index - 1])));
     } finally {
-      if (created.length) await admin(15000, ...created.map(database => `DROP DATABASE ${database} WITH (FORCE)`));
+      if (created.length) await stage(summary, 'database-clone-cleanup', () =>
+        admin(15000, ...created.map(database => `DROP DATABASE ${database} WITH (FORCE)`)));
     }
     // Shared state and database catalog assertions see only the canonical database and no concurrent tests.
     const [serialResult] = await Promise.allSettled([execute('worker-0-serial', serial)]);
@@ -385,7 +393,7 @@ async function imageGuard(pins, file, env, initContainer) {
 }
 async function verifyHostedDatabaseInit(checked, env, container) {
   const pid1 = (await checked('docker', ['exec', container, 'cat', '/proc/1/comm'], env, 10000, { quiet: true })).trim();
-  if (pid1 !== 'docker-init') throw new Error('Hosted pgTAP database requires docker-init as PID 1');
+  if (pid1 !== 'docker-init') throw new Error('Hosted database requires docker-init as PID 1');
   return pid1;
 }
 async function backendLint(summary, commands, execute, file = 'ci-reports/db-lint.json') {
@@ -418,6 +426,7 @@ async function qualify(diagnostic) {
   const nightlyNetwork = process.env.NIGHTLY_DOCKER_NETWORK;
   const disposableShard = isHostedPgtap(process.env);
   if (disposableShard && pinState.qualificationOnly) throw new Error('Hosted pgTAP database init requires the digest-pinned Docker guard');
+  const useDatabaseInit = !pinState.qualificationOnly && needsHostedDatabaseInit(process.env);
   const workers = process.env.PGTAP_WORKERS || 'nproc';
   if (disposableShard) hostedWorkerLimit(workers, PGTAP_WORKER_CAP);
   const selected = shard ? shardFiles(fs.readdirSync('supabase/tests/pgtap'), shard) : undefined;
@@ -487,7 +496,7 @@ async function qualify(diagnostic) {
     if (!pinState.qualificationOnly) {
       diskFloor(dockerRoot);
       diagnostic.stage = 'image-guard';
-      guard = await imageGuard(pins, path.join(temp, 'runtime-image-pins.json'), env, disposableShard ? databaseContainer : undefined);
+      guard = await imageGuard(pins, path.join(temp, 'runtime-image-pins.json'), env, useDatabaseInit ? databaseContainer : undefined);
       cliEnv = guard.env;
     }
     diagnostic.stage = 'cli-download';
@@ -521,7 +530,7 @@ async function qualify(diagnostic) {
     started = true; // A partial start must also be stopped.
     console.log(`Stack service exclusions: ${lane.exclude.join(',')}`);
     await timed('stack-start', () => checked(cli, ['start', '--debug', '--workdir', temp, '-x', lane.exclude.join(',')], cliEnv, 6 * 60000));
-    if (disposableShard) {
+    if (useDatabaseInit) {
       summary.databasePid1 = await timed('database-init', () => verifyHostedDatabaseInit(checked, env, databaseContainer));
     }
     diagnostic.stage = 'stack-status';
@@ -703,4 +712,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, withHostedCloneIsolation, pgtapDeadline };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, timeHostedCloneCommand, withHostedCloneIsolation, pgtapDeadline };

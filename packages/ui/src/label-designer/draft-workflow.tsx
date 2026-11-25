@@ -344,7 +344,7 @@ export function DraftWorkflow({
               type="button"
               className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                 editorMode === "visual"
-                  ? "border-b-2 border-blue-600 text-blue-600"
+                  ? "border-b-2 border-ui-accent text-ui-accent"
                   : "text-ui-muted hover:text-ui-ink"
               }`}
               onClick={() => setEditorMode("visual")}
@@ -356,7 +356,7 @@ export function DraftWorkflow({
               type="button"
               className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                 editorMode === "code"
-                  ? "border-b-2 border-blue-600 text-blue-600"
+                  ? "border-b-2 border-ui-accent text-ui-accent"
                   : "text-ui-muted hover:text-ui-ink"
               }`}
               onClick={() => setEditorMode("code")}

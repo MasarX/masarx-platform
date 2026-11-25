@@ -413,7 +413,7 @@ export async function OnboardingReadinessPage({
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm" data-testid={`${testIdPrefix}-plugins-table`}>
+            <table className="min-w-full text-start text-sm" data-testid={`${testIdPrefix}-plugins-table`}>
               <thead className="text-xs uppercase tracking-wide text-ui-muted">
                 <tr className="border-b border-ui-border/60">
                   <th className="px-3 py-3">Plugin</th>

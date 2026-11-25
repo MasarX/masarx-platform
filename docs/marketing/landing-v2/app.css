@@ -1,3 +1,7 @@
+/* Tokens. The landing build prepends the shared --ui-* tokens from
+   packages/ui/src/styles.css. Landing names whose values equal a shared token
+   alias it; every other value below is the landing override listed in
+   DESIGN.md section 2 (#162). */
 :root {
   --container: clamp(960px, 92vw, 1440px);
   --gutter: clamp(18px, 3vw, 28px);
@@ -27,8 +31,13 @@
 
 html[lang="ar"] { --font-sans: var(--font-sans-ar); }
 
+html {
+  --bg: rgb(var(--ui-paper));
+  --text: rgb(var(--ui-ink));
+}
+
 html[data-variant="ai"] {
-  --brand: #4F46E5;
+  --brand: rgb(var(--ui-accent));
   --accent: #818CF8;
   --accent-2: #10B981;
   --btn-primary-text: #ffffff;
@@ -39,10 +48,8 @@ html[data-variant="ai"] {
 }
 
 html[data-theme="light"] {
-  --bg: #FAFBFE;
   --surface: rgba(255, 255, 255, 0.92);
-  --surface-strong: #ffffff;
-  --text: #0F172A;
+  --surface-strong: rgb(var(--ui-surface));
   --muted: #546275;
   --border: rgba(79, 70, 229, 0.10);
   --tint-1: rgba(79, 70, 229, 0.03);
@@ -58,10 +65,9 @@ html[data-theme="light"] {
 }
 
 html[data-theme="dark"] {
-  --bg: #0B1121;
+  --brand: #4F46E5;
   --surface: rgba(15, 23, 42, 0.80);
   --surface-strong: #111827;
-  --text: #F1F5F9;
   --muted: rgba(241, 245, 249, 0.65);
   --border: rgba(79, 70, 229, 0.18);
   --tint-1: rgba(79, 70, 229, 0.06);
@@ -118,20 +124,19 @@ body::before {
   background-size: 28px 28px;
 }
 
-/* Aurora ambient */
+/* Aurora ambient: wide soft gradients, no filter, so a repaint stays cheap (#438) */
 body::after {
   content: "";
   position: fixed;
-  inset: -22%;
+  inset: 0;
   pointer-events: none;
   z-index: -1;
   opacity: 0;
-  filter: blur(80px) saturate(110%);
   transform: translate3d(0, 0, 0);
   background:
-    radial-gradient(520px 360px at 20% 30%, color-mix(in srgb, var(--brand) 22%, transparent), transparent 60%),
-    radial-gradient(520px 360px at 80% 20%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 62%),
-    radial-gradient(460px 320px at 55% 80%, color-mix(in srgb, var(--accent-2) 16%, transparent), transparent 62%);
+    radial-gradient(680px 520px at 7% 21%, color-mix(in srgb, var(--brand) 22%, transparent), transparent 75%),
+    radial-gradient(680px 520px at 93% 7%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 75%),
+    radial-gradient(620px 480px at 57% 93%, color-mix(in srgb, var(--accent-2) 16%, transparent), transparent 75%);
 }
 
 html[data-variant="ai"] body::after { opacity: 0.45; }
@@ -168,18 +173,16 @@ a:hover { text-decoration: underline; }
   border-radius: var(--radius-pill);
   padding: 10px 14px;
   transform: translateY(-200%);
-  transition: transform var(--dur-fast) var(--ease);
   z-index: 999;
 }
 .skip-link:focus { transform: translateY(0); }
 
-/* --- Header (glassmorphism) --- */
+/* --- Header: opaque, no backdrop blur, so focus and scroll repaints stay cheap (#438) --- */
 .header {
   position: sticky;
   top: 0;
   z-index: 50;
-  backdrop-filter: blur(14px);
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
 
@@ -369,7 +372,8 @@ html[data-motion="off"] [data-tilt] { transform: none; }
 }
 
 /* --- Sections --- */
-.section { padding: clamp(72px, 8vw, 140px) 0; content-visibility: auto; contain-intrinsic-size: auto 600px; }
+/* No content-visibility: skipped sections swap a 600px placeholder for their real height after a focus or fragment scroll, moving the target off screen (#626). */
+.section { padding: clamp(72px, 8vw, 140px) 0; }
 .section h2 { margin: 0; font-size: clamp(26px, 2.5vw, 36px); letter-spacing: -0.03em; }
 [data-driver-review-note] { white-space: pre-wrap; overflow-wrap: anywhere; }
 .lead { margin: 12px 0 0; color: var(--muted); max-width: 72ch; line-height: 1.6; font-size: 17px; }
@@ -1261,7 +1265,7 @@ html.js[data-motion="on"] .cap-card.is-card-visible .cap-svg .draw-line {
 }
 
 /* --- Motion off: immediate visibility --- */
-html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="off"] *::after {
+html[data-motion="off"], html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="off"] *::after {
   scroll-behavior: auto !important;
   transition: none !important;
   animation: none !important;
@@ -1278,8 +1282,7 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
     position: absolute;
     top: 100%;
     inset-inline: 0;
-    background: color-mix(in srgb, var(--bg) 96%, transparent);
-    backdrop-filter: blur(14px);
+    background: var(--bg);
     border-bottom: 1px solid var(--border);
     padding: 12px var(--gutter);
     flex-direction: column;
@@ -1455,25 +1458,16 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   align-items: start;
   padding: 1rem 1.1rem;
   border-radius: 24px;
-  border: 1px solid var(--line);
-  background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(244,247,252,0.95));
-  box-shadow: 0 16px 34px rgba(6, 29, 77, 0.08);
+  /* The tone tints the theme surface, so both themes follow the shared tokens (#464). */
+  --banner-tone: var(--brand);
+  border: 1px solid color-mix(in srgb, var(--banner-tone) 28%, transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--banner-tone) 10%, var(--surface-strong)), var(--surface-strong));
+  box-shadow: var(--shadow-md);
 }
 
-.track-request-banner[data-tone="success"] {
-  border-color: rgba(8, 127, 91, 0.28);
-  background: linear-gradient(135deg, rgba(235, 255, 248, 0.96), rgba(248, 255, 252, 0.98));
-}
-
-.track-request-banner[data-tone="warning"] {
-  border-color: rgba(191, 94, 0, 0.24);
-  background: linear-gradient(135deg, rgba(255, 247, 237, 0.98), rgba(255, 252, 246, 0.98));
-}
-
-.track-request-banner[data-tone="danger"] {
-  border-color: rgba(201, 42, 42, 0.22);
-  background: linear-gradient(135deg, rgba(255, 241, 242, 0.98), rgba(255, 248, 248, 0.98));
-}
+.track-request-banner[data-tone="success"] { --banner-tone: rgb(var(--ui-success)); }
+.track-request-banner[data-tone="warning"] { --banner-tone: rgb(var(--ui-warning)); }
+.track-request-banner[data-tone="danger"] { --banner-tone: rgb(var(--ui-danger)); }
 
 .track-request-banner-badge {
   width: fit-content;
@@ -1484,8 +1478,8 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text);
-  background: rgba(255,255,255,0.75);
-  border: 1px solid rgba(6,29,77,0.1);
+  background: var(--surface-strong);
+  border: 1px solid color-mix(in srgb, var(--banner-tone) 28%, transparent);
 }
 
 .track-request-banner-text {
@@ -2042,4 +2036,308 @@ body.track-map-overlay-open {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
   .reveal { opacity: 1; transform: none; }
+}
+
+/* --- Live delivery card (#406) --- */
+.track-courier-card {
+  --area-stroke: var(--brand);
+  display: grid;
+  gap: 1.1rem;
+  color: var(--muted);
+}
+
+/* --brand is about 2.8:1 on dark map land; --accent keeps the dashed cell at 3:1 or more. */
+[data-theme="dark"] .track-courier-card {
+  --area-stroke: var(--accent);
+}
+
+.track-courier-card .track-summary-grid {
+  gap: 0.75rem;
+}
+
+.track-courier-stops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-block-start: 0.35rem;
+}
+
+.track-courier-stops span {
+  inline-size: 14px;
+  block-size: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--muted);
+  opacity: 0.55;
+}
+
+.track-courier-stops span.is-you {
+  border-color: var(--brand);
+  background: var(--brand);
+  opacity: 1;
+}
+
+.track-courier-map {
+  position: relative;
+}
+
+.track-courier-map-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.track-courier-map-frame {
+  touch-action: auto;
+}
+
+.track-courier-area {
+  stroke: var(--area-stroke);
+  stroke-width: 2;
+  stroke-dasharray: 6 5;
+  fill: color-mix(in srgb, var(--brand) 16%, transparent);
+  fill-opacity: 1;
+}
+
+.track-courier-area-label {
+  position: absolute;
+  z-index: 500;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  translate: -50% -50%;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--surface-strong);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+}
+
+[dir="rtl"] .track-courier-area-label {
+  translate: 50% -50%;
+}
+
+.track-courier-attrib {
+  position: absolute;
+  z-index: 500;
+  inset-block-end: 6px;
+  inset-inline-end: 8px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface-strong) 80%, transparent);
+}
+
+.track-courier-attrib a {
+  color: inherit;
+}
+
+.track-courier-notice {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  border: 1px dashed var(--border);
+  background: var(--tint-1);
+}
+
+.track-courier-notice strong {
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.track-courier-notice p {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.track-courier-card .track-form-actions:not(:has(button:not([hidden]))) {
+  display: none;
+}
+
+.track-courier-status {
+  display: inline-flex;
+  align-items: center;
+}
+
+.track-courier-dot {
+  display: inline-block;
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  margin-inline-end: 6px;
+}
+
+.track-courier-status:not([data-status="live"]) .track-courier-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--muted);
+}
+
+.track-courier-privacy {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.track-courier-skel {
+  display: block;
+  block-size: 14px;
+  margin-block-start: 6px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--tint-2), color-mix(in srgb, var(--brand) 14%, transparent), var(--tint-2));
+  background-size: 200% 100%;
+  animation: track-courier-shimmer 2s linear infinite;
+}
+
+html[data-motion="off"] .track-courier-skel {
+  animation: none;
+}
+
+@keyframes track-courier-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+@media (max-width: 720px) {
+  .track-courier-map-frame {
+    min-height: 220px;
+  }
+}
+
+/* --- Proof of delivery (#407): the tile reuses the map picker frame's radius and border --- */
+.track-pod {
+  display: grid;
+  gap: 1rem;
+  color: var(--muted);
+}
+
+.pod-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pod-grid:empty {
+  display: none;
+}
+
+.pod-thumb {
+  display: grid;
+  gap: 0.5rem;
+  align-content: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+
+button.pod-thumb {
+  cursor: zoom-in;
+}
+
+.pod-thumb strong {
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.pod-thumb > span:last-child {
+  font-size: 0.82rem;
+}
+
+.pod-thumb:focus-visible {
+  outline: none;
+}
+
+.pod-thumb:focus-visible .pod-tile {
+  outline: 3px solid color-mix(in srgb, var(--brand) 55%, transparent);
+  outline-offset: 3px;
+}
+
+.pod-tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  max-inline-size: 100%;
+  border-radius: 1.2rem;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--map-land);
+}
+
+.pod-tile.is-signature {
+  background: var(--surface-strong);
+}
+
+.pod-tile img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.pod-tile.is-signature img,
+.track-pod-modal .pod-tile img {
+  object-fit: contain;
+}
+
+.track-pod-modal .pod-tile {
+  aspect-ratio: auto;
+  min-block-size: 12rem;
+  max-block-size: 70vh;
+}
+
+.pod-missing {
+  display: grid;
+  gap: 0.35rem;
+  place-items: center;
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.85rem;
+}
+
+.pod-missing strong {
+  color: var(--text);
+}
+
+.pod-skel.track-courier-skel {
+  block-size: auto;
+  aspect-ratio: 4 / 3;
+  margin-block-start: 0;
+  border-radius: 1.2rem;
+}
+
+.pod-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.track-pod-plain {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.track-pod .track-form-actions:not(:has(button:not([hidden]))) {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .pod-grid {
+    gap: 0.75rem;
+  }
 }

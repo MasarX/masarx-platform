@@ -1306,7 +1306,12 @@
       "description": "Dynamic resource view driven by ui_read_registry.",
       "unavailable": {
         "title": "Resource view unavailable.",
-        "action": "Confirm the UI registry and resource read RPCs are provisioned for this scope."
+        "action": "Refresh the page or try again later."
+      },
+      "authRequired": {
+        "title": "This page isn’t available right now.",
+        "action": "Sign in or try again later.",
+        "signIn": "Sign in"
       },
       "timeout": {
         "title": "Resource view timed out.",
@@ -3430,6 +3435,27 @@
       "drivers": "Drivers",
       "eta": "ETA",
       "noJobsDropHere": "No jobs — drop here to assign"
+    },
+    "pickupStatus": {
+      "unknown": "Unknown",
+      "statuses": {
+        "pending": "Pending",
+        "pickup_requested": "Pickup requested",
+        "scheduled": "Scheduled",
+        "pickup_scheduled": "Pickup scheduled",
+        "planned": "Planned",
+        "assigned": "Assigned",
+        "in_progress": "In progress",
+        "completed": "Completed",
+        "failed": "Failed",
+        "pickup_failed": "Pickup failed",
+        "cancelled": "Cancelled"
+      },
+      "assignmentModes": {
+        "internal_driver": "Internal driver",
+        "partner": "Partner",
+        "unassigned": "Unassigned"
+      }
     },
     "commentThread": {
       "noComments": "No comments yet",

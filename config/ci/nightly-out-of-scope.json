@@ -1,5 +1,13 @@
 [
   {
+    "name": "Hosted Console V2 accessibility checks",
+    "reason": "The hosted CI browser job owns the seed-mode Vite server, egress guard and axe report.",
+    "covered_by": "Console V2 axe in .github/workflows/public-ci.yml.",
+    "suites": [
+      "scripts/ci-hosted/playwright.console-a11y.config.cjs"
+    ]
+  },
+  {
     "name": "Deployed full-app browser tests",
     "reason": "Requires deployed application endpoints and environment-specific test identities.",
     "covered_by": "Post-deploy browser work tracked in #130.",

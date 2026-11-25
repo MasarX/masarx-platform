@@ -71,9 +71,9 @@ function textField(
 
 function QualityBadge({ quality }: { quality: "ok" | "at_risk" | "unscannable" }) {
   const colors = {
-    ok: "bg-green-100 text-green-700",
-    at_risk: "bg-yellow-100 text-yellow-700",
-    unscannable: "bg-red-100 text-red-700",
+    ok: "bg-[rgb(var(--ui-success)/0.12)] text-ui-ink",
+    at_risk: "bg-[rgb(var(--ui-warning)/0.12)] text-ui-ink",
+    unscannable: "bg-[rgb(var(--ui-danger)/0.12)] text-ui-ink",
   };
   const labels = {
     ok: t("barcodeQualityOk"),
@@ -91,7 +91,7 @@ function ValidationBadge({ valid }: { valid: boolean }) {
   return (
     <span
       className={`inline-block rounded px-1 py-0.5 text-[10px] font-medium ${
-        valid ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+        valid ? "bg-[rgb(var(--ui-success)/0.12)] text-ui-ink" : "bg-[rgb(var(--ui-danger)/0.12)] text-ui-ink"
       }`}
     >
       {valid ? t("barcodeDataValid") : t("barcodeDataInvalid")}
@@ -259,13 +259,13 @@ export function BlockPropertyPanel({
           {/* Advanced barcode settings */}
           <button
             type="button"
-            className="text-[10px] text-blue-600 hover:underline"
+            className="text-[10px] text-ui-accent hover:underline"
             onClick={() => setShowAdvanced(!showAdvanced)}
           >
             {showAdvanced ? `- ${t("advancedSettings")}` : `+ ${t("advancedSettings")}`}
           </button>
           {showAdvanced ? (
-            <div className="space-y-2 rounded border border-ui-border/30 bg-gray-50 p-2">
+            <div className="space-y-2 rounded border border-ui-border/30 bg-ui-highlight/50 p-2">
               <div className="grid grid-cols-2 gap-2">
                 {numField(t("moduleWidth"), block.module_width, (v) => set({ module_width: v }), id("module_width"))}
                 {numField(t("quietZone"), block.quiet_zone_modules, (v) => set({ quiet_zone_modules: v }), id("quiet_zone"))}
