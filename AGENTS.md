@@ -30,14 +30,16 @@ MasarX helps delivery teams manage shipments and coordinate integrations, wareho
 
 ## Commands
 
+Push and let CI run tests, lint, typecheck and builds. Do not run them locally on the shared workstation.
+
 - Set up: use the Node.js version in `.nvmrc` and run `npm ci --ignore-scripts` at the repository root.
-- Lint: `npm run lint:frontend`, `npm run lint:structure`, `npm run lint:commands`, `npm run lint:docs:ssot`, `npm run lint:db` and `npm run lint:db:managed-grants`. Select the checks that cover the change.
+- Lint command references: `npm run lint:frontend`, `npm run lint:structure`, `npm run lint:commands`, `npm run lint:docs:ssot`, `npm run lint:db` and `npm run lint:db:managed-grants`.
 - Format Console V2: `npm --prefix apps/console-v2 run format`.
-- Typecheck: `npm run typecheck:frontend`, `npm --prefix apps/console-v2 run typecheck`, or `npm run typecheck:fieldops`.
-- Affected tests: run `npm run ci:local:impact -- --base-ref origin/main` against the intended base, substituting its ref when needed. The `ci` workflow in `.github/workflows/public-ci.yml` selects affected jobs for pull requests.
-- Full tests: the same workflow runs the full hosted CI graph on `merge_group`. Use `npm run ci:local:strict` for strict local qualification. See `docs/guides/TESTING_GUIDE.md` for the suite commands and backend requirements.
-- pgTAP: `npm run test:pgtap` uses `psql` and a configured, isolated PostgreSQL test database with the Supabase schema and fixtures. Verify the target before running database tests.
-- Build: run `npm run build` in the Console, Console V2 or Portal app directory, or `npm run build:landing` at the root.
+- Typecheck command references: `npm run typecheck:frontend`, `npm --prefix apps/console-v2 run typecheck`, or `npm run typecheck:fieldops`.
+- Affected tests: after a push to a pull request, the [CI workflow](.github/workflows/public-ci.yml) selects affected jobs and `ci-gate` checks their results. Command reference: `npm run ci:local:impact -- --base-ref origin/main`.
+- Full tests: the same workflow runs the full hosted CI graph on `merge_group`, with `ci-gate` aggregating the results. Command reference: `npm run ci:local:strict`. See the [testing guide](docs/guides/TESTING_GUIDE.md) for suite commands and backend requirements.
+- pgTAP: the `Database pgTAP` matrix runs all six shards when CI selects database coverage on a pull request and on every `merge_group`. Command reference: `npm run test:pgtap`, which uses `psql` and requires a verified, isolated PostgreSQL test database with the Supabase schema and fixtures.
+- Build command references: `npm run build` in the Console, Console V2 or Portal app directory and `npm run build:landing` at the root.
 - Run locally: `npm run dev:console:v2`, `npm run dev:console`, `npm run dev:portal`, `npm run dev:fieldops` or `npm run dev:landing`. See `docs/guides/LOCAL_SETUP.md` for backend setup.
 
 ## Must-follow coding rules
@@ -50,19 +52,31 @@ MasarX helps delivery teams manage shipments and coordinate integrations, wareho
 - Validate inputs where data enters an API, import or configuration loader. Version contracts used by independent consumers and phase breaking changes across releases. Enforce authorization on the server, deny access by default and test each role. Paginate growing lists, avoid per-row queries and use query plans to justify indexes.
 - Store instants in UTC and convert them to the user's time zone for display. Store future schedules as local time and an IANA time-zone name. Make jobs and inbound handlers safe to repeat by using deduplication keys. Set outbound call timeouts and a finite retry limit with backoff. Give users safe errors with a recovery action where available.
 - Follow the [test policy](DELIVERY.md#test-policy) and [CI checks and runner rules](DELIVERY.md#checks).
+- Apply the [critical-change review rule](#critical-changes-the-only-changes-that-get-a-review) when preparing a PR.
 - Follow [DESIGN.md](DESIGN.md) for UI changes. Use translation catalogs and cover Arabic, right-to-left layouts and WCAG 2.2 AA.
 - The owner's approval is required only for production deployments, spending money or using paid services, access only the owner can grant, destructive operations on real data, and making private things public.
 
-## Risk paths (high risk only: need one independent review before landing)
+## Critical changes (the only changes that get a review)
 
-A change needs the [independent review](DELIVERY.md#branching-and-merging) only when it touches one of these paths, because a mistake there is irreversible, silent or public. Nothing else gets the review: docs, `DESIGN.md`, `AGENTS.md` and `DELIVERY.md`, presentation-only UI, tests, refactors, dependency version bumps and lockfiles, `package.json` outside its `scripts`, and DEV or staging-only fixes. One review per change, with no repeat rounds: a fix to a finding, or any push after the verdict, is checked by tests and needs a new review only if it touches a path below.
+The owner's rule (24 Nov): critical means production, secrets, real data, making anything public, host/network/firewall changes, repo settings and release gates.
 
-- Data loss: `/supabase/migrations/`, purge and retention functions, `scripts/ops/workspace/destroy.js`, `scripts/ops/workspace/delete-branch.js`, and the database-target selection in `/scripts/utils/pg-candidates.js` and `/scripts/utils/pg-hostaddr.js`.
-- Data exposure: `apps/console/app/auth/`, `apps/console/app/access-policy/`, `apps/portal/app/auth/`, `apps/portal/app/access-policy/`, `apps/console-v2/src/routes/auth/`, `apps/shared/security-middleware.ts`, `supabase/functions/`, SQL grants and row-level security, any UI or API change to which personal data is shown, and to whom, and any change that makes something public or opens network or access-control exposure.
-- Money rules: cash-on-delivery amounts, collections and payouts, wherever they live.
-- Secrets and logs: `/scripts/utils/load-env.js`, `/scripts/utils/env-file.js` and `/scripts/qa/qa-log.js`.
-- Merge gates: `/.github/`, `/scripts/ci-hosted/`, `/config/ci/` (including the quarantine and accepted-failure lists), `/scripts/ops/ci/`, `/scripts/tests/run-pgtap-cloud.js`, and the `scripts` entries of `package.json` files that CI runs.
-- Production configuration and deploys: `/scripts/deploy/`, `/supabase/config.toml` and `/config/edge/functions.json`.
+- Production: production configuration and deploys, `/scripts/deploy/`, `/supabase/config.toml` and `/config/edge/functions.json`.
+- Secrets: how they are stored, read, scoped or rotated, and token helpers. This includes `/scripts/utils/load-env.js`, `/scripts/utils/env-file.js` and `/scripts/qa/qa-log.js`.
+- Real data:
+  - every migration in `/supabase/migrations/`;
+  - deletes, purges, retention, audit logs and history, backups and restores, including `scripts/ops/workspace/destroy.js` and `scripts/ops/workspace/delete-branch.js`;
+  - the database-target selection in `/scripts/utils/pg-candidates.js` and `/scripts/utils/pg-hostaddr.js`;
+  - sign-in, permissions, and server code that decides which real data people can access or what personal data an API returns. This includes SQL grants, row-level security, server code in `/supabase/functions/`, `SECURITY DEFINER` function bodies, API contract views, `apps/shared/security-middleware.ts`, the server routes in `apps/console/app/api/` and `apps/portal/app/api/`, and the Console, Console V2 and Portal sign-in and access-policy paths. It also covers personal data carried in exports, prints and outbound messages.
+  - safety-critical rules until end-to-end tests cover every project safety rule. Each new safety rule requires review until its end-to-end test lands. [Issue #558](https://github.com/MasarX/masarx-platform/issues/558) tracks the rule and test inventory.
+- Making anything public: repository, package or bucket visibility, and new public endpoints.
+- Host, network and firewall: public ingress routes, CORS, token rules and rewrites in `tooling/apps/api-ingress-worker/`, the egress proxy and its allowlists, servers, DNS and firewall rules. Egress controls include `supabase/functions/api-caller/egress.mjs`, `supabase/functions/api-caller/proxy.mjs`, `supabase/migrations/20261123046800_validate_outbound_integration_urls.sql` and `scripts/ops/verify-api-caller-guarded-egress-proxy.js`.
+- Repo settings and release gates: rulesets and repository settings, the privacy deny check, `/CODEOWNERS`, `/.github/`, `/scripts/ci-hosted/`, `/config/ci/` (including the quarantine and accepted-failure lists), `/scripts/ops/ci/`, `/scripts/tests/run-pgtap-cloud.js`, and scripts CI or deploy workflows run directly or through `package.json` script entries. This includes `scripts/edge/verify-frozen-lock.cjs`, `scripts/edge/verify-npm-import-lock.js` and `scripts/ops/vercel/validate-build.js`. Deleting, skipping or weakening a test, including pgTAP authorization and contract tests, or changing the test-file guard allowlist is critical.
+
+Documentation changes that alter a manual or automated merge or deploy gate, or who must review or approve a change, are critical.
+
+**Not critical on their own.** Dependencies and lockfiles, internal tools under `/tooling/` outside the public ingress worker, money rules, and added or changed tests that preserve existing checks. Spending money still requires the owner's approval.
+
+Follow the [review and merge process](DELIVERY.md#branching-and-merging).
 
 ## Data safety
 
@@ -92,7 +106,7 @@ Use the configured [location partition purge](supabase/migrations/202601251090_t
 - For a database function change, write a new migration with `CREATE OR REPLACE`. Start from the live catalog body using `pg_get_functiondef`, or the catalog after replaying `main` from zero. The original migration is historical. Preserve later fixes.
 - Give new tables explicit `REVOKE` and `GRANT` statements and enable RLS with scoped policies. Give new functions explicit `REVOKE` and `GRANT` statements and verify their row access. State the effective grants for each new or changed function, such as `service_role` only.
 - In migration PRs, list each `GRANT`, `REVOKE`, `ALTER DEFAULT PRIVILEGES` and `CREATE POLICY` by object, privilege or policy scope, and role. Reject broad schema grants, default-privilege changes, loop grants and changes to extension-managed privileges.
-- Run `npm run lint:db:managed-grants` for changed migrations. Use the exact-file, hash-bound policy in `config/ci/supabase-managed-grants.json` for reviewed dynamic grant targets. Keep `supabase/tests/pgtap/045a_definer_execute_allowlist.sql` current when `SECURITY DEFINER` execute access for `anon` or `authenticated` changes in `public` or `api`.
+- After a push with migration changes to a pull request, the CI `Lint` job runs `npm run lint:db:managed-grants`. Use the exact-file, hash-bound policy in `config/ci/supabase-managed-grants.json` for reviewed dynamic grant targets. Keep `supabase/tests/pgtap/045a_definer_execute_allowlist.sql` current when `SECURITY DEFINER` execute access for `anon` or `authenticated` changes in `public` or `api`.
 - New public tables follow the executor-only trusted policy, API contract view and lookup contracts checked by `supabase/tests/pgtap/0zz_ui_rpc_executor_role_v1.sql`, `supabase/tests/pgtap/0zz_api_contract_views.sql` and `supabase/tests/pgtap/0zz_no_literal_enum_checks.sql`.
 - Use an isolated test database and generated data. Never copy one environment's data into another. Require a [verified production backup before every production deploy](DELIVERY.md#deploys).
 
