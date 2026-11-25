@@ -8,6 +8,14 @@
     ]
   },
   {
+    "name": "Hosted application speed checks",
+    "reason": "The hosted CI build jobs own the production builds, synthetic fixture and browser measurement.",
+    "covered_by": "Build (console) and Build (portal and landing) in .github/workflows/public-ci.yml.",
+    "suites": [
+      "scripts/ci-hosted/playwright.app-speed.config.cjs"
+    ]
+  },
+  {
     "name": "Deployed full-app browser tests",
     "reason": "Requires deployed application endpoints and environment-specific test identities.",
     "covered_by": "Post-deploy browser work tracked in #130.",

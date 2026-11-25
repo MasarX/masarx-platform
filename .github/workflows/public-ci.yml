@@ -617,8 +617,12 @@ jobs:
       - *timing_install
       - *install_locked
       - *timing_work
+      - name: Install lockfile-selected Chromium
+        run: node scripts/ci-hosted/tasks.cjs browser-install
+      - name: Build and measure Console V2
+        run: node scripts/ci-hosted/tasks.cjs console-v2-speed
       - name: Build present console
-        if: steps.subject.outputs.present == 'true'
+        if: ${{ !cancelled() && steps.subject.outputs.present == 'true' && steps.install.outcome == 'success' }}
         run: node scripts/ci-hosted/tasks.cjs build apps/console
 
   build-portal-landing:
@@ -653,8 +657,13 @@ jobs:
       - *timing_install
       - *install_locked
       - *timing_work
+      - name: Install lockfile-selected Chromium
+        if: steps.subject.outputs.portal == 'true'
+        run: node scripts/ci-hosted/tasks.cjs browser-install
       - name: Build present portal
         if: steps.subject.outputs.portal == 'true'
+        env:
+          CI_PORTAL_SPEED: '1'
         run: node scripts/ci-hosted/tasks.cjs build apps/portal
       - name: Build present landing
         if: ${{ !cancelled() && steps.subject.outputs.landing == 'true' && steps.install.outcome == 'success' }}
@@ -691,7 +700,20 @@ jobs:
       - *timing_work
       - name: Run synthetic local landing suite
         if: steps.subject.outputs.present == 'true'
-        run: node scripts/ci-hosted/tasks.cjs landing-e2e
+        env:
+          SPEED_EVIDENCE_DIR: test-results/speed-evidence
+        run: |
+          status=0
+          node scripts/ci-hosted/tasks.cjs landing-e2e || status=$?
+          shopt -s nullglob
+          reports=("$SPEED_EVIDENCE_DIR"/speed--*.json)
+          if (( ${#reports[@]} )); then
+            jq -c '{screen, route, viewport, sampleCount: (.runs | length), p75, budget, limit}' "${reports[@]}"
+          elif (( status == 0 )); then
+            echo 'Missing Landing speed measurements.' >&2
+            exit 1
+          fi
+          exit "$status"
       # Runs after a landing failure too, so one run reports both suites.
       - name: Run Console V2 seed-mode axe suite
         id: console_a11y
