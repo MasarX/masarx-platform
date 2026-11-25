@@ -1,4 +1,4 @@
-﻿# Testing Guide
+# Testing Guide
 
 This guide explains how to run, interpret, and extend the test suites for the MasarX Delivery Platform.
 
@@ -32,7 +32,8 @@ external requests blocked.
 
 Wire new suites into an existing CI job where their dependencies are available.
 For a suite that needs unavailable infrastructure, record its scope, owning lead,
-reason and last active UTC date in the quarantine. CI fails on uncovered entries,
+reason, tracking issue and last active UTC date in the quarantine. CI fails on
+uncovered entries,
 expired quarantines and selectors that no longer cover a suite.
 
 ## Test Suites

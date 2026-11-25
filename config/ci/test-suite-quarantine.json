@@ -47,7 +47,7 @@
       "tests/e2e/fieldops-e2e-detox/jest.detox.config.js"
     ],
     "owner": "MasarX QA",
-    "reason": "The native Detox configuration needs a built FieldOps Android app, an emulator and a disposable backend.",
+    "reason": "The native Detox configuration needs a built FieldOps Android app, an emulator and a disposable backend (#679).",
     "expires": "2026-12-15"
   },
   {
@@ -56,7 +56,7 @@
       "apps/console-v2/tests/e2e/console.label-designer.e2e.spec.ts"
     ],
     "owner": "MasarX QA",
-    "reason": "Console V2 live-readiness scenarios need a separately provisioned backend and role fixtures.",
+    "reason": "Console V2 live-readiness scenarios need a separately provisioned backend and role fixtures (#684).",
     "expires": "2026-12-15"
   },
   {
@@ -65,8 +65,8 @@
       "apps/console-v2/package.json#test:visual*"
     ],
     "owner": "MasarX Design",
-    "reason": "Visual baseline capture requires an audited fixture, browser and reference-image setup. The regeneration workflow is opt-in and has separate prerequisites.",
-    "expires": "2026-12-15"
+    "reason": "Visual baseline comparison requires an audited fixture, browser and reference-image setup. The regeneration workflow is opt-in and has separate prerequisites (#683).",
+    "expires": "2026-12-18"
   },
   {
     "match": [
@@ -83,7 +83,7 @@
       "package.json#test:qa:cases*"
     ],
     "owner": "MasarX QA",
-    "reason": "These entry points require deployed Edge functions, service credentials and isolated QA case fixtures.",
+    "reason": "These entry points require deployed Edge functions, service credentials and isolated QA case fixtures (#686).",
     "expires": "2026-12-15"
   },
   {
@@ -91,7 +91,7 @@
       "supabase/rollback/tests/**/*.sql"
     ],
     "owner": "MasarX Delivery",
-    "reason": "Rollback tests need a disposable database replayed to the exact migration boundary, followed by an inverse and refusal check.",
+    "reason": "Rollback tests need a disposable database replayed to the exact migration boundary, followed by an inverse and refusal check (#690).",
     "expires": "2026-12-15"
   }
 ]
