@@ -673,7 +673,20 @@ jobs:
       - *timing_work
       - name: Run synthetic local landing suite
         if: steps.subject.outputs.present == 'true'
-        run: node scripts/ci-hosted/tasks.cjs landing-e2e
+        env:
+          SPEED_EVIDENCE_DIR: test-results/speed-evidence
+        run: |
+          status=0
+          node scripts/ci-hosted/tasks.cjs landing-e2e || status=$?
+          shopt -s nullglob
+          reports=("$SPEED_EVIDENCE_DIR"/speed--*.json)
+          if (( ${#reports[@]} )); then
+            jq -c '{screen, route, viewport, sampleCount: (.runs | length), p75, budget, limit}' "${reports[@]}"
+          elif (( status == 0 )); then
+            echo 'Missing Landing speed measurements.' >&2
+            exit 1
+          fi
+          exit "$status"
       # Runs after a landing failure too, so one run reports both suites.
       - name: Run Console V2 seed-mode axe suite
         id: console_a11y
