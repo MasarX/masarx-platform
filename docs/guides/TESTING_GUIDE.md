@@ -110,23 +110,61 @@ Notes:
 
 ### 6) Frontend UI/E2E (Console + Portal)
 
-Frontend quality gates run with Jest UI tests and Playwright E2E:
+Frontend quality gates run with Jest UI tests and Playwright E2E.
 
 ```bash
 npm run lint:frontend
 npm run test:ui
-npx playwright test --workers=1
+npm run test:e2e -- --workers=1
+npm run test:e2e:landing
 ```
 
-Notes:
-- UI tests rely on Testing Library `@testing-library/user-event` (declared in root devDependencies). If Jest cannot resolve it, run `npm install` from the repo root.
-- Run Playwright locally without forcing `CI=1` when using localhost apps (`3001` console / `3002` portal), so the config can auto-start dev servers.
-- In CI/strict environments, set `CONSOLE_BASE_URL` and `PORTAL_BASE_URL` explicitly.
-- Use host-root values (for example `https://vkhyghkwqoksmtxwrkgqyyxk.example.invalid`, `https://yguwjnwkkqutolgwughjsloj.example.invalid`), not `/console` or `/portal` path prefixes.
+#### UI component tests
+
+The UI Jest suite uses jsdom, Testing Library, and `ts-jest` with `tsconfig.jest.json`. Its setup adds `jest-dom` and `jest-axe` matchers and supplies missing browser APIs such as `TextEncoder`, `TextDecoder`, `ResizeObserver`, and `matchMedia`. [Jest UI config](../../config/tooling/jest.config.ui.js) · [UI setup](../../tests/ui/setup.ts)
+
+Use `renderWithIntl()` for components that need translations, React Query, or toasts. It wraps Testing Library's `render()` with `NextIntlClientProvider`, `QueryProvider`, and `ToastHost`, and defaults to the merged English UI and Console messages. [Render helper](../../tests/ui/test-utils.tsx)
+
+Jest maps `next/cache`, `next-intl`, `server-only`, and stylesheet imports to module mocks. For component-specific dependencies, mock `next/navigation`, `next/link`, or the relevant `@masarx/api` entry point in the test. [Module mocks](../../tests/ui/__mocks__/)
+
+#### Next.js Console and Portal E2E
+
+The root Playwright config matches specs in `tests/e2e/` by project.
+
+| Project | Spec filename prefix | Local app |
+| --- | --- | --- |
+| `console` | `console` | Console, port `3001` |
+| `a11y` | `a11y` | Console, port `3001` |
+| `shared` | `action`, `logging`, `navigation`, `labels` | Console, port `3001` |
+| `portal` | `portal` | Portal, port `3002` |
+
+The suite uses zero retries and retains traces, screenshots, and video on failure. The root config defines the timeout defaults, worker defaults, and exact filename patterns. [Playwright config](../../playwright.config.ts)
+
+- Use `E2E_PROJECTS` to select projects. In strict runs (`CI`, `STRICT_E2E_GATE_ENV`, or `E2E_REQUIRE_BASE_URLS`), set an explicit non-loopback, host-root `CONSOLE_BASE_URL` for the `console`, `a11y`, or `shared` projects and `PORTAL_BASE_URL` for the `portal` project.
+- For local runs, the root config starts `dev:console:legacy` and `dev:portal` for selected apps at their default local origins. To start the Next.js console manually, run `npm run dev:console`. Match the configured origin to the host and port where the app is serving.
+- To test a built Next.js app locally, use its `build` and `start` scripts and point Playwright at that server's origin.
+- For a manually started Next.js dev server, add the browser hostname to `NEXT_ALLOWED_DEV_ORIGINS` in the selected environment. Playwright supplies it automatically to the dev servers it starts. [Origin resolution](../../apps/shared/next-dev-origins.js)
+- `E2E_WORKERS` sets the worker count. `E2E_WEB_SERVER_TIMEOUT_MS`, `E2E_TEST_TIMEOUT_MS`, and `E2E_EXPECT_TIMEOUT_MS` configure the startup, test, and assertion timeouts. `E2E_FORCE_CLEAN` replaces existing local app listeners and clears their Next.js caches before startup.
+
+Use the [E2E utilities](../../tests/e2e/utils/) for sign-in and sessions (`auth.ts`, `session.ts`), test accounts (`demo-accounts.ts`), origins and route prefixes (`base-urls.ts`, `base-paths.ts`), navigation and route coverage (`navigation.ts`, `coverage-routes.ts`), performance assertions (`performance.ts`), and runtime error checks (`error-guards.ts`, `runtime-errors.ts`).
+
+#### Landing E2E
+
+The `landing` project covers `tests/landing-e2e/`. By default it uses one worker and starts `dev:landing` locally with a preferred port of `3333`. Use `LANDING_BASE_URL` to select an existing environment or `LANDING_E2E_PORT` to set the preferred local port. `LANDING_E2E_WORKERS` accepts integers from `1` through `4`. [Landing Playwright config](../../playwright.landing.config.ts)
+
+The hosted browser job uses dedicated loopback configurations for [synthetic Landing E2E](../../scripts/ci-hosted/playwright.landing.config.cjs) and [Console V2 seed-mode axe](../../scripts/ci-hosted/playwright.console-a11y.config.cjs). Qualify full Next.js Console and Portal E2E separately with the origins above.
+
+#### Console V2 readiness
+
+- For a local Console V2 server, use `npm run dev:console:v2 -- --port <leased-port>`. [Local setup](LOCAL_SETUP.md)
 - For Console V2 production-readiness checks, navigate to each target through visible app controls first: sidebar/shell navigation, command palette, breadcrumbs, row actions, drawer actions, or other in-app links. Direct URL entry is a separate deep-link/legacy-redirect assertion and cannot be the only proof that the route is navigable.
 - Treat pgTAP as necessary but not sufficient for Console V2 readiness. Each production-readiness slice also needs frontend route/action tests, Browser-click proof from the operator shell, at least one unbiased frontend lifecycle auditor, and an evidence table covering frontend surface, backend/API/RPC wiring, CRUD/action coverage, Browser status, automated tests, gaps, fixes, and final verdict.
 - Treat Playwright as supporting evidence only for Console V2/Landing readiness. Completion requires Browser/Chrome click proof on a backend-backed runtime (`VITE_USE_SEED=false` with live Supabase credentials or approved cloud/preview/stg), with real API/RPC/data proof and no seed/demo/mock/synthetic rows, in-memory adapters, or toast-only success.
-- For Console V2, `npm run test:e2e:console` is seed smoke only because it excludes `@live-readiness`; use `npm run test:e2e:console:live` with `E2E_CONSOLE_LIVE=1`, `VITE_USE_SEED=false`, live Supabase env, and observed Supabase RPC traffic for readiness proof.
-- If local app startup is slow, increase the Playwright web-server startup timeout with `E2E_WEB_SERVER_TIMEOUT_MS` (for example `E2E_WEB_SERVER_TIMEOUT_MS=600000`).
-- Prefer `data-testid` selectors and resilient visibility checks for async/hydrating surfaces to avoid strict-locator flakes from duplicate hidden shells.
+- Run `npm --prefix apps/console-v2 run test:e2e:console` for seed smoke. It excludes `@live-readiness`. Run `npm --prefix apps/console-v2 run test:e2e:console:live` with `E2E_CONSOLE_LIVE=1`, `VITE_USE_SEED=false`, live Supabase environment values, and observed Supabase RPC traffic for readiness proof. [Console V2 Playwright config](../../apps/console-v2/playwright.e2e.config.ts)
+
+#### Writing new tests
+
+- Put focused unit tests in `tests/unit/<area>/` with a `.test.js`, `.test.ts`, or `.test.tsx` suffix.
+- Put UI component tests in `tests/ui/` with a `.test.ts` or `.test.tsx` suffix. Use `renderWithIntl()` and mock routing or API dependencies where the component needs them.
+- Put Console and Portal E2E specs in `tests/e2e/`. Use the project prefix and the `.spec.ts` suffix, for example `console-settings.spec.ts`. Reuse the auth and navigation helpers. Use stable selectors such as `data-testid` and visibility assertions for async surfaces.
 

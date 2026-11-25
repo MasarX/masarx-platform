@@ -26,6 +26,11 @@ function npmScript(name, prefix) {
   if (!manifest.scripts?.[name]) throw new Error(`Missing script ${prefix || '.'}:${name}`);
   run('npm', [...(prefix ? ['--prefix', prefix] : []), 'run', name]);
 }
+function appSpeed(app) {
+  process.env.SPEED_APP = app;
+  run(process.execPath, [require.resolve('@playwright/test/cli'), 'test',
+    '-c', 'scripts/ci-hosted/playwright.app-speed.config.cjs']);
+}
 function detect(subject) {
   let present;
   if (subject === 'database') present = exists('supabase/migrations');
@@ -89,8 +94,19 @@ async function main() {
   if (command === 'build') {
     if (subject === 'landing') return npmScript('build:landing');
     if (!nextApps().some(app => `apps/${app}` === subject)) throw new Error('Build subject must be a Next app');
+    const measurePortal = subject === 'apps/portal' && process.env.CI_PORTAL_SPEED === '1';
+    if (measurePortal && process.env.NEXT_PUBLIC_SUPABASE_URL !== 'http://127.0.0.1:54321') {
+      throw new Error('Portal speed check requires the loopback fixture');
+    }
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = crypto.randomBytes(32).toString('hex');
-    return npmScript('build', subject);
+    npmScript('build', subject);
+    if (measurePortal) appSpeed('portal');
+    return;
+  }
+  if (command === 'console-v2-speed') {
+    process.env.VITE_USE_SEED = 'true';
+    npmScript('build', 'apps/console-v2');
+    return appSpeed('console-v2');
   }
   if (command === 'browser-install' || browserSuites[command]) {
     const args = command === 'browser-install' ? ['install', '--with-deps', 'chromium']

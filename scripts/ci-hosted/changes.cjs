@@ -5,8 +5,9 @@ const gates = ['database', 'typecheck', 'unit', 'ui', 'build_console', 'build_po
 const state = value => Object.fromEntries(gates.map(gate => [gate, value]));
 const cdPaths = new Set([
   '.github/workflows/deploy.yml',
-  '.github/workflows/provenance-on-tag.yml',
+  '.github/workflows/release-on-tag.yml',
   'tests/unit/ops/dev-db-dry-run-workflow.test.js',
+  'tests/unit/ops/release-tag-types.test.js',
   'tests/unit/ops/release-workflow.test.js',
 ]);
 const sharedInputs = [
@@ -34,6 +35,10 @@ function select(files, event = 'pull_request') {
         // FieldOps has no hosted build target.
         affected.build_console = affected.build_portal = affected.build_landing = true;
       } else return state(true);
+    } else if (file === 'scripts/frontend/design-speed-budgets.cjs') {
+      affected.unit = affected.build_console = affected.build_portal = affected.e2e = true;
+    } else if (file.startsWith('tests/speed-e2e/')) {
+      affected.build_console = affected.build_portal = true;
     } else if (/^docs\/marketing\/(?:landing-v2|brand)\/|^scripts\/frontend\/(?:build|serve)-landing\.js$/.test(file)) {
       affected.unit = affected.build_landing = affected.e2e = true;
     } else if (/^tests\/unit\/app-[^/]+\.test\.tsx$/.test(file)) affected.unit = affected.ui = true;
