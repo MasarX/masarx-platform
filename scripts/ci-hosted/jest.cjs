@@ -187,8 +187,7 @@ function main() {
       reasons: verdict?.reasons || ['JEST_INFRASTRUCTURE_OR_CONFIGURATION_FAILURE'], ok: verdict?.ok === true };
     fs.mkdirSync('ci-reports', { recursive: true });
     fs.writeFileSync(`ci-reports/${lane}${suffix}.json`, `${JSON.stringify(summary, null, 2)}\n`);
-    const details = { ...summary, ...resultDetails(report, verdict, result, root), unexpectedAssertionIds: verdict?.unexpected || [] };
-    fs.writeFileSync(`ci-reports/jest-results.${lane}${suffix}.json`, `${JSON.stringify(details, null, 2)}\n`);
+    fs.writeFileSync(`ci-reports/jest-results.${lane}${suffix}.json`, `${JSON.stringify({ ...summary, ...resultDetails(report, verdict, result, root) }, null, 2)}\n`);
     console.log(JSON.stringify(summary));
     if (temp) fs.rmSync(temp, { recursive: true, force: true });
   }

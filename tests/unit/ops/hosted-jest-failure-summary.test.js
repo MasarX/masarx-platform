@@ -29,10 +29,19 @@ test('a controlled Jest failure retains its verdict and complete artifact while 
   try {
     const file = 'tests/unit/example.test.js';
     const secret = randomUUID();
+    const privateValues = [
+      ['fixture', 'runner', 'invalid'].join('.'),
+      [192, 0, 2, 10].join('.'),
+      ['2001', 'db8', '', '23'].join(':'),
+      path.join(temp, 'folder with spaces', 'input.txt'),
+      ['host', 'lane-instance'].join('='),
+    ];
     const cases = [0, ...Array.from({ length: 11 }, (_, index) => index + 1)].map(index => ({
       fullName: index === 0
         ? 'case zero <details>\n' + secret + ' ' + 'long '.repeat(80) + 'end of long title'
-        : 'unexpected case ' + index,
+        : index <= privateValues.length
+          ? 'runtime value "' + privateValues[index - 1] + '"'
+          : 'unexpected case ' + index,
       status: 'failed',
       failureMessages: ['assertion fixture message'],
     }));
@@ -83,14 +92,21 @@ test('a controlled Jest failure retains its verdict and complete artifact while 
       ok: false, observedFailures: 13, unexpected: 12, expected: 1, executed: 14,
       reasons: ['UNEXPECTED_ASSERTION_FAILURES'],
     });
-    expect(JSON.parse(artifact).suites[0].tests).toHaveLength(14);
+    const authoritative = JSON.parse(artifact);
+    expect(authoritative.suites[0].tests).toHaveLength(14);
+    expect(authoritative).not.toHaveProperty('unexpectedAssertionIds');
+    fs.writeFileSync(result.replace('.json', '.proposed.json'),
+      JSON.stringify({ ...authoritative, proposedDiagnostics: true, unexpected: 0 }));
     expect(artifact).toContain('assertion fixture message');
     expect(artifact).toContain('end of long title');
-    const rendered = spawnSync(process.execPath, [path.join(scripts, 'jest-failure-summary.cjs'), 'unit'], options);
+    const rendered = spawnSync(process.execPath, ['--require', stub, path.join(scripts, 'jest-failure-summary.cjs'), 'unit'], options);
     expect(rendered.error).toBeUndefined();
     expect(rendered.status).toBe(0);
     const summary = fs.readFileSync(options.env.GITHUB_STEP_SUMMARY, 'utf8');
-    expect(summary.match(/^tests\/unit\/example\.test\.js ? /gm)).toHaveLength(10);
+    const rows = summary.split('\n').filter(line => line.startsWith(file + ' - '));
+    expect(rows).toHaveLength(10);
+    expect(rows.filter(row => row === file + ' - [name redacted]')).toHaveLength(privateValues.length);
+    for (const value of privateValues) expect(summary).not.toContain(value);
     expect(summary).toContain('case zero &lt;details&gt; [REDACTED]');
     expect(summary).toContain('2 additional unexpected failures omitted.');
     expect(summary).toContain('[Complete Jest result artifact](' + options.env.JEST_ARTIFACT_URL + ')');
