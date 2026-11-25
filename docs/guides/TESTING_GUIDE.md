@@ -123,7 +123,7 @@ The root Playwright config matches specs in `tests/e2e/` by project.
 
 The suite uses zero retries and retains traces, screenshots, and video on failure. The root config defines the timeout defaults, worker defaults, and exact filename patterns. [Playwright config](../../playwright.config.ts)
 
-- Use `E2E_PROJECTS` to select projects and `CONSOLE_BASE_URL` or `PORTAL_BASE_URL` to set their origins. CI and strict runs require host-root URLs for the selected projects. Use the dedicated hosted CI config for strict loopback runs.
+- Use `E2E_PROJECTS` to select projects. In strict runs (`CI`, `STRICT_E2E_GATE_ENV`, or `E2E_REQUIRE_BASE_URLS`), set an explicit non-loopback, host-root `CONSOLE_BASE_URL` for the `console`, `a11y`, or `shared` projects and `PORTAL_BASE_URL` for the `portal` project.
 - For local runs, the root config starts `dev:console:legacy` and `dev:portal` for selected apps at their default local origins. To start the Next.js console manually, run `npm run dev:console`. Match the configured origin to the host and port where the app is serving.
 - To test a built Next.js app locally, use its `build` and `start` scripts and point Playwright at that server's origin.
 - For a manually started Next.js dev server, add the browser hostname to `NEXT_ALLOWED_DEV_ORIGINS` in the selected environment. Playwright supplies it automatically to the dev servers it starts. [Origin resolution](../../apps/shared/next-dev-origins.js)
@@ -134,6 +134,8 @@ Use the [E2E utilities](../../tests/e2e/utils/) for sign-in and sessions (`auth.
 #### Landing E2E
 
 The `landing` project covers `tests/landing-e2e/`. By default it uses one worker and starts `dev:landing` locally with a preferred port of `3333`. Use `LANDING_BASE_URL` to select an existing environment or `LANDING_E2E_PORT` to set the preferred local port. `LANDING_E2E_WORKERS` accepts integers from `1` through `4`. [Landing Playwright config](../../playwright.landing.config.ts)
+
+The hosted browser job uses dedicated loopback configurations for [synthetic Landing E2E](../../scripts/ci-hosted/playwright.landing.config.cjs) and [Console V2 seed-mode axe](../../scripts/ci-hosted/playwright.console-a11y.config.cjs). Qualify full Next.js Console and Portal E2E separately with the origins above.
 
 #### Console V2 readiness
 
