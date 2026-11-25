@@ -41,7 +41,7 @@ Run [Production preflight](../../.github/workflows/production-preflight.yml) at 
 
 ## Verify and promote the published artifacts
 
-[Provenance on tag](../../.github/workflows/provenance-on-tag.yml) currently builds and attests only a static Landing release archive. [#285](https://github.com/MasarX/masarx-platform/issues/285) owns the main-build artifacts and deploy consumer. [#236](https://github.com/MasarX/masarx-platform/issues/236) owns the frozen Edge bundle and upload. Stop if any deployable lacks its attested main-build digest and matching staging evidence, or if the production deploy and rollback commands are unavailable. The tag-built Landing archive is release evidence for that archive.
+[Release on tag](../../.github/workflows/release-on-tag.yml) currently builds and attests only a static Landing release archive. [#285](https://github.com/MasarX/masarx-platform/issues/285) owns the main-build artifacts and deploy consumer. [#236](https://github.com/MasarX/masarx-platform/issues/236) owns the frozen Edge bundle and upload. Stop if any deployable lacks its attested main-build digest and matching staging evidence, or if the production deploy and rollback commands are unavailable. The tag-built Landing archive is release evidence for that archive.
 
 For each deployable, take `ARTIFACT`, `ARTIFACT_SHA256` and `MAIN_BUILD_WORKFLOW` from the approved release record. Choose the workflow that produced the attestation, identified in `OWNER/REPO/.github/workflows/FILE` form. Verify the staged artifact before using the release's operator deploy entry point.
 

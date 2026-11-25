@@ -5980,6 +5980,7 @@ const withCors = (res: Response, corsHeaders: Record<string, string>) => {
     headers.set(key, value);
   });
   headers.set("x-masarx-edge-function", "label-renderer");
+  headers.set("x-masarx-renderer-transport", "1");
   return new Response(res.body, { status: res.status, headers });
 };
 

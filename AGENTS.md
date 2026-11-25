@@ -6,7 +6,7 @@
 - Board (private): https://github.com/orgs/MasarX/projects/9 · Project brief: the board README
 - Environments: `ci` and `dev` are active. `stg` and `prod` are configured. See [delivery environments](DELIVERY.md#environments).
 - Release plan: [repository milestones](https://github.com/MasarX/masarx-platform/milestones).
-- Leads (thread titles): "MasarX Master", "MasarX Delivery", "MasarX Design"
+- Leads (thread titles): "MasarX Master", "MasarX Delivery", "MasarX QA", "MasarX Design"
 - UI project: yes
 - Other repos: none
 - Links: [DELIVERY.md](DELIVERY.md), [DESIGN.md](DESIGN.md), the portfolio engineering standard and the portfolio orchestration skill.
@@ -52,19 +52,31 @@ Push and let CI run tests, lint, typecheck and builds. Do not run them locally o
 - Validate inputs where data enters an API, import or configuration loader. Version contracts used by independent consumers and phase breaking changes across releases. Enforce authorization on the server, deny access by default and test each role. Paginate growing lists, avoid per-row queries and use query plans to justify indexes.
 - Store instants in UTC and convert them to the user's time zone for display. Store future schedules as local time and an IANA time-zone name. Make jobs and inbound handlers safe to repeat by using deduplication keys. Set outbound call timeouts and a finite retry limit with backoff. Give users safe errors with a recovery action where available.
 - Follow the [test policy](DELIVERY.md#test-policy) and [CI checks and runner rules](DELIVERY.md#checks).
+- Apply the [critical-change review rule](#critical-changes-the-only-changes-that-get-a-review) when preparing a PR.
 - Follow [DESIGN.md](DESIGN.md) for UI changes. Use translation catalogs and cover Arabic, right-to-left layouts and WCAG 2.2 AA.
 - The owner's approval is required only for production deployments, spending money or using paid services, access only the owner can grant, destructive operations on real data, and making private things public.
 
-## Risk paths (high risk only: need one independent review before landing)
+## Critical changes (the only changes that get a review)
 
-A change needs the [independent review](DELIVERY.md#branching-and-merging) only when it touches one of these paths, because a mistake there is irreversible, silent or public. Nothing else gets the review: docs, `DESIGN.md`, `AGENTS.md` and `DELIVERY.md`, presentation-only UI, tests, refactors, dependency version bumps and lockfiles, `package.json` outside its `scripts`, and DEV or staging-only fixes. One review per change, with no repeat rounds: a fix to a finding, or any push after the verdict, is checked by tests and needs a new review only if it touches a path below.
+The owner's rule (24 Nov): critical means production, secrets, real data, making anything public, host/network/firewall changes, repo settings and release gates.
 
-- Data loss: `/supabase/migrations/`, purge and retention functions, `scripts/ops/workspace/destroy.js`, `scripts/ops/workspace/delete-branch.js`, and the database-target selection in `/scripts/utils/pg-candidates.js` and `/scripts/utils/pg-hostaddr.js`.
-- Data exposure: `apps/console/app/auth/`, `apps/console/app/access-policy/`, `apps/portal/app/auth/`, `apps/portal/app/access-policy/`, `apps/console-v2/src/routes/auth/`, `apps/shared/security-middleware.ts`, `supabase/functions/`, SQL grants and row-level security, any UI or API change to which personal data is shown, and to whom, and any change that makes something public or opens network or access-control exposure.
-- Money rules: cash-on-delivery amounts, collections and payouts, wherever they live.
-- Secrets and logs: `/scripts/utils/load-env.js`, `/scripts/utils/env-file.js` and `/scripts/qa/qa-log.js`.
-- Merge gates: `/.github/`, `/scripts/ci-hosted/`, `/config/ci/` (including the quarantine and accepted-failure lists), `/scripts/ops/ci/`, `/scripts/tests/run-pgtap-cloud.js`, and the `scripts` entries of `package.json` files that CI runs.
-- Production configuration and deploys: `/scripts/deploy/`, `/supabase/config.toml` and `/config/edge/functions.json`.
+- Production: production configuration and deploys, `/scripts/deploy/`, `/supabase/config.toml` and `/config/edge/functions.json`.
+- Secrets: how they are stored, read, scoped or rotated, and token helpers. This includes `/scripts/utils/load-env.js`, `/scripts/utils/env-file.js` and `/scripts/qa/qa-log.js`.
+- Real data:
+  - every migration in `/supabase/migrations/`;
+  - deletes, purges, retention, audit logs and history, backups and restores, including `scripts/ops/workspace/destroy.js` and `scripts/ops/workspace/delete-branch.js`;
+  - the database-target selection in `/scripts/utils/pg-candidates.js` and `/scripts/utils/pg-hostaddr.js`;
+  - sign-in, permissions, and server code that decides which real data people can access or what personal data an API returns. This includes SQL grants, row-level security, server code in `/supabase/functions/`, `SECURITY DEFINER` function bodies, API contract views, `apps/shared/security-middleware.ts`, the server routes in `apps/console/app/api/` and `apps/portal/app/api/`, and the Console, Console V2 and Portal sign-in and access-policy paths. It also covers personal data carried in exports, prints and outbound messages.
+  - safety-critical rules until end-to-end tests cover every project safety rule. Each new safety rule requires review until its end-to-end test lands. [Issue #558](https://github.com/MasarX/masarx-platform/issues/558) tracks the rule and test inventory.
+- Making anything public: repository, package or bucket visibility, and new public endpoints.
+- Host, network and firewall: public ingress routes, CORS, token rules and rewrites in `tooling/apps/api-ingress-worker/`, the egress proxy and its allowlists, servers, DNS and firewall rules. Egress controls include `supabase/functions/api-caller/egress.mjs`, `supabase/functions/api-caller/proxy.mjs`, `supabase/migrations/20261123046800_validate_outbound_integration_urls.sql` and `scripts/ops/verify-api-caller-guarded-egress-proxy.js`.
+- Repo settings and release gates: rulesets and repository settings, the privacy deny check, `/CODEOWNERS`, `/.github/`, `/scripts/ci-hosted/`, `/config/ci/` (including the quarantine and accepted-failure lists), `/scripts/ops/ci/`, `/scripts/tests/run-pgtap-cloud.js`, and scripts CI or deploy workflows run directly or through `package.json` script entries. This includes `scripts/edge/verify-frozen-lock.cjs`, `scripts/edge/verify-npm-import-lock.js` and `scripts/ops/vercel/validate-build.js`. Deleting, skipping or weakening a test, including pgTAP authorization and contract tests, or changing the test-file guard allowlist is critical.
+
+Documentation changes that alter a manual or automated merge or deploy gate, or who must review or approve a change, are critical.
+
+**Not critical on their own.** Dependencies and lockfiles, internal tools under `/tooling/` outside the public ingress worker, money rules, and added or changed tests that preserve existing checks. Spending money still requires the owner's approval.
+
+Follow the [review and merge process](DELIVERY.md#branching-and-merging).
 
 ## Data safety
 

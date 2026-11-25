@@ -5,8 +5,9 @@ const gates = ['database', 'typecheck', 'unit', 'ui', 'build_console', 'build_po
 const state = value => Object.fromEntries(gates.map(gate => [gate, value]));
 const cdPaths = new Set([
   '.github/workflows/deploy.yml',
-  '.github/workflows/provenance-on-tag.yml',
+  '.github/workflows/release-on-tag.yml',
   'tests/unit/ops/dev-db-dry-run-workflow.test.js',
+  'tests/unit/ops/release-tag-types.test.js',
   'tests/unit/ops/release-workflow.test.js',
 ]);
 const sharedInputs = [
