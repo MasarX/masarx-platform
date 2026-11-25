@@ -583,6 +583,10 @@ export const AR_STRINGS: FieldOpsStrings = {
     earnings: "الأرباح",
     view_details: "عرض التفاصيل",
   },
+  podOtp: {
+    label: "رمز التحقق، 4 أرقام",
+    hint: "اكتب الرمز الذي وصل إلى المستلم في رسالة نصية.",
+  },
   errorBoundary: {
     tryAgain: "إعادة المحاولة",
     copyDetails: "نسخ تفاصيل الخطأ",
