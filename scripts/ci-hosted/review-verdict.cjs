@@ -1,7 +1,8 @@
 'use strict';
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
-const { readFileSync } = require('node:fs');
+const { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
+const { tmpdir } = require('node:os');
 const path = require('node:path');
 
 const sha = /^[a-f0-9]{40}$/;
@@ -75,10 +76,14 @@ function githubClient(repository, token, send = fetch) {
   };
 }
 
-function gitObjects(root) {
-  const git = (args, encoding) => execFileSync('git', args, {
+function gitAt(root, args, encoding) {
+  return execFileSync('git', args, {
     cwd: root, encoding, timeout: 60000, stdio: ['ignore', 'pipe', 'pipe'],
   });
+}
+
+function gitObjects(root) {
+  const git = (args, encoding) => gitAt(root, args, encoding);
   const entry = (commit, filename) => git(['--literal-pathspecs', 'ls-tree', '-z', commit, '--', filename]);
   return {
     checkout: () => git(['rev-parse', 'HEAD'], 'utf8').trim(),
@@ -99,6 +104,11 @@ function gitObjects(root) {
       return scripts;
     },
   };
+}
+
+function matchesCriticalPath(policy, filename) {
+  return policy.patterns.some(pattern =>
+    pattern.endsWith('/**') ? filename.startsWith(pattern.slice(0, -2)) : filename === pattern);
 }
 
 function newestVerdict(comments, identities) {
@@ -143,8 +153,7 @@ async function enforce(event, policy, api, objects) {
     if (file.status === 'renamed') filenames.add(file.previous_filename);
   }
 
-  const critical = [...filenames].filter(filename => policy.patterns.some(pattern =>
-    pattern.endsWith('/**') ? filename.startsWith(pattern.slice(0, -2)) : filename === pattern));
+  const critical = [...filenames].filter(filename => matchesCriticalPath(policy, filename));
   const manifests = policy.packageScriptFiles.filter(filename => filenames.has(filename));
   if (manifests.length) {
     // The PR diff is relative to its merge base, even when the target branch advanced.
@@ -180,10 +189,99 @@ async function enforce(event, policy, api, objects) {
   return critical.length ? 'Critical-file review verdict accepted' : 'No critical files changed';
 }
 
-async function selfCheck() {
-  const base = 'a'.repeat(40);
-  const head = 'b'.repeat(40);
-  const old = 'c'.repeat(40);
+function checkDocumentedPaths(root, policy) {
+  const docs = readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
+  const critical = docs.split(/^## /m).find(section => section.startsWith('Critical changes ('));
+  assert.ok(critical, 'Missing AGENTS.md critical changes section');
+  const [rules, exclusions] = critical.split(/^\*\*Not critical on their own\.\*\*/m);
+  assert.ok(exclusions, 'Missing AGENTS.md critical changes exclusions');
+  const documented = [...rules.matchAll(/`(\/?[\w.-]+(?:\/[\w.-]+)*\/?)`/g)]
+    .map(([, filename]) => filename.replace(/^\//, ''));
+  assert.ok(documented.length > 0, 'Missing AGENTS.md critical path references');
+  const unmapped = documented.filter(filename =>
+    !matchesCriticalPath(policy, filename) && !policy.packageScriptFiles.includes(filename));
+  assert.deepEqual(unmapped, [], 'Unmapped critical path references in AGENTS.md: ' + unmapped.join(', '));
+}
+
+function fixtureInventory(git, base, head) {
+  const fields = git(['diff', '--name-status', '-z', '-M', base, head, '--']).split('\0');
+  const files = [];
+  const statuses = { A: 'added', D: 'removed', M: 'modified' };
+  for (let i = 0; i < fields.length - 1;) {
+    const status = fields[i++];
+    const filename = fields[i++];
+    if (status === 'R100') {
+      files.push({ filename: fields[i++], previous_filename: filename, status: 'renamed' });
+    } else {
+      assert.ok(statuses[status], 'Unexpected synthetic Git diff status: ' + status);
+      files.push({ filename, status: statuses[status] });
+    }
+  }
+  return files;
+}
+
+async function checkVerdicts(temp) {
+  const source = path.join(temp, 'source');
+  const checkout = path.join(temp, 'checkout');
+  mkdirSync(source);
+  const git = args => gitAt(source, args, 'utf8');
+  git(['init', '--template=', '--object-format=sha1', '--initial-branch=base']);
+  git(['config', 'user.name', 'Synthetic fixture']);
+  git(['config', 'user.email', 'fixture@example.invalid']);
+  git(['config', 'commit.gpgsign', 'false']);
+  const criticalFile = 'scripts/deploy/run.sh';
+  const renameFile = 'scripts/deploy/rename.sh';
+  const scopeFile = 'scripts/deploy/scope.sh';
+  const write = (filename, content) => writeFileSync(path.join(source, filename), content);
+  const stage = (filename, content) => {
+    write(filename, content);
+    git(['add', '--', filename]);
+  };
+  const commit = message => {
+    git(['commit', '-m', message]);
+    return git(['rev-parse', 'HEAD']).trim();
+  };
+  mkdirSync(path.join(source, 'scripts/deploy'), { recursive: true });
+  stage(criticalFile, 'base\n');
+  stage(renameFile, 'synthetic rename source\n');
+  stage(scopeFile, 'scope\n');
+  stage('package.json', '{}\n');
+  const base = commit('Fixture base');
+  git(['switch', '--detach', base]);
+  stage(criticalFile, 'reviewed\n');
+  const old = commit('Reviewed critical edit');
+  git(['branch', 'reviewed', old]);
+
+  function buildCase(name, edit, parent = old) {
+    git(['switch', '--detach', parent]);
+    edit();
+    const head = commit(name);
+    git(['branch', name, head]);
+    return { head, files: fixtureInventory(git, base, head) };
+  }
+  const unchanged = buildCase('unchanged', () => stage('note.md', 'synthetic note\n'));
+  const added = buildCase('added', () => stage('scripts/deploy/added.sh', 'synthetic addition\n'));
+  const removed = buildCase('removed', () => git(['rm', '--', criticalFile]));
+  const missingInBoth = buildCase('after-removal', () => stage('note.md', 'synthetic note\n'), removed.head);
+  const modeChanged = buildCase('mode-change', () => {
+    chmodSync(path.join(source, criticalFile), 0o755);
+    git(['update-index', '--chmod=+x', '--', criticalFile]);
+  });
+  const renamed = buildCase('renamed', () => git(['mv', '--', renameFile, 'moved.sh']));
+  const scopeChanged = buildCase('scope-change', () => stage(scopeFile, 'scope expanded\n'));
+  const nonCritical = buildCase('non-critical', () => stage('note.md', 'synthetic note\n'), base);
+  const manifestOnly = buildCase('manifest-metadata', () => stage('package.json', '{"private":true}\n'), base);
+  const manifestScripts = buildCase('manifest-scripts', () => stage('package.json', '{"scripts":{"lint":"check"}}\n'), base);
+  assert.ok(renamed.files.some(file => file.status === 'renamed' && file.previous_filename === renameFile),
+    'Git fixture must report a rename out of the critical paths');
+  assert.ok(!unchanged.files.some(file => file.filename === scopeFile) &&
+    scopeChanged.files.some(file => file.filename === scopeFile), 'Git fixture must expand the reviewed scope');
+  assert.equal(git(['rev-parse', old + ':' + criticalFile]), git(['rev-parse', modeChanged.head + ':' + criticalFile]),
+    'Mode-only change must preserve the blob ID');
+
+  gitAt(temp, ['clone', '--no-local', '--depth=1', '--single-branch', '--branch', 'base', source, checkout]);
+  const objects = gitObjects(checkout);
+  const head = unchanged.head;
   const event = readEvent('pull_request', { pull_request: { number: 17, base: { sha: base }, head: { sha: head } } });
   assert.deepEqual(readEvent('merge_group', { merge_group: {
     base_sha: base, head_ref: 'refs/heads/gh-readonly-queue/main/pr-17-' + old,
@@ -200,58 +298,66 @@ async function selfCheck() {
   const comment = (body, author = 11) => ({
     id: ++nextId, body, user: { id: author }, created_at: '2026-01-01T00:00:00Z',
   });
-  async function check({ number = 17, comments = [], files = [{ filename: 'scripts/deploy/run.sh', status: 'modified' }],
-    contentsMatch = false, changedFiles = files.length, scriptsBefore = {}, scriptsAfter = {},
-    secondHead = head } = {}) {
+  async function check({ comments = [], candidate = unchanged, changedFiles = candidate.files.length,
+    secondHead = candidate.head } = {}) {
+    const { number } = event;
     const endpoint = '/pulls/' + number;
     let reads = 0;
     const api = {
       get: async route => {
-        if (route.startsWith('/compare/')) return { merge_base_commit: { sha: base } };
+        if (route.startsWith('/compare/')) {
+          assert.equal(route, '/compare/' + base + '...' + candidate.head + '?per_page=1');
+          return { merge_base_commit: { sha: base } };
+        }
         assert.equal(route, endpoint);
-        const currentHead = reads++ ? secondHead : head;
+        const currentHead = reads++ ? secondHead : candidate.head;
         return { number, state: 'open', head: { sha: currentHead }, changed_files: changedFiles };
       },
       list: async route => {
-        if (route === endpoint + '/files') return files;
+        if (route === endpoint + '/files') return candidate.files;
         assert.equal(route, '/issues/' + number + '/comments');
         return comments;
       },
     };
-    return enforce({ number, base }, policy, api, {
-      checkout: () => base, fetch: () => {},
-      same: () => contentsMatch,
-      scripts: commit => commit === base ? scriptsBefore : scriptsAfter,
-    });
+    return enforce({ ...event, eventHead: candidate.head }, policy, api, objects);
   }
 
   await assert.rejects(check(), /Missing review verdict/);
   await assert.rejects(check({ comments: [comment('VERDICT: GO ' + head), comment('VERDICT: NO_GO ' + head)] }), /NO_GO/);
-  await assert.rejects(check({ comments: [comment('VERDICT: GO ' + old)] }), /stale/);
-  assert.match(await check({ comments: [comment('VERDICT: GO ' + old)], contentsMatch: true }), /accepted/);
+  const reviewed = [comment('VERDICT: GO ' + old)];
+  assert.match(await check({ comments: reviewed }), /accepted/, 'unchanged critical entry');
+  for (const [name, candidate] of Object.entries({ added, removed, modeChanged, renamed, scopeChanged })) {
+    await assert.rejects(check({ candidate, comments: reviewed }), /stale/, name);
+  }
+  assert.match(await check({ candidate: missingInBoth, comments: [comment('VERDICT: GO ' + removed.head)] }),
+    /accepted/, 'reviewed removal is still absent at the current head');
   await assert.rejects(check({ comments: [comment('VERDICT: GO ' + head), comment('VERDICT: GO abc')] }), /Malformed/);
   await assert.rejects(check({ comments: [comment('VERDICT: GO ' + head, 12)] }), /Missing/);
   const brokenApi = githubClient('example/repo', String(11), async () => ({ ok: false, status: 503 }));
-  await assert.rejects(enforce(event, policy, brokenApi, { checkout: () => base }), /HTTP 503/);
+  await assert.rejects(enforce(event, policy, brokenApi, objects), /HTTP 503/);
   assert.match(await check({ comments: [comment('VERDICT: GO ' + head)] }), /accepted/);
-  assert.match(await check({ files: [{ filename: 'docs/note.md', status: 'modified' }] }), /No critical/);
-  await assert.rejects(check({ files: [{
-    filename: 'other/new-name', previous_filename: 'scripts/deploy/run.sh', status: 'renamed',
-  }] }), /Missing/);
-  await assert.rejects(check({ changedFiles: 2 }), /Incomplete/);
+  assert.match(await check({ candidate: nonCritical }), /No critical/);
+  await assert.rejects(check({ changedFiles: unchanged.files.length + 1 }), /Incomplete/);
   await assert.rejects(check({ comments: [comment('VERDICT: GO ' + head)], secondHead: old }), /PR changed/);
-  assert.match(await check({ files: [{ filename: 'package.json', status: 'modified' }] }), /No critical/);
-  await assert.rejects(check({
-    files: [{ filename: 'package.json', status: 'modified' }],
-    scriptsBefore: { lint: 'check' }, scriptsAfter: { lint: 'check --changed' },
-  }), /Missing/);
+  assert.match(await check({ candidate: manifestOnly }), /No critical/);
+  await assert.rejects(check({ candidate: manifestScripts }), /Missing/);
+}
+
+async function selfCheck(root, policy) {
+  checkDocumentedPaths(root, policy);
+  const temp = mkdtempSync(path.join(tmpdir(), 'review-verdict-'));
+  try {
+    await checkVerdicts(temp);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
   console.log('Review verdict self-checks passed');
 }
 
 async function main(env) {
   const root = path.resolve(__dirname, '../..');
   const policy = readPolicy(JSON.parse(readFileSync(path.join(root, 'config/ci/critical-paths.json'), 'utf8')));
-  if (process.argv[2] === '--self-check') return selfCheck();
+  if (process.argv[2] === '--self-check') return selfCheck(root, policy);
   const event = readEvent(env.GITHUB_EVENT_NAME, JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8')));
   console.log(await enforce(event, policy, githubClient(env.GITHUB_REPOSITORY, env.GITHUB_TOKEN), gitObjects(root)));
 }
