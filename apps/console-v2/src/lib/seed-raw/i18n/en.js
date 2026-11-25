@@ -25,6 +25,11 @@ export const en = {
     // Starts with the visible label of the language button (WCAG 2.5.3).
     switchLanguage: 'AR, switch to Arabic',
     userMenu: 'user menu',
+    themeCycle: {
+      system: 'Theme: system (click to cycle)',
+      light: 'Theme: light (click to cycle)',
+      dark: 'Theme: dark (click to cycle)',
+    },
   },
   nav: {
     today: 'Today',

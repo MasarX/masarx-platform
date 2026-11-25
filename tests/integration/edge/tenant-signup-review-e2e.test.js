@@ -402,7 +402,7 @@ runIfEdge('tenant-signup-review edge (E2E)', () => {
       expect(workflowBindingPolicy.rows[0]?.settings_version_id).toBeTruthy();
 
       const onboardingReadiness = await db.query(
-        `SELECT public.integration_plugin_baseline_readiness_v1('tenant', $1::uuid) AS readiness`,
+        `SELECT public.onboarding_integration_plugin_readiness_v1('tenant', $1::uuid) AS readiness`,
         [approvedOrgId],
       );
       const readiness =
@@ -413,15 +413,20 @@ runIfEdge('tenant-signup-review edge (E2E)', () => {
       const readinessItems = Array.isArray(readiness.items) ? readiness.items : [];
 
       expect(readiness).toMatchObject({
-        status: 'ready',
-        pending_credentials_total: 1,
+        ok: true,
+        scope_type: 'tenant',
+        scope_id: approvedOrgId,
+        baseline_profile: 'default',
+        blocking_count: 0,
+        pending_credentials_count: 0,
       });
       expect(readinessItems).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            plugin_key: 'baseline.provider_webhook_handoff',
-            status: 'pending_credentials',
-            task_id: expect.any(String),
+            plugin_key: 'default-shipment-webhook-intake',
+            status: 'healthy',
+            active_version_id: expect.any(String),
+            validation_ok: true,
           }),
         ]),
       );
