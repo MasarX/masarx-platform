@@ -45,6 +45,9 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import sqlScanner from '../../../scripts/ops/pr-validation-focused-isolation.js';
+
+const { lexSqlForIsolation, splitTopLevelSqlStatements } = sqlScanner;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..', '..');
@@ -381,56 +384,227 @@ function extractFrontendCapabilities() {
   return out;
 }
 
-/**
- * Parse canonical backend capability/permission DECLARATIONS from migrations.
- *
- * We treat the following patterns as authoritative declarations:
- *   1. `"key":"foo.bar"` — JSON entries inside the access_control_policy seed.
- *   2. `jsonb_build_object('key', 'foo.bar', ...)` — wave-extension capability
- *      additions to the same global policy.
- *   3. `VALUES ('foo.bar', '<label>', ...)` rows in files that mention
- *      `'rbac_permission'` (the lookup_values seed for the permissions
- *      registry consumed by user_has_permission_v1).
- *   4. `TEXT[] := ARRAY['foo.bar', 'baz.qux', ...]` — Phase B5+ pattern where
- *      caps are batch-registered by iterating an array literal and emitting
- *      `jsonb_build_object('key', v_new_cap, ...)` per entry. The literal
- *      strings inside the ARRAY[...] are the canonical declarations.
- *      Constrained to files that mention `access_control_policy` (the SSOT
- *      seed) to avoid catching unrelated array literals.
- */
+const CAPABILITY_KEY = /^[a-z][a-z_]*\.[a-z][a-z_]*$/;
+
+function addCapability(out, key) {
+  if (typeof key === 'string' && CAPABILITY_KEY.test(key)) out.add(key);
+}
+
+function addJsonCapabilities(out, entries) {
+  if (!Array.isArray(entries)) return;
+  for (const entry of entries) addCapability(out, entry?.key);
+}
+
+function sqlStatements(sql) {
+  return splitTopLevelSqlStatements(lexSqlForIsolation(sql)).map(({ tokens }) => tokens);
+}
+
+function argumentList(tokens, open) {
+  const args = [];
+  let depth = 0;
+  let start = open + 1;
+  const closing = tokens[open].value === '(' ? ')' : ']';
+  for (let i = start; i < tokens.length; i++) {
+    const { value } = tokens[i];
+    if (depth === 0 && (value === ',' || value === closing)) {
+      args.push(tokens.slice(start, i));
+      start = i + 1;
+      if (value === closing) return { args, end: i };
+    } else if (value === '(' || value === '[') {
+      depth++;
+    } else if (value === ')' || value === ']') {
+      depth--;
+    }
+  }
+  return { args: [], end: open };
+}
+
+function selectsCategory(tokens, category) {
+  return tokens.some(({ value }, i) =>
+    value === 'category' && tokens[i + 1]?.value === '=' && tokens[i + 2]?.literal === category);
+}
+
+function policyRegistry(tokens) {
+  if (!tokens.some(({ literal }) => literal === 'access_control_policy')) return false;
+  const words = tokens.map(({ value }) => value).join(' ');
+  return /\b(?:(?:insert into|update) (?:public \. )?settings(?:_versions)?\b|upsert_settings_value_v1 \()/.test(words);
+}
+
+function policySeeds(tokens, writesPolicy, out) {
+  for (const [i, token] of tokens.entries()) {
+    // A policy CTE can declare the document without persisting a settings row.
+    const policyCte = i >= 5 &&
+      tokens.slice(i - 5, i).map(({ value }) => value).join(' ') === 'with policy as ( select';
+    if ((writesPolicy || policyCte) && /^\s*\{[\s\S]*"capabilities"\s*:\s*\[/.test(token.literal ?? '')) {
+      addJsonCapabilities(out, JSON.parse(token.literal).capabilities);
+    }
+  }
+}
+
+function policyValues(tokens) {
+  const values = [];
+  for (const [i, token] of tokens.entries()) {
+    if (tokens[i + 1]?.value !== '(') continue;
+    if (token.value === 'jsonb_set') {
+      const { args } = argumentList(tokens, i + 1);
+      if (args[1]?.[0]?.literal === '{capabilities}' && args[2]) values.push(args[2]);
+    }
+    if (token.value === 'jsonb_build_object') {
+      const { args } = argumentList(tokens, i + 1);
+      for (let j = 0; j + 1 < args.length; j += 2) {
+        if (args[j][0]?.literal === 'capabilities') values.push(args[j + 1]);
+      }
+    }
+  }
+  return values;
+}
+
+function policyInputs(statements) {
+  const assignments = new Map();
+  const loops = [];
+  const activeLoops = [];
+  for (const tokens of statements) {
+    for (const [i, token] of tokens.entries()) {
+      if (token.value === ':' && tokens[i + 1]?.value === '=') {
+        const type = tokens[i - 1]?.value;
+        const textArray = type === ']' && tokens[i - 2]?.value === '[' && tokens[i - 3]?.value === 'text';
+        const name = tokens[i - (textArray ? 4 : type === 'jsonb' ? 2 : 1)]?.value;
+        if (!assignments.has(name)) assignments.set(name, []);
+        assignments.get(name).push({ expression: tokens.slice(i + 2), textArray });
+      }
+      if (token.value !== 'loop') continue;
+      if (tokens[i - 1]?.value === 'end') {
+        const loop = activeLoops.pop();
+        if (loop?.source) loops.push({ ...loop, end: token.start });
+        continue;
+      }
+      const header = tokens.findLastIndex(({ value }, j) =>
+        j < i && (value === 'for' || value === 'foreach') && tokens[j + 2]?.value === 'in');
+      const source = header < 0 ? [] : tokens.slice(header + 3, i);
+      const each = tokens[header]?.value === 'foreach' && source[0]?.value === 'array';
+      const elements = source.findIndex(({ value }, j) =>
+        value === 'jsonb_array_elements' && source[j + 1]?.value === '(');
+      activeLoops.push({
+        start: token.start,
+        name: tokens[header + 1]?.value,
+        source: each ? source.slice(1) : elements >= 0 ? argumentList(source, elements + 1).args[0] : undefined,
+      });
+    }
+  }
+  return { assignments, loops };
+}
+
+function collectPolicyUpdates(statements, values, out) {
+  if (values.length === 0) return;
+  // Follow only values feeding the capability field, including loop inputs.
+  const { assignments, loops } = policyInputs(statements);
+  const seen = new Set();
+  const seenKeys = new Set();
+
+  function visit(tokens, key = false, textArray = false) {
+    const visited = key ? seenKeys : seen;
+    if (visited.has(tokens)) return;
+    visited.add(tokens);
+    if (key && tokens.length === 1) addCapability(out, tokens[0].literal);
+    if (key && textArray && tokens[0]?.value === 'array' && tokens[1]?.value === '[') {
+      for (const entry of argumentList(tokens, 1).args) {
+        if (entry.length === 1) addCapability(out, entry[0].literal);
+      }
+      return;
+    }
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      if (!key && /^\s*\[\s*\{/.test(token.literal ?? '')) {
+        addJsonCapabilities(out, JSON.parse(token.literal));
+      }
+      if (!key && token.value === 'jsonb_build_object' && tokens[i + 1]?.value === '(') {
+        const { args, end } = argumentList(tokens, i + 1);
+        if (args[0]?.[0]?.literal === 'key' && args[1]) visit(args[1], true);
+        i = end;
+        continue;
+      }
+      if (token.type !== 'identifier' || (key && tokens.length !== 1) ||
+          ['.', '-', '#', '('].includes(tokens[i + 1]?.value) ||
+          tokens[i - 1]?.value === '.') continue;
+      const loop = loops.find(({ name, start, end }) =>
+        name === token.value && start < token.start && token.start < end);
+      if (loop) visit(loop.source, key);
+      const definition = assignments.get(token.value)?.findLast(({ expression }) =>
+        expression.at(-1)?.end <= token.start);
+      if (definition) visit(definition.expression, key, definition.textArray);
+    }
+  }
+
+  for (const value of values) visit(value);
+}
+
+function collectPermissionRows(statements, out) {
+  const permissionDefinitions = new Set();
+  for (const tokens of statements) {
+    const words = tokens.map(({ value }) => value).join(' ');
+    const lookupId = words.match(/\bselect (?:\w+ \. )?id into (\w+) from (?:public \. )?lookup_definitions\b/);
+    if (lookupId) {
+      if (selectsCategory(tokens, 'rbac_permission')) permissionDefinitions.add(lookupId[1]);
+      else permissionDefinitions.delete(lookupId[1]);
+    }
+    const insert = words.match(/\binsert into (?:public \. )?lookup_values\b[\s\S]*/);
+    if (!insert) continue;
+    const fromRegistry = words.includes('lookup_definitions') && selectsCategory(tokens, 'rbac_permission');
+    const fromLocalId = insert[0].match(/\b(?:select|values \() (\w+) ,/)?.[1];
+    if (!fromRegistry && !permissionDefinitions.has(fromLocalId)) continue;
+    for (const [i, token] of tokens.entries()) {
+      if (token.value !== 'values') continue;
+      for (let row = i + 1; tokens[row]?.value === '(';) {
+        const { args, end } = argumentList(tokens, row);
+        const keyColumn = permissionDefinitions.has(args[0]?.[0]?.value) ? 1 : 0;
+        if (args[keyColumn]?.length === 1 && args[keyColumn + 1]?.[0]?.type === 'string') {
+          addCapability(out, args[keyColumn][0].literal);
+        }
+        if (tokens[end + 1]?.value !== ',') break;
+        row = end + 2;
+      }
+    }
+  }
+}
+
+/** Read capability fields and their inputs within each SQL statement or routine. */
 function extractBackendDeclarations() {
   const out = new Set();
-  const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql'));
-  const reJsonKey = /"key"\s*:\s*"([a-z][a-z_]*\.[a-z][a-z_]*)"/g;
-  const reBuildObj = /jsonb_build_object\(\s*'key'\s*,\s*'([a-z][a-z_]*\.[a-z][a-z_]*)'/g;
-  // For rbac_permission seed rows: each row in a multi-row VALUES block looks
-  // like `('foo.bar', '<label>', ...)`. The first row is preceded by `VALUES`,
-  // subsequent rows by a comma. We match either. Constrained to files that
-  // declare `rbac_permission` to avoid catching unrelated tuple literals.
-  const reLookupVals = /(?:VALUES|,)\s*\(\s*'([a-z][a-z_]*\.[a-z][a-z_]*)'\s*,\s*'/g;
-  // Phase B5+ pattern — TEXT[] := ARRAY[...] of capability strings used to
-  // batch-register caps into access_control_policy.
-  const reTargetCapsArray = /TEXT\[\]\s*:=\s*ARRAY\[([\s\S]*?)\]/g;
-  const reCapInArray = /'([a-z][a-z_]*\.[a-z][a-z_]*)'/g;
-  for (const filename of files) {
-    const text = readFileSync(join(MIGRATIONS_DIR, filename), 'utf8');
-    let m;
-    reJsonKey.lastIndex = 0;
-    while ((m = reJsonKey.exec(text)) !== null) out.add(m[1]);
-    reBuildObj.lastIndex = 0;
-    while ((m = reBuildObj.exec(text)) !== null) out.add(m[1]);
-    if (text.includes('rbac_permission')) {
-      reLookupVals.lastIndex = 0;
-      while ((m = reLookupVals.exec(text)) !== null) out.add(m[1]);
-    }
-    if (text.includes('access_control_policy')) {
-      reTargetCapsArray.lastIndex = 0;
-      while ((m = reTargetCapsArray.exec(text)) !== null) {
-        const body = m[1];
-        let cm;
-        reCapInArray.lastIndex = 0;
-        while ((cm = reCapInArray.exec(body)) !== null) out.add(cm[1]);
+  for (const filename of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql'))) {
+    const sql = readFileSync(join(MIGRATIONS_DIR, filename), 'utf8');
+    if (!/access_control_policy|rbac_permission|"capabilities"/.test(sql)) continue;
+    const statements = sqlStatements(sql);
+    collectPermissionRows(statements, out);
+
+    const routines = [];
+    const policyStatements = [];
+    for (const tokens of statements) {
+      const header = tokens.map(({ value }) => value).join(' ');
+      const name = header.match(/^create (?:or replace )?function (?:\w+ \. )?(\w+) \(/)?.[1];
+      const body = tokens.find(({ type }) => type === 'dollar_body')?.body;
+      if (body && (tokens[0]?.value === 'do' || name)) {
+        const inner = sqlStatements(body);
+        const bodyTokens = inner.flat();
+        collectPermissionRows(inner, out);
+        const ownsPolicy = policyRegistry(bodyTokens);
+        if (ownsPolicy) policyStatements.push(bodyTokens);
+        routines.push({ name, inner, bodyTokens, ownsPolicy });
+      } else {
+        const ownsPolicy = policyRegistry(tokens);
+        policySeeds(tokens, ownsPolicy, out);
+        if (ownsPolicy) {
+          policyStatements.push(tokens);
+          collectPolicyUpdates([tokens], policyValues(tokens), out);
+        }
       }
+    }
+
+    for (const { name, inner, bodyTokens, ownsPolicy } of routines) {
+      const usedByPolicy = name && policyStatements.some((tokens) =>
+        tokens.some(({ value }, i) => value === name && tokens[i + 1]?.value === '('));
+      if (!ownsPolicy && !usedByPolicy) continue;
+      policySeeds(bodyTokens, ownsPolicy, out);
+      collectPolicyUpdates(inner, policyValues(bodyTokens), out);
     }
   }
   return out;
