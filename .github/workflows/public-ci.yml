@@ -378,11 +378,35 @@ jobs:
         run: |
           if git diff --quiet --no-renames "$LOCAL_GATE_BASE_SHA" HEAD -- \
             .github/workflows/deploy.yml .github/workflows/public-ci.yml \
-            package.json package-lock.json scripts/ci-hosted/tasks.cjs scripts/edge supabase/functions; then
+            package.json package-lock.json deno.lock config/edge/functions.json scripts/ci-hosted/tasks.cjs scripts/edge \
+            supabase/config.toml supabase/functions tests/unit/ops/edge-frozen-lock.test.js; then
             exit 0
           fi
           npm run edge:sync-shared
           npm run edge:prepare-resource-import-exceljs
+          mkdir -p "$RUNNER_TEMP/edge-tools"
+          archive="$RUNNER_TEMP/deno.zip"
+          curl --fail --silent --show-error --location https://github.com/denoland/deno/releases/download/v2.9.6/deno-x86_64-unknown-linux-gnu.zip --output "$archive"
+          printf '394f07f4da2bebe6ce6f1e7ce0fa16429b29b08c35e3fac3fe25972676dff4b2  %s\n' "$archive" | sha256sum --check
+          unzip -q "$archive" deno -d "$RUNNER_TEMP/edge-tools"
+          export PATH="$RUNNER_TEMP/edge-tools:$PATH"
+          export EDGE_FROZEN_WORKDIR="$RUNNER_TEMP/edge-frozen"
+          node scripts/edge/verify-frozen-lock.cjs
+          bash scripts/edge/verify-frozen-manifest.sh "$EDGE_FROZEN_WORKDIR"
+          env -u EDGE_FROZEN_WORKDIR node --experimental-vm-modules node_modules/jest/bin/jest.js \
+            --config config/tooling/jest.config.unit.js --runInBand --runTestsByPath tests/unit/ops/edge-frozen-lock.test.js
+          EDGE_FROZEN_WORKDIR=.edge-frozen node scripts/edge/check-bundle-lock-drift.cjs
+          printf 'void import("npm:qrcode-generator@1.5.2");\n' > "$RUNNER_TEMP/leak.ts"
+          if node scripts/edge/check-frozen-bundle-imports.cjs "$RUNNER_TEMP/leak.ts" > "$RUNNER_TEMP/leak.log" 2>&1; then
+            echo '::error::The offline Edge check accepted a dynamic npm import.'
+            exit 1
+          fi
+          grep -F "Unbundled Edge import in $RUNNER_TEMP/leak.ts:1" "$RUNNER_TEMP/leak.log"
+          touch "$EDGE_FROZEN_WORKDIR/supabase/unexpected.ts"
+          if bash scripts/edge/verify-frozen-manifest.sh "$EDGE_FROZEN_WORKDIR"; then
+            echo '::error::The frozen Edge manifest accepted an unexpected file.'
+            exit 1
+          fi
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs lint
@@ -447,11 +471,20 @@ jobs:
       - *restore_npm
       - *timing_install
       - *install_locked
+      - name: Install pinned Deno
+        if: steps.subject.outputs.present == 'true'
+        run: bash scripts/edge/install-pinned-deno.sh
       - *timing_work
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/base-guard.cjs jest.cjs unit
       - *timing_report
+      - name: Report frozen Edge lock cases
+        if: ${{ !cancelled() && hashFiles('ci-reports/jest-results.unit.*-of-*.json') != '' }}
+        run: |
+          jq -r '.suites[] | select(.file == "tests/unit/ops/edge-frozen-lock.test.js")
+            | .tests[] | select(.fullName | startswith("checks the frozen Edge lock with a "))
+            | "\(.status) \(.fullName)"' ci-reports/jest-results.unit.*-of-*.json
       - name: Check proposed test-result capture
         if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.subject.outputs.present == 'true' }}
         env:
@@ -558,8 +591,12 @@ jobs:
       - *timing_install
       - *install_locked
       - *timing_work
+      - name: Install lockfile-selected Chromium
+        run: node scripts/ci-hosted/tasks.cjs browser-install
+      - name: Build and measure Console V2
+        run: node scripts/ci-hosted/tasks.cjs console-v2-speed
       - name: Build present console
-        if: steps.subject.outputs.present == 'true'
+        if: ${{ !cancelled() && steps.subject.outputs.present == 'true' && steps.install.outcome == 'success' }}
         run: node scripts/ci-hosted/tasks.cjs build apps/console
 
   build-portal-landing:
@@ -594,8 +631,13 @@ jobs:
       - *timing_install
       - *install_locked
       - *timing_work
+      - name: Install lockfile-selected Chromium
+        if: steps.subject.outputs.portal == 'true'
+        run: node scripts/ci-hosted/tasks.cjs browser-install
       - name: Build present portal
         if: steps.subject.outputs.portal == 'true'
+        env:
+          CI_PORTAL_SPEED: '1'
         run: node scripts/ci-hosted/tasks.cjs build apps/portal
       - name: Build present landing
         if: ${{ !cancelled() && steps.subject.outputs.landing == 'true' && steps.install.outcome == 'success' }}
@@ -632,7 +674,20 @@ jobs:
       - *timing_work
       - name: Run synthetic local landing suite
         if: steps.subject.outputs.present == 'true'
-        run: node scripts/ci-hosted/tasks.cjs landing-e2e
+        env:
+          SPEED_EVIDENCE_DIR: test-results/speed-evidence
+        run: |
+          status=0
+          node scripts/ci-hosted/tasks.cjs landing-e2e || status=$?
+          shopt -s nullglob
+          reports=("$SPEED_EVIDENCE_DIR"/speed--*.json)
+          if (( ${#reports[@]} )); then
+            jq -c '{screen, route, viewport, sampleCount: (.runs | length), p75, budget, limit}' "${reports[@]}"
+          elif (( status == 0 )); then
+            echo 'Missing Landing speed measurements.' >&2
+            exit 1
+          fi
+          exit "$status"
       # Runs after a landing failure too, so one run reports both suites.
       - name: Run Console V2 seed-mode axe suite
         id: console_a11y
