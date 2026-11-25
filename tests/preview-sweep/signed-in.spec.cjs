@@ -88,6 +88,10 @@ for (const app of ['console', 'console-v2', 'portal']) {
         async function screenshot(page, state, marker) {
           checkpoint(state);
           await check(state, 'marker', () => expect(marker).toBeVisible());
+          await check(state, 'marker-in-view', async () => {
+            await marker.scrollIntoViewIfNeeded();
+            await expect(marker).toBeInViewport({ ratio: 1 });
+          });
           const root = page.locator('html');
           await check(state, 'language', () => expect(root).toHaveAttribute('lang', locale));
           await check(state, 'direction', () => expect(root).toHaveAttribute('dir', locale === 'ar' ? 'rtl' : 'ltr'));

@@ -16,6 +16,11 @@ test('selects preview inputs within the existing UI job', () => {
   }
 });
 
+test('selects only the UI job for changes under tests/preview-sweep/', () => {
+  const affected = select(['tests/preview-sweep/additional-capture.spec.cjs']);
+  expect(Object.keys(affected).filter(job => affected[job])).toEqual(['ui']);
+});
+
 test('ignores unrelated changes and runs the capture when the selector output is missing', () => {
   const unrelated = ['DESIGN.md', 'apps/fieldops/App.tsx', 'apps/landing/src/site.ts', 'tests/ui/table.test.tsx'];
   const affected = [...unrelated, 'apps/portal/app/page.tsx'];
