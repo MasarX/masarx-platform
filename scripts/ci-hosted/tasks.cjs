@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 const { run: checked, retry } = require('./process.cjs');
 
 const root = process.cwd();
+const appSpeedConfig = 'scripts/ci-hosted/playwright.app-speed.config.cjs';
 const browserSuites = {
   'landing-e2e': 'scripts/ci-hosted/playwright.landing.config.cjs',
   'console-a11y': 'scripts/ci-hosted/playwright.console-a11y.config.cjs',
@@ -29,7 +30,7 @@ function npmScript(name, prefix) {
 function appSpeed(app) {
   process.env.SPEED_APP = app;
   run(process.execPath, [require.resolve('@playwright/test/cli'), 'test',
-    '-c', 'scripts/ci-hosted/playwright.app-speed.config.cjs']);
+    '-c', appSpeedConfig]);
 }
 function detect(subject) {
   let present;
@@ -133,4 +134,4 @@ async function main() {
   throw new Error('Unknown command');
 }
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { nextApps, detect, install, browserSuites };
+module.exports = { nextApps, detect, install, browserSuites, appSpeedConfig };

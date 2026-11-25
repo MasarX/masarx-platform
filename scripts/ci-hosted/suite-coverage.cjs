@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { parse } = require('yaml');
-const { browserSuites } = require('./tasks.cjs');
+const { browserSuites, appSpeedConfig } = require('./tasks.cjs');
 const { shardFiles } = require('./pgtap.cjs');
 
 const policyPath = 'config/ci/test-suite-quarantine.json';
@@ -144,6 +144,14 @@ function ciCoverage(files) {
     addFiles(covered, playwrightFiles(config, { ...process.env, ...browser.env }));
     covered.add(config);
   }
+  step('build-console', 'node scripts/ci-hosted/tasks.cjs console-v2-speed');
+  const portalSpeed = step('build-portal-landing', 'node scripts/ci-hosted/tasks.cjs build apps/portal');
+  if (portalSpeed.env?.CI_PORTAL_SPEED !== '1') throw new Error('Portal build does not run the speed suite');
+  for (const app of ['console-v2', 'portal']) {
+    addFiles(covered, playwrightFiles(appSpeedConfig, { ...process.env, SPEED_APP: app }));
+  }
+  covered.add(appSpeedConfig);
+
   covered.add('playwright.landing.config.ts');
   covered.add(workspace + '/playwright.a11y.config.ts');
   addScripts('package.json', ['test:e2e:landing']);
