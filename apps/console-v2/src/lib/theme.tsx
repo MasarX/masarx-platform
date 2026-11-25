@@ -1,50 +1,82 @@
-// theme.tsx — light/dark + density (compact/comfortable/cozy). Persisted to localStorage.
-// Applies via data-theme + data-density on <html> so tokens.css cascade resolves correctly.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+// theme.tsx — theme comes from the shared provider (system/light/dark, stored in
+// the shared key, follows live OS changes in system mode). Density
+// (compact/comfortable/cozy) stays a Console V2 setting. Both apply to <html>
+// as data-theme and data-density so the tokens.css cascade resolves correctly.
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import {
+  THEME_STORAGE_KEY,
+  ThemeProvider as SharedThemeProvider,
+  useTheme as useSharedTheme,
+  type ThemeMode,
+} from '@masarx/ui/theme';
 
-type Theme = 'light' | 'dark';
+export { THEME_STORAGE_KEY };
+export type { ThemeMode };
+
 type Density = 'compact' | 'comfortable' | 'cozy';
 
-interface ThemeCtx {
-  theme: Theme;
+const LEGACY_THEME_KEY = 'console-v2.theme';
+const DENSITY_KEY = 'console-v2.density';
+const DENSITIES: Density[] = ['compact', 'comfortable', 'cozy'];
+const THEME_CYCLE: ThemeMode[] = ['system', 'light', 'dark'];
+
+/** Moves a theme saved by the old Console V2 provider into the shared key, once. */
+export function migrateLegacyTheme(): void {
+  try {
+    const legacy = localStorage.getItem(LEGACY_THEME_KEY);
+    if (legacy === null) return;
+    if ((legacy === 'light' || legacy === 'dark') && localStorage.getItem(THEME_STORAGE_KEY) === null) {
+      localStorage.setItem(THEME_STORAGE_KEY, legacy);
+    }
+    localStorage.removeItem(LEGACY_THEME_KEY);
+  } catch {
+    // ignore storage failures; the shared provider falls back to system
+  }
+}
+
+interface DensityCtx {
   density: Density;
-  setTheme: (t: Theme) => void;
   cycleDensity: () => void;
 }
 
-const Ctx = createContext<ThemeCtx | null>(null);
+const Ctx = createContext<DensityCtx | null>(null);
 
-const DENSITIES: Density[] = ['compact', 'comfortable', 'cozy'];
+function DensityProvider({ children }: { children: ReactNode }) {
+  const [density, setDensity] = useState<Density>(
+    () => (localStorage.getItem(DENSITY_KEY) as Density) || 'comfortable',
+  );
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() => (localStorage.getItem('console-v2.theme') as Theme) || 'light');
-  const [density, setDensityState] = useState<Density>(() => (localStorage.getItem('console-v2.density') as Density) || 'comfortable');
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem('console-v2.theme', theme);
-  }, [theme]);
   useEffect(() => {
     document.documentElement.dataset.density = density;
-    localStorage.setItem('console-v2.density', density);
+    localStorage.setItem(DENSITY_KEY, density);
   }, [density]);
 
+  const cycleDensity = useCallback(
+    () => setDensity((d) => DENSITIES[(DENSITIES.indexOf(d) + 1) % DENSITIES.length]!),
+    [],
+  );
+
+  return <Ctx.Provider value={{ density, cycleDensity }}>{children}</Ctx.Provider>;
+}
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
+  // Runs during the first render, before the shared provider reads storage.
+  useState(migrateLegacyTheme);
   return (
-    <Ctx.Provider
-      value={{
-        theme,
-        density,
-        setTheme: setThemeState,
-        cycleDensity: () => setDensityState((d) => DENSITIES[(DENSITIES.indexOf(d) + 1) % DENSITIES.length]!),
-      }}
-    >
-      {children}
-    </Ctx.Provider>
+    <SharedThemeProvider>
+      <DensityProvider>{children}</DensityProvider>
+    </SharedThemeProvider>
   );
 }
 
 export function useTheme() {
   const ctx = useContext(Ctx);
+  const shared = useSharedTheme();
   if (!ctx) throw new Error('useTheme outside ThemeProvider');
-  return ctx;
+  const { theme, setTheme } = shared;
+  return {
+    ...shared,
+    ...ctx,
+    cycleTheme: () => setTheme(THEME_CYCLE[(THEME_CYCLE.indexOf(theme) + 1) % THEME_CYCLE.length]!),
+  };
 }
