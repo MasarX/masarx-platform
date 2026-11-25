@@ -69,6 +69,7 @@ import { pushToast } from '@/components/toastStore';
 import { useCapability, useIdentity } from '@/lib/identity';
 import { humanizeToken } from '@/lib/display-text';
 import { readUrlParam } from '@/lib/url-params';
+import { useI18n } from '@/lib/i18n';
 // Strict canonical tone/label SSOT. AGENTS.md §2 (ZERO HARDCODING) + §4 (SSOT):
 // every chip tone derives from `lookup_values.metadata.tone` via this resolver.
 // Missing canonical row → caller renders a `danger` chip with `(missing)`
@@ -134,10 +135,11 @@ interface DriverProfileRow extends Record<string, unknown> {
   emergency_contact_name: string | null; // SSOT: projection (driver_profiles.metadata->>'emergency_contact_name')
   emergency_contact_phone: string | null; // SSOT: projection (driver_profiles.metadata->>'emergency_contact_phone')
   hired_at: string;                    // SSOT: driver_profiles.hired_at
-  deliveries_today: number;            // SSOT: projection — count of completed shipments today
-  deliveries_week: number;             // SSOT: projection — count of completed shipments past 7 days
-  on_time_pct: number;                 // SSOT: projection — aggregate over completed shipments
-  customer_rating: number;             // SSOT: projection — aggregate over customer ratings
+  // #409: absent from v_driver_directory until the backend view adds them; NULL = not available.
+  deliveries_today?: number | null;    // SSOT: projection — count of completed shipments today
+  deliveries_week?: number | null;     // SSOT: projection — count of completed shipments past 7 days
+  on_time_pct?: number | null;         // SSOT: projection — aggregate over completed shipments
+  customer_rating?: number | null;     // SSOT: projection — aggregate over customer ratings
   // W29 directory projection (additive optional fields).
   user_full_name?: string | null;      // SSOT: v_driver_directory.user_full_name
   user_email?: string | null;          // SSOT: v_driver_directory.user_email
@@ -2650,7 +2652,12 @@ function VehicleHistoryTab({
 }
 
 // ─── Performance tab ────────────────────────────────────────────────────
-function PerformanceTab({
+// A metric is real only when it is a finite number; a real 0 stays 0.
+function metricValue(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+export function PerformanceTab({
   driver,
   kpiThresholds,
 }: {
@@ -2666,6 +2673,12 @@ function PerformanceTab({
   // scope returns the canonical per-day series.
   const sparkSeed = useMemo(() => Array.from({ length: 7 }, () => 0), []);
   const onTimeSpark = useMemo(() => Array.from({ length: 7 }, () => 0), []);
+  const { t } = useI18n();
+  const notAvailable = t('common.notAvailable');
+  const deliveriesToday = metricValue(driver.deliveries_today);
+  const deliveriesWeek = metricValue(driver.deliveries_week);
+  const onTimePct = metricValue(driver.on_time_pct);
+  const customerRating = metricValue(driver.customer_rating);
 
   return (
     <div style={{ padding: '0 14px' }}>
@@ -2679,40 +2692,46 @@ function PerformanceTab({
       >
         <KPICard
           label="Deliveries today"
-          value={driver.deliveries_today}
-          tone="info"
-          spark={sparkSeed}
+          value={deliveriesToday ?? '—'}
+          tone={deliveriesToday == null ? 'neutral' : 'info'}
+          delta={deliveriesToday == null ? notAvailable : undefined}
+          spark={deliveriesToday == null ? undefined : sparkSeed}
         />
         <KPICard
           label="Deliveries (7d)"
-          value={driver.deliveries_week}
+          value={deliveriesWeek ?? '—'}
           tone="neutral"
-          delta={`avg ${(driver.deliveries_week / 7).toFixed(1)}/day`}
-          spark={sparkSeed}
+          delta={deliveriesWeek == null ? notAvailable : `avg ${(deliveriesWeek / 7).toFixed(1)}/day`}
+          spark={deliveriesWeek == null ? undefined : sparkSeed}
         />
         <KPICard
           label="On-time %"
-          value={`${Math.round(driver.on_time_pct * 100)}%`}
+          value={onTimePct == null ? '—' : `${Math.round(onTimePct * 100)}%`}
           tone={
-            driver.on_time_pct >= kpiThresholds.on_time_pct_good
-              ? 'good'
-              : driver.on_time_pct >= kpiThresholds.on_time_pct_warn
-                ? 'warn'
-                : 'danger'
+            onTimePct == null
+              ? 'neutral'
+              : onTimePct >= kpiThresholds.on_time_pct_good
+                ? 'good'
+                : onTimePct >= kpiThresholds.on_time_pct_warn
+                  ? 'warn'
+                  : 'danger'
           }
-          spark={onTimeSpark.map((v) => v * 100)}
+          delta={onTimePct == null ? notAvailable : undefined}
+          spark={onTimePct == null ? undefined : onTimeSpark.map((v) => v * 100)}
         />
         <KPICard
           label="Customer rating"
-          value={driver.customer_rating.toFixed(1)}
+          value={customerRating == null ? '—' : customerRating.toFixed(1)}
           tone={
-            driver.customer_rating >= kpiThresholds.rating_good
-              ? 'good'
-              : driver.customer_rating >= kpiThresholds.rating_warn
-                ? 'warn'
-                : 'danger'
+            customerRating == null
+              ? 'neutral'
+              : customerRating >= kpiThresholds.rating_good
+                ? 'good'
+                : customerRating >= kpiThresholds.rating_warn
+                  ? 'warn'
+                  : 'danger'
           }
-          delta="out of 5.0"
+          delta={customerRating == null ? notAvailable : 'out of 5.0'}
         />
       </div>
 
@@ -2735,7 +2754,7 @@ function PerformanceTab({
           }}
         >
           <span className="mono">7-day deliveries</span>
-          <span className="mono">total {driver.deliveries_week}</span>
+          <span className="mono">{deliveriesWeek == null ? notAvailable : `total ${deliveriesWeek}`}</span>
         </div>
         <Sparkline values={sparkSeed} width={320} height={48} />
       </div>

@@ -2,7 +2,7 @@
 // when a `capability` is required and the user does not hold it, the Button is
 // disabled and a CapabilityLock chip is appended.
 import { describe, it, expect, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../test/render';
 import { Button } from './Button';
@@ -32,6 +32,31 @@ describe('Button', () => {
     );
     await user.click(screen.getByRole('button', { name: /Run/ }));
     expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('acts on click, not on press, so releasing outside cancels it (WCAG 2.5.2)', async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    renderWithProviders(
+      <div>
+        <Button label="Approve request" onClick={onClick} />
+        <span>Outside</span>
+      </div>,
+      { capabilities: ['all'] },
+    );
+    const btn = screen.getByRole('button', { name: 'Approve request' });
+    const outside = screen.getByText('Outside');
+
+    fireEvent.pointerDown(btn, { pointerType: 'mouse' });
+    fireEvent.mouseDown(btn);
+    fireEvent.pointerUp(outside, { pointerType: 'mouse' });
+    fireEvent.mouseUp(outside);
+    expect(onClick).not.toHaveBeenCalled();
+
+    btn.focus();
+    await user.keyboard('{Enter}');
+    await user.keyboard(' ');
+    expect(onClick).toHaveBeenCalledTimes(2);
   });
 
   it('allows an action when any one accepted capability is present', async () => {

@@ -45,7 +45,7 @@ async function main() {
   if (command === 'detect') return detect(subject);
   if (command === 'install') return install(checked);
   if (command === 'lint') {
-    for (const name of ['lint:frontend', 'lint:commands', 'lint:structure', 'lint:ingress-worker']) {
+    for (const name of ['lint:docs:ssot', 'lint:frontend', 'lint:commands', 'lint:structure', 'lint:ingress-worker']) {
       npmScript(name);
     }
     if (exists('supabase/migrations')) {
@@ -58,6 +58,15 @@ async function main() {
   if (command === 'typecheck') {
     if (!subject) throw new Error('Typecheck app is required');
     if (subject === 'apps/fieldops') return npmScript('typecheck:fieldops');
+    // Console V2 is a Vite app, so it has its own tsc script rather than the Next typegen path.
+    if (subject === 'apps/console-v2') {
+      // src/routeTree.gen.ts is gitignored and written by the Vite router plugin, so generate it before tsc.
+      // The plugin options in vite.config.ts are the generator defaults, so getConfig({}) matches them.
+      const appRoot = path.resolve(subject);
+      const { Generator, getConfig } = require(require.resolve('@tanstack/router-generator', { paths: [appRoot] }));
+      await new Generator({ config: getConfig({}, appRoot), root: appRoot }).run();
+      return npmScript('typecheck', subject);
+    }
     if (!nextApps().some(app => `apps/${app}` === subject)) throw new Error('Typecheck subject must be a Next app');
     for (const app of nextApps().filter(app => `apps/${app}` === subject)) {
       const dir = `apps/${app}`;
@@ -78,9 +87,10 @@ async function main() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = crypto.randomBytes(32).toString('hex');
     return npmScript('build', subject);
   }
-  if (command === 'browser-install' || command === 'landing-e2e') {
+  const suites = { 'landing-e2e': 'landing', 'console-a11y': 'console-a11y' };
+  if (command === 'browser-install' || suites[command]) {
     const args = command === 'browser-install' ? ['install', '--with-deps', 'chromium']
-      : ['test', '-c', 'scripts/ci-hosted/playwright.landing.config.cjs'];
+      : ['test', '-c', `scripts/ci-hosted/playwright.${suites[command]}.config.cjs`];
     return run(process.execPath, [require.resolve('@playwright/test/cli'), ...args]);
   }
   if (command === 'visual' || command === 'visual-preflight') {

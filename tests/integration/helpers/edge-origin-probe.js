@@ -97,7 +97,7 @@ function buildAllowedOriginCandidates({
   return candidates;
 }
 
-async function probeAllowedOrigin(candidates, requestFn) {
+async function probeAllowedOrigin(candidates, requestFn, expectedResponse) {
   const attempts = [];
   const list = Array.isArray(candidates) ? candidates : [];
   for (const origin of list) {
@@ -108,8 +108,10 @@ async function probeAllowedOrigin(candidates, requestFn) {
       const errorCode = String(result?.body?.error?.code || '').trim();
       attempts.push({ origin, status, code: errorCode });
       if (status === 403) continue;
+      const matchesExpectedResponse =
+        status === expectedResponse?.status && errorCode === expectedResponse?.errorCode;
       // A server/auth/routing failure is not proof that CORS admitted this origin.
-      if (!((status >= 200 && status < 300) ||
+      if (!(matchesExpectedResponse || (status >= 200 && status < 300) ||
           (status === 400 && errorCode && errorCode !== 'server_misconfigured'))) continue;
       return { origin, attempts };
     } catch (error) {
