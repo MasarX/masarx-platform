@@ -52,7 +52,7 @@ function verify(
       if (fs.existsSync(path.join(root, dir, 'deno.json'))) args.push('--import-map', `${dir}/deno.json`);
       if (workdir) {
         fs.mkdirSync(path.join(workdir, dir), { recursive: true });
-        args.push('--platform=deno', '--packages=bundle', '--output', path.join(workdir, entry));
+        args.push('--platform=deno', '--packages=bundle', '--minify', '--keep-names', '--output', path.join(workdir, entry));
       }
       const status = runDeno(name, [...args, entry], root, cache);
       if (status !== 0) return status;
