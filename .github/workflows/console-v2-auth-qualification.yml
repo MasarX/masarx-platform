@@ -1,0 +1,75 @@
+name: Console V2 Auth qualification
+
+'on':
+  workflow_dispatch:
+    inputs:
+      workflow_commit:
+        description: Reviewed workflow commit on main
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      CANDIDATE_SHA: 9bdb40233df50568fdc49e0b1efa2450d1f8e45b
+      CANDIDATE_TREE: 6542c872a5d57972e364f5b894aafac18029be6b
+    steps:
+      - name: Bind the reviewed workflow
+        shell: bash
+        env:
+          REVIEWED_SHA: ${{ inputs.workflow_commit }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          [[ "$GITHUB_REF" == refs/heads/main && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ && "$WORKFLOW_SHA" == "$REVIEWED_SHA" && "$GITHUB_SHA" == "$REVIEWED_SHA" ]]
+      - name: Check out workflow source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: workflow
+          persist-credentials: false
+      - name: Check out candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          path: candidate
+          persist-credentials: false
+      - name: Verify both checkouts and require the QA workload
+        shell: bash
+        run: |
+          [[ "$(git -C workflow rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ "$(git -C candidate rev-parse HEAD)" == "$CANDIDATE_SHA" ]]
+          [[ "$(git -C candidate rev-parse 'HEAD^{tree}')" == "$CANDIDATE_TREE" ]]
+          for workload in fixture browser; do
+            if [[ ! -f "workflow/scripts/ci-hosted/console-v2-auth-qa-${workload}.cjs" ]]; then
+              echo "::error::Reviewed QA ${workload} entry point missing. Browser qualification NOT_RUN."
+              exit 1
+            fi
+          done
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: candidate/.nvmrc
+          package-manager-cache: false
+      - name: Qualify local production builds
+        id: qualification
+        working-directory: candidate
+        run: node ../workflow/scripts/ci-hosted/console-v2-auth-qualification.cjs
+      - name: Retain validated qualification evidence
+        if: ${{ !cancelled() && steps.qualification.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: console-v2-auth-qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/console-auth-evidence/test-results/console-v2-auth/auth-qualification.json
+            ${{ runner.temp }}/console-auth-evidence/test-results/console-v2-auth/speed-evidence/speed--dashboard-live.json
+            ${{ runner.temp }}/console-auth-evidence/test-results/console-v2-auth/speed-evidence/speed--dashboard-demo.json
+          if-no-files-found: error
+          retention-days: 1
