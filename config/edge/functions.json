@@ -1,4 +1,5 @@
 {
+  "use_api_bundle_limit_bytes": 5000000,
   "functions": [
     {
       "name": "api-caller",

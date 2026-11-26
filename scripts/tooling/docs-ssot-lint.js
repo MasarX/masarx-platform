@@ -4,6 +4,14 @@ const fs = require('fs');
 const path = require('path');
 
 const DEFAULT_CONFIG_PATH = 'config/docs/ssot-critical-docs.json';
+const REQUIRED_DOCS = [
+  'AGENTS.md',
+  'DELIVERY.md',
+  'DESIGN.md',
+  'docs/product/mission.md',
+  'docs/guides/TESTING_GUIDE.md',
+  'docs/guides/LOCAL_SETUP.md',
+];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function readJson(filePath) {
@@ -148,7 +156,18 @@ function runLint(opts = {}) {
   const now = opts.now || new Date();
 
   const issues = [];
-  for (const docEntry of config.docs || []) {
+  const docs = config.docs;
+  if (!Array.isArray(docs) || docs.length === 0) {
+    return { issues: ['critical_docs_registry_empty'], configPath };
+  }
+  if (configPath === path.resolve(rootDir, DEFAULT_CONFIG_PATH)) {
+    for (const requiredDoc of REQUIRED_DOCS) {
+      if (!docs.some(entry => entry?.path === requiredDoc && entry.checkLinks === true)) {
+        issues.push(`missing_required_link_check "${requiredDoc}"`);
+      }
+    }
+  }
+  for (const docEntry of docs) {
     issues.push(...lintDocEntry(rootDir, docEntry, { now, maxAgeDays }));
   }
   return { issues, configPath };

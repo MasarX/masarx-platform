@@ -124,7 +124,8 @@ export function ToastHost({ children }: { children: React.ReactNode }) {
           >
             <div className="space-y-1">
               {item.title ? <ToastTitle>{item.title}</ToastTitle> : null}
-              {item.description ? (
+              {/* Error fallbacks reuse the title as description; show that text once. */}
+              {item.description && item.description !== item.title ? (
                 <ToastDescription>{item.description}</ToastDescription>
               ) : null}
             </div>
