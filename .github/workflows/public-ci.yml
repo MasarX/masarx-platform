@@ -294,8 +294,8 @@ jobs:
           node scripts/ci-hosted/selfcheck.cjs
           node scripts/ci-hosted/shard-selfcheck.cjs
           node scripts/ci-hosted/database-selfcheck.cjs
+          node --test scripts/ci-hosted/images.test.cjs scripts/tests/bootstrap/online-index-fixtures.test.js
           node scripts/ci-hosted/review-verdict.cjs --self-check
-          node --test scripts/ci-hosted/images.test.cjs
       - name: Check deploy branch references
         timeout-minutes: 1
         run: node scripts/ci-hosted/deploy-branch-refs.cjs
@@ -364,6 +364,8 @@ jobs:
           NPM_CONFIG_CACHE: ${{ runner.temp }}/npm-cache
         run: node scripts/ci-hosted/tasks.cjs install
       - *timing_work
+      - name: Require CI coverage or an active quarantine for every test suite
+        run: node scripts/ci-hosted/suite-coverage.cjs
       - name: Verify Edge npm import lock
         run: |
           if [[ "$GITHUB_EVENT_NAME" == 'pull_request' ]] &&
@@ -543,9 +545,10 @@ jobs:
         run: node scripts/ci-hosted/base-guard.cjs jest.cjs ui
       - name: Run Console v2 Vitest
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        env:
-          CONSOLE_V2_CI_DEFER_CAPABILITY_LINT: '1'
         run: npm run test --workspace @masarx/console-v2
+      - name: Run FieldOps UI tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run test:ui:fieldops -- --runInBand
       - *timing_report
       - name: Check proposed test-result capture
         if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.jest.outputs.present == 'true' }}
@@ -644,11 +647,13 @@ jobs:
         run: node scripts/ci-hosted/tasks.cjs build landing
 
   e2e:
-    name: Landing E2E and Console V2 axe (full-app E2E excluded)
+    name: Landing and Console V2 browser tests
     needs: append-only
     if: ${{ !cancelled() && (needs.append-only.result != 'success' || needs.append-only.outputs.e2e != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      SPEED_EVIDENCE_DIR: test-results/speed-evidence
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
@@ -673,21 +678,22 @@ jobs:
         run: node scripts/ci-hosted/tasks.cjs browser-install
       - *timing_work
       - name: Run synthetic local landing suite
+        id: landing_e2e
         if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/tasks.cjs landing-e2e
+      - name: Report Landing speed measurements
+        if: ${{ !cancelled() && (steps.landing_e2e.outcome == 'success' || steps.landing_e2e.outcome == 'failure') }}
         env:
-          SPEED_EVIDENCE_DIR: test-results/speed-evidence
+          LANDING_E2E_OUTCOME: ${{ steps.landing_e2e.outcome }}
         run: |
-          status=0
-          node scripts/ci-hosted/tasks.cjs landing-e2e || status=$?
           shopt -s nullglob
           reports=("$SPEED_EVIDENCE_DIR"/speed--*.json)
           if (( ${#reports[@]} )); then
             jq -c '{screen, route, viewport, sampleCount: (.runs | length), p75, budget, limit}' "${reports[@]}"
-          elif (( status == 0 )); then
+          elif [[ "$LANDING_E2E_OUTCOME" == success ]]; then
             echo 'Missing Landing speed measurements.' >&2
             exit 1
           fi
-          exit "$status"
       # Runs after a landing failure too, so one run reports both suites.
       - name: Run Console V2 seed-mode axe suite
         id: console_a11y
@@ -695,6 +701,9 @@ jobs:
         env:
           A11Y_EVIDENCE_DIR: test-results/console-a11y/evidence
         run: node scripts/ci-hosted/tasks.cjs console-a11y
+      - name: Run Console V2 seed-mode E2E
+        if: ${{ !cancelled() && steps.console.outputs.present == 'true' }}
+        run: node scripts/ci-hosted/tasks.cjs console-seed
       - *timing_report
       - name: Upload Console V2 axe evidence
         if: ${{ !cancelled() && steps.console_a11y.outcome != 'skipped' }}

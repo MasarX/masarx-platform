@@ -332,19 +332,21 @@ export async function PickupRequestsPage({
                   <div className="flex flex-wrap items-center gap-2">
                     {formatStatusBadge(stringValue(row.status))}
                     {stringValue(row.tracking_number) ? (
-                      <Badge>{stringValue(row.tracking_number) ?? ""}</Badge>
+                      <Badge data-evidence-mask="record-id">
+                        {stringValue(row.tracking_number) ?? ""}
+                      </Badge>
                     ) : null}
                     {stringValue(row.route_run_status) ? (
                       <Badge tone="info">{stringValue(row.route_run_status) ?? ""}</Badge>
                     ) : null}
                   </div>
-                  <div className="mt-3 text-sm font-medium text-ui-ink">
+                  <div data-evidence-mask="record-id" className="mt-3 text-sm font-medium text-ui-ink">
                     {stringValue(row.client_reference_number) ??
                       stringValue(row.carrier_reference_number) ??
                       stringValue(row.tracking_number) ??
                       buildLookupFriendlyLabel("Shipment", shipmentId)}
                   </div>
-                  <div className="mt-2 text-sm text-ui-muted">
+                  <div data-evidence-mask="record-id" className="mt-2 text-sm text-ui-muted">
                     {formatPickupAddress(originAddress) ?? "No origin address captured."}
                   </div>
                   <div className="mt-3 text-xs text-ui-muted">
@@ -355,7 +357,7 @@ export async function PickupRequestsPage({
                       me?.timezone,
                     ) ?? "No requested window."}
                   </div>
-                  <div className="mt-3">
+                  <div data-evidence-mask="record-id" className="mt-3">
                     {renderFieldPairs([
                       ["Client", stringValue(row.client_label) ?? stringValue(row.client_id)],
                       ["Sender", stringValue(row.sender_label) ?? stringValue(row.sender_id)],
@@ -370,7 +372,7 @@ export async function PickupRequestsPage({
                     ])}
                   </div>
                   {pickupRequest ? (
-                    <div className="mt-3">
+                    <div data-evidence-mask="record-id" className="mt-3">
                       <pre className="overflow-x-auto rounded-xl border border-ui-border bg-ui-surface/70 p-3 text-xs text-ui-muted">
                         {JSON.stringify(pickupRequest, null, 2)}
                       </pre>
