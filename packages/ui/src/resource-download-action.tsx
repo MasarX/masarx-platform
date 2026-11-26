@@ -193,7 +193,7 @@ export function ResourceDownloadAction({
       }
       const trustedUrls = safeDownloadUrls(urls);
       if (trustedUrls.length !== urls.length) {
-        const error = new Error("Blocked unsafe download URL returned by API.");
+        const error = new UiMessageError("Blocked unsafe download URL returned by API.");
         (error as { requestId?: string }).requestId = requestIdFromResponse ?? requestId;
         throw error;
       }

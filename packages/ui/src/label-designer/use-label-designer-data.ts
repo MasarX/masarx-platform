@@ -383,7 +383,7 @@ export function useAssets(
       if (!signedUrl) throw new UiMessageError("Signed URL was not returned.");
       const trustedSignedUrl = resolveTrustedExternalDataUrl(signedUrl);
       if (!trustedSignedUrl) {
-        throw new UiMessageError("Signed URL origin is not trusted.");
+        throw new Error("Signed URL origin is not trusted.");
       }
       openTrustedInNewTab(trustedSignedUrl);
     },
@@ -565,7 +565,7 @@ export function useDraftActions(
     if (insertedDraft.id === state.selectedDraftId || !isDraftStatusInternal(insertedDraft.status) ||
         insertedDraft.scope_type !== selectedScope.scopeType || insertedDraft.scope_id !== selectedScope.scopeId ||
         insertedDraft.label_type !== nextLabelType) {
-      throw new UiMessageError("Created draft does not match the requested new draft and scope.");
+      throw new Error("Created draft does not match the requested new draft and scope.");
     }
     await loadScopeData(insertedDraft.id);
   }, [assertWriteScope, loadScopeData, parseDraftEditorValue, selectedScope, state.draftName, state.labelType, state.organizationId, state.selectedDraftId, ui]);

@@ -68,7 +68,7 @@ import {
   resolveSafeAppBasePath,
   resolveSafeHref,
 } from "./url-guard";
-import { formatUiError, getUiErrorMessage, UiMessageError } from "./utils";
+import { formatUiError, getUiErrorMessage, sanitizeUiError } from "./utils";
 import { isUuidValue } from "./resource-utils";
 
 const DEFAULT_ID_PARAM = "id";
@@ -1184,7 +1184,7 @@ const waitForConfiguredReadback = async (
   failureMessage: string
 ) => {
   const rpcName = readback.rpc?.trim() ?? "";
-  if (!rpcName) throw new UiMessageError(failureMessage);
+  if (!rpcName) throw new Error(failureMessage);
 
   const params = Object.fromEntries(
     Object.entries(readback.params ?? {}).map(([key, spec]) => [
@@ -1209,7 +1209,7 @@ const waitForConfiguredReadback = async (
     }
   }
 
-  throw new UiMessageError(failureMessage);
+  throw new Error(failureMessage);
 };
 
 const subscribeToClientReady = () => () => {};
@@ -1535,7 +1535,7 @@ export function BulkActions({
           result?: Record<string, unknown>,
         ) => {
           const field = (value: unknown) => typeof value === "string" && value.trim()
-            ? formatUiError(value.trim(), "").slice(0, 512)
+            ? sanitizeUiError(value.trim())?.slice(0, 512)
             : undefined;
           const identity = (value: unknown) => typeof value === "string" && isUuidValue(value)
             ? value.trim()
@@ -1580,7 +1580,7 @@ export function BulkActions({
               await onSuccess?.({ action, result, selectedIds: [...invocationIds] });
               return true;
             } catch (error) {
-              const errorMessage = formatUiError(error, "Backend readback refresh failed.");
+              const errorMessage = formatUiError(error, "");
               if (genericReceipt) {
                 showFeedback("warning", t("toast.readbackErrorDescription"), result);
               }
@@ -1624,7 +1624,7 @@ export function BulkActions({
               if (!requiresBatchResultEvidence(execution)) throw error;
               configuredReadbackFailed = true;
               toast({ tone: "warning", title: t("toast.readbackErrorDescription"),
-                description: formatUiError(error, "Backend readback refresh failed.") });
+                description: formatUiError(error, "") });
               reportBulkEvent("ui.bulk_action.readback.refresh_error", action);
             }
           }
@@ -1652,7 +1652,7 @@ export function BulkActions({
                 configuredReadbackFailed = true;
                 reportBulkEvent("ui.bulk_action.readback.refresh_error", action);
                 toast({ tone: "warning", title: t("toast.readbackErrorDescription"),
-                  description: formatUiError(error, "Backend readback refresh failed.") });
+                  description: formatUiError(error, "") });
               }
             }
 
