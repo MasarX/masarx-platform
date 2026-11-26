@@ -2679,13 +2679,10 @@
 
   const OPTION_CHOICES = ['home_delivery', 'branch_pickup', 'safe_place'];
   const OPTION_PLACES = ['reception', 'neighbour', 'other'];
-  // The server decides; this only skips calls it would answer closed (same status and service rules).
-  const OPTION_OPEN_STATUSES = new Set(['pending', 'in_transit', 'scheduled', 'assigned', 'at_hub']);
-
+  // The server decides eligibility from the tenant policy (allowed statuses included); the page only skips non-delivery services.
   function shouldLoadOptions(payload) {
     const shipment = (payload?.tracking || payload)?.shipment || {};
-    return shipment.service_type === 'delivery'
-      && OPTION_OPEN_STATUSES.has(String(shipment.status || '').trim().toLowerCase());
+    return shipment.service_type === 'delivery';
   }
 
   function otherTrackingChangesOpen() {

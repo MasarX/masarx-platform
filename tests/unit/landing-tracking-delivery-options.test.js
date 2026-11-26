@@ -333,11 +333,31 @@ describe.each(['en', 'ar'])('delivery options card (%s)', (lang) => {
     expect(q().hidden).toBe(true);
   });
 
-  test.each([
-    { label: 'a delivered shipment', session: sessionBody({ status: 'delivered' }) },
-    { label: 'a pickup service', session: sessionBody({ serviceType: 'pickup' }) },
-  ])('no options call for $label', async ({ session }) => {
-    const { q, calls } = await loadTrackingPage({ lang, session });
+  test.each(['created', 'pending_dispatch'])('server policy decides: a %s delivery gets the card', async (status) => {
+    const { q, calls, radios } = await loadTrackingPage({ lang, session: sessionBody({ status }) });
+    expect(calls('options')).toHaveLength(1);
+    expect(JSON.parse(calls('options')[0][1].body)).toEqual({ session_token: 'session-token' });
+    expect(q().hidden).toBe(false);
+    expect(q('form').hidden).toBe(false);
+    expect(radios('option').map((radio) => radio.value)).toEqual(['home_delivery', 'branch_pickup', 'safe_place']);
+  });
+
+  test('not eligible: the server answer shows the closed notice, no form and no error', async () => {
+    // The server answers an ineligible shipment the same as closed changes (changes_open false).
+    const { q, t, calls } = await loadTrackingPage({
+      lang,
+      session: sessionBody({ status: 'delivered' }),
+      options: optionsBody({ changes_open: false, choices: [], branches: [], safe_place: null }),
+    });
+    expect(calls('options')).toHaveLength(1);
+    expect(q('form').hidden).toBe(true);
+    expect(q('notice-title').textContent).toBe(t('track_option_closed_title'));
+    expect(q('status').textContent).toBe('');
+    expect(q('status').getAttribute('role')).toBeNull();
+  });
+
+  test('no options call for a pickup service', async () => {
+    const { q, calls } = await loadTrackingPage({ lang, session: sessionBody({ serviceType: 'pickup' }) });
     expect(calls('options')).toHaveLength(0);
     expect(q().hidden).toBe(true);
   });
