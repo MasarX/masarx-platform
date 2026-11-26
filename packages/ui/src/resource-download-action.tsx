@@ -17,7 +17,7 @@ import {
   isTrustedDownloadUrl,
   safeDownloadUrls,
 } from "./url-guard";
-import { formatUiError, getUiErrorMessage } from "./utils";
+import { formatUiError, getUiErrorMessage, UiMessageError } from "./utils";
 import { useToast } from "./use-toast";
 import { downloadTrustedFile } from "./file-download";
 
@@ -186,7 +186,8 @@ export function ResourceDownloadAction({
         ? payload.urls.filter(Boolean)
         : [];
       if (urls.length === 0) {
-        const error = new Error(payload.errors?.[0]?.error || t("errors.noUrls"));
+        const backendError = payload.errors?.[0]?.error;
+        const error = backendError ? new Error(backendError) : new UiMessageError(t("errors.noUrls"));
         (error as { requestId?: string }).requestId = requestIdFromResponse ?? requestId;
         throw error;
       }

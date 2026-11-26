@@ -1,7 +1,7 @@
 import * as React from "react";
 import { createUiClient } from "@masarx/api";
 import { createBrowserClient } from "@masarx/auth/browser";
-import { formatUiError } from "../utils";
+import { formatUiError, UiMessageError } from "../utils";
 import {
   openTrustedInNewTab,
   resolveTrustedExternalDataUrl,
@@ -37,7 +37,7 @@ function useClients() {
     if (error) throw error;
     const jwt = asText(data.session?.access_token);
     if (!jwt) {
-      throw new Error("Authentication session is missing. Please sign in again.");
+      throw new UiMessageError("Authentication session is missing. Please sign in again.");
     }
     return jwt;
   }, [supabase]);
@@ -97,7 +97,7 @@ export function useBootstrap(
 
       const nextOrgId = asText(who.organization_id);
       if (!nextOrgId) {
-        throw new Error("Organization context is required for label designer.");
+        throw new UiMessageError("Organization context is required for label designer.");
       }
 
       const nextCapabilitiesSet = new Set<string>();
@@ -323,7 +323,7 @@ export function useAssets(
         { mode: "list" },
       );
       if (response?.ok !== true) {
-        throw new Error("Asset list request failed.");
+        throw new UiMessageError("Asset list request failed.");
       }
       const nextAssets = (Array.isArray(response.assets) ? response.assets : [])
         .map((asset) => {
@@ -347,7 +347,7 @@ export function useAssets(
   const upload = React.useCallback(
     async (file: File) => {
       const base64 = await readFileAsBase64Internal(file);
-      if (!base64) throw new Error("Could not read selected file.");
+      if (!base64) throw new UiMessageError("Could not read selected file.");
       const response = await invokeEdgeFunction<{ ok?: boolean; error?: unknown }>(
         "label-designer-assets",
         {
@@ -380,10 +380,10 @@ export function useAssets(
         throw new Error(formatJson(response?.error || response));
       }
       const signedUrl = asText(response.signed_url);
-      if (!signedUrl) throw new Error("Signed URL was not returned.");
+      if (!signedUrl) throw new UiMessageError("Signed URL was not returned.");
       const trustedSignedUrl = resolveTrustedExternalDataUrl(signedUrl);
       if (!trustedSignedUrl) {
-        throw new Error("Signed URL origin is not trusted.");
+        throw new UiMessageError("Signed URL origin is not trusted.");
       }
       openTrustedInNewTab(trustedSignedUrl);
     },
@@ -470,7 +470,7 @@ export function usePreview(
 
   const loadSamplePayload = React.useCallback(async () => {
     if (!state.selectedShipmentId) {
-      throw new Error("Select a shipment first.");
+      throw new UiMessageError("Select a shipment first.");
     }
     const response = await ui.rpc<{ ok?: boolean; payload?: unknown; error?: unknown }>(
       "label_designer_get_sample_payload",
@@ -486,8 +486,8 @@ export function usePreview(
   }, [dispatch, state.selectedShipmentBoxId, state.selectedShipmentId, ui]);
 
   const previewDraft = React.useCallback(async () => {
-    if (!state.selectedDraftId) throw new Error("Select a draft before preview.");
-    if (!state.selectedShipmentId) throw new Error("Select a shipment before preview.");
+    if (!state.selectedDraftId) throw new UiMessageError("Select a draft before preview.");
+    if (!state.selectedShipmentId) throw new UiMessageError("Select a shipment before preview.");
 
     const response = await invokeEdgeFunction<{ ok?: boolean; error?: unknown }>(
       "label-renderer",
@@ -520,7 +520,7 @@ export function useDraftActions(
     try {
       const parsed = JSON.parse(state.draftEditor);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("Draft JSON must be an object.");
+        throw new UiMessageError("Draft JSON must be an object.");
       }
       dispatch({ type: "SET_DRAFT_EDITOR_ERROR", payload: null });
       return parsed as Record<string, unknown>;
@@ -532,17 +532,17 @@ export function useDraftActions(
   }, [dispatch, state.draftEditor]);
 
   const assertWriteScope = React.useCallback(() => {
-    if (!state.capabilities.includes("label_design.write")) throw new Error("Write permission is required.");
-    if (!selectedScope || !state.organizationId) throw new Error("Scope context is missing.");
+    if (!state.capabilities.includes("label_design.write")) throw new UiMessageError("Write permission is required.");
+    if (!selectedScope || !state.organizationId) throw new UiMessageError("Scope context is missing.");
   }, [selectedScope, state.capabilities, state.organizationId]);
 
   const createDraft = React.useCallback(async () => {
     assertWriteScope();
     if (!selectedScope || !state.organizationId) {
-      throw new Error("Scope context is missing.");
+      throw new UiMessageError("Scope context is missing.");
     }
     const parsed = parseDraftEditorValue();
-    if (!parsed) throw new Error("Draft JSON is invalid.");
+    if (!parsed) throw new UiMessageError("Draft JSON is invalid.");
     const nextLabelType = asText(state.labelType) || "shipping";
     const nextName = asText(state.draftName) || `Draft ${new Date().toISOString()}`;
 
@@ -561,11 +561,11 @@ export function useDraftActions(
       throw new Error(message);
     }
     const insertedDraft = parseDraftRows([response.draft])[0];
-    if (!insertedDraft) throw new Error("Draft was created but could not be parsed.");
+    if (!insertedDraft) throw new UiMessageError("Draft was created but could not be parsed.");
     if (insertedDraft.id === state.selectedDraftId || !isDraftStatusInternal(insertedDraft.status) ||
         insertedDraft.scope_type !== selectedScope.scopeType || insertedDraft.scope_id !== selectedScope.scopeId ||
         insertedDraft.label_type !== nextLabelType) {
-      throw new Error("Created draft does not match the requested new draft and scope.");
+      throw new UiMessageError("Created draft does not match the requested new draft and scope.");
     }
     await loadScopeData(insertedDraft.id);
   }, [assertWriteScope, loadScopeData, parseDraftEditorValue, selectedScope, state.draftName, state.labelType, state.organizationId, state.selectedDraftId, ui]);
@@ -573,15 +573,15 @@ export function useDraftActions(
   const saveDraft = React.useCallback(async () => {
     assertWriteScope();
     const selectedDraft = state.drafts.find((d) => d.id === state.selectedDraftId);
-    if (!selectedDraft) throw new Error("Select a draft before saving.");
+    if (!selectedDraft) throw new UiMessageError("Select a draft before saving.");
     if (selectedDraft.scope_type !== selectedScope?.scopeType || selectedDraft.scope_id !== selectedScope?.scopeId) {
-      throw new Error("Selected draft does not match the active scope.");
+      throw new UiMessageError("Selected draft does not match the active scope.");
     }
     if (!isDraftStatusInternal(selectedDraft.status)) {
-      throw new Error("Published drafts are immutable. Create a new draft first.");
+      throw new UiMessageError("Published drafts are immutable. Create a new draft first.");
     }
     const parsed = parseDraftEditorValue();
-    if (!parsed) throw new Error("Draft JSON is invalid.");
+    if (!parsed) throw new UiMessageError("Draft JSON is invalid.");
 
     const response = await ui.rpc<RpcResponse & { draft?: unknown }>(
       "label_designer_update_draft",
@@ -600,7 +600,7 @@ export function useDraftActions(
   }, [assertWriteScope, loadScopeData, parseDraftEditorValue, selectedScope, state.draftName, state.drafts, state.labelType, state.selectedDraftId, ui]);
 
   const validateDraft = React.useCallback(async () => {
-    if (!state.selectedDraftId) throw new Error("Select a draft before validating.");
+    if (!state.selectedDraftId) throw new UiMessageError("Select a draft before validating.");
     const response = await ui.rpc<{ ok?: boolean; errors?: unknown }>(
       "label_designer_validate_label_design_draft",
       { p_draft_id: state.selectedDraftId },
@@ -613,7 +613,7 @@ export function useDraftActions(
   }, [dispatch, state.selectedDraftId, ui]);
 
   const publishDraft = React.useCallback(async () => {
-    if (!state.selectedDraftId) throw new Error("Select a draft before publishing.");
+    if (!state.selectedDraftId) throw new UiMessageError("Select a draft before publishing.");
     // Publish the editor's current value, never a stale saved row or a published original.
     await saveDraft();
     await validateDraft();
@@ -641,7 +641,7 @@ export function useDraftActions(
 function readFileAsBase64Internal(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(reader.error || new Error("Could not read file."));
+    reader.onerror = () => reject(reader.error || new UiMessageError("Could not read file."));
     reader.onload = () => {
       const raw = typeof reader.result === "string" ? reader.result : "";
       const marker = raw.indexOf(",");

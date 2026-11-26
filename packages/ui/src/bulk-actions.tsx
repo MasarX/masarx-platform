@@ -68,7 +68,7 @@ import {
   resolveSafeAppBasePath,
   resolveSafeHref,
 } from "./url-guard";
-import { formatUiError, getUiErrorMessage } from "./utils";
+import { formatUiError, getUiErrorMessage, UiMessageError } from "./utils";
 import { isUuidValue } from "./resource-utils";
 
 const DEFAULT_ID_PARAM = "id";
@@ -1184,7 +1184,7 @@ const waitForConfiguredReadback = async (
   failureMessage: string
 ) => {
   const rpcName = readback.rpc?.trim() ?? "";
-  if (!rpcName) throw new Error(failureMessage);
+  if (!rpcName) throw new UiMessageError(failureMessage);
 
   const params = Object.fromEntries(
     Object.entries(readback.params ?? {}).map(([key, spec]) => [
@@ -1209,7 +1209,7 @@ const waitForConfiguredReadback = async (
     }
   }
 
-  throw new Error(failureMessage);
+  throw new UiMessageError(failureMessage);
 };
 
 const subscribeToClientReady = () => () => {};
