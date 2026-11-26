@@ -6,7 +6,7 @@ class GuardError extends Error {}
 
 function readGit(reason, args, input) {
   try {
-    return git(['--no-replace-objects', ...args], 'utf8', input);
+    return git(['--no-replace-objects', '--no-lazy-fetch', ...args], 'utf8', input);
   } catch {
     throw new GuardError(reason);
   }

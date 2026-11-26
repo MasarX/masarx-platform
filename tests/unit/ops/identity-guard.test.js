@@ -77,7 +77,12 @@ test('the identity guard checks both commit roles and the PR opener without prin
     const head = commit(bot, bot, 'Tip');
     const rejected = `identity-guard: fail (2 commits) ${badAuthor.slice(0, 12)} ${badCommitter.slice(0, 12)}\n`;
     check(mergeGroup(head), 1, '', rejected);
-    check(mergeGroup(head), 1, '', rejected, shallowCheckout(1));
+    const truncatedRange = shallowCheckout(1);
+    check(mergeGroup(head), 1, '', rejected, truncatedRange);
+    const excludedBase = spawnSync('git', ['--no-lazy-fetch', 'cat-file', '-e', base], {
+      ...options, cwd: truncatedRange,
+    });
+    expect(excludedBase.status).toBeGreaterThan(0);
     check(mergeGroup(allowed), 1, '', 'identity-guard: error (merge group head mismatch)\n');
 
     const eventPath = path.join(cwd, 'event.json');
