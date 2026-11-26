@@ -34,6 +34,7 @@ Follows engineering standard v1.29.3.
 
 - Set job and step limits from measured run and job timings, plus a margin.
 - Root Markdown changes select Unit Jest, which runs the public-source boundary test.
+- Manual branch CI uses the merge base of the dispatched commit and the protected default branch for Lint. Pull requests and merge groups use the base supplied by their event.
 - CI runs only on free GitHub-hosted runners. Get the owner's approval before spending money or using a paid service. Use at most 20 jobs per CI run. CI runs Landing E2E. Full Console, Portal and FieldOps journeys need separate qualification.
 - PR wall time uses the workflow start and the `ci-gate` result timestamps. Track p50 and p90 on the project board's CI-FAST item. Timing-weighted pgTAP shards were the first change ([#173](https://github.com/MasarX/masarx-platform/pull/173)).
 - Keep queue-entry-to-completion wall time under 25 minutes. Track PR-open-to-merge time alongside PR wall time and queue wall time. Use a ±10% tolerance for timing comparisons unless the repository defines another tolerance.

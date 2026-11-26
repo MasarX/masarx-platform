@@ -317,10 +317,18 @@ jobs:
           fetch-depth: 1
       - *timing_begin
       - name: Fetch lint base
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.event_name == 'workflow_dispatch' && github.token || '' }}
         run: |
+          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
+            LOCAL_GATE_BASE_SHA=$(gh api "repos/$GITHUB_REPOSITORY/compare/$DEFAULT_BRANCH...$GITHUB_SHA" --jq '.merge_base_commit.sha // empty')
+          fi
           [[ "$LOCAL_GATE_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'A proven lint base SHA is required.' >&2; exit 1; }
           git fetch --no-tags --depth=1 origin "$LOCAL_GATE_BASE_SHA"
           git cat-file -e "${LOCAL_GATE_BASE_SHA}^{commit}"
+          printf 'Lint base: %s\n' "$LOCAL_GATE_BASE_SHA"
+          printf 'LOCAL_GATE_BASE_SHA=%s\n' "$LOCAL_GATE_BASE_SHA" >> "$GITHUB_ENV"
       - name: Detect subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect lint
