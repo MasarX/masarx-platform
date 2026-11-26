@@ -244,6 +244,47 @@
   const trackRequestBannerBadge = document.querySelector('[data-track-request-banner-badge]');
   const trackRequestBannerText = document.querySelector('[data-track-request-banner-text]');
   const trackRequestBannerCase = document.querySelector('[data-track-request-banner-case]');
+  const trackCourierCard = document.querySelector('[data-track-courier]');
+  const trackCourierLock = document.querySelector('[data-track-courier-lock]');
+  const trackCourierFacts = document.querySelector('[data-track-courier-facts]');
+  const trackCourierEta = document.querySelector('[data-track-courier-eta]');
+  const trackCourierStops = document.querySelector('[data-track-courier-stops]');
+  const trackCourierUpdated = document.querySelector('[data-track-courier-updated]');
+  const trackCourierMapWrap = document.querySelector('[data-track-courier-map-wrap]');
+  const trackCourierMapFrame = document.querySelector('[data-track-courier-map-frame]');
+  const trackCourierMap = document.querySelector('[data-track-courier-map]');
+  const trackCourierAttrib = document.querySelector('[data-track-courier-attrib]');
+  const trackCourierNotice = document.querySelector('[data-track-courier-notice]');
+  const trackCourierNoticeTitle = document.querySelector('[data-track-courier-notice-title]');
+  const trackCourierNoticeText = document.querySelector('[data-track-courier-notice-text]');
+  const trackCourierRetry = document.querySelector('[data-track-courier-retry]');
+  const trackCourierReverify = document.querySelector('[data-track-courier-reverify]');
+  const trackCourierMeta = document.querySelector('[data-track-courier-meta]');
+  const trackCourierMetaText = document.querySelector('[data-track-courier-meta-text]');
+  const trackCourierStatus = document.querySelector('[data-track-courier-status]');
+  const trackCourierStatusText = document.querySelector('[data-track-courier-status-text]');
+  const trackCourierPrivacy = document.querySelector('[data-track-courier-privacy]');
+  const trackCourierFormStatus = document.querySelector('[data-track-courier-form-status]');
+  const trackProofCard = document.querySelector('[data-track-proof]');
+  const trackProofLock = document.querySelector('[data-track-proof-lock]');
+  const trackProofGrid = document.querySelector('[data-track-proof-grid]');
+  const trackProofNotice = document.querySelector('[data-track-proof-notice]');
+  const trackProofNoticeTitle = document.querySelector('[data-track-proof-notice-title]');
+  const trackProofNoticeText = document.querySelector('[data-track-proof-notice-text]');
+  const trackProofMeta = document.querySelector('[data-track-proof-meta]');
+  const trackProofPartial = document.querySelector('[data-track-proof-partial]');
+  const trackProofStatus = document.querySelector('[data-track-proof-status]');
+  const trackProofReload = document.querySelector('[data-track-proof-reload]');
+  const trackProofReverify = document.querySelector('[data-track-proof-reverify]');
+  const trackProofPlain = document.querySelector('[data-track-proof-plain]');
+  const trackProofOverlay = document.querySelector('[data-track-proof-overlay]');
+  const trackProofClose = document.querySelector('[data-track-proof-close]');
+  const trackProofNext = document.querySelector('[data-track-proof-next]');
+  const trackProofDialogTitle = document.querySelector('[data-track-proof-dialog-title]');
+  const trackProofDialogCopy = document.querySelector('[data-track-proof-dialog-copy]');
+  const trackProofDialogTile = document.querySelector('[data-track-proof-dialog-tile]');
+  const trackProofDialogImage = document.querySelector('[data-track-proof-dialog-image]');
+  const trackProofDialogMeta = document.querySelector('[data-track-proof-dialog-meta]');
   const trackMapPicker = document.querySelector('[data-track-map-picker]');
   const trackMapDialogPicker = document.querySelector('[data-track-map-picker-expanded]');
   const trackMapValue = document.querySelector('[data-track-map-value]');
@@ -315,12 +356,16 @@
       verify: null,
       reschedule_date: null,
       location_change: null,
+      live: null,
+      proof: null,
     },
     mapPin: null,
     mapPinConfirmed: false,
     mapOverlayTrigger: null,
     mapLocateInFlight: false,
     mapLocateSeq: 0,
+    liveDelivery: { view: 'none', data: null, timer: null, lastFetchAt: 0, map: null, rect: null },
+    proof: { view: 'none', data: null, items: [], dialogIndex: -1 },
   };
 
   function getIntakeConfig(formKey) {
@@ -1655,6 +1700,8 @@
   function resetTrackingFlow({ clearReference = true, scroll = false } = {}) {
     if (hasTrackingMutationInFlight()) return false;
     invalidateTrackingRequests();
+    stopLiveDelivery();
+    resetProof();
     saveTrackingSession('');
     state.trackingReference = '';
     state.trackingPayload = null;
@@ -2006,6 +2053,604 @@
     }
   }
 
+  // --- Live delivery card (#406): server-coarsened ETA, stops and area only ---
+
+  const LIVE_DELIVERY_POLL_MS = 60000;
+  const LIVE_DELIVERY_STATUSES = new Set(['live', 'too_far', 'hidden', 'paused']);
+
+  function readLiveDelivery(payload) {
+    const tracking = payload && typeof payload === 'object' ? payload.tracking || payload : null;
+    const live = tracking?.live_delivery;
+    return live && typeof live === 'object' && LIVE_DELIVERY_STATUSES.has(live.status) ? live : null;
+  }
+
+  function isLiveDeliveryArea(area) {
+    if (!area || typeof area !== 'object') return false;
+    const { south, west, north, east } = area;
+    return [south, west, north, east].every(Number.isFinite) && north > south && east > west;
+  }
+
+  function formatTrackingTimeRange(startAt, endAt, options = { hour: 'numeric', minute: '2-digit' }) {
+    const start = new Date(startAt);
+    const end = new Date(endAt);
+    if (!startAt || !endAt || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return '';
+    try {
+      const formatter = new Intl.DateTimeFormat(root.lang || 'en', options);
+      return typeof formatter.formatRange === 'function'
+        ? formatter.formatRange(start, end)
+        : `${formatter.format(start)} – ${formatter.format(end)}`;
+    } catch {
+      return '';
+    }
+  }
+
+  function formatMinutesAgo(value) {
+    const at = new Date(value).getTime();
+    if (!value || !Number.isFinite(at)) return '';
+    const minutes = Math.max(0, Math.round((Date.now() - at) / 60000));
+    try {
+      return new Intl.RelativeTimeFormat(root.lang || 'en', { numeric: 'auto' }).format(-minutes, 'minute');
+    } catch {
+      return '';
+    }
+  }
+
+  function formatAreaDistance(area) {
+    // The cell height is the grid size the tenant policy chose; 1 degree of latitude is about 111.32 km.
+    const meters = Math.max(100, Math.round(((area.north - area.south) * 111320) / 100) * 100);
+    return new Intl.NumberFormat(root.lang || 'en', { style: 'unit', unit: 'meter', maximumFractionDigits: 0 }).format(meters);
+  }
+
+  function setBdiText(el, text) {
+    if (!el) return;
+    const value = text || getText('track_not_available', root.lang || 'en') || '';
+    // Same text, same node: an unchanged ETA must not re-announce in its live region.
+    if (el.childNodes.length === 1 && el.firstChild.nodeName === 'BDI' && el.firstChild.textContent === value) return;
+    const bdi = document.createElement('bdi');
+    bdi.textContent = value;
+    el.replaceChildren(bdi);
+  }
+
+  function fillTextWithBdi(el, template, token, value) {
+    if (!el) return;
+    const [before, after = ''] = String(template || '').split(`{${token}}`);
+    const bdi = document.createElement('bdi');
+    bdi.textContent = value;
+    el.replaceChildren(before, bdi, after);
+  }
+
+  function renderLiveDeliveryStops(el, count) {
+    if (!el) return;
+    if (!Number.isFinite(count) || count < 0) {
+      el.textContent = getText('track_not_available', root.lang || 'en') || '';
+      return;
+    }
+    const ahead = Math.round(count);
+    el.textContent = new Intl.NumberFormat(root.lang || 'en').format(ahead);
+    if (ahead > 3) return;
+    const row = document.createElement('span');
+    row.className = 'track-courier-stops';
+    row.setAttribute('aria-hidden', 'true');
+    for (let i = 0; i <= ahead; i += 1) {
+      const dot = document.createElement('span');
+      if (i === ahead) dot.className = 'is-you';
+      row.appendChild(dot);
+    }
+    el.appendChild(row);
+  }
+
+  function renderLiveDeliveryArea(area) {
+    const L = getLeaflet();
+    if (!L || !trackCourierMap) return;
+    const bounds = [[area.south, area.west], [area.north, area.east]];
+    const live = state.liveDelivery;
+    if (!live.map) {
+      live.map = L.map(trackCourierMap, {
+        zoomControl: false,
+        attributionControl: false,
+        dragging: false,
+        touchZoom: false,
+        scrollWheelZoom: false,
+        doubleClickZoom: false,
+        boxZoom: false,
+        keyboard: false,
+      });
+      L.tileLayer(mapRuntime.tileUrl, { maxZoom: mapRuntime.maxZoom }).addTo(live.map);
+      live.rect = L.rectangle(bounds, { className: 'track-courier-area', interactive: false }).addTo(live.map);
+      if (trackCourierAttrib) trackCourierAttrib.innerHTML = mapRuntime.tileAttribution;
+    } else {
+      live.rect.setBounds(bounds);
+    }
+    live.map.invalidateSize();
+    live.map.fitBounds(bounds, { padding: [48, 48], maxZoom: 15, animate: false });
+  }
+
+  function renderLiveDeliveryCard() {
+    if (!trackCourierCard) return;
+    const lang = root.lang || 'en';
+    const { view, data } = state.liveDelivery;
+    trackCourierCard.hidden = view === 'none';
+    if (view === 'none') return;
+
+    const status = view === 'data' ? data.status : '';
+    const showArea = status === 'live' && isLiveDeliveryArea(data.area) && Boolean(getLeaflet());
+    trackCourierCard.setAttribute('aria-busy', String(view === 'loading'));
+    if (trackCourierLock) trackCourierLock.textContent = getText(view === 'expired' ? 'track_masked_pill' : 'track_courier_lock', lang) || '';
+
+    if (trackCourierFacts) trackCourierFacts.hidden = view !== 'data' && view !== 'loading';
+    if (view === 'loading') {
+      [trackCourierEta, trackCourierStops, trackCourierUpdated].forEach((el) => {
+        if (!el) return;
+        const skel = document.createElement('span');
+        skel.className = 'track-courier-skel';
+        el.replaceChildren(skel);
+      });
+    } else if (view === 'data') {
+      setBdiText(trackCourierEta, formatTrackingTimeRange(data.eta_window_start_at, data.eta_window_end_at));
+      renderLiveDeliveryStops(trackCourierStops, data.stops_ahead);
+      setBdiText(trackCourierUpdated, formatMinutesAgo(data.updated_at));
+    }
+
+    if (trackCourierMapWrap) trackCourierMapWrap.hidden = !showArea;
+    if (trackCourierPrivacy) trackCourierPrivacy.hidden = !showArea;
+    if (showArea) {
+      if (trackCourierMapFrame) {
+        trackCourierMapFrame.setAttribute('aria-label', (getText('track_courier_map_aria', lang) || '').replace('{distance}', formatAreaDistance(data.area)));
+      }
+      renderLiveDeliveryArea(data.area);
+    }
+
+    let notice = '';
+    if (view === 'data' && !showArea) notice = status === 'too_far' || status === 'paused' ? status : 'hidden';
+    else if (view === 'error' || view === 'expired') notice = view;
+    if (trackCourierNotice) trackCourierNotice.hidden = !notice;
+    if (notice) {
+      if (trackCourierNoticeTitle) trackCourierNoticeTitle.textContent = getText(`track_courier_${notice}_title`, lang) || '';
+      if (notice === 'error') {
+        const shipment = state.trackingPayload?.tracking?.shipment || {};
+        const promised = formatTrackingTimeRange(shipment.promised_window_start_at, shipment.promised_window_end_at, {
+          month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+        });
+        if (promised) fillTextWithBdi(trackCourierNoticeText, getText('track_courier_error_text', lang), 'window', promised);
+        else if (trackCourierNoticeText) trackCourierNoticeText.textContent = getText('track_courier_error_text_plain', lang) || '';
+      } else if (trackCourierNoticeText) {
+        trackCourierNoticeText.textContent = getText(`track_courier_${notice}_text`, lang) || '';
+      }
+    }
+
+    if (trackCourierRetry) trackCourierRetry.hidden = view !== 'error';
+    if (trackCourierReverify) trackCourierReverify.hidden = view !== 'expired';
+
+    const showMeta = view === 'data' || view === 'error';
+    if (trackCourierMeta) trackCourierMeta.hidden = !showMeta;
+    if (showMeta) {
+      let metaKey = '';
+      if (showArea) metaKey = 'track_courier_meta_live';
+      else if (status === 'paused') metaKey = 'track_courier_meta_paused';
+      else if (view === 'data') metaKey = 'track_courier_meta_poll';
+      if (metaKey === 'track_courier_meta_live') fillTextWithBdi(trackCourierMetaText, getText(metaKey, lang), 'distance', formatAreaDistance(data.area));
+      else if (trackCourierMetaText) trackCourierMetaText.textContent = metaKey ? getText(metaKey, lang) || '' : '';
+      let liveStatus = 'offline';
+      if (view === 'data') liveStatus = showArea || status === 'too_far' ? 'live' : status === 'paused' ? 'paused' : 'hidden';
+      if (trackCourierStatus) trackCourierStatus.dataset.status = liveStatus;
+      if (trackCourierStatusText) {
+        const text = getText(`track_courier_status_${liveStatus}`, lang) || '';
+        if (trackCourierStatusText.textContent !== text) trackCourierStatusText.textContent = text;
+      }
+    }
+
+    if (trackCourierFormStatus) {
+      setTrackingStatus(
+        trackCourierFormStatus,
+        view === 'loading' ? 'track_courier_loading' : view === 'error' ? 'track_courier_error_status' : '',
+        view === 'error' ? 'error' : undefined
+      );
+    }
+  }
+
+  function setLiveDeliveryView(view, data = null) {
+    state.liveDelivery.view = view;
+    state.liveDelivery.data = data;
+    renderLiveDeliveryCard();
+  }
+
+  function scheduleLiveDeliveryPoll(delay = LIVE_DELIVERY_POLL_MS) {
+    window.clearTimeout(state.liveDelivery.timer);
+    state.liveDelivery.timer = null;
+    if (state.trackingStage !== 'results' || !state.trackingSessionToken) return;
+    if (document.visibilityState === 'hidden') return;
+    state.liveDelivery.timer = window.setTimeout(fetchLiveDelivery, Math.max(0, delay));
+  }
+
+  function applyLiveDelivery(payload) {
+    const live = readLiveDelivery(payload);
+    setLiveDeliveryView(live ? 'data' : 'none', live);
+    scheduleLiveDeliveryPoll();
+  }
+
+  function startLiveDelivery(payload) {
+    const tracking = payload && typeof payload === 'object' ? payload.tracking || payload : null;
+    const status = String(tracking?.shipment?.status || '').trim().toLowerCase();
+    // live_delivery is null outside out-for-delivery, so other statuses need no session fetch.
+    if (status !== 'out_for_delivery') {
+      setLiveDeliveryView('none');
+      return;
+    }
+    setLiveDeliveryView('loading');
+    fetchLiveDelivery();
+  }
+
+  function stopLiveDelivery() {
+    window.clearTimeout(state.liveDelivery.timer);
+    state.liveDelivery.timer = null;
+    state.liveDelivery.lastFetchAt = 0;
+    setLiveDeliveryView('none');
+  }
+
+  async function fetchLiveDelivery() {
+    window.clearTimeout(state.liveDelivery.timer);
+    state.liveDelivery.timer = null;
+    const token = state.trackingSessionToken;
+    if (!token || state.trackingStage !== 'results') return;
+    const request = beginTrackingRequest('live');
+    state.liveDelivery.lastFetchAt = Date.now();
+    try {
+      const { response, data } = await postTracking('session', { session_token: token }, request.controller);
+      if (!isCurrentTrackingRequest(request)) return;
+      if (!response.ok || !data || data.ok === false) {
+        if (data?.error?.code === 'invalid_session') {
+          saveTrackingSession('');
+          setLiveDeliveryView('expired');
+        } else {
+          setLiveDeliveryView('error', state.liveDelivery.data);
+        }
+        return;
+      }
+      const live = readLiveDelivery(data);
+      setLiveDeliveryView(live ? 'data' : 'none', live);
+    } catch {
+      if (!isCurrentTrackingRequest(request)) return;
+      setLiveDeliveryView('error', state.liveDelivery.data);
+    } finally {
+      if (finishTrackingRequest(request)) scheduleLiveDeliveryPoll();
+    }
+  }
+
+  function handleLiveDeliveryVisibility() {
+    if (document.visibilityState === 'hidden') {
+      window.clearTimeout(state.liveDelivery.timer);
+      state.liveDelivery.timer = null;
+      return;
+    }
+    if (state.liveDelivery.view === 'expired') return;
+    scheduleLiveDeliveryPoll(LIVE_DELIVERY_POLL_MS - (Date.now() - state.liveDelivery.lastFetchAt));
+  }
+
+  // --- Proof of delivery (#407): short-lived signed file links, fetched only for a verified session ---
+
+  const POD_KINDS = new Set(['photo', 'signature']);
+
+  function readProofCompletion(payload) {
+    const tracking = payload && typeof payload === 'object' ? payload.tracking || payload : null;
+    const completion = tracking?.shipment?.delivery_completion;
+    return completion && typeof completion === 'object' ? completion : null;
+  }
+
+  function isProofPartial(payload) {
+    const completion = readProofCompletion(payload);
+    return completion?.completion_kind === 'partial' && Number(completion.delivered_box_count) > 0;
+  }
+
+  function shouldLoadProof(payload) {
+    const tracking = payload && typeof payload === 'object' ? payload.tracking || payload : null;
+    const status = String(tracking?.shipment?.status || '').trim().toLowerCase();
+    return status === 'delivered' || isProofPartial(payload);
+  }
+
+  function formatProofTime(value, options = { hour: 'numeric', minute: '2-digit' }) {
+    const at = new Date(value);
+    if (!value || Number.isNaN(at.getTime())) return '';
+    try {
+      return new Intl.DateTimeFormat(root.lang || 'en', options).format(at);
+    } catch {
+      return '';
+    }
+  }
+
+  function proofFileUrl(url) {
+    try {
+      const base = new URL(resolveTrackingEndpoint(), window.location.href);
+      const target = new URL(String(url || ''), base);
+      // The session token is sent only to the tracking API's own origin.
+      return target.origin === base.origin && /^https?:$/.test(target.protocol) ? target.href : '';
+    } catch {
+      return '';
+    }
+  }
+
+  async function fetchProofFile(artifact, token, controller) {
+    const href = proofFileUrl(artifact.url);
+    if (!href) return '';
+    try {
+      const response = await fetch(href, {
+        method: 'POST',
+        mode: 'cors',
+        credentials: 'omit',
+        cache: 'no-store',
+        referrerPolicy: 'no-referrer',
+        headers: withPublicEdgeHeaders({ 'content-type': 'application/json' }),
+        body: JSON.stringify({ session_token: token }),
+        signal: controller.signal,
+      });
+      if (!response.ok) return '';
+      const blob = await response.blob();
+      return /^image\//.test(blob.type) ? URL.createObjectURL(blob) : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function revokeProofItems(items) {
+    items.forEach((item) => {
+      if (item.src) URL.revokeObjectURL(item.src);
+    });
+  }
+
+  function setProofView(view, { proof = null, items = [] } = {}) {
+    revokeProofItems(state.proof.items);
+    state.proof.view = view;
+    state.proof.data = proof;
+    state.proof.items = items;
+    renderProofCard();
+  }
+
+  function resetProof() {
+    invalidateTrackingRequests(['proof']);
+    closeProofDialog({ restoreFocus: false });
+    setProofView('none');
+  }
+
+  async function loadProof(payload = state.trackingPayload) {
+    closeProofDialog({ restoreFocus: false });
+    const token = state.trackingSessionToken;
+    if (!token || state.trackingStage !== 'results' || !shouldLoadProof(payload)) {
+      invalidateTrackingRequests(['proof']);
+      setProofView('none');
+      return;
+    }
+    const request = beginTrackingRequest('proof');
+    setProofView('loading');
+    try {
+      const timeoutId = window.setTimeout(() => request.controller.abort(), PUBLIC_REQUEST_TIMEOUT_MS);
+      try {
+        const { response, data } = await postTracking('proof', { session_token: token }, request.controller);
+        if (!isCurrentTrackingRequest(request)) return;
+        if (!response.ok || !data || data.ok === false) {
+          const code = data?.error?.code;
+          if (code === 'invalid_session') {
+            saveTrackingSession('');
+            setProofView('session');
+          } else {
+            setProofView(code === 'proof_unavailable' ? 'unavailable' : 'error');
+          }
+          return;
+        }
+        const proof = data.proof && typeof data.proof === 'object' ? data.proof : {};
+        const artifacts = (Array.isArray(proof.artifacts) ? proof.artifacts : [])
+          .filter((artifact) => artifact && POD_KINDS.has(artifact.kind));
+        if (proof.state === 'expired') {
+          setProofView('expired');
+          return;
+        }
+        // One tile per artifact the policy left in; with none, the proof section is not rendered.
+        if (proof.state !== 'available' || !artifacts.length) {
+          setProofView('unavailable');
+          return;
+        }
+        const items = await Promise.all(artifacts.map(async (artifact) => ({
+          kind: artifact.kind,
+          captured_at: artifact.captured_at,
+          src: await fetchProofFile(artifact, token, request.controller),
+        })));
+        if (!isCurrentTrackingRequest(request)) {
+          revokeProofItems(items);
+          return;
+        }
+        setProofView(items.every((item) => item.src) ? 'ready' : 'error', { proof, items });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    } catch {
+      if (isCurrentTrackingRequest(request)) setProofView('error');
+    } finally {
+      finishTrackingRequest(request);
+    }
+  }
+
+  function renderProofTile(item, index) {
+    const lang = root.lang || 'en';
+    const isPhoto = item.kind === 'photo';
+    const time = formatProofTime(item.captured_at);
+    const thumb = document.createElement(item.src ? 'button' : 'div');
+    thumb.className = 'pod-thumb';
+    const tile = document.createElement('span');
+    tile.className = isPhoto ? 'pod-tile' : 'pod-tile is-signature';
+    if (item.src) {
+      thumb.type = 'button';
+      thumb.dataset.trackProofIndex = String(index);
+      thumb.setAttribute('aria-haspopup', 'dialog');
+      thumb.setAttribute('aria-label', isPhoto
+        ? (time ? getText('track_pod_open_photo', lang).replace('{time}', time) : getText('track_pod_open_photo_plain', lang))
+        : getText('track_pod_open_signature', lang));
+      const img = document.createElement('img');
+      img.src = item.src;
+      img.alt = '';
+      img.setAttribute('aria-hidden', 'true');
+      tile.append(img);
+    } else {
+      const missing = document.createElement('span');
+      missing.className = 'pod-missing';
+      const title = document.createElement('strong');
+      title.textContent = getText(isPhoto ? 'track_pod_photo_missing' : 'track_pod_signature_missing', lang);
+      missing.append(title, getText('track_pod_missing_hint', lang));
+      tile.append(missing);
+    }
+    const name = document.createElement('strong');
+    name.textContent = getText(isPhoto ? 'track_pod_photo' : 'track_pod_signature', lang);
+    const caption = document.createElement('span');
+    const recipient = String(state.proof.data?.recipient_name || '').trim();
+    if (isPhoto && time) fillTextWithBdi(caption, getText('track_pod_photo_caption', lang), 'time', time);
+    else if (isPhoto) caption.textContent = getText('track_pod_photo_caption_plain', lang);
+    else if (recipient) fillTextWithBdi(caption, getText('track_pod_signature_caption', lang), 'name', recipient);
+    else caption.textContent = getText('track_pod_signature_caption_plain', lang);
+    thumb.append(tile, name, caption);
+    return thumb;
+  }
+
+  function renderProofCard() {
+    if (!trackProofCard) return;
+    const lang = root.lang || 'en';
+    const { view, items } = state.proof;
+    const notices = {
+      expired: ['track_pod_expired_title', 'track_pod_expired_text'],
+      session: ['track_pod_session_title', 'track_pod_session_text'],
+    };
+    trackProofCard.hidden = !['loading', 'ready', 'error', 'expired', 'session'].includes(view);
+    if (trackProofPlain) trackProofPlain.hidden = view !== 'unavailable';
+
+    const completion = readProofCompletion(state.trackingPayload);
+    const partial = isProofPartial(state.trackingPayload) && Number(completion.box_count) > 0;
+    if (trackProofLock) {
+      if (partial) {
+        const number = new Intl.NumberFormat(lang);
+        trackProofLock.textContent = getText('track_pod_boxes', lang)
+          .replace('{delivered}', number.format(Number(completion.delivered_box_count)))
+          .replace('{total}', number.format(Number(completion.box_count)));
+      } else {
+        trackProofLock.textContent = getText('track_masked_pill', lang);
+      }
+    }
+
+    if (trackProofGrid) {
+      if (view === 'loading') {
+        const skeletons = [0, 1].map(() => {
+          const skel = document.createElement('span');
+          skel.className = 'track-courier-skel pod-skel';
+          skel.setAttribute('aria-hidden', 'true');
+          return skel;
+        });
+        trackProofGrid.replaceChildren(...skeletons);
+      } else {
+        trackProofGrid.replaceChildren(...items.map(renderProofTile));
+      }
+    }
+
+    const notice = notices[view];
+    if (trackProofNotice) trackProofNotice.hidden = !notice;
+    if (notice && trackProofNoticeTitle) trackProofNoticeTitle.textContent = getText(notice[0], lang);
+    if (notice && trackProofNoticeText) trackProofNoticeText.textContent = getText(notice[1], lang);
+
+    const until = items.length ? formatProofTime(state.proof.data?.available_until, {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    }) : '';
+    if (trackProofMeta) trackProofMeta.hidden = !until;
+    if (until) fillTextWithBdi(trackProofMeta, getText('track_pod_available_until', lang), 'time', until);
+    if (trackProofPartial) trackProofPartial.hidden = !(partial && items.length);
+
+    if (trackProofStatus) {
+      const key = view === 'loading' ? 'track_pod_loading' : view === 'error' ? 'track_pod_error_status' : '';
+      trackProofStatus.textContent = key ? getText(key, lang) : '';
+      trackProofStatus.classList.toggle('is-error', view === 'error');
+    }
+    if (trackProofReload) trackProofReload.hidden = view !== 'error';
+    if (trackProofReverify) trackProofReverify.hidden = view !== 'session';
+    if (trackProofOverlay && !trackProofOverlay.hidden) renderProofDialog();
+  }
+
+  function viewableProofItems() {
+    return state.proof.items.map((item, index) => ({ ...item, index })).filter((item) => item.src);
+  }
+
+  function renderProofDialog() {
+    const lang = root.lang || 'en';
+    const viewable = viewableProofItems();
+    const position = viewable.findIndex((item) => item.index === state.proof.dialogIndex);
+    const item = viewable[position];
+    if (!item) {
+      closeProofDialog({ restoreFocus: false });
+      return;
+    }
+    const isPhoto = item.kind === 'photo';
+    const time = formatProofTime(item.captured_at);
+    if (trackProofDialogTitle) trackProofDialogTitle.textContent = getText(isPhoto ? 'track_pod_photo' : 'track_pod_signature', lang);
+    if (trackProofDialogCopy) {
+      trackProofDialogCopy.textContent = getText(isPhoto ? 'track_pod_photo_dialog_copy' : 'track_pod_signature_dialog_copy', lang);
+    }
+    if (trackProofDialogTile) trackProofDialogTile.classList.toggle('is-signature', !isPhoto);
+    if (trackProofDialogImage) {
+      trackProofDialogImage.src = item.src;
+      trackProofDialogImage.alt = isPhoto
+        ? (time ? getText('track_pod_photo_alt', lang).replace('{time}', time) : getText('track_pod_photo_alt_plain', lang))
+        : getText('track_pod_signature_alt', lang);
+    }
+    if (trackProofDialogMeta) {
+      const number = new Intl.NumberFormat(lang);
+      const count = getText('track_pod_position', lang)
+        .replace('{index}', number.format(position + 1))
+        .replace('{total}', number.format(viewable.length));
+      const bdi = document.createElement('bdi');
+      bdi.textContent = formatProofTime(item.captured_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+      trackProofDialogMeta.replaceChildren(...(bdi.textContent ? [bdi, ' · '] : []), count);
+    }
+    if (trackProofNext) trackProofNext.hidden = viewable.length < 2;
+  }
+
+  function openProofDialog(index) {
+    if (!trackProofOverlay || !state.proof.items[index]?.src) return;
+    state.proof.dialogIndex = index;
+    trackProofOverlay.hidden = false;
+    document.body.classList.add('track-map-overlay-open');
+    renderProofDialog();
+    if (trackProofClose) trackProofClose.focus();
+  }
+
+  function closeProofDialog({ restoreFocus = true } = {}) {
+    if (!trackProofOverlay || trackProofOverlay.hidden) return;
+    trackProofOverlay.hidden = true;
+    if (trackProofDialogImage) trackProofDialogImage.removeAttribute('src');
+    if (!trackMapOverlay || trackMapOverlay.hidden) document.body.classList.remove('track-map-overlay-open');
+    // Tiles are re-rendered on a language change, so focus returns to the tile by index.
+    const tile = trackProofGrid?.querySelector(`[data-track-proof-index="${state.proof.dialogIndex}"]`);
+    if (restoreFocus && tile) tile.focus();
+  }
+
+  function showNextProof() {
+    const viewable = viewableProofItems();
+    const position = viewable.findIndex((item) => item.index === state.proof.dialogIndex);
+    const next = viewable[(position + 1) % viewable.length];
+    if (!next) return;
+    state.proof.dialogIndex = next.index;
+    renderProofDialog();
+  }
+
+  function handleProofDialogKeydown(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeProofDialog();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = [trackProofClose, trackProofNext].filter((el) => el && !el.hidden);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (!focusable.includes(active) || (event.shiftKey ? active === first : active === last)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    }
+  }
+
   async function postTracking(action, body, controller = new AbortController()) {
     const url = resolveTrackingUrl(action);
     if (!url) throw new Error('missing_tracking_endpoint');
@@ -2307,11 +2952,6 @@
         if (state.trackingRequestInFlight.location_change) return;
         const key = pickerEl === trackMapDialogPicker ? 'expanded' : 'inline';
         setMapPinAtCenter(mapControllers[key]);
-        return;
-      }
-      if (e.key === 'Escape' && trackMapOverlay && !trackMapOverlay.hidden) {
-        e.preventDefault();
-        closeMapOverlay();
       }
     });
   }
@@ -2374,6 +3014,31 @@
     });
   }
 
+  const DIALOG_FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  // Modal dialog keyboard contract: Escape closes from any control, Tab and Shift+Tab wrap inside.
+  function handleMapOverlayKeydown(e) {
+    if (trackMapOverlay.hidden) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeMapOverlay();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const focusable = [...trackMapOverlay.querySelectorAll(DIALOG_FOCUSABLE)]
+      .filter((el) => el.getClientRects().length > 0);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
   function closeMapOverlay() {
     if (!trackMapOverlay || trackMapOverlay.hidden) return;
     trackMapOverlay.hidden = true;
@@ -2398,6 +3063,8 @@
       trackMapDialogPicker.setAttribute('aria-label', getText('track_location_map_aria_expanded', lang) || 'Expanded shipment location map');
     }
     if (state.trackingPayload) renderTrackingPayload(state.trackingPayload);
+    renderLiveDeliveryCard();
+    renderProofCard();
     syncMapPinUi();
   }
 
@@ -2439,6 +3106,8 @@
       saveTrackingSession(token);
       renderTrackingPayload(data);
       setTrackingStage('results');
+      applyLiveDelivery(data);
+      loadProof(data);
     } catch {
       if (!isCurrentTrackingRequest(request)) return;
       saveTrackingSession('');
@@ -2551,6 +3220,8 @@
       renderTrackingPayload(data);
       setTrackingStage('results');
       setOwnedTrackingRequestStatus(request, '');
+      startLiveDelivery(data);
+      loadProof(data);
     } catch (error) {
       if (!isCurrentTrackingRequest(request)) return;
       setOwnedTrackingRequestStatus(
@@ -3038,8 +3709,32 @@
       trackMapOverlay.addEventListener('click', (e) => {
         if (e.target === trackMapOverlay) closeMapOverlay();
       });
+      trackMapOverlay.addEventListener('keydown', handleMapOverlayKeydown);
     }
 
+    if (trackProofGrid) {
+      trackProofGrid.addEventListener('click', (e) => {
+        const thumb = e.target instanceof Element ? e.target.closest('[data-track-proof-index]') : null;
+        if (thumb) openProofDialog(Number(thumb.dataset.trackProofIndex));
+      });
+    }
+    if (trackProofReload) trackProofReload.addEventListener('click', () => loadProof());
+    if (trackProofReverify) {
+      trackProofReverify.addEventListener('click', () => resetTrackingFlow({ clearReference: false, scroll: true }));
+    }
+    if (trackProofClose) trackProofClose.addEventListener('click', () => closeProofDialog());
+    if (trackProofNext) trackProofNext.addEventListener('click', showNextProof);
+    if (trackProofOverlay) {
+      trackProofOverlay.addEventListener('keydown', handleProofDialogKeydown);
+      trackProofOverlay.addEventListener('click', (e) => {
+        if (e.target === trackProofOverlay) closeProofDialog();
+      });
+    }
+    document.addEventListener('visibilitychange', handleLiveDeliveryVisibility);
+    if (trackCourierRetry) trackCourierRetry.addEventListener('click', () => fetchLiveDelivery());
+    if (trackCourierReverify) {
+      trackCourierReverify.addEventListener('click', () => resetTrackingFlow({ clearReference: false, scroll: true }));
+    }
     window.addEventListener('pagehide', () => invalidateTrackingRequests());
     hydrateTrackingSession();
     syncMapPinUi();

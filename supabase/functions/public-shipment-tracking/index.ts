@@ -3,6 +3,8 @@ import { resolveBrowserCorsPolicy } from "./_shared/cors.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2.119.0";
 import { logStructured, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 
+import { serveTrackingProof } from "./proof.ts";
+
 type JsonRecord = Record<string, unknown>;
 
 const SUPABASE_URL = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);
@@ -49,6 +51,8 @@ const mapRpcErrorToStatus = (code: string): number => {
   switch (code) {
     case "rate_limited":
       return 429;
+    case "changes_closed":
+      return 409;
     case "disabled":
       return 503;
     case "invalid_session":
@@ -173,12 +177,13 @@ const createServiceClient = () => {
   });
 };
 
-const pathAction = (pathname: string): "lookup" | "verify" | "session" | "request" | "" => {
+const pathAction = (pathname: string): "lookup" | "verify" | "session" | "request" | "options" | "" => {
   const normalized = pathname.replace(/\/+$/g, "");
   if (normalized.endsWith("/lookup")) return "lookup";
   if (normalized.endsWith("/verify")) return "verify";
   if (normalized.endsWith("/session")) return "session";
   if (normalized.endsWith("/request")) return "request";
+  if (normalized.endsWith("/options")) return "options";
   return "";
 };
 
@@ -188,6 +193,7 @@ const TRACKING_RPC_BY_ACTION: Record<string, string> = {
   verify: "public_tracking_verify_v1",
   session: "public_tracking_session_v1",
   request: "public_tracking_submit_request_v2",
+  options: "public_tracking_delivery_options_v1",
 };
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -204,8 +210,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json(405, { ok: false, error: { code: "method_not_allowed" } }, cors.headers);
   }
 
-  const action = pathAction(new URL(req.url).pathname);
-  if (!action) {
+  const requestUrl = new URL(req.url);
+  const action = pathAction(requestUrl.pathname);
+  const isProof = /\/proof(?:\/file)?\/*$/.test(requestUrl.pathname);
+  if (!action && !isProof) {
     return json(404, { ok: false, error: { code: "not_found" } }, cors.headers);
   }
 
@@ -287,6 +295,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const ipHash = await sha256Hex(`${effectiveIpHashSalt}:${clientIp}`);
+  if (isProof) {
+    return serveTrackingProof(serviceClient, { ...payload, ip_hash: ipHash }, requestUrl, cors.headers, effectiveIpHashSalt);
+  }
+
   let turnstileVerified = false;
 
   if (routeRequiresTurnstile(action)) {

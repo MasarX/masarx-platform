@@ -132,7 +132,7 @@ apps/console/app/marketplace/requests/page.tsx 1
 apps/console/app/marketplace/settlements/page.tsx 1
 apps/console/app/operations/public-tracking-requests/page.tsx 1
 apps/console/app/workflows/templates/page.tsx 2
-apps/fieldops/App.tsx 505
+apps/fieldops/App.tsx 486
 apps/fieldops/src/components/BottomSheet.tsx 2
 apps/fieldops/src/components/Skeleton.tsx 2
 apps/fieldops/src/fixtures/mobile-v2-bay-detail-fixtures.ts 1

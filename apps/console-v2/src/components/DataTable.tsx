@@ -1664,17 +1664,8 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
     const cols = visibleColumns();
     const colCount = cols.length + (allowSelection ? 1 : 0) + (allRowActions.length ? 1 : 0);
 
-    if (!processed.length) {
-      return (
-        <tbody>
-          <tr>
-            <td colSpan={colCount} style={{ padding: 0 }}>
-              <StateView kind="empty" hint={emptyText} />
-            </td>
-          </tr>
-        </tbody>
-      );
-    }
+    // The empty state renders beside the table, not in a cell (see the top-level render).
+    if (!processed.length) return null;
 
     if (groupBy) {
       const groups = groupRows(processed, groupBy);
@@ -1861,6 +1852,8 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
           {renderHeader()}
           {renderBody()}
         </table>
+        {/* Beside the table: a cell spanning every column is as wide as the columns, wider than a phone. */}
+        {processed.length ? null : <StateView kind="empty" hint={emptyText} />}
       </div>
       {/* Per-instance overlay nodes — render them so the hooks have a portal anchor. */}
       {drawer?.node ?? null}
