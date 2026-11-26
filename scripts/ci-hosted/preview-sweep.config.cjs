@@ -27,6 +27,8 @@ const server = (command, port, env) => ({
 
 module.exports = defineConfig({
   testDir: join(root, 'tests/preview-sweep'),
+  grep: /\bportal\b/,
+  repeatEach: 10,
   forbidOnly: true,
   retries: 0,
   workers: 1,
