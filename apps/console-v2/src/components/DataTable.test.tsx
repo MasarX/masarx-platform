@@ -112,6 +112,15 @@ describe('DataTable', () => {
     expect(screen.getByText(/Nothing here yet/i)).toBeInTheDocument();
   });
 
+  it('renders the empty state beside the table so the columns do not set its width', () => {
+    renderWithProviders(<DataTable<Row> columns={COLS} rows={[]} />);
+    const title = screen.getByText(/Nothing here yet/i);
+    expect(title.closest('table')).toBeNull();
+    // Still inside the table's scroll area, so a short table keeps scrolling to it.
+    expect(title.closest('.dt')).not.toBeNull();
+    expect(screen.getByRole('columnheader', { name: /AWB/ })).toBeInTheDocument();
+  });
+
   it('renders empty datetime values as blanks instead of the Unix epoch', () => {
     renderWithProviders(
       <DataTable
