@@ -26,6 +26,8 @@ test("finance viewer can open the Console Dashboard", async ({ context }) => {
     await expect(ready, failure).toBeVisible();
     await expect(blockingState, failure).toHaveCount(0);
     await expect(heading, failure).toBeVisible();
+    await expect(page.getByTestId("console-dashboard-module-finance-settlements"), failure).toBeVisible();
+    await expect(page.getByTestId("console-dashboard-action-shipments.create"), failure).toHaveCount(0);
   } catch {
     throw new Error(failure);
   }
