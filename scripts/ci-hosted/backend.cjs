@@ -132,6 +132,12 @@ function timeHostedCloneCommand(summary, admin, ...commands) {
   return stage(summary, `database-clone:${clone[1]}`, () => admin(...commands));
 }
 
+function dropHostedDatabases(summary, admin, databases) {
+  return stage(summary, 'database-clone-cleanup', async () => {
+    for (const database of databases) await admin(`DROP DATABASE ${database} WITH (FORCE)`);
+  });
+}
+
 async function withHostedCloneIsolation(admin, restore, clone) {
   const { rolconnlimit, rolsuper, logLevel, restoreLogging } = JSON.parse(await admin(`SELECT json_build_object(
     'rolconnlimit', rolconnlimit, 'rolsuper', rolsuper, 'logLevel', setting,
@@ -270,8 +276,7 @@ async function runHostedShard({ selected, checked, testEnv, admin, summary, dock
       diskFloor(dockerRoot);
       results = await Promise.allSettled(workers.map((files, index) => execute(`worker-${index}`, files, index === 0 ? 'postgres' : databases[index - 1])));
     } finally {
-      if (created.length) await stage(summary, 'database-clone-cleanup', () =>
-        admin(15000, ...created.map(database => `DROP DATABASE ${database} WITH (FORCE)`)));
+      if (created.length) await dropHostedDatabases(summary, boundedAdmin, created);
     }
     // Shared state and database catalog assertions see only the canonical database and no concurrent tests.
     const [serialResult] = await Promise.allSettled([execute('worker-0-serial', serial)]);
@@ -712,4 +717,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, timeHostedCloneCommand, withHostedCloneIsolation, pgtapDeadline };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, timeHostedCloneCommand, dropHostedDatabases, withHostedCloneIsolation, pgtapDeadline };

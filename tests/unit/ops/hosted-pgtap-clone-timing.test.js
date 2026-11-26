@@ -1,4 +1,4 @@
-const { timeHostedCloneCommand } = require('../../../scripts/ci-hosted/backend.cjs');
+const { timeHostedCloneCommand, dropHostedDatabases } = require('../../../scripts/ci-hosted/backend.cjs');
 
 test('records individual clone durations and preserves command results and failures', async () => {
   const summary = { stages: [] };
@@ -30,4 +30,29 @@ test('records individual clone durations and preserves command results and failu
     { name: 'database-clone:pgtap_worker_1', status: 'passed', durationMs: 20 },
     { name: 'database-clone:pgtap_worker_2', status: 'failed', durationMs: 35 },
   ]);
+});
+
+test('drops every hosted clone in a separate admin call', async () => {
+  const summary = { stages: [] };
+  const admin = jest.fn().mockResolvedValue('DROP DATABASE');
+  await dropHostedDatabases(summary, admin, ['pgtap_worker_1', 'pgtap_worker_2', 'pgtap_worker_3']);
+  expect(admin.mock.calls).toEqual([
+    ['DROP DATABASE pgtap_worker_1 WITH (FORCE)'],
+    ['DROP DATABASE pgtap_worker_2 WITH (FORCE)'],
+    ['DROP DATABASE pgtap_worker_3 WITH (FORCE)'],
+  ]);
+  expect(summary.stages).toMatchObject([{ name: 'database-clone-cleanup', status: 'passed' }]);
+});
+
+test('fails hosted clone cleanup when an individual drop fails', async () => {
+  const summary = { stages: [] };
+  const timeout = new Error('Drop timed out');
+  const admin = jest.fn().mockResolvedValueOnce('DROP DATABASE').mockRejectedValueOnce(timeout);
+  await expect(dropHostedDatabases(summary, admin, ['pgtap_worker_1', 'pgtap_worker_2', 'pgtap_worker_3']))
+    .rejects.toBe(timeout);
+  expect(admin.mock.calls).toEqual([
+    ['DROP DATABASE pgtap_worker_1 WITH (FORCE)'],
+    ['DROP DATABASE pgtap_worker_2 WITH (FORCE)'],
+  ]);
+  expect(summary.stages).toMatchObject([{ name: 'database-clone-cleanup', status: 'failed' }]);
 });
