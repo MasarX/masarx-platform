@@ -49,10 +49,11 @@ export async function strictConsoleSignIn(
 ) {
   const credentials = readCredentials(role);
   let failure = "SIGN_IN_FAILED/FORM_NOT_READY";
+  let passwordRequests = 0;
+  let submitted = false;
   try {
     const page = await context.newPage();
     const url = new URL(route, getConsoleBaseUrl());
-    let passwordRequests = 0;
     const countGrants = (request: Request) => {
       if (isPasswordGrant(request)) passwordRequests += 1;
     };
@@ -86,12 +87,14 @@ export async function strictConsoleSignIn(
       }, credentials, { timeout });
       if (!filled) throw new Error();
 
-      const [response] = await Promise.all([
+      const [response, submission] = await Promise.allSettled([
         page.waitForResponse((result) => isPasswordGrant(result.request()), { timeout }),
         form.locator('button[type="submit"]').click({ timeout }),
       ]);
-      if (!response.ok()) {
-        failure = "SIGN_IN_FAILED/REJECTED_" + response.status();
+      submitted = submission.status === "fulfilled";
+      if (!submitted || response.status === "rejected") throw new Error();
+      if (!response.value.ok()) {
+        failure = "SIGN_IN_FAILED/REJECTED_" + response.value.status();
         throw new Error();
       }
 
@@ -104,13 +107,13 @@ export async function strictConsoleSignIn(
       const cookies = await context.cookies(url.origin);
       if (!findSupabaseSessionIdentity(cookies, credentials.email)) throw new Error();
 
-      failure = "SIGN_IN_FAILED/FORM_NOT_READY";
       if (passwordRequests !== 1) throw new Error();
       return page;
     } finally {
       page.off("request", countGrants);
     }
   } catch {
-    throw new Error(failure);
+    const wrongRequestCount = passwordRequests > 1 || (submitted && passwordRequests === 0);
+    throw new Error(wrongRequestCount ? "SIGN_IN_FAILED/REQUEST_COUNT" : failure);
   }
 }
