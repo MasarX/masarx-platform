@@ -29,14 +29,19 @@ for (const app of ['console', 'console-v2', 'portal']) {
         const path = v2 ? '/operate/shipments' : '/resources/shipments';
         const reader = app === 'portal' ? 'sender_user' : 'dispatcher';
         const checkpoint = stage => console.log('\nSWEEP', app, locale, theme, size, stage);
+        const probeMarker = state => app === 'portal' && (state === 'error' || state === 'denied');
 
-        async function check(state, code, run) {
+        async function check(state, code, run, page) {
           try {
             return await run();
           } catch (error) {
             console.log('\nSWEEP-FAIL', app, locale, theme, size, state, code);
             if (code === 'marker' && error instanceof Error) {
               console.log('SWEEP-ERROR ' + error.message.replaceAll('\n', '\nSWEEP-ERROR '));
+              if (page && probeMarker(state) && error.message.includes('resolved to 2 elements')) {
+                const pair = await page.evaluate(() => window.__sweepMarkerPair ?? 'miss').catch(() => 'miss');
+                console.log('\nSWEEP-MARKERS', app, locale, theme, size, state, pair);
+              }
             }
             throw error;
           }
@@ -66,6 +71,28 @@ for (const app of ['console', 'console-v2', 'portal']) {
               }, { locale, theme, session: account.session }));
             }
             const page = await check(state, 'new-page', () => context.newPage());
+            if (probeMarker(state)) {
+              const markerTestId = state === 'error' ? 'portal-resource-error' : 'portal-resource-blocked';
+              await page.addInitScript(testId => {
+                const publicId = /^(portal-resource-(blocked|error|ready|shipment-search)|portal-app-shell-sidebar|route-(loading|error)-page)$/;
+                const publicTag = /^(a|article|aside|div|main|p|section|span)$/;
+                new MutationObserver(() => {
+                  const matches = document.querySelectorAll(`[data-testid="${testId}"]`);
+                  if (matches.length !== 2) return;
+                  window.__sweepMarkerPair = Array.from(matches, element => {
+                    const chain = [];
+                    for (let node = element; node; node = node.parentElement) {
+                      const id = node.getAttribute('data-testid');
+                      if (id !== null) chain.unshift(publicId.test(id) ? id : 'other');
+                    }
+                    const { width, height } = element.getBoundingClientRect();
+                    const visible = width > 0 && height > 0 && getComputedStyle(element).visibility === 'visible';
+                    const tag = publicTag.test(element.localName) ? element.localName : 'other';
+                    return `${tag}:${visible ? 'visible' : 'hidden'}:${chain.join('>')}`;
+                  }).join(' ');
+                }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-testid', 'hidden', 'style', 'class'] });
+              }, markerTestId);
+            }
             if (!v2 && state === 'empty') {
               // Hydrate the signed-in shell before triggering the route's streaming loading state.
               await check(state, 'open-shell', () => page.goto('/'));
@@ -92,7 +119,7 @@ for (const app of ['console', 'console-v2', 'portal']) {
           v2 ? 'h3.state__title' : ':scope > p:first-child',
         )) {
           checkpoint(state);
-          await check(state, 'marker', () => expect(container).toBeVisible());
+          await check(state, 'marker', () => expect(container).toBeVisible(), page);
           await check(state, 'marker-in-view', async () => {
             await marker.scrollIntoViewIfNeeded();
             const [vw, vh, x, y, width, height, ratio] = await container.evaluate(element => new Promise(resolve => {
