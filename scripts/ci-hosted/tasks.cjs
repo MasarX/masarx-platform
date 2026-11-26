@@ -6,6 +6,12 @@ const crypto = require('node:crypto');
 const { run: checked, retry } = require('./process.cjs');
 
 const root = process.cwd();
+const appSpeedConfig = 'scripts/ci-hosted/playwright.app-speed.config.cjs';
+const browserSuites = {
+  'landing-e2e': 'scripts/ci-hosted/playwright.landing.config.cjs',
+  'console-a11y': 'scripts/ci-hosted/playwright.console-a11y.config.cjs',
+  'console-seed': 'scripts/ci-hosted/playwright.console-seed.config.cjs',
+};
 const exists = file => fs.existsSync(path.join(root, file));
 const read = file => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
 const nextApps = () => !exists('apps') ? [] : fs.readdirSync('apps').filter(name => {
@@ -20,6 +26,11 @@ function npmScript(name, prefix) {
   const manifest = prefix ? read(`${prefix}/package.json`) : read('package.json');
   if (!manifest.scripts?.[name]) throw new Error(`Missing script ${prefix || '.'}:${name}`);
   run('npm', [...(prefix ? ['--prefix', prefix] : []), 'run', name]);
+}
+function appSpeed(app) {
+  process.env.SPEED_APP = app;
+  run(process.execPath, [require.resolve('@playwright/test/cli'), 'test',
+    '-c', appSpeedConfig]);
 }
 function detect(subject) {
   let present;
@@ -84,13 +95,23 @@ async function main() {
   if (command === 'build') {
     if (subject === 'landing') return npmScript('build:landing');
     if (!nextApps().some(app => `apps/${app}` === subject)) throw new Error('Build subject must be a Next app');
+    const measurePortal = subject === 'apps/portal' && process.env.CI_PORTAL_SPEED === '1';
+    if (measurePortal && process.env.NEXT_PUBLIC_SUPABASE_URL !== 'http://127.0.0.1:54321') {
+      throw new Error('Portal speed check requires the loopback fixture');
+    }
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = crypto.randomBytes(32).toString('hex');
-    return npmScript('build', subject);
+    npmScript('build', subject);
+    if (measurePortal) appSpeed('portal');
+    return;
   }
-  const suites = { 'landing-e2e': 'landing', 'console-a11y': 'console-a11y' };
-  if (command === 'browser-install' || suites[command]) {
+  if (command === 'console-v2-speed') {
+    process.env.VITE_USE_SEED = 'true';
+    npmScript('build', 'apps/console-v2');
+    return appSpeed('console-v2');
+  }
+  if (command === 'browser-install' || browserSuites[command]) {
     const args = command === 'browser-install' ? ['install', '--with-deps', 'chromium']
-      : ['test', '-c', `scripts/ci-hosted/playwright.${suites[command]}.config.cjs`];
+      : ['test', '-c', browserSuites[command]];
     return run(process.execPath, [require.resolve('@playwright/test/cli'), ...args]);
   }
   if (command === 'visual' || command === 'visual-preflight') {
@@ -113,4 +134,4 @@ async function main() {
   throw new Error('Unknown command');
 }
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { nextApps, detect, install };
+module.exports = { nextApps, detect, install, browserSuites, appSpeedConfig };

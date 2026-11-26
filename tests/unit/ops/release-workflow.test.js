@@ -4,7 +4,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const yaml = require('yaml');
 
-const body = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/provenance-on-tag.yml'), 'utf8');
+const body = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/release-on-tag.yml'), 'utf8');
 const workflow = yaml.parse(body);
 const { verify, build } = workflow.jobs;
 const gate = verify.steps.find(step => step.id === 'verify').run;
