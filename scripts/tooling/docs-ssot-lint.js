@@ -141,11 +141,32 @@ function lintDocEntry(rootDir, docEntry, options = {}) {
       const resolved = resolveLocalLink(rootDir, fullPath, rawTarget);
       if (!linkExists(resolved)) {
         issues.push(`${relPath}: broken_local_link "${rawTarget}"`);
+        continue;
+      }
+      const lineFragment = normalizeLinkTarget(rawTarget).split('#', 2)[1];
+      if (resolved && /^L\d/.test(lineFragment ?? '') && !validLineRange(resolved, lineFragment)) {
+        issues.push(`${relPath}: broken_line_link "${rawTarget}"`);
       }
     }
   }
 
   return issues;
+}
+
+function validLineRange(file, fragment) {
+  // shortcut: check bounds only. Pin a revision when the link must identify the same code.
+  const target = !path.extname(file) && !fs.existsSync(file) ? `${file}.md` : file;
+  const range = /^L(\d+)(?:-L(\d+))?$/.exec(fragment);
+  if (!range || !fs.statSync(target, { throwIfNoEntry: false })?.isFile()) return false;
+  const start = Number(range[1]);
+  const end = Number(range[2] ?? range[1]);
+  if (start < 1 || start > end) return false;
+
+  const content = fs.readFileSync(target, 'utf8');
+  if (!content) return false;
+  const lines = content.split(/\r\n|\n|\r/);
+  const count = lines.length - Number(lines.at(-1) === '');
+  return end <= count;
 }
 
 function runLint(opts = {}) {
