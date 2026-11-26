@@ -20,7 +20,7 @@ import {
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
 import { stripBasePath } from "./navigation-paths";
 import { useToast } from "./use-toast";
-import { formatUiError } from "./utils";
+import { formatUiError, UiMessageError } from "./utils";
 import { formatResourceValue } from "./resource-utils";
 import { labelFromKey } from "./resource-query";
 import {
@@ -853,7 +853,7 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
         enabled: nextEnabled,
       });
       if (updated?.workflow_run_trigger_id !== triggerId) {
-        throw new Error(t("triggers.workflowRuns.toast.updateErrorTitle"));
+        throw new UiMessageError(t("triggers.workflowRuns.toast.updateErrorTitle"));
       }
       const updatedRow = { ...row, ...updated, id: triggerId };
 
@@ -890,20 +890,20 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
       const targetTemplateId = editor.targetWorkflowTemplateId.trim();
 
       if (!sourceTemplateId || !targetTemplateId) {
-        throw new Error(t("triggers.workflowRuns.toast.missingTemplate"));
+        throw new UiMessageError(t("triggers.workflowRuns.toast.missingTemplate"));
       }
       if (sourceTemplateId === targetTemplateId) {
-        throw new Error(t("triggers.workflowRuns.toast.sameTemplate"));
+        throw new UiMessageError(t("triggers.workflowRuns.toast.sameTemplate"));
       }
 
       const statuses = parseStatuses(editor.sourceStatusesText) ?? (statusOptions.length ? [] : ["completed"]);
       if (statuses.length === 0) {
-        throw new Error(t("triggers.workflowRuns.toast.invalidStatuses"));
+        throw new UiMessageError(t("triggers.workflowRuns.toast.invalidStatuses"));
       }
 
       const contextPatch = contextPatchState.value;
       if (!contextPatch) {
-        throw new Error(t("triggers.workflowRuns.toast.invalidContextPatch"));
+        throw new UiMessageError(t("triggers.workflowRuns.toast.invalidContextPatch"));
       }
 
       const ui = createUiClient();
@@ -952,7 +952,7 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
           notes: editor.notes.trim(),
         });
         if (updated?.workflow_run_trigger_id !== editor.triggerId) {
-          throw new Error(t("triggers.workflowRuns.toast.updateErrorTitle"));
+          throw new UiMessageError(t("triggers.workflowRuns.toast.updateErrorTitle"));
         }
         const previous = [...incomingRows, ...outgoingRows].find(
           (row) => normalizeText(row.id) === editor.triggerId
@@ -988,7 +988,7 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
       const ui = createUiClient();
       const deleted = await ui.deleteWorkflowRunTrigger(del.triggerId);
       if (deleted?.workflow_run_trigger_id !== del.triggerId) {
-        throw new Error(t("triggers.workflowRuns.toast.deleteErrorTitle"));
+        throw new UiMessageError(t("triggers.workflowRuns.toast.deleteErrorTitle"));
       }
       toast({ tone: "success", title: t("triggers.workflowRuns.toast.deleted") });
       removeWorkflowRunRow(del.triggerId);
