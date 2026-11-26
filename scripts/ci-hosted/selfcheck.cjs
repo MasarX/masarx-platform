@@ -3,6 +3,8 @@ let checks = 0;
 const rawAssert = require('node:assert/strict');
 const assert = new Proxy(rawAssert, { get(target, key) { const value = target[key]; return typeof value === 'function' ? (...args) => { checks++; return value(...args); } : value; } });
 const fs = require('node:fs'); const path = require('node:path'); const crypto = require('node:crypto');
+const { createRequire } = require('node:module');
+const { runInNewContext } = require('node:vm');
 const { evaluate, identity, parseList, resultDetails, relativeFile } = require('./jest.cjs');
 const { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch } = require('./backend.cjs');
 const { handleRequest, handleConnect } = require('./deny-egress.cjs');
@@ -10,6 +12,7 @@ const { exceptions, assess, objectsAt, outOfOrder, orderFloor } = require('./mig
 const { targetBase, targetFile } = require('./target-policy.cjs');
 const { guardPlan } = require('./base-guard.cjs');
 const { changedPaths, select } = require('./changes.cjs');
+const { DEFAULT_CONFIG_PATH, runLint } = require('../tooling/docs-ssot-lint.js');
 const { workflowIgnore, installCommand, checkInstallPolicy, enforceWorkflowInventory } = require('./install-policy.cjs');
 const { installCommandPatternSource } = require('./install-policy.cjs');
 const { installCommandPatternFlags } = require('./install-policy.cjs');
@@ -189,7 +192,9 @@ assert.throws(() => guardPlan('candidate.js', base, readBase));
 assert.throws(() => guardPlan('jest.cjs', 'HEAD', readBase));
 assert.throws(() => guardPlan('jest.cjs', base, () => `120000 blob ${base}\tfile\0`));
 const affected = files => Object.entries(select(files)).filter(([, enabled]) => enabled).map(([gate]) => gate);
-assert.deepEqual(affected(['README.md']), []);
+for (const file of ['AGENTS.md', 'DELIVERY.md', 'DESIGN.md', 'CLAUDE.md', 'GEMINI.md', 'agents.md', 'SECURITY.md', 'README.md']) {
+  assert.deepEqual(affected([file]), ['unit'], file);
+}
 for (const file of ['docs/guides/synthetic.md', 'docs/api/openapi.json']) {
   assert.deepEqual(affected([file]), ['unit']);
 }
@@ -197,19 +202,21 @@ assert.deepEqual(affected(['supabase/migrations/synthetic.sql']), ['database', '
 for (const file of ['docs/marketing/landing-v2/index.html', 'scripts/frontend/serve-landing.js']) {
   assert.deepEqual(affected([file]), ['unit', 'build_landing', 'e2e']);
 }
-assert.deepEqual(affected(['tests/landing-e2e/synthetic.spec.ts']), ['e2e']);
+assert.deepEqual(affected(['tests/landing-e2e/synthetic.spec.ts']), ['unit', 'e2e']);
+assert.deepEqual(affected(['playwright.landing.config.ts']), ['unit', 'e2e']);
 assert.deepEqual(affected(['apps/console/app/page.tsx']), ['typecheck', 'unit', 'ui', 'build_console']);
 assert.deepEqual(affected(['apps/portal/app/page.tsx']), ['typecheck', 'unit', 'ui', 'build_portal']);
 assert.deepEqual(affected(['apps/landing/src/synthetic.ts']), ['typecheck', 'unit', 'ui', 'build_landing', 'e2e']);
 assert.deepEqual(affected(['apps/fieldops/src/synthetic.ts']), ['typecheck', 'unit', 'ui', 'build_console', 'build_portal', 'build_landing']);
 assert.deepEqual(affected(['tests/unit/synthetic.test.js', 'tests/ui/synthetic.test.tsx']), ['unit', 'ui']);
+assert.deepEqual(affected(['tests/ui/synthetic.test.tsx']), ['unit', 'ui']);
 for (const file of ['unknown/path.ts', 'unknown/path.md', 'synthetic.mdx', 'apps/shared/synthetic.ts',
   'apps/portal/package.json', 'packages/ui/src/synthetic.ts', 'packages/ui/bun.lockb',
   'docs/synthetic/manifest.yaml', '.github/workflows/public-ci.yml', 'scripts/ci-hosted/changes.cjs', 'config/synthetic.json']) {
   assert.deepEqual(select(['README.md', file]), select());
 }
 assert.equal(affected().length, 8);
-const cdWorkflows = ['.github/workflows/deploy.yml', '.github/workflows/provenance-on-tag.yml'];
+const cdWorkflows = ['.github/workflows/deploy.yml', '.github/workflows/release-on-tag.yml'];
 const cdTests = ['tests/unit/ops/dev-db-dry-run-workflow.test.js', 'tests/unit/ops/release-workflow.test.js'];
 const cdChanges = [...cdWorkflows, ...cdTests];
 assert.deepEqual(select(cdChanges, 'pull_request'), { ...select(), database: false });
@@ -285,6 +292,56 @@ const savedExists = fs.existsSync; const savedOutput = process.env.GITHUB_OUTPUT
 try { delete process.env.GITHUB_OUTPUT; fs.existsSync = file => file.split(path.sep).join('/').endsWith('scripts/frontend/build-landing.js'); console.log = line => detection.push(line); detect('landing'); }
 finally { fs.existsSync = savedExists; console.log = savedLog; if (savedOutput === undefined) delete process.env.GITHUB_OUTPUT; else process.env.GITHUB_OUTPUT = savedOutput; }
 assert.deepEqual(detection, ['landing: present']);
+
+const taskFile = require.resolve('./tasks.cjs');
+const taskRequire = createRequire(taskFile);
+const taskModule = { exports: {} };
+const lintCalls = [];
+function requireLintTask(name) {
+  if (name !== 'node:child_process') return taskRequire(name);
+  return {
+    spawnSync(command, args) {
+      lintCalls.push([command, ...args]);
+      return { status: 0 };
+    },
+  };
+}
+requireLintTask.main = taskModule;
+runInNewContext(fs.readFileSync(taskFile, 'utf8'), {
+  module: taskModule,
+  require: requireLintTask,
+  process: { argv: [process.execPath, taskFile, 'lint'], cwd: () => root, env: {} },
+}, { filename: taskFile });
+assert.ok(
+  lintCalls.some(([command, action, script]) => command === 'npm' && action === 'run' && script === 'lint:docs:ssot'),
+  'Hosted Lint must run npm run lint:docs:ssot',
+);
+assert.equal(
+  require('../../package.json').scripts['lint:docs:ssot'],
+  'node scripts/tooling/docs-ssot-lint.js',
+  'lint:docs:ssot must run the docs SSOT checker',
+);
+
+const docsLintRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hosted-docs-ssot-selfcheck-'));
+try {
+  const registry = path.join(docsLintRoot, DEFAULT_CONFIG_PATH);
+  fs.mkdirSync(path.dirname(registry), { recursive: true });
+  fs.writeFileSync(registry, JSON.stringify({ docs: [] }));
+  assert.deepEqual(runLint({ rootDir: docsLintRoot }).issues, ['critical_docs_registry_empty']);
+
+  const docs = ['DELIVERY.md', 'DESIGN.md'].map(doc => ({ path: doc, checkLinks: true }));
+  for (const doc of docs) fs.writeFileSync(path.join(docsLintRoot, doc.path), '# Fixture\n');
+  fs.writeFileSync(registry, JSON.stringify({ docs }));
+  assert.deepEqual(runLint({ rootDir: docsLintRoot }).issues, [
+    'missing_required_link_check "AGENTS.md"',
+    'missing_required_link_check "docs/product/mission.md"',
+    'missing_required_link_check "docs/guides/TESTING_GUIDE.md"',
+    'missing_required_link_check "docs/guides/LOCAL_SETUP.md"',
+  ]);
+} finally {
+  fs.rmSync(docsLintRoot, { recursive: true, force: true });
+}
+
 const emptyRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hosted-result-selfcheck-'));
 try {
   const run = require('node:child_process').spawnSync(process.execPath, [path.join(root, 'scripts/ci-hosted/jest.cjs'), 'unit'], {
