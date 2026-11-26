@@ -22,6 +22,26 @@ function mask(value) {
   console.log(`::add-mask::${value.replaceAll('%', '%25')}`);
 }
 
+async function reportFixtureWriteError(response) {
+  const error = await response.json();
+  // Supabase can wrap the PostgreSQL error in a message with additional row details.
+  const message = typeof error?.message === 'string' ? error.message : '';
+  const header = /^(?:Failed to run sql query: )?ERROR: +([0-9A-Z]{5}): +([^\r\n]*)/.exec(message);
+  const sqlstate = typeof error?.code === 'string' && /^[0-9A-Z]{5}$/.test(error.code) ? error.code : header?.[1];
+  if (!sqlstate) return;
+
+  const primary = header?.[2] ?? message.split(/[\r\n]/, 1)[0];
+  const constraint = error?.constraint ??
+    /^(?:duplicate key value|new row for relation "[^"]+"|insert or update on table "[^"]+") violates (?:unique|check|foreign key) constraint "([a-z_][a-z0-9_]*)"$/.exec(primary)?.[1];
+  const column = error?.column ??
+    /^(?:null value in column|column) "([a-z_][a-z0-9_]*)"(?: of relation "[^"]+")? (?:violates not-null constraint|does not exist)$/.exec(primary)?.[1];
+  const identifier = /^[a-z_][a-z0-9_]{0,62}$/;
+  let detail = '';
+  if (typeof constraint === 'string' && identifier.test(constraint)) detail = ` constraint=${constraint}`;
+  else if (typeof column === 'string' && identifier.test(column)) detail = ` column=${column}`;
+  console.error(`fixture_write_sqlstate=${sqlstate}${detail}`);
+}
+
 async function request(url, headers, reason, method = 'GET', body) {
   try {
     const response = await fetch(url, {
@@ -33,6 +53,7 @@ async function request(url, headers, reason, method = 'GET', body) {
     });
     if (response.ok) return method === 'DELETE' ? null : await response.json();
     if (reason === 'auth_config') console.error(`auth_config_http_status=${response.status}`);
+    if (reason === 'fixture_write') await reportFixtureWriteError(response);
   } catch {
     // Provider errors can contain configuration, identities or request data.
   }
