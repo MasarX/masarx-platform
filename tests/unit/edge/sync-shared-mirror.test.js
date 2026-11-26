@@ -9,6 +9,7 @@ test('Edge shared mirror preserves matching files and replaces divergent entries
     const script = path.join(root, 'scripts', 'edge', 'sync-shared.js');
     fs.mkdirSync(path.dirname(script), { recursive: true });
     fs.copyFileSync(path.resolve(__dirname, '../../../scripts/edge/sync-shared.js'), script);
+    fs.copyFileSync(path.resolve(__dirname, '../../../scripts/edge/shared-layout.cjs'), path.join(path.dirname(script), 'shared-layout.cjs'));
 
     const functions = path.join(root, 'supabase', 'functions');
     const source = path.join(functions, '_shared');

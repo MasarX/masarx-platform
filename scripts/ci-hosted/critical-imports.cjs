@@ -216,7 +216,7 @@ function localResolver(files, read) {
       const [targets, wildcard] = pathMapping(specifier, mappings);
       if (targets !== undefined) {
         for (const target of targets) {
-          const resolved = resolvePath(posix.join(mappingBase, target.replace('*', wildcard)), 'typescript');
+          const resolved = resolvePath(posix.join(mappingBase, target.replaceAll('*', wildcard)), 'typescript');
           if (resolved) return resolved;
         }
         missing();
@@ -237,7 +237,7 @@ function localResolver(files, read) {
     const [target, wildcard] = exports ? pathMapping(subpath, exports)
       : [subpath === '.' ? manifest.main ?? './index.js' : subpath, ''];
     if (typeof target !== 'string' || !target.startsWith('./')) missing();
-    const candidate = posix.join(directory, target.replace('*', wildcard));
+    const candidate = posix.join(directory, target.replaceAll('*', wildcard));
     if (!candidate.startsWith(directory + '/')) missing();
     return resolvePath(candidate, exports ? 'explicit' : mode) ?? missing();
   };

@@ -41,6 +41,7 @@ describe("edge rpc auth fallback", () => {
     const syncScript = path.join(fixtureRoot, "scripts", "edge", "sync-shared.js");
     fs.mkdirSync(path.dirname(syncScript), { recursive: true });
     fs.copyFileSync(path.join(repoRoot, "scripts", "edge", "sync-shared.js"), syncScript);
+    fs.copyFileSync(path.join(repoRoot, "scripts", "edge", "shared-layout.cjs"), path.join(path.dirname(syncScript), "shared-layout.cjs"));
     const functionsRoot = path.join(fixtureRoot, "supabase", "functions");
     fs.cpSync(path.dirname(sharedModulePath), path.join(functionsRoot, "_shared"), { recursive: true });
     functionSharedModulePaths = ["api-gateway", "webhook-receiver"].map((name) => {

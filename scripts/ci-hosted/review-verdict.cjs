@@ -222,7 +222,7 @@ function checkDocumentedPaths(docs, policy) {
   const critical = docs.split(/^## /m).find(section => section.startsWith('Critical changes ('));
   assert.ok(critical, 'Missing AGENTS.md critical changes section');
   const [rules, exclusions] = critical.split(/^\*\*Not critical on their own\.\*\*/m);
-  assert.ok(exclusions, 'Missing AGENTS.md critical changes exclusions');
+  assert.ok(exclusions !== undefined, 'Missing AGENTS.md critical changes exclusions');
   const documented = [...rules.matchAll(/`(\/?[\w.-]+(?:\/[\w.-]+)*\/?)`/g)]
     .map(([, filename]) => filename.replace(/^\//, ''));
   assert.ok(documented.length > 0, 'Missing AGENTS.md critical path references');
@@ -389,7 +389,9 @@ async function checkVerdicts(temp) {
     /Pending critical path is tracked: future\.config\.js/);
   assert.throws(() => checkPendingPaths(policy, objects.files(), objects.tracked, () => "const config = 'old.config.js';"),
     /Pending critical path is no longer named: future\.config\.js/);
-  assert.throws(() => criticalClosure([namingFile], objects.files(), () => "require('./missing.cjs');", matchesPattern),
+  const readMissingImportFixture = filename => filename === namingFile
+    ? "require('./missing.cjs');" : readFileSync(path.join(checkout, filename), 'utf8');
+  assert.throws(() => criticalClosure([namingFile], objects.files(), readMissingImportFixture, matchesPattern),
     /Unresolved local import .*missing\.cjs/);
   let nextId = 0;
   const earlier = '2026-01-01T00:00:00Z';

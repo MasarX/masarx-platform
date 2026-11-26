@@ -15,6 +15,7 @@ test.each([
     const script = path.join(root, 'scripts', 'edge', 'sync-shared.js');
     fs.mkdirSync(path.dirname(script), { recursive: true });
     fs.copyFileSync(path.resolve(__dirname, '../../../scripts/edge/sync-shared.js'), script);
+    fs.copyFileSync(path.resolve(__dirname, '../../../scripts/edge/shared-layout.cjs'), path.join(path.dirname(script), 'shared-layout.cjs'));
     const functions = path.join(root, 'supabase', 'functions');
     if (state !== 'absent') fs.mkdirSync(functions, { recursive: true });
     if (state === 'full') {
