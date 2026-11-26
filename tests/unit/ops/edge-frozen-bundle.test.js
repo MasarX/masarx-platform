@@ -1,5 +1,6 @@
 jest.mock('node:child_process', () => ({ spawnSync: jest.fn() }));
 jest.mock('../../../config/edge/functions.json', () => ({
+  use_api_bundle_limit_bytes: 1024,
   functions: [{ name: 'fixture-edge', enabled: true }],
 }));
 
