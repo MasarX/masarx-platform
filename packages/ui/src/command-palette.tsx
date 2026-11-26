@@ -472,12 +472,12 @@ export function CommandPalette({
           ) : null}
           {commandError ? (
             <div role="status" aria-live="polite" aria-atomic="true" data-testid={`${testIdPrefix}-command-palette-registry-error`}>
-              {t("registryUnavailable")} {formatUiError(commandError, t("registryUnavailable"))}
+              {t("registryUnavailable")} {formatUiError(commandError, "")}
             </div>
           ) : null}
           {readError || readLoading ? (
             <div role="status" aria-live="polite" aria-atomic="true" data-testid={`${testIdPrefix}-command-palette-read-registry-error`}>
-              {t("disabled.readUnavailable")} {readError ? formatUiError(readError, t("disabled.readUnavailable")) : t("readLoading")}
+              {t("disabled.readUnavailable")} {readError ? formatUiError(readError, "") : t("readLoading")}
             </div>
           ) : null}
           {allBlocked ? (

@@ -1,5 +1,7 @@
 import { screen } from "@testing-library/react";
-import { renderWithIntl } from "../../tests/ui/test-utils";
+import userEvent from "@testing-library/user-event";
+import type { UiCommandDefinition } from "@masarx/api";
+import { renderWithIntl } from "./test-utils";
 import { ResourceBulkActions } from "../../packages/ui/src/resource-bulk-actions";
 
 jest.mock("next/navigation", () => ({
@@ -8,17 +10,17 @@ jest.mock("next/navigation", () => ({
   usePathname: () => "/test",
 }));
 
+const rpcMock = jest.fn().mockResolvedValue({ status: "completed" });
+
 jest.mock("@masarx/api", () => ({
   ...jest.requireActual("@masarx/api"),
-  createUiClient: jest.fn(() => ({
-    executeCommand: jest.fn(),
-  })),
+  createUiClient: () => ({ rpc: rpcMock }),
 }));
 
 const defaultProps = {
   resourceKey: "shipments",
   resource: null,
-  commands: [] as any[],
+  commands: [],
   selectedIds: [] as string[],
   appKey: "console" as const,
   appBasePath: "/console",
@@ -26,36 +28,67 @@ const defaultProps = {
   userCapabilities: [],
 };
 
-test("renders without crashing with empty commands", () => {
+const refreshStatus: UiCommandDefinition = {
+  key: "shipments.refresh_status",
+  label: "Refresh shipment status",
+  execution: { type: "rpc", rpc: "ui_execute_command_v1" },
+  selection: { min_count: 1 },
+};
+
+const archiveShipments: UiCommandDefinition = {
+  key: "shipments.archive",
+  label: "Archive shipments",
+  capability: "shipments.archive",
+  execution: { type: "rpc", rpc: "ui_execute_command_v1" },
+  selection: { min_count: 1 },
+};
+
+const selectedIds = ["shipment-1", "shipment-2"];
+
+test("shows the empty-state message when selected rows have no actions", () => {
   renderWithIntl(
-    <ResourceBulkActions {...defaultProps} />
+    <ResourceBulkActions {...defaultProps} selectedIds={selectedIds} />
   );
 
-  // With empty commands and empty selectedIds, component renders without error
-  expect(true).toBe(true);
+  expect(
+    screen.getByText("No actions configured for this selection.")
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
 
-test("renders with selectedIds", () => {
+test("disables a named action when no rows are selected", () => {
+  renderWithIntl(<ResourceBulkActions {...defaultProps} commands={[refreshStatus]} />);
+
+  expect(
+    screen.getByRole("button", { name: "Refresh shipment status" })
+  ).toBeDisabled();
+});
+
+test("confirms the permitted action and disables the restricted action", async () => {
+  const user = userEvent.setup();
   renderWithIntl(
     <ResourceBulkActions
       {...defaultProps}
-      selectedIds={["id_1", "id_2"]}
+      commands={[refreshStatus, archiveShipments]}
+      selectedIds={selectedIds}
     />
   );
 
-  // With empty commands but non-empty selectedIds, renders the "empty" message
-  expect(screen.getByText(/./)).toBeInTheDocument();
-});
+  const refreshButton = screen.getByRole("button", { name: "Refresh shipment status" });
+  expect(refreshButton).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Archive shipments" })).toBeDisabled();
 
-test("handles empty selectedIds gracefully", () => {
-  renderWithIntl(
-    <ResourceBulkActions
-      {...defaultProps}
-      selectedIds={[]}
-      commands={[]}
-    />
-  );
+  await user.click(refreshButton);
+  expect(rpcMock).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Confirm" }));
 
-  // With no actions and no selected IDs, renders without error
-  expect(true).toBe(true);
+  expect(rpcMock).toHaveBeenCalledTimes(1);
+  expect(rpcMock).toHaveBeenCalledWith("ui_execute_command_v1", {
+    p_action_key: "shipments.refresh_status",
+    p_resource_key: "shipments",
+    p_selection_ids: selectedIds,
+    p_selection_id: null,
+    p_selection_count: 2,
+    p_params: null,
+  });
 });

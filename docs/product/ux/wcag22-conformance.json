@@ -1,0 +1,95 @@
+{
+  "about": "WCAG 2.2 AA conformance records for the criteria axe cannot check (#301). One record per core screen and criterion: status pass, fail or na, evidence, and an issue link for each fail. tests/unit/wcag22-conformance-records.test.js lists the required screens and criteria. Records whose evidence starts with 'ci:' are asserted by that spec in CI; the others are manual reviews.",
+  "screens": {
+    "landing": {
+      "name": "Landing (docs/marketing/landing-v2/index.html), EN and AR",
+      "records": {
+        "keyboard-focus-order": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance landing: keyboard-focus-order (Tab walk at 1440px: skip link first, DOM order, visible focus indicator, no positive tabindex)" },
+        "focus-not-obscured": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance landing: focus-not-obscured (each Tab stop hit-tested against the sticky header at 1440px and 390px)" },
+        "reflow-320": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance landing: reflow-320 (no text cut by the viewport edge at 320px)" },
+        "text-spacing": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance landing: text-spacing (1.4.12 overrides add no clipped text at 1440px and 390px)" },
+        "accessible-authentication": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance landing: accessible-authentication (the driver status token field accepts paste and is not read-only)" },
+        "consistent-help": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance landing: consistent-help (FAQ and contact links keep the same relative order across landing and tracking pages)" },
+        "redundant-entry": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance landing: redundant-entry (the driver documents step does not ask again for status lookup fields)" },
+        "status-messages": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance landing: status-messages (every form has a polite live region for its status)" },
+        "reduced-motion": { "status": "fail", "issue": "https://github.com/MasarX/masarx-platform/issues/493", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance landing: reduced-motion (under prefers-reduced-motion the page sets data-motion=off and runs no animation over 5 s; by default, motion over 5 s has a control that stops it). HTML ships data-motion=on, which outranks the OS setting in app.js, and the infinite aurora background runs with no stop control" }
+      }
+    },
+    "public-tracking": {
+      "name": "Public tracking (docs/marketing/landing-v2/track.html): lookup, verify, results, request forms and the map dialog, EN and AR",
+      "records": {
+        "keyboard-focus-order": { "status": "fail", "issue": "https://github.com/MasarX/masarx-platform/issues/495", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance public-tracking: keyboard-focus-order (Tab walk on the lookup and results stages: skip link first, DOM order, visible indicator, no positive tabindex; the map dialog takes focus, keeps Tab inside, closes on Escape and returns focus). The map dialog has aria-modal but no focus containment, so Tab moves to the footer behind it, and Escape closes it only from the map picker" },
+        "focus-not-obscured": { "status": "fail", "issue": "https://github.com/MasarX/masarx-platform/issues/546", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance public-tracking: focus-not-obscured (each Tab stop hit-tested at 1440px and 390px on lookup and results). The inline map's Zoom in control receives focus while entirely hidden on Arabic results at 390px (run 45414572556)" },
+        "reflow-320": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance public-tracking: reflow-320 (no text cut by the viewport edge at 320px, lookup and results stages)" },
+        "text-spacing": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance public-tracking: text-spacing (1.4.12 overrides add no clipped text, lookup and results stages)" },
+        "accessible-authentication": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance public-tracking: accessible-authentication (reference and last-3-digit fields accept paste and are not read-only, with the Turnstile host rendered by a local stub). The real managed Turnstile widget asks no puzzle (manual)" },
+        "consistent-help": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance public-tracking: consistent-help (FAQ and contact links keep the same relative order across landing and tracking pages)" },
+        "redundant-entry": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance public-tracking: redundant-entry (verify and request steps do not ask again for the reference or digits)" },
+        "status-messages": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance public-tracking: status-messages (every form has a polite live region and a failed lookup reports in it)" },
+        "reduced-motion": { "status": "fail", "issue": "https://github.com/MasarX/masarx-platform/issues/493", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance public-tracking: reduced-motion (under prefers-reduced-motion the page sets data-motion=off and runs no animation over 5 s; by default, motion over 5 s has a control that stops it). HTML ships data-motion=on, which outranks the OS setting in app.js, and the infinite aurora background runs with no stop control" }
+      }
+    },
+    "portal-tracking": {
+      "name": "Portal /tracking (apps/portal/app/tracking, packages/ui/src/tracking-page.tsx)",
+      "records": {
+        "keyboard-focus-order": { "status": "pass", "evidence": "ci: tests/ui/conformance-wcag22.test.tsx › portal-tracking keyboard-focus-order (labelled native controls, Tab order follows the DOM, no positive tabindex)" },
+        "focus-not-obscured": { "status": "pass", "evidence": "manual code review at aa89ab81a: AppShell keeps its header outside the overflow-y-auto content pane (packages/ui/src/app-shell.tsx), so focused page controls scroll inside the pane and nothing sticky covers them. No CI browser job serves the portal yet (#270)" },
+        "reflow-320": { "status": "pass", "evidence": "manual code review at aa89ab81a: the search form is flex-wrap with a 220px minimum field and wrapping buttons (packages/ui/src/tracking-search-form.tsx), which fits 320px less the page and form padding; the sidebar is a drawer below lg. No CI browser job serves the portal yet (#270)" },
+        "text-spacing": { "status": "pass", "evidence": "manual code review at aa89ab81a: the tracking page sets no fixed heights or overflow clipping on text containers (tracking-page.tsx, section.tsx, page-header.tsx, tracking-search-form.tsx). No CI browser job serves the portal yet (#270)" },
+        "accessible-authentication": { "status": "na", "evidence": "The page uses optional authentication and the lookup asks for no secret; sign-in is a separate screen (apps/portal/app/tracking/page.tsx authMode optional)" },
+        "consistent-help": { "status": "pass", "evidence": "manual code review at aa89ab81a: the only help mechanism, the keyboard shortcuts help, comes from the shared AppShell on every portal page in the same place (packages/ui/src/app-shell.tsx)" },
+        "redundant-entry": { "status": "na", "evidence": "Single-field, single-step lookup; the query is kept in the URL and read back after search" },
+        "status-messages": { "status": "pass", "evidence": "ci: tests/ui/conformance-wcag22.test.tsx › portal-tracking status-messages (query readback uses role=status, empty-search error uses role=alert and is linked by aria-describedby)" },
+        "reduced-motion": { "status": "pass", "evidence": "ci: tests/ui/conformance-wcag22.test.tsx › portal-tracking reduced-motion (no auto-running animate-* or width or transform transition without a motion-safe or motion-reduce guard on the page shell). The print progress widget in result tables has its own record" }
+      }
+    },
+    "print-progress-widget": {
+      "name": "Shared print progress widget (packages/ui/src/print-progress-widget.tsx), reduced motion only",
+      "records": {
+        "reduced-motion": { "status": "fail", "issue": "https://github.com/MasarX/masarx-platform/issues/489", "evidence": "ci: tests/ui/conformance-wcag22.test.tsx › print-progress-widget reduced-motion (spinner, indeterminate bar and width transition carry a motion-safe or motion-reduce guard). The spinner uses a bare animate-spin, the indeterminate bar animate-pulse and the fill transition-[width], and styles.css stops only .ui-shimmer under reduced motion" }
+      }
+    },
+    "fieldops-trips": {
+      "name": "FieldOps trips (apps/fieldops/src/mobile-v2-trips-screen.tsx), manual: axe does not run on React Native",
+      "records": {
+        "keyboard-focus-order": { "status": "pass", "evidence": "manual code review at aa89ab81a: trip cards, search field and Scan seal are Pressable or TextInput with accessibilityRole and accessibilityLabel, in reading order" },
+        "focus-not-obscured": { "status": "pass", "evidence": "manual code review at aa89ab81a: the list is a ScrollView with 96dp bottom padding for the tab bar, so the platform scrolls a focused card clear of it" },
+        "reflow-320": { "status": "pass", "evidence": "manual code review at aa89ab81a: flex rows with no fixed width above 320dp and font scaling left on (no allowFontScaling=false)" },
+        "text-spacing": { "status": "na", "evidence": "Native app: the platform gives users no way to override line, letter or word spacing (WCAG2ICT note for 1.4.12)" },
+        "accessible-authentication": { "status": "na", "evidence": "No sign-in step on this screen; driver sign-in is a separate screen" },
+        "consistent-help": { "status": "na", "evidence": "This screen offers no help mechanism" },
+        "redundant-entry": { "status": "na", "evidence": "Search only, no multi-step process" },
+        "status-messages": { "status": "na", "evidence": "Filtering updates the list in place and shows no status message" },
+        "reduced-motion": { "status": "pass", "evidence": "manual code review at aa89ab81a: no Animated, LayoutAnimation or looping animation on the screen" }
+      }
+    },
+    "fieldops-stop": {
+      "name": "FieldOps stop (apps/fieldops/src/mobile-v2-stop-screen.tsx), manual: axe does not run on React Native",
+      "records": {
+        "keyboard-focus-order": { "status": "pass", "evidence": "manual code review at aa89ab81a: parcel rows and proof checklist rows are Pressables with roles, labels and disabled state, in reading order" },
+        "focus-not-obscured": { "status": "pass", "evidence": "manual code review at aa89ab81a: content is one ScrollView; the only overlay is a pointer-events none fade over the mini map, which holds no focusable control" },
+        "reflow-320": { "status": "pass", "evidence": "manual code review at aa89ab81a: flex rows with no fixed width above 320dp and font scaling left on" },
+        "text-spacing": { "status": "na", "evidence": "Native app: the platform gives users no way to override line, letter or word spacing (WCAG2ICT note for 1.4.12)" },
+        "accessible-authentication": { "status": "na", "evidence": "No sign-in step on this screen" },
+        "consistent-help": { "status": "na", "evidence": "This screen offers no help mechanism" },
+        "redundant-entry": { "status": "na", "evidence": "The stop screen collects no input; proof capture happens on the POD screen" },
+        "status-messages": { "status": "fail", "issue": "https://github.com/MasarX/masarx-platform/issues/490", "evidence": "manual code review at aa89ab81a: the 'Action logged' readback appears as plain Text with no accessibilityLiveRegion or announcement" },
+        "reduced-motion": { "status": "pass", "evidence": "manual code review at aa89ab81a: no Animated, LayoutAnimation or looping animation on the screen" }
+      }
+    },
+    "fieldops-pod": {
+      "name": "FieldOps proof of delivery (apps/fieldops/src/mobile-v2-pod-screen.tsx), manual: axe does not run on React Native",
+      "records": {
+        "keyboard-focus-order": { "status": "fail", "issue": "https://github.com/MasarX/masarx-platform/issues/492", "evidence": "manual code review at aa89ab81a: 'Enter OTP code' moves focus to a TextInput placed off screen at opacity 0 with no accessibilityLabel, so the focused field is neither visible nor named" },
+        "focus-not-obscured": { "status": "pass", "evidence": "manual code review at aa89ab81a: steps render in a ScrollView under a static app bar; the camera overlay holds no focusable control" },
+        "reflow-320": { "status": "pass", "evidence": "manual code review at aa89ab81a: the 200dp scan frame and 4 x 54dp OTP cells fit 320dp; other rows are flex and wrap" },
+        "text-spacing": { "status": "na", "evidence": "Native app: the platform gives users no way to override line, letter or word spacing (WCAG2ICT note for 1.4.12)" },
+        "accessible-authentication": { "status": "na", "evidence": "The recipient OTP verifies the handover, not the driver's sign-in; driver sign-in is a separate screen" },
+        "consistent-help": { "status": "na", "evidence": "This screen offers no help mechanism" },
+        "redundant-entry": { "status": "pass", "evidence": "manual code review at aa89ab81a: recipient name and phone come from the stop and are shown, not asked again, across the photo, signature, OTP, cash and ID steps" },
+        "status-messages": { "status": "fail", "issue": "https://github.com/MasarX/masarx-platform/issues/490", "evidence": "manual code review at aa89ab81a: capture errors (PodCaptureError) are plain Text with no live region, and the busy ActivityIndicator has no accessible label" },
+        "reduced-motion": { "status": "pass", "evidence": "manual code review at aa89ab81a: only the platform ActivityIndicator while busy; no Animated, LayoutAnimation or looping animation" }
+      }
+    }
+  }
+}

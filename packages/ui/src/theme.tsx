@@ -12,7 +12,8 @@ type ThemeContextValue = {
   toggleTheme: () => void;
 };
 
-const THEME_STORAGE_KEY = "masarx-ui-theme";
+/** The one theme storage key every surface reads and writes. */
+export const THEME_STORAGE_KEY = "masarx-ui-theme";
 const THEME_ATTRIBUTE = "data-theme";
 
 const ThemeContext = React.createContext<ThemeContextValue | null>(null);
@@ -64,24 +65,32 @@ function persistTheme(theme: ThemeMode) {
  * Theme provider that syncs system preference with stored overrides.
  */
 export function ThemeProvider({ children }: { children?: React.ReactNode }) {
-  const [theme, setTheme] = React.useState<ThemeMode>("system");
+  // "system" first so server and client render alike; the stored choice loads after mount.
+  const [theme, setThemeState] = React.useState<ThemeMode>("system");
   const [resolvedTheme, setResolvedTheme] =
     React.useState<ResolvedTheme>("light");
 
   React.useEffect(() => {
-    const stored = readStoredTheme();
-    setTheme(stored);
+    setThemeState(readStoredTheme());
   }, []);
 
   React.useEffect(() => {
     const resolved = theme === "system" ? resolveSystemTheme() : theme;
     setResolvedTheme(resolved);
     applyTheme(resolved);
-    persistTheme(theme);
   }, [theme]);
 
+  // Storage is written only on a user's choice, so a mount (or StrictMode remount)
+  // never clears a stored theme before it has been read.
+  const setTheme = React.useCallback((next: ThemeMode) => {
+    persistTheme(next);
+    setThemeState(next);
+  }, []);
+
   React.useEffect(() => {
-    if (theme !== "system" || typeof window === "undefined") return;
+    if (theme !== "system" || typeof window === "undefined" || !window.matchMedia) {
+      return;
+    }
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const handleChange = () => {
       const resolved = resolveSystemTheme();
@@ -97,17 +106,13 @@ export function ThemeProvider({ children }: { children?: React.ReactNode }) {
   }, [theme]);
 
   const toggleTheme = React.useCallback(() => {
-    setTheme((current) => {
-      if (current === "system") {
-        return resolvedTheme === "dark" ? "light" : "dark";
-      }
-      return current === "dark" ? "light" : "dark";
-    });
-  }, [resolvedTheme]);
+    const current = theme === "system" ? resolvedTheme : theme;
+    setTheme(current === "dark" ? "light" : "dark");
+  }, [theme, resolvedTheme, setTheme]);
 
   const value = React.useMemo(
     () => ({ theme, resolvedTheme, setTheme, toggleTheme }),
-    [theme, resolvedTheme, toggleTheme]
+    [theme, resolvedTheme, setTheme, toggleTheme]
   );
 
   return (

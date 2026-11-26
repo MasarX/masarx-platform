@@ -639,7 +639,8 @@ describe("schedule run acceptance receipt", () => {
       expect(run).toHaveBeenCalledTimes(1);
       if (scenario === "RPC failure") {
         expect(screen.queryByTestId("receipt-run-readback-trigger-1")).not.toBeInTheDocument();
-        expect(await screen.findByText("Run denied")).toBeInTheDocument();
+        expect(await screen.findByText("Run schedule")).toBeInTheDocument();
+        expect(screen.queryByText("Run denied", { exact: false })).not.toBeInTheDocument();
         expect(mockedNavigateTo).not.toHaveBeenCalled();
       } else {
         const receipt = screen.getByTestId("receipt-run-readback-trigger-1");
@@ -650,7 +651,8 @@ describe("schedule run acceptance receipt", () => {
           expect(mockedNavigateTo).not.toHaveBeenCalled();
         } else {
           expect(within(receipt).getByRole("link")).toHaveAttribute("href", "/portal/workflows/runs/accepted-1");
-          expect(await screen.findByText("navigation unavailable")).toBeInTheDocument();
+          expect(await screen.findByText("The action was written, but its canonical read-back is not visible yet. Refresh and verify before retrying.")).toBeInTheDocument();
+          expect(screen.queryByText("navigation unavailable", { exact: false })).not.toBeInTheDocument();
         }
       }
       expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
