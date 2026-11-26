@@ -4,7 +4,7 @@ const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
 const { parse } = require('yaml');
 
-const workflow = parse(readFileSync(resolve(__dirname, '../../../.github/workflows/provenance-on-tag.yml'), 'utf8'));
+const workflow = parse(readFileSync(resolve(__dirname, '../../../.github/workflows/release-on-tag.yml'), 'utf8'));
 const { verify, build } = workflow.jobs;
 const tagChecks = verify.steps.find(step => step.id === 'verify').run.split('\nif ! sha=')[0];
 const bash = process.platform === 'win32' ? join(process.env.ProgramFiles, 'Git', 'bin', 'bash.exe') : 'bash';
