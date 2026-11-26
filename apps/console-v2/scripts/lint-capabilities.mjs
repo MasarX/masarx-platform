@@ -52,9 +52,8 @@ const { lexSqlForIsolation, splitTopLevelSqlStatements } = sqlScanner;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..', '..');
 const APP_ROOT = resolve(__dirname, '..');
-// Paths can be overridden via env vars for test isolation. Production CI uses
-// the defaults (FE registry under apps/console-v2 and migrations under
-// supabase/migrations at the repo root).
+// Tests can supply fixture paths for the registry, migrations, and drift lists.
+const LISTS_PATH = process.env.LINT_CAPABILITIES_LISTS_PATH;
 const REGISTRY_PATH = process.env.LINT_CAPABILITIES_REGISTRY_PATH
   ? resolve(process.env.LINT_CAPABILITIES_REGISTRY_PATH)
   : join(APP_ROOT, 'src', 'lib', 'seed-raw', 'registry.js');
@@ -123,7 +122,7 @@ const FE_ONLY_PENDING = Object.freeze(new Set([
   // gates for the operator console. Backend declares fine-grained
   // marketplace_*.read|write per resource (see
   // 202603071110_marketplace_network_registry_rls_v1.sql) plus action-scoped
-  // capabilities (`marketplace.award`, `marketplace.settle`, etc.).
+  // commands (`marketplace.award`, `marketplace.settle`, etc.).
   // Follow-up: either register the roll-up `marketplace.read|write` keys or
   // refactor the FE to gate on the per-resource keys.
   'marketplace.read',
@@ -215,11 +214,16 @@ const BACKEND_ONLY_ACCEPTED = Object.freeze(new Set([
   'addresses.write',           // surface uses addresses.read; writes flow via shipments.write
   'agreements.read',           // see ALIAS_MAP for `service_offerings.read`
   'agreements.write',          // canonical for service_offerings + branches surfaces
+  // Surfaced by the Next.js Console. Console V2 hosts no automation marketplace module.
+  'automation_marketplace.install',
+  'automation_marketplace.manage_connections',
+  'automation_marketplace.publish',
+  'automation_marketplace.read',
+  'automation_marketplace.review',
+  'automation_marketplace.upgrade',
   'api_routes.read',           // backend ingress observability internal
   'baskets.read',              // marketplace baskets — internal
   'baskets.write',
-  'dispatch_exception_review.complete',
-  'dispatch_exception_review_mine.complete',
   'fleet.read',                // FE surfaces drivers.* / vehicles.* aliases
   'fleet.write',
   'finance.read',              // FE umbrella surface; cod/settlements/billing roll up here
@@ -241,33 +245,15 @@ const BACKEND_ONLY_ACCEPTED = Object.freeze(new Set([
   // surfaces; the native app consumes them through row-driven mobile
   // navigation/RPC policy and the console proof lives in Mobile V2 evidence.
   'cash_drop.write',
+  'finance.withdrawal.request',
   'hold.read',
   'hold.write',
+  'kyc.write',
   'location_pings.write',      // mobile-only (Field Ops app)
   'manual_review.read',        // surface uses pickups.read / tasks.read aggregations
   'manual_review.resolve',
   'mappings.read',             // mapping studio internals
   'mappings.write',
-  // Marketplace action-scoped capabilities — fine-grained RPC asserts.
-  // Console surfaces (network/marketplace) gate on the roll-up
-  // `marketplace.read|write` (see FE_ONLY_PENDING). Each of these is
-  // consumed inside its corresponding RPC body.
-  'marketplace.accept_award',
-  'marketplace.approve',
-  'marketplace.award',
-  'marketplace.complete_work',
-  'marketplace.counter',
-  'marketplace.dispute',
-  'marketplace.expire',
-  'marketplace.finalize_settlement',
-  'marketplace.publish_availability',
-  'marketplace.quote',
-  'marketplace.reject_award',
-  'marketplace.release',
-  'marketplace.reopen',
-  'marketplace.reverse_settlement',
-  'marketplace.settle',
-  'marketplace.submit_offer',
   // Marketplace per-resource RLS keys — FE surfaces use the roll-up; the
   // per-resource keys are RLS-internal.
   'marketplace_awards.read',
@@ -291,81 +277,60 @@ const BACKEND_ONLY_ACCEPTED = Object.freeze(new Set([
   'marketplace_verification_records.write',
   'marketplace_work_packages.read',
   'marketplace_work_packages.write',
-  // Exception action-scoped capabilities consumed inside RPC bodies.
-  'mis_sort_exceptions.resolve_reassign',
   'operation_handlers.write',  // workflow handler internals
   'organizations.write',       // FE surfaces organizations.read; writes are
                                // tenant_signup_requests.review + RPC-level
   'provider_auth.read',        // integrations internals
   'requests.create',           // policy-request flow (FE uses inline UI)
   'requests.read',             // policy-request flow
-  // Route plan RPC-scoped capabilities — surface gates on route_plans.read|write
-  // (which IS in the backend declarations — verified by the lint).
-  'route_plans.publish',
-  'route_plans.rebalance',
-  'route_plans.solve_sequence',
-  // Route run / route stop / route assignment capabilities — driver-mobile only.
-  'route_runs.assign',         // Console command key, not a FE capability gate
-  'route_runs.accept_assignment',
-  'route_runs.acknowledge_assignment',
-  'route_runs.confirm_departure', // Console command key, not a FE capability gate
-  'route_runs.refuse_assignment',
-  'route_stops.reassign',
-  'routes.assign',
-  'routes.reassign',
   'scan_events.read',          // warehouse + driver mobile
   'scan_events.write',
   'settings.approve',          // FE surfaces settings.write at the surface
   'settings.request',
   'settings_category_registry.read', // Access/RBAC metadata plumbing; Console settings metadata reads gate on console_metadata.read/settings.read.
-  'shipments.delete',          // RPC-scoped (surface uses shipments.write)
-  'shipments.edit',
-  'shipments.print_labels',
-  'shipments.reschedule',
-  'shipments.resort',
-  'shipments.update_geocode',
-  'sla_deadline_alerts.complete',
-  'tabular_import.process',
-  // Task action-scoped capabilities consumed by mobile + RPC bodies.
-  'tasks.arrived',
-  'tasks.close_route',
-  'tasks.complete',
-  'tasks.en_route',
-  'tasks.exception',
-  'tasks.open',
-  'tasks.transition',          // Console command key, not a FE capability gate
+  'tasks.complete',            // action-scoped gate used by mobile and RPCs
   'trips.read',                // mobile-only (Field Ops app)
   'token_rotation.approve',    // platform/security-admin only
   'token_rotation.read',
   'token_rotation.request',
-  'unassigned_exceptions.claim',
   'usage.read',                // SaaS metering — internal
   'user_devices.read',         // FE uses devices.write surface alias
-  'user_devices.revoke',
   'user_devices.write',
   'users.manage',              // platform-admin only (FE uses organizations.read)
   'users.read',
-  // Warehouse transfer action-scoped capabilities (surface uses
-  // warehouse.read|write roll-up).
-  'warehouse_transfers.dispatch',
+  // Warehouse transfer gates for the warehouse.read|write roll-up.
   'warehouse_transfers.read',
-  'warehouse_transfers.reconcile_destination',
-  'warehouse_transfers.scan_arrival',
-  'warehouse_transfers.scan_departure',
   'warehouse_transfers.write',
   'wallet.read',               // mobile-only (Field Ops app)
-  'webhooks.archive_source',   // command key is routed and gated by webhooks.write in Console V2
   'webhook_sources.read',      // surface uses webhooks.read
   'workflow_runs.read',        // FE surface gate is workflows.read
   'workflow_runs.write',       // FE surface gate is workflows.write
-  // Zone exception action-scoped capabilities consumed by mobile + RPC bodies.
-  'wrong_zone_exceptions.request_zone_override',
-  'wrong_zone_exceptions.resolve_reassign',
 ]));
 
 // ---------------------------------------------------------------------------
 // Extraction
 // ---------------------------------------------------------------------------
+
+function readLists() {
+  if (!LISTS_PATH) return { ALIAS_MAP, FE_ONLY_PENDING, BACKEND_ONLY_ACCEPTED };
+
+  const lists = JSON.parse(readFileSync(resolve(LISTS_PATH), 'utf8'));
+  const aliases = lists?.ALIAS_MAP;
+  const pending = lists?.FE_ONLY_PENDING;
+  const accepted = lists?.BACKEND_ONLY_ACCEPTED;
+  const isKey = (value) => typeof value === 'string' && value.trim().length > 0;
+  const isKeyList = (value) => Array.isArray(value) && value.every(isKey);
+  if (!aliases || typeof aliases !== 'object' || Array.isArray(aliases) ||
+      !Object.entries(aliases).every(([alias, canonical]) => isKey(alias) && isKey(canonical)) ||
+      !isKeyList(pending) || !isKeyList(accepted)) {
+    throw new Error('LINT_CAPABILITIES_LISTS_PATH requires an ALIAS_MAP object and FE_ONLY_PENDING and BACKEND_ONLY_ACCEPTED arrays of keys');
+  }
+  return {
+    ALIAS_MAP: aliases,
+    FE_ONLY_PENDING: new Set(pending),
+    BACKEND_ONLY_ACCEPTED: new Set(accepted),
+  };
+}
 
 /** Parse the FE `capabilities = [ '...', '...' ]` literal. */
 function extractFrontendCapabilities() {
@@ -399,11 +364,10 @@ function sqlStatements(sql) {
   return splitTopLevelSqlStatements(lexSqlForIsolation(sql)).map(({ tokens }) => tokens);
 }
 
-function argumentList(tokens, open) {
+function argumentList(tokens, open, closing = tokens[open].value === '(' ? ')' : ']') {
   const args = [];
   let depth = 0;
   let start = open + 1;
-  const closing = tokens[open].value === '(' ? ')' : ']';
   for (let i = start; i < tokens.length; i++) {
     const { value } = tokens[i];
     if (depth === 0 && (value === ',' || value === closing)) {
@@ -547,19 +511,52 @@ function collectPermissionRows(statements, out) {
       if (selectsCategory(tokens, 'rbac_permission')) permissionDefinitions.add(lookupId[1]);
       else permissionDefinitions.delete(lookupId[1]);
     }
-    const insert = words.match(/\binsert into (?:public \. )?lookup_values\b[\s\S]*/);
-    if (!insert) continue;
+    const target = tokens.findIndex(({ value }, i) => value === 'lookup_values' &&
+      (tokens[i - 1]?.value === 'into' && tokens[i - 2]?.value === 'insert' ||
+       tokens[i - 1]?.value === '.' && tokens[i - 2]?.value === 'public' &&
+       tokens[i - 3]?.value === 'into' && tokens[i - 4]?.value === 'insert'));
+    if (target < 0 || tokens[target + 1]?.value !== '(') continue;
+
+    const { args: columns, end: columnEnd } = argumentList(tokens, target + 1);
+    const valueColumn = columns.findIndex(([token]) => token?.value === 'value');
+    const definitionColumn = columns.findIndex(([token]) => token?.value === 'lookup_definition_id');
+    if (valueColumn < 0 || definitionColumn < 0) continue;
+
+    const source = columnEnd + 1;
+    const query = tokens[source]?.value;
+    const select = query === 'select' ? argumentList(tokens, source, 'from') : undefined;
+    const projection = select?.args[valueColumn];
+    if (projection?.length === 1 && projection[0].type === 'string') {
+      // Follow the SELECT's source so a different registry in the WITH clause
+      // cannot make an unrelated row look like a permission declaration.
+      const relation = tokens[select.end + 1]?.value;
+      const cte = tokens.findIndex(({ value }, i) => i < target && value === relation &&
+        tokens[i + 1]?.value === 'as' && tokens[i + 2]?.value === '(');
+      const definition = cte < 0
+        ? tokens.slice(select.end)
+        : tokens.slice(cte + 3, argumentList(tokens, cte + 2).end);
+      const definitionSql = definition.map(({ value }) => value).join(' ');
+      if (/\bfrom (?:public \. )?lookup_definitions\b/.test(definitionSql) &&
+          selectsCategory(definition, 'rbac_permission')) {
+        out.add(projection[0].literal);
+      }
+      continue;
+    }
+
     const fromRegistry = words.includes('lookup_definitions') && selectsCategory(tokens, 'rbac_permission');
-    const fromLocalId = insert[0].match(/\b(?:select|values \() (\w+) ,/)?.[1];
-    if (!fromRegistry && !permissionDefinitions.has(fromLocalId)) continue;
+    const localProjection = select?.args[definitionColumn];
+    const readsLocalId = localProjection?.length === 1 && permissionDefinitions.has(localProjection[0].value);
+    if (query !== 'values' && !fromRegistry && !readsLocalId) continue;
+
     for (const [i, token] of tokens.entries()) {
       if (token.value !== 'values') continue;
       for (let row = i + 1; tokens[row]?.value === '(';) {
         const { args, end } = argumentList(tokens, row);
-        const keyColumn = permissionDefinitions.has(args[0]?.[0]?.value) ? 1 : 0;
-        if (args[keyColumn]?.length === 1 && args[keyColumn + 1]?.[0]?.type === 'string') {
-          addCapability(out, args[keyColumn][0].literal);
-        }
+        const key = args[i === source ? valueColumn : 0];
+        const scoped = i === source
+          ? permissionDefinitions.has(args[definitionColumn]?.[0]?.value)
+          : fromRegistry || readsLocalId;
+        if (scoped && key?.length === 1 && key[0].type === 'string') out.add(key[0].literal);
         if (tokens[end + 1]?.value !== ',') break;
         row = end + 2;
       }
@@ -614,7 +611,14 @@ function extractBackendDeclarations() {
 // Drift computation
 // ---------------------------------------------------------------------------
 
-function computeDrift(fe, backend) {
+function computeDrift(fe, backend, { ALIAS_MAP, FE_ONLY_PENDING, BACKEND_ONLY_ACCEPTED }) {
+  const staleEntries = [
+    ['ALIAS_MAP', Object.keys(ALIAS_MAP), (alias) => fe.has(alias) && backend.has(ALIAS_MAP[alias])],
+    ['FE_ONLY_PENDING', FE_ONLY_PENDING, (cap) => fe.has(cap)],
+    ['BACKEND_ONLY_ACCEPTED', BACKEND_ONLY_ACCEPTED, (cap) => backend.has(cap)],
+  ].flatMap(([list, entries, matches]) =>
+    [...entries].filter((entry) => !matches(entry)).map((entry) => ({ list, entry })));
+
   // Drift up: FE strings unaccounted-for in backend.
   // A string is accounted-for if it is:
   //   - present in backend, OR
@@ -651,7 +655,7 @@ function computeDrift(fe, backend) {
     driftDown.push(cap);
   }
 
-  return { driftUp: driftUp.sort(), driftDown: driftDown.sort(), aliasFailures };
+  return { driftUp: driftUp.sort(), driftDown: driftDown.sort(), aliasFailures, staleEntries };
 }
 
 // ---------------------------------------------------------------------------
@@ -659,8 +663,9 @@ function computeDrift(fe, backend) {
 // ---------------------------------------------------------------------------
 
 function main() {
-  let fe, backend;
+  let fe, backend, lists;
   try {
+    lists = readLists();
     fe = extractFrontendCapabilities();
     backend = extractBackendDeclarations();
   } catch (err) {
@@ -668,14 +673,14 @@ function main() {
     process.exit(1);
   }
 
-  const { driftUp, driftDown, aliasFailures } = computeDrift(fe, backend);
+  const { driftUp, driftDown, aliasFailures, staleEntries } = computeDrift(fe, backend, lists);
 
-  const failed = driftUp.length > 0 || driftDown.length > 0 || aliasFailures.length > 0;
+  const failed = [driftUp, driftDown, aliasFailures, staleEntries].some((entries) => entries.length > 0);
   if (!failed) {
     console.log(
       `All capabilities aligned (${fe.size} FE, ${backend.size} backend, ` +
-      `${Object.keys(ALIAS_MAP).length} aliases, ${FE_ONLY_PENDING.size} FE-pending, ` +
-      `${BACKEND_ONLY_ACCEPTED.size} backend-only-accepted).`
+      `${Object.keys(lists.ALIAS_MAP).length} aliases, ${lists.FE_ONLY_PENDING.size} FE-pending, ` +
+      `${lists.BACKEND_ONLY_ACCEPTED.size} backend-only-accepted).`
     );
     process.exit(0);
   }
@@ -706,6 +711,9 @@ function main() {
     for (const { alias, canonical } of aliasFailures) {
       console.error(`    - ${alias} -> ${canonical}  (canonical missing from backend declarations)`);
     }
+  }
+  for (const { list, entry } of staleEntries) {
+    console.error(`  Stale ${list} entry: ${entry}`);
   }
   process.exit(1);
 }
