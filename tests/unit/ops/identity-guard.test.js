@@ -31,37 +31,58 @@ test('the identity guard checks both commit roles and the PR opener without prin
     });
     return git(['rev-parse', 'HEAD']);
   };
-  const check = (env, status, stdout, stderr) => {
+  const check = (env, status, stdout, stderr, checkout = cwd) => {
     const result = spawnSync(process.execPath, [guard], {
-      ...options, env: { ...process.env, ...env },
+      ...options, cwd: checkout, env: { ...process.env, ...env },
     });
     expect(result.status).toBe(status);
     expect(result.stdout === stdout).toBe(true);
     expect(result.stderr === stderr).toBe(true);
   };
 
+  const allowlistFile = 'config/ci/commit-identities.json';
+  const installGuard = checkout => {
+    fs.mkdirSync(path.join(checkout, 'scripts/ci-hosted'), { recursive: true });
+    fs.mkdirSync(path.join(checkout, 'config/ci'), { recursive: true });
+    for (const file of [guard, 'scripts/ci-hosted/target-policy.cjs']) {
+      fs.copyFileSync(path.join(__dirname, '../../..', file), path.join(checkout, file));
+    }
+    fs.writeFileSync(path.join(checkout, allowlistFile), JSON.stringify([botRow, webRow]));
+  };
+  const shallowCheckout = depth => {
+    const checkout = path.join(cwd, `queue-${depth}`);
+    git(['clone', '--quiet', '--no-local', `--depth=${depth}`, '.', checkout]);
+    expect(git(['-C', checkout, 'rev-parse', '--is-shallow-repository'])).toBe('true');
+    installGuard(checkout);
+    return checkout;
+  };
+
   try {
     git(['init', '--quiet']);
-    fs.mkdirSync(path.join(cwd, 'scripts/ci-hosted'), { recursive: true });
-    fs.mkdirSync(path.join(cwd, 'config/ci'), { recursive: true });
-    for (const file of [guard, 'scripts/ci-hosted/target-policy.cjs']) {
-      fs.copyFileSync(path.join(__dirname, '../../..', file), path.join(cwd, file));
-    }
-    fs.writeFileSync(path.join(cwd, 'config/ci/commit-identities.json'),
-      JSON.stringify([botRow, webRow]));
+    git(['config', 'uploadpack.allowReachableSHA1InWant', 'true']);
+    git(['config', 'uploadpack.allowFilter', 'true']);
+    installGuard(cwd);
 
+    commit(person, person, 'Before base');
     const base = commit(person, person, 'Base');
     const mergeGroup = head => ({ GITHUB_EVENT_NAME: 'merge_group', GROUP_BASE: base, GROUP_HEAD: head });
     const allowed = commit(bot, web, 'Allowed');
     check(mergeGroup(allowed), 0, 'identity-guard: pass\n', '');
-    commit({ ...person, email: bot.email }, bot, 'Disallowed author');
-    commit(bot, { ...person, name: bot.name }, 'Disallowed committer');
+    const completeRange = shallowCheckout(2);
+    git(['-C', completeRange, 'remote', 'remove', 'origin']);
+    check(mergeGroup(allowed), 0, 'identity-guard: pass\n', '', completeRange);
+
+    const badAuthor = commit({ ...person, email: bot.email }, bot, 'Disallowed author');
+    const badCommitter = commit(bot, { ...person, name: bot.name }, 'Disallowed committer');
     const head = commit(bot, bot, 'Tip');
-    check(mergeGroup(head), 1, '', 'identity-guard: fail (2 commits)\n');
-    check(mergeGroup(allowed), 1, '', 'identity-guard: fail (0 commits)\n');
+    const rejected = `identity-guard: fail (2 commits) ${badAuthor.slice(0, 12)} ${badCommitter.slice(0, 12)}\n`;
+    check(mergeGroup(head), 1, '', rejected);
+    check(mergeGroup(head), 1, '', rejected, shallowCheckout(1));
+    check(mergeGroup(allowed), 1, '', 'identity-guard: error (merge group head mismatch)\n');
 
     const eventPath = path.join(cwd, 'event.json');
     const pullRequest = { GITHUB_EVENT_NAME: 'pull_request', GITHUB_EVENT_PATH: eventPath };
+    check(pullRequest, 1, '', 'identity-guard: error (unreadable pull request event)\n');
     const writeOpener = (id, login, type) => {
       fs.writeFileSync(eventPath, JSON.stringify({ pull_request: { user: { id, login, type } } }));
     };
@@ -75,6 +96,9 @@ test('the identity guard checks both commit roles and the PR opener without prin
     check(pullRequest, 1, '', 'identity-guard: opener fail\n');
     writeOpener(102, botLogin, 'Bot');
     check(pullRequest, 1, '', 'identity-guard: opener fail\n');
+
+    fs.writeFileSync(path.join(cwd, allowlistFile), JSON.stringify([{ name: botLogin }]));
+    check(pullRequest, 1, '', 'identity-guard: error (invalid allowlist row)\n');
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
