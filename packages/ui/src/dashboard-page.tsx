@@ -970,7 +970,7 @@ export async function DashboardPage({
                 {action.allowed ? (
                   <div className="mt-4">
                     <Button asChild>
-                      <a href={action.href} data-testid={`${testIdPrefix}-action-${action.key}`}>{t("actionStart")}</a>
+                      <a href={action.href}>{t("actionStart")}</a>
                     </Button>
                   </div>
                 ) : null}

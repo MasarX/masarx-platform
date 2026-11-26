@@ -92,6 +92,7 @@ export async function strictConsoleSignIn(
         form.locator('button[type="submit"]').click({ timeout }),
       ]);
       submitted = submission.status === "fulfilled";
+      if (submitted) failure = "SIGN_IN_FAILED/NO_RESPONSE";
       if (!submitted || response.status === "rejected") throw new Error();
       if (!response.value.ok()) {
         failure = "SIGN_IN_FAILED/REJECTED_" + response.value.status();
