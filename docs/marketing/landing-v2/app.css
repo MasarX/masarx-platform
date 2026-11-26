@@ -51,6 +51,7 @@ html[data-theme="light"] {
   --surface: rgba(255, 255, 255, 0.92);
   --surface-strong: rgb(var(--ui-surface));
   --muted: #546275;
+  --brand-text: var(--brand);
   --border: rgba(79, 70, 229, 0.10);
   --tint-1: rgba(79, 70, 229, 0.03);
   --tint-2: rgba(79, 70, 229, 0.06);
@@ -69,6 +70,8 @@ html[data-theme="dark"] {
   --surface: rgba(15, 23, 42, 0.80);
   --surface-strong: #111827;
   --muted: rgba(241, 245, 249, 0.65);
+  /* --brand on dark surfaces is under 3:1, so brand-colored text uses the lighter accent (#423). */
+  --brand-text: var(--accent);
   --border: rgba(79, 70, 229, 0.18);
   --tint-1: rgba(79, 70, 229, 0.06);
   --tint-2: rgba(79, 70, 229, 0.10);
@@ -549,7 +552,7 @@ html.js[data-motion="on"] .hero.is-inview .hero-visual {
   gap: 6px;
   font-size: 12px;
   font-weight: 800;
-  color: var(--brand);
+  color: var(--brand-text);
 }
 .lifecycle-live::before {
   content: "";
@@ -680,7 +683,7 @@ html.js[data-motion="on"] .hero.is-inview .lifecycle-step {
   border-color: color-mix(in srgb, var(--brand) 25%, var(--border));
   background: color-mix(in srgb, var(--brand) 3%, var(--surface));
 }
-.compare-new h3 { margin: 0; font-size: 16px; letter-spacing: -0.02em; color: var(--brand); }
+.compare-new h3 { margin: 0; font-size: 16px; letter-spacing: -0.02em; color: var(--brand-text); }
 .compare-list { margin-top: 14px; }
 
 /* Compare card entrance */
@@ -1153,7 +1156,7 @@ html[dir="rtl"][data-motion="on"] .logos-track {
   content: "\2588";
   display: inline;
   animation: blink-caret 530ms step-end infinite;
-  color: var(--brand);
+  color: var(--brand-text);
   font-weight: 800;
   margin-inline-start: 1px;
 }
@@ -1201,7 +1204,7 @@ html.js[data-motion="on"] .hero.is-inview .lc-icon .drift {
 }
 @keyframes svg-drift { to { transform: translateX(2px); } }
 
-.cap-svg { width: 24px; height: 24px; flex-shrink: 0; color: var(--brand); }
+.cap-svg { width: 24px; height: 24px; flex-shrink: 0; color: var(--brand-text); }
 .cap-svg .spin { transform-origin: center; }
 html.js[data-motion="on"] .cap-card.is-card-visible .cap-svg .spin {
   animation: svg-spin 3s linear infinite;
@@ -1643,7 +1646,7 @@ html[data-motion="off"], html[data-motion="off"] *, html[data-motion="off"] *::b
 }
 
 .track-map-status[data-tone="info"] {
-  color: var(--brand);
+  color: var(--brand-text);
 }
 
 .track-map-picker .leaflet-container {
