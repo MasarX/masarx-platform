@@ -1,3 +1,5 @@
+const { readFileSync } = require('node:fs');
+const { resolve } = require('node:path');
 const { select, selectPreviewSweep } = require('../../../scripts/ci-hosted/changes.cjs');
 
 test('selects preview inputs within the existing UI job', () => {
@@ -27,4 +29,19 @@ test('ignores unrelated changes and runs the capture when the selector output is
   expect(selectPreviewSweep(affected)).toBe(true);
   expect(selectPreviewSweep(unrelated)).toBe(false);
   expect(selectPreviewSweep()).toBe(true);
+});
+
+test('admits only fixed cell keys and numeric geometry in the preview workflow log', () => {
+  const workflow = readFileSync(resolve(__dirname, '../../../.github/workflows/public-ci.yml'), 'utf8');
+  const [, pattern] = workflow.match(/-e '\/(\^SWEEP-GEOM .+\$)\/p'/);
+  const filter = new RegExp(pattern);
+  const line = 'SWEEP-GEOM console-v2 ar dark phone empty 390 844 -42.125 100.000 960.000 60.000 0.406250000';
+  expect(line).toMatch(filter);
+  expect(line.replace('0.406250000', '1.000000000')).toMatch(filter);
+  for (const rejected of [
+    line + ' extra',
+    line.replace('console-v2', 'custom'),
+    line.replace('390', 'https://example.com'),
+    line.replace('0.406250000', '1.100000000'),
+  ]) expect(rejected).not.toMatch(filter);
 });

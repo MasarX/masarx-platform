@@ -85,11 +85,23 @@ for (const app of ['console', 'console-v2', 'portal']) {
           }
         }
 
-        async function screenshot(page, state, marker) {
+        async function screenshot(page, state, container, marker = container.locator(
+          v2 ? 'h3.state__title' : ':scope > p:first-child',
+        )) {
           checkpoint(state);
-          await check(state, 'marker', () => expect(marker).toBeVisible());
+          await check(state, 'marker', () => expect(container).toBeVisible());
           await check(state, 'marker-in-view', async () => {
             await marker.scrollIntoViewIfNeeded();
+            const [vw, vh, x, y, width, height, ratio] = await container.evaluate(element => new Promise(resolve => {
+              const observer = new IntersectionObserver(([entry]) => {
+                observer.disconnect();
+                const { x, y, width, height } = entry.boundingClientRect;
+                resolve([window.innerWidth, window.innerHeight, x, y, width, height, entry.intersectionRatio]);
+              });
+              observer.observe(element);
+            }));
+            console.log('\nSWEEP-GEOM', app, locale, theme, size, state, vw, vh,
+              ...[x, y, width, height].map(value => value.toFixed(3)), ratio.toFixed(9));
             await expect(marker).toBeInViewport({ ratio: 1 });
           });
           const root = page.locator('html');
@@ -107,10 +119,18 @@ for (const app of ['console', 'console-v2', 'portal']) {
 
         await withPage(reader, 'empty', async (page, release) => {
           const main = page.getByRole('main');
-          await screenshot(page, 'loading', v2 ? main.locator('.state--loading') : main.getByTestId('route-loading-page'));
+          const loading = v2 ? main.locator('.state--loading') : main.getByTestId('route-loading-page');
+          await screenshot(page, 'loading', loading, v2 ? undefined : loading.getByTestId('loading-state-header'));
           release();
-          await screenshot(page, 'empty', v2 ? main.locator('.state--empty') :
-            main.getByTestId(app + '-resource-ready').getByText(/No records returned for this resource\./));
+          if (v2) {
+            await screenshot(page, 'empty', main.locator('.state--empty'));
+          } else {
+            const emptyMessage = /No records returned for this resource\./;
+            const empty = main.getByTestId(app + '-resource-ready').getByRole('status').filter({
+              hasText: emptyMessage,
+            });
+            await screenshot(page, 'empty', empty, empty.getByText(emptyMessage));
+          }
         });
         await withPage(reader, 'error', page => screenshot(page, 'error',
           page.getByTestId(v2 ? 'app-guard-metadata-error' : app + '-resource-error')));
