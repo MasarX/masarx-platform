@@ -139,6 +139,13 @@ function ciCoverage(files) {
   covered.add(workspace + '/vitest.config.ts');
   addScripts(workspace + '/package.json', ['test', 'test:watch', 'test:coverage']);
 
+  step('ui', 'SWEEP_LOCALE="$locale" node node_modules/@playwright/test/cli.js test -c scripts/ci-hosted/preview-sweep.config.cjs 2>&1 |');
+  // Both locales list the same files, so these values only satisfy the pull request guard for listing.
+  addFiles(covered, playwrightFiles('scripts/ci-hosted/preview-sweep.config.cjs', {
+    ...process.env, GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'pull_request', RUNNER_ENVIRONMENT: 'github-hosted',
+    RUNNER_TEMP: os.tmpdir(), SWEEP_LOCALE: 'en',
+  }));
+
   for (const [suite, config] of Object.entries(browserSuites)) {
     const browser = step('e2e', 'node scripts/ci-hosted/tasks.cjs ' + suite);
     addFiles(covered, playwrightFiles(config, { ...process.env, ...browser.env }));
