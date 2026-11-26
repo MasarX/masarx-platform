@@ -16,7 +16,9 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test/render';
 import { DispatchModule, routeRunAssignTargetForDriver, routeStopDeliveryOption } from '@/modules/operate/dispatch';
+// @ts-expect-error JS catalogs without types
 import { en } from '@/lib/seed-raw/i18n/en.js';
+// @ts-expect-error JS catalogs without types
 import { ar } from '@/lib/seed-raw/i18n/ar.js';
 import * as api from '@/lib/api';
 import { ui_get_resource_v1, ui_list_resource_complete } from '@/lib/data-source';
