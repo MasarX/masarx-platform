@@ -1,0 +1,66 @@
+name: Console V2 Auth stack proof
+
+'on':
+  pull_request:
+    paths:
+      - '.github/workflows/console-v2-auth*.yml'
+      - 'scripts/ci-hosted/console-v2-auth-qualification.cjs'
+      - 'scripts/ci-hosted/backend.cjs'
+      - 'scripts/ci-hosted/docker-images.cjs'
+      - 'scripts/ci-hosted/images.cjs'
+      - 'scripts/ci-hosted/process.cjs'
+      - 'scripts/ops/ci/supabase-cli-asset.js'
+
+permissions:
+  contents: read
+
+jobs:
+  stack:
+    name: Isolated Auth Supabase stack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: workflow
+          persist-credentials: false
+      - name: Read the qualification's exact candidate pin
+        id: pin
+        shell: bash
+        run: |
+          workflow=workflow/.github/workflows/console-v2-auth-qualification.yml
+          sha=$(awk '$1 == "CANDIDATE_SHA:" {print $2}' "$workflow")
+          tree=$(awk '$1 == "CANDIDATE_TREE:" {print $2}' "$workflow")
+          [[ "$sha" =~ ^[0-9a-f]{40}$ && "$tree" =~ ^[0-9a-f]{40}$ ]]
+          printf 'sha=%s\ntree=%s\n' "$sha" "$tree" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.pin.outputs.sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: candidate/.nvmrc
+          package-manager-cache: false
+      - name: Prove the qualification stack on the pinned source
+        id: proof
+        shell: bash
+        working-directory: candidate
+        env:
+          CANDIDATE_SHA: ${{ steps.pin.outputs.sha }}
+          CANDIDATE_TREE: ${{ steps.pin.outputs.tree }}
+          WORKFLOW_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          [[ "$(git -C ../workflow rev-parse HEAD)" == "$WORKFLOW_SHA" ]]
+          [[ "$(git rev-parse HEAD)" == "$CANDIDATE_SHA" ]]
+          [[ "$(git rev-parse 'HEAD^{tree}')" == "$CANDIDATE_TREE" ]]
+          GITHUB_SHA="$WORKFLOW_SHA" node ../workflow/scripts/ci-hosted/console-v2-auth-qualification.cjs --stack-only
+      - name: Retain the stack proof
+        if: ${{ !cancelled() && steps.proof.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: console-v2-auth-stack-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/console-auth-evidence/test-results/console-v2-auth/auth-qualification.json
+          if-no-files-found: error
+          retention-days: 1

@@ -12,12 +12,12 @@ const { expiryUnboundExitCode } = require('./console-v2-auth-qa-fixture.cjs');
 const root = process.cwd();
 const candidate = createRequire(path.join(root, 'package.json'));
 const {
-  bucketSections, completePins, configureHostedDatabase, disableHostedAutovacuum,
-  hostedStackPorts, imageGuard, migrationInventory, verifyHostedDatabaseInit,
-} = candidate('./scripts/ci-hosted/backend.cjs');
-const { run } = candidate('./scripts/ci-hosted/process.cjs');
+  completePins, configureHostedDatabase, disableHostedAutovacuum, hostedStackPorts,
+  imageGuard, installHostedCli, migrationInventory, verifyHostedDatabaseInit, writeHostedStackConfig,
+} = require('./backend.cjs');
+const { prepareImages } = require('./images.cjs');
+const { run } = require('./process.cjs');
 const { assertLoopbackOnly, loadLaneConfig, readSupabaseConfig } = candidate('./scripts/ops/ci/cloud-pool-db-local.js');
-const { buildSupabaseCliAsset } = candidate('./scripts/ops/ci/supabase-cli-asset.js');
 const { readSpeedBudgets } = candidate('./scripts/frontend/design-speed-budgets.cjs');
 const checks = ['liveStartup', 'demoStartup', 'signIn', 'restore', 'refresh', 'signOut', 'mfa', 'startupP75'];
 const loopback = '127.0.0.1';
@@ -33,10 +33,19 @@ const baseEnv = {
   NEXT_TELEMETRY_DISABLED: '1', NX_NO_CLOUD: 'true', DO_NOT_TRACK: '1',
   SUPABASE_TELEMETRY_DISABLED: '1', OTEL_SDK_DISABLED: 'true',
 };
-const quiet = (command, args, env = baseEnv, timeout) =>
-  run(command, args, { env, timeout, quiet: true, printQuietFailure: false });
+const quiet = (command, args, env = baseEnv, timeout, options) =>
+  run(command, args, { ...options, env, timeout, quiet: true, printQuietFailure: false });
 const npm = (args, env) => quiet('npm', args, env);
 const writeJson = (file, value) => fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+
+function failureCode(error) {
+  if (error.failure?.timeout || error.name === 'TimeoutError' || ['ETIMEDOUT', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'].includes(error.code)) return 'TIMEOUT_OR_LIMIT';
+  if (error.code === 'ERR_ASSERTION') return 'CHECK_FAILED';
+  if (error instanceof SyntaxError) return 'INVALID_OUTPUT';
+  if (error.failure?.signal || error.signal) return 'COMMAND_SIGNAL';
+  if (Number.isInteger(error.failure?.exitCode ?? error.status)) return 'COMMAND_EXIT';
+  return 'OPERATION_FAILED';
+}
 
 function speedEvidence(file, limit) {
   const { viewport, runs } = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -53,27 +62,34 @@ function speedEvidence(file, limit) {
     result: result.lcpMs <= limit.lcpMs && result.inpMs <= limit.inpMs ? 'PASS' : 'FAIL' };
 }
 
-async function qualify() {
+async function qualify(stackOnly) {
   const report = {
     workflow: process.env.GITHUB_WORKFLOW_REF, workflowCommit: process.env.GITHUB_SHA,
     run: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT,
     candidateCommit: process.env.CANDIDATE_SHA, candidateTree: process.env.CANDIDATE_TREE,
-    stages: {}, builds: {}, qa: Object.fromEntries(checks.map(name => [name, 'NOT_RUN'])),
+    stages: {}, failureReasons: {}, builds: {}, qa: Object.fromEntries(checks.map(name => [name, 'NOT_RUN'])),
+  };
+  const fail = (name, step, code) => {
+    report.stages[name] = 'FAIL';
+    report.failureReasons[name] = { step, code };
+    console.error(`${name}: FAIL ${step} ${code}`);
   };
   const stage = async (name, work) => {
+    let step = name;
     try {
-      const result = await work();
+      const result = await work(value => { step = value; });
       report.stages[name] = 'PASS';
+      console.log(`${name}: PASS`);
       return result;
-    } catch {
-      report.stages[name] = 'FAIL';
-      throw new Error(name);
+    } catch (error) {
+      fail(name, step, failureCode(error));
+      throw error;
     }
   };
   const temp = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP, 'console-auth-'));
   const evidence = path.join(process.env.RUNNER_TEMP, 'console-auth-evidence/test-results/console-v2-auth');
   const speed = path.join(temp, 'speed-evidence');
-  const cli = path.join(temp, 'supabase-cli');
+  const cli = path.join(temp, 'bin', 'supabase');
   const stack = path.join(temp, 'stack');
   const project = `console-auth-${report.run}`;
   const database = `supabase_db_${project}`;
@@ -89,23 +105,28 @@ async function qualify() {
   fs.mkdirSync(speed);
 
   try {
-    await stage('lockedDependencies', async () => {
+    await stage('lockedDependencies', async mark => {
+      mark('lockfile');
       report.lockfileSha256 = fileHash('package-lock.json');
       const { packageManager } = candidate('./package.json');
       assert.match(packageManager, /^npm@\d+\.\d+\.\d+$/);
+      mark('npmVersion');
       await npm(['install', '--global', packageManager, '--ignore-scripts', '--no-audit', '--no-fund']);
       assert.equal((await npm(['--version'])).trim(), packageManager.slice(4));
+      mark('npmCi');
       await npm(['ci', '--ignore-scripts', '--no-audit', '--no-fund']);
+      mark('lockfile');
       assert.equal(fileHash('package-lock.json'), report.lockfileSha256);
     });
-    const { status, apiUrl } = await stage('isolatedSupabase', async () => {
+    const { status, apiUrl } = await stage('isolatedSupabase', async mark => {
+      mark('pinsAndVersions');
       const pins = candidate('./config/ci/hosted-supabase-images.json');
       assert(completePins(pins));
       const services = candidate('./tests/fixtures/ci/supabase-services-2.116.0.json').services;
       const rest = services.find(service => service.name === 'postgrest/postgrest');
       assert.equal(rest?.local, 'v16.1');
       pins.push({
-        image: 'supabase/postgrest', cli_tag: rest.local, mirror: 'ghcr.io',
+        role: 'rest', image: 'supabase/postgrest', cli_tag: rest.local, mirror: 'ghcr.io',
         digest: 'sha256:5922bde07147b82b1c9d8f749e48c1e5b99ebb233f3888bb7ab65f07cf4ac82d',
         image_id: 'sha256:eb4951a2f9ac02288100937995af3cb7fb64c296b1228405de5d77ca4dd3410d',
       });
@@ -114,63 +135,62 @@ async function qualify() {
       const requiredPins = pins.filter(pin => pin.role !== 'realtime');
       const { major } = readSupabaseConfig();
       assert.equal(String(major), String(psqlClientMajor));
-      const asset = buildSupabaseCliAsset({ version: '2.116.0', platform: 'linux', arch: 'amd64' });
-      const response = await fetch(asset.download_url, { signal: AbortSignal.timeout(120_000) });
-      assert(response.ok);
-      const archive = Buffer.from(await response.arrayBuffer());
-      assert.equal(sha256(archive), asset.sha256);
-      const archivePath = path.join(temp, 'supabase.tar.gz');
-      fs.writeFileSync(archivePath, archive);
-      await quiet('tar', ['-xzf', archivePath, '-C', temp, 'supabase']);
-      fs.renameSync(path.join(temp, 'supabase'), cli);
-      for (const pin of requiredPins) {
-        const ref = `${pin.mirror}/${pin.image}@${pin.digest}`;
-        await quiet('docker', ['pull', '--platform=linux/amd64', ref]);
-        pin.runtimeId = (await quiet('docker', ['image', 'inspect', '--format', '{{.Id}}', ref])).trim();
-        assert.equal(pin.runtimeId, pin.image_id);
-        await quiet('docker', ['tag', pin.runtimeId, `public.ecr.aws/${pin.image}:${pin.cli_tag}`]);
-      }
-      report.supabaseCliSha256 = asset.sha256;
+      mark('cliInstall');
+      fs.mkdirSync(path.dirname(cli));
+      report.supabaseCliSha256 = await installHostedCli(quiet, baseEnv, temp, path.dirname(cli));
+      mark('dockerPreflight');
+      const dockerRoot = (await quiet('docker', ['info', '--format', '{{.DockerRootDir}}'], baseEnv, 30_000)).trim();
+      mark('imagePullOrVerification');
+      await prepareImages(requiredPins, { env: baseEnv, checked: quiet, timed: (_, action) => action(), summary: {}, dockerRoot, quiet: true });
       report.imageDigests = Object.fromEntries(requiredPins.map(pin => [pin.image, pin.digest]));
-      const { apiPort, dbPort, shadowPort } = await hostedStackPorts();
+      mark('stackConfiguration');
+      const ports = await hostedStackPorts();
+      const { apiPort, dbPort } = ports;
       const apiUrl = origin(apiPort);
       const supabaseDir = path.join(stack, 'supabase');
-      fs.mkdirSync(path.join(supabaseDir, 'migrations'), { recursive: true });
-      const config = [
-        `project_id = "${project}"`, '[api]', 'enabled = true', `port = ${apiPort}`, 'schemas = ["api"]',
-        'extra_search_path = ["public", "extensions"]', '[db]', `port = ${dbPort}`,
-        `shadow_port = ${shadowPort}`, `major_version = ${major}`, '[db.seed]', 'enabled = false',
-        '[studio]', 'enabled = false', '[analytics]', 'enabled = false', '[auth]', 'enabled = true',
+      const config = writeHostedStackConfig(stack, project, ports, major, [
         `jwt_expiry = ${jwtExpirySeconds}`,
         `site_url = "${liveUrl}"`, `additional_redirect_urls = ["${liveUrl}/auth/callback"]`,
-        '[storage]', 'enabled = true', '', bucketSections(fs.readFileSync('supabase/config.toml', 'utf8')),
-      ].join('\n');
-      fs.writeFileSync(path.join(supabaseDir, 'config.toml'), config);
+      ], true);
+      // PostgREST builds its cache before the CLI returns. Candidate migrations will populate this empty schema.
+      const bootstrap = 'CREATE SCHEMA api AUTHORIZATION postgres;\n';
+      fs.writeFileSync(path.join(supabaseDir, 'seed.sql'), bootstrap, { mode: 0o600 });
       report.stackConfigSha256 = sha256(config);
+      report.stackBootstrapSha256 = sha256(bootstrap);
       report.jwtExpirySeconds = jwtExpirySeconds;
+      mark('loopbackNetwork');
       await quiet('docker', ['network', 'create', '--opt', 'com.docker.network.bridge.host_binding_ipv4=127.0.0.1', project]);
       networkCreated = true;
+      mark('imageGuard');
       guard = await imageGuard(requiredPins, path.join(temp, 'image-pins.json'),
         { ...baseEnv, SUPABASE_HOME: path.join(temp, 'supabase-home') }, database);
       started = true;
+      mark('stackStart');
       await quiet(cli, ['start', '--workdir', stack, '--network-id', project, '-x',
-        exclude.filter(service => service !== 'postgrest').join(',')], guard.env, 360_000);
+        exclude.filter(service => service !== 'postgrest').join(',')], guard.env, 360_000).catch(error => {
+        if (JSON.parse(fs.readFileSync(guard.policyFile, 'utf8')).denied > 0) mark('imagePolicy');
+        throw error;
+      });
+      mark('databaseInit');
       await verifyHostedDatabaseInit(quiet, baseEnv, database);
-      const ports = [];
+      mark('publishedPorts');
+      const published = [];
       const containers = (await quiet('docker', ['ps', '-q', '--filter', `network=${project}`])).trim().split(/\s+/);
       for (const id of containers) {
         const mappings = JSON.parse(await quiet('docker', ['inspect', '--format', '{{json .NetworkSettings.Ports}}', id]));
         for (const binding of Object.values(mappings ?? {}).flat().filter(Boolean)) {
           assert.equal(binding.HostIp, loopback);
-          ports.push(binding.HostPort);
+          published.push(binding.HostPort);
         }
       }
-      assert.deepEqual(ports.sort(), [String(apiPort), String(dbPort)].sort());
+      assert.deepEqual(published.sort(), [String(apiPort), String(dbPort)].sort());
+      mark('stackStatus');
       const status = JSON.parse(await quiet(cli, ['status', '--workdir', stack, '-o', 'json'], guard.env));
       assert.equal(new URL(status.API_URL).port, String(apiPort));
       assert.equal(new URL(status.DB_URL).port, String(dbPort));
       assertLoopbackOnly({ SUPABASE_URL: status.API_URL, DATABASE_URL: status.DB_URL }, 'auth qualification');
       assert(status.ANON_KEY && status.SERVICE_ROLE_KEY && status.ANON_KEY !== status.SERVICE_ROLE_KEY);
+      mark('databaseConnect');
       const { Client } = candidate('pg');
       const db = new Client({ connectionString: status.DB_URL, connectionTimeoutMillis: 15_000, query_timeout: 15_000 });
       const admin = (...sql) => quiet('docker', ['exec', database, 'sh', '-ec',
@@ -179,32 +199,39 @@ async function qualify() {
         '--set=ON_ERROR_STOP=1', ...sql.flatMap(command => ['-c', command])]);
       await db.connect();
       try {
+        mark('emptyMigrationHistory');
         const history = await db.query("SELECT to_regclass('supabase_migrations.schema_migrations') AS history");
         if (history.rows[0].history) {
           const initial = await db.query('SELECT count(*)::int AS n FROM supabase_migrations.schema_migrations');
           assert.equal(initial.rows[0].n, 0);
         }
+        mark('databaseSettings');
         await disableHostedAutovacuum(status.DB_URL, dbPort, admin, db);
         await configureHostedDatabase(admin, db, false);
+        mark('migrationReplay');
         fs.rmdirSync(path.join(supabaseDir, 'migrations'));
         fs.symlinkSync(path.join(root, 'supabase/migrations'), path.join(supabaseDir, 'migrations'), 'dir');
         await quiet(cli, ['migration', 'up', '--local', '--workdir', stack], guard.env);
+        mark('migrationInventory');
         const applied = await db.query('SELECT version FROM supabase_migrations.schema_migrations ORDER BY version');
         assert.deepEqual(applied.rows.map(row => row.version), migrationInventory(fs.readdirSync('supabase/migrations')));
         assert.equal((await db.query('SHOW cron.launch_active_jobs')).rows[0]['cron.launch_active_jobs'], 'off');
       } finally {
         await db.end();
       }
+      mark('authHealth');
       const health = await fetch(`${apiUrl}/auth/v1/health`, {
         headers: { apikey: status.ANON_KEY }, redirect: 'error', signal: AbortSignal.timeout(5_000),
       });
       assert(health.ok);
+      mark('imagePolicy');
       assert.equal(JSON.parse(fs.readFileSync(guard.policyFile, 'utf8')).denied, 0);
       return { status, apiUrl };
     });
+    if (stackOnly) return;
 
     const appRequire = createRequire(path.join(app, 'package.json'));
-    const { preview } = await import(pathToFileURL(appRequire.resolve('vite')));
+    const { preview } = await stage('previewPrerequisites', () => import(pathToFileURL(appRequire.resolve('vite'))));
     let bundleFailed = false;
     for (const [mode, url] of [['live', liveUrl], ['demo', demoUrl]]) {
       const live = mode === 'live';
@@ -226,15 +253,17 @@ async function qualify() {
         }
       }
       const dist = path.join(temp, mode);
-      fs.renameSync(path.join(app, 'dist'), dist);
-      const files = fs.readdirSync(dist, { recursive: true, withFileTypes: true })
-        .filter(entry => entry.isFile())
-        .map(entry => path.relative(dist, path.join(entry.parentPath, entry.name))).sort();
-      assert(files.includes('index.html') && files.some(file => file.endsWith('.js')));
-      report.builds[mode] = {
-        inputsSha256: sha256(JSON.stringify(buildInputs)),
-        directorySha256: sha256(JSON.stringify(files.map(file => [file, fileHash(path.join(dist, file))]))),
-      };
+      await stage(`${mode}BuildEvidence`, () => {
+        fs.renameSync(path.join(app, 'dist'), dist);
+        const files = fs.readdirSync(dist, { recursive: true, withFileTypes: true })
+          .filter(entry => entry.isFile())
+          .map(entry => path.relative(dist, path.join(entry.parentPath, entry.name))).sort();
+        assert(files.includes('index.html') && files.some(file => file.endsWith('.js')));
+        report.builds[mode] = {
+          inputsSha256: sha256(JSON.stringify(buildInputs)),
+          directorySha256: sha256(JSON.stringify(files.map(file => [file, fileHash(path.join(dist, file))]))),
+        };
+      });
       await stage(`${mode}Preview`, async () => {
         const server = await preview({
           configFile: false, root: app, mode: 'production', logLevel: 'silent', build: { outDir: dist },
@@ -317,28 +346,33 @@ async function qualify() {
       ...previews.map(server => server.close()),
       ...(started ? [quiet(cli, ['stop', '--workdir', stack, '--no-backup'], guard.env, 90_000)] : []),
     ];
-    let clean = (await Promise.allSettled(cleanup)).every(result => result.status === 'fulfilled');
+    const outcomes = await Promise.allSettled(cleanup);
+    const failedCleanup = outcomes.find(result => result.status === 'rejected');
+    if (failedCleanup) fail('teardown', 'stopServices', failureCode(failedCleanup.reason));
     guard?.child.kill();
     // The CLI may remove the network itself.
     try {
       const remaining = networkCreated ? await quiet('docker', ['network', 'ls', '--format', '{{.Name}}']) : '';
       if (remaining.split('\n').includes(project)) await quiet('docker', ['network', 'rm', project]);
-    } catch {
-      clean = false;
+    } catch (error) {
+      fail('teardown', 'removeNetwork', failureCode(error));
     }
     try {
       fs.rmSync(temp, { recursive: true, force: true });
-    } catch {
-      clean = false;
+    } catch (error) {
+      fail('teardown', 'removePrivateFiles', failureCode(error));
     }
-    if (!clean) process.exitCode = 1;
-    report.stages.teardown = clean ? 'PASS' : 'FAIL';
+    if (report.stages.teardown === 'FAIL') process.exitCode = 1;
+    else {
+      report.stages.teardown = 'PASS';
+      console.log('teardown: PASS');
+    }
     writeJson(path.join(evidence, 'auth-qualification.json'), report);
     fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n`);
   }
 }
 
-qualify().catch(() => {
-  console.error('Qualification could not complete its provenance report.');
+qualify(process.argv[2] === '--stack-only').catch(() => {
+  console.error('provenance: FAIL report OPERATION_FAILED');
   process.exitCode = 1;
 });
