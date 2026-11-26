@@ -1,7 +1,7 @@
 import { isTurnstileTestSecret, sanitizeTurnstileErrorCodes, turnstileHostnameFailure } from "./_shared/turnstile-local-test.mjs";
 import { resolveBrowserCorsPolicy } from "./_shared/cors.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2.119.0";
-import { logStructured, parseRequestBody, readEnv } from "./_shared/mod.mjs";
+import { classifyError, databaseErrorCodeForLog, logStructured, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 
 import { serveTrackingProof } from "./proof.ts";
 
@@ -336,11 +336,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const { data: rpcData, error: rpcError } = await serviceClient.rpc(rpcName, rpcPayload);
   if (rpcError) {
-    return reportInternalError(500, "rpc_failed", rpcError, {
+    return reportInternalError(500, "rpc_failed", "rpc_failed", {
       rpc: rpcName,
-      rpc_error_code: redactLogText(rpcError.code),
-      details: redactLogText(rpcError.details),
-      hint: redactLogText(rpcError.hint),
+      rpc_error_code: databaseErrorCodeForLog(rpcError.code) ?? "unclassified",
+      error_type: classifyError(rpcError),
     });
   }
 
