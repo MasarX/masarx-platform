@@ -19,6 +19,22 @@ For intake changes, cover request authentication, acknowledgment behavior, dupli
 
 When adding a fixture, generate identifiers at setup and reuse them across requests and assertions. Keep SQL-only tests transactional and explicitly clean up rows created through the API.
 
+## Hosted suite coverage
+
+The required CI lint job inventories tracked test files, runner configurations and
+npm test commands. It compares the inventory with files selected by the hosted
+runners, the post-DEV browser report and the
+[suite quarantine](../../config/ci/test-suite-quarantine.json). The inventory step
+uses the runners' file-listing mode.
+
+Console V2 seed mode uses the app's fallback fonts so browser tests can run with
+external requests blocked.
+
+Wire new suites into an existing CI job where their dependencies are available.
+For a suite that needs unavailable infrastructure, record its scope, owning lead,
+reason, tracking issue and last active UTC date in the quarantine. CI fails on
+uncovered entries, expired quarantines and selectors that no longer cover a suite.
+
 ## Test Suites
 
 ### 1) Unit Tests (no DB)

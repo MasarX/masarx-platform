@@ -6,6 +6,12 @@ const crypto = require('node:crypto');
 const { run: checked, retry } = require('./process.cjs');
 
 const root = process.cwd();
+const appSpeedConfig = 'scripts/ci-hosted/playwright.app-speed.config.cjs';
+const browserSuites = {
+  'landing-e2e': 'scripts/ci-hosted/playwright.landing.config.cjs',
+  'console-a11y': 'scripts/ci-hosted/playwright.console-a11y.config.cjs',
+  'console-seed': 'scripts/ci-hosted/playwright.console-seed.config.cjs',
+};
 const exists = file => fs.existsSync(path.join(root, file));
 const read = file => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
 const nextApps = () => !exists('apps') ? [] : fs.readdirSync('apps').filter(name => {
@@ -24,7 +30,7 @@ function npmScript(name, prefix) {
 function appSpeed(app) {
   process.env.SPEED_APP = app;
   run(process.execPath, [require.resolve('@playwright/test/cli'), 'test',
-    '-c', 'scripts/ci-hosted/playwright.app-speed.config.cjs']);
+    '-c', appSpeedConfig]);
 }
 function detect(subject) {
   let present;
@@ -103,10 +109,9 @@ async function main() {
     npmScript('build', 'apps/console-v2');
     return appSpeed('console-v2');
   }
-  const suites = { 'landing-e2e': 'landing', 'console-a11y': 'console-a11y' };
-  if (command === 'browser-install' || suites[command]) {
+  if (command === 'browser-install' || browserSuites[command]) {
     const args = command === 'browser-install' ? ['install', '--with-deps', 'chromium']
-      : ['test', '-c', `scripts/ci-hosted/playwright.${suites[command]}.config.cjs`];
+      : ['test', '-c', browserSuites[command]];
     return run(process.execPath, [require.resolve('@playwright/test/cli'), ...args]);
   }
   if (command === 'visual' || command === 'visual-preflight') {
@@ -129,4 +134,4 @@ async function main() {
   throw new Error('Unknown command');
 }
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { nextApps, detect, install };
+module.exports = { nextApps, detect, install, browserSuites, appSpeedConfig };

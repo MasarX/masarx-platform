@@ -3879,7 +3879,7 @@ export const settings_category_registry = [
 // Capability catalog (subset that matters for the demo)
 export const capabilities = [
   'shipments.read', 'shipments.write',
-  'routes.read', 'routes.write', 'routes.scan_load', 'routes.confirm_departure',
+  'routes.read', 'routes.write',
   'route_plans.read', 'route_plans.write',
   'baskets.read', 'baskets.write',
   // Pickups read seam stays distinct; write seam is canonical fleet.write
