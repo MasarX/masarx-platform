@@ -78,12 +78,12 @@ async function jsonRequest(url, headers, code, method = 'GET', body) {
   throw new ProbeError(code);
 }
 
-async function renderPreview(projectUrl, headers, body) {
+async function renderPreview(send, wait = delay) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     let status;
     let text;
     try {
-      const response = await request(`${projectUrl}/functions/v1/label-renderer`, headers, 'POST', body);
+      const response = await send();
       status = response.status;
       if (status === 200) text = await response.text();
       else await response.body?.cancel().catch(() => {});
@@ -100,7 +100,7 @@ async function renderPreview(projectUrl, headers, body) {
       return checkPreview(status, result);
     }
     if (status !== undefined && (status < 500 || status >= 600)) return checkPreview(status);
-    if (attempt < 2) await delay(1000 * 2 ** attempt);
+    if (attempt < 2) await wait(1000 * 2 ** attempt);
     else return { code: status === undefined ? EXIT.renderNetwork : EXIT.renderStatus };
   }
 }
@@ -219,7 +219,16 @@ async function cleanup(db, fixture, authUsers, authHeaders, verifiedUserId) {
     requireProbe(owned, EXIT.cleanupVerify);
     const { rowCount } = await db.query('SELECT 1 FROM auth.users WHERE email = $1', [fixture.email]);
     requireProbe(rowCount === 0, EXIT.cleanupVerify);
-    for (const [table, [where, params]] of Object.entries(owned)) {
+    const tenantRows = ['organization_id = $1', [fixture.organizationId]];
+    const verified = {
+      ...owned,
+      rbac_roles: tenantRows,
+      rbac_role_permissions: tenantRows,
+      rbac_user_role_assignments: tenantRows,
+      canonical_cities: tenantRows,
+      canonical_districts: tenantRows,
+    };
+    for (const [table, [where, params]] of Object.entries(verified)) {
       const remaining = await db.query(`SELECT 1 FROM public.${table} WHERE ${where} LIMIT 1`, params);
       requireProbe(remaining.rowCount === 0, EXIT.cleanupVerify);
     }
@@ -305,10 +314,12 @@ async function run(env) {
     requireProbe(claims?.role === 'authenticated' && claims.sub === user.id, stage);
 
     stage = EXIT.renderNetwork;
-    const rendered = await renderPreview(projectUrl, { apikey: anonKey, authorization: `Bearer ${jwt}` }, {
-      mode: 'designer_preview', user_jwt: jwt, label_type: labelType,
-      draft_id: fixture.draftId, shipment_id: fixture.shipmentId, shipment_box_id: fixture.boxId,
-    });
+    const rendered = await renderPreview(() => request(
+      `${projectUrl}/functions/v1/label-renderer`, { apikey: anonKey, authorization: `Bearer ${jwt}` }, 'POST', {
+        mode: 'designer_preview', user_jwt: jwt, label_type: labelType,
+        draft_id: fixture.draftId, shipment_id: fixture.shipmentId, shipment_box_id: fixture.boxId,
+      },
+    ));
     requireProbe(rendered.code === 0, rendered.code);
     pdfBytes = rendered.pdfBytes;
   } catch (error) {
@@ -325,23 +336,31 @@ async function run(env) {
 }
 
 async function main() {
-  const report = (line) => {
-    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${line}\n`);
-    console.log(line);
-  };
+  const summary = process.env.GITHUB_STEP_SUMMARY;
+  const evidence = [];
   let errors = [];
   try {
     const result = await run(process.env);
     errors = result.errors;
-    if (result.pdfBytes) report(`LABEL_PROBE status=200 pdf_bytes=${result.pdfBytes} sha=${process.env.GITHUB_SHA}`);
-    if (result.cleaned) report('LABEL_PROBE_CLEANUP rows=0');
+    if (result.pdfBytes) evidence.push(`LABEL_PROBE status=200 pdf_bytes=${result.pdfBytes} sha=${process.env.GITHUB_SHA}`);
+    if (result.cleaned) evidence.push('LABEL_PROBE_CLEANUP rows=0');
   } catch (error) {
     errors.push(error instanceof ProbeError ? error.code : EXIT.unexpected);
   }
-  for (const code of errors) console.error(`LABEL_PROBE_ERROR code=${code}`);
+  const failures = errors.map(code => `LABEL_PROBE_ERROR code=${code}`);
+  for (const line of evidence) console.log(line);
+  for (const line of failures) console.error(line);
+  if (summary) {
+    try {
+      appendFileSync(summary, `${[...evidence, ...failures].join('\n')}\n`);
+    } catch {
+      console.error(`LABEL_PROBE_ERROR code=${EXIT.unexpected}`);
+      errors.push(EXIT.unexpected);
+    }
+  }
   process.exitCode = errors.at(-1) ?? 0;
 }
 
 if (require.main === module) void main();
 
-module.exports = { checkPreview, EXIT };
+module.exports = { checkPreview, renderPreview, EXIT };

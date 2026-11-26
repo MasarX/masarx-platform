@@ -543,6 +543,7 @@ jobs:
       superseded: ${{ steps.apply_guard.outputs.superseded }}
       configured: ${{ steps.guard.outputs.configured }}
       not_configured: ${{ steps.guard.outputs.configured == 'false' }}
+      edge_deployed: ${{ steps.deploy.outcome == 'success' }}
     steps:
       - name: Guard configuration
         id: guard
@@ -753,16 +754,37 @@ jobs:
             if [[ "$auth_mode" == public_no_jwt ]]; then flags+=(--no-verify-jwt); fi
             "$cli" functions deploy "$function_name" --project-ref "$SUPABASE_PROJECT_REF" --use-api --workdir "$EDGE_FROZEN_WORKDIR" "${flags[@]}"
           done < <(printf '%s\n' "${edge_deploy[@]}")
+      - name: Record database push attempt
+        if: ${{ always() && steps.deploy.outputs.attempted == 'true' }}
+        run: echo 'Database push started'
+
+  label-render-probe:
+    needs: database
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      needs.database.result == 'success' && needs.database.outputs.edge_deployed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: dev
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Verify the deployed label renderer
-        if: steps.deploy.outcome == 'success'
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         run: node scripts/deploy/dev-label-render-probe.cjs
-      - name: Record database push attempt
-        if: ${{ always() && steps.deploy.outputs.attempted == 'true' }}
-        run: echo 'Database push started'
 
   database-dry-run:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'
@@ -1318,7 +1340,7 @@ jobs:
           PY
 
   summary:
-    needs: [database, console, portal, landing, ingress]
+    needs: [database, label-render-probe, console, portal, landing, ingress]
     if: ${{ always() && (github.event_name == 'push' || inputs.mode == 'deploy') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
