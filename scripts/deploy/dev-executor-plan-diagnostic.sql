@@ -23,8 +23,9 @@ SELECT COALESCE((SELECT
     AND cardinality(g.oids) = 46 AND array_position(g.oids, NULL) IS NULL
     AND cardinality(r.oids) = 454 AND array_position(r.oids, NULL) IS NULL
     AND r.oids @> g.oids AS diagnostic_inputs_ok,
-  (SELECT replace(body, seam, format(
-    $acl$WHERE acl.grantee=0 AND acl.privilege_type='EXECUTE' AND f.oid <> ALL (%L::oid[]))$acl$, r.oids))
+  -- The stored body ends with ';', which cannot sit inside the projected_after CTE; the hash above stays on the raw body.
+  (SELECT regexp_replace(replace(body, seam, format(
+    $acl$WHERE acl.grantee=0 AND acl.privilege_type='EXECUTE' AND f.oid <> ALL (%L::oid[]))$acl$, r.oids)), ';\s*$', '')
    FROM planner) AS projected_sql,
   g.oids AS grant_oids, r.oids AS revoke_oids
 FROM grant_targets g CROSS JOIN revoke_targets r
