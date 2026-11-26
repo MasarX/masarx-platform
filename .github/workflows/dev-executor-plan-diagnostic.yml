@@ -5,6 +5,9 @@ name: DEV executor plan diagnostic
 permissions:
   contents: read
 
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
 jobs:
   executor-plan:
     if: github.ref == 'refs/heads/main'
