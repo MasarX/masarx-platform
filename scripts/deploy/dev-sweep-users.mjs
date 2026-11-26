@@ -23,6 +23,8 @@ function mask(value) {
 }
 
 async function reportFixtureWriteError(response) {
+  // The status alone separates a token or scope refusal from a database error.
+  console.error(`fixture_write_http_status=${response.status}`);
   const error = await response.json();
   // Supabase can wrap the PostgreSQL error in a message with additional row details.
   const message = typeof error?.message === 'string' ? error.message : '';
