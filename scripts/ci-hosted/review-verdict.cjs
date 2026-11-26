@@ -4,6 +4,7 @@ const { execFileSync } = require('node:child_process');
 const { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
+const { criticalClosure } = require('./critical-imports.cjs');
 
 const sha = /^[a-f0-9]{40}$/;
 const numericId = value => Number.isSafeInteger(value) && value > 0;
@@ -11,18 +12,23 @@ const filePath = value => typeof value === 'string' && value.split('/').every(
   part => part && part !== '.' && part !== '..' && !part.includes('\0'),
 );
 
-function readPolicy({ paths, packageScriptFiles, verdictAccountIds }) {
-  if (!paths || typeof paths !== 'object' || !Object.values(paths).every(Array.isArray)) {
+function readPolicy({ paths, closureRoots = {}, pendingPaths = [], packageScriptFiles, verdictAccountIds }) {
+  const categories = value => value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.values(value).every(Array.isArray);
+  if (!categories(paths) || !categories(closureRoots)) {
     throw new Error('Invalid critical-path categories');
   }
-  const patterns = Object.values(paths).flat();
+  const roots = Object.values(closureRoots).flat();
+  const patterns = [...Object.values(paths).flat(), ...roots];
   if (!patterns.length || !patterns.every(pattern => typeof pattern === 'string' &&
     filePath(pattern.replace(/\/\*\*$/, '')) && !pattern.replace(/\/\*\*$/, '').includes('*')) ||
+    !Array.isArray(pendingPaths) || !pendingPaths.every(entry => filePath(entry?.path) && filePath(entry?.namedBy) &&
+      !entry.path.includes('*')) ||
     !Array.isArray(packageScriptFiles) || !packageScriptFiles.every(filePath) ||
     !Array.isArray(verdictAccountIds) || !verdictAccountIds.length || !verdictAccountIds.every(numericId)) {
     throw new Error('Invalid critical-path policy');
   }
-  return { patterns, packageScriptFiles, verdictAccountIds: new Set(verdictAccountIds) };
+  return { patterns, roots, pendingPaths, packageScriptFiles, verdictAccountIds: new Set(verdictAccountIds) };
 }
 
 function readEvent(eventName, event) {
@@ -90,6 +96,7 @@ function gitObjects(root) {
     files: () => git(['ls-tree', '-r', '-z', '--format=%(objectmode)%x09%(path)', 'HEAD'], 'utf8').split('\0')
       .filter(item => /^100(?:644|755)\t/.test(item))
       .map(item => item.slice(item.indexOf('\t') + 1)),
+    tracked: filename => entry('HEAD', filename).length > 0,
     fetch: (...commits) => git(['fetch', '--no-tags', '--depth=1', 'origin', ...new Set(commits)]),
     same: (left, right, filename) => entry(left, filename).equals(entry(right, filename)),
     scripts(commit, filename) {
@@ -114,7 +121,9 @@ function matchesPattern(pattern, filename) {
 }
 
 function matchesCriticalPath(policy, filename) {
-  return policy.patterns.some(pattern => matchesPattern(pattern, filename));
+  return policy.dependencyPaths?.has(filename) ||
+    policy.pendingPaths.some(entry => matchesPattern(entry.path, filename)) ||
+    policy.patterns.some(pattern => matchesPattern(pattern, filename));
 }
 
 function isTestPath(filename) {
@@ -228,6 +237,28 @@ function checkPolicyPaths(policy, files) {
   assert.deepEqual(unmatched, [], 'Critical policy paths absent from the candidate tree: ' + unmatched.join(', '));
 }
 
+function checkPendingPaths(policy, files, tracked, read) {
+  for (const { path: filename, namedBy } of policy.pendingPaths) {
+    if (tracked(filename)) {
+      throw new Error('Pending critical path is tracked: ' + filename + '. List it as a root or directly and remove this entry.');
+    }
+    if (files.includes(namedBy)) {
+      const source = read(namedBy);
+      if (["'", '"', String.fromCharCode(96)].some(quote => source.includes(quote + filename + quote))) continue;
+    }
+    throw new Error('Pending critical path is no longer named: ' + filename + ' in ' + namedBy);
+  }
+}
+
+function completePolicy(root, policy, objects) {
+  const files = objects.files();
+  const read = filename => readFileSync(path.join(root, filename), 'utf8');
+  checkPolicyPaths(policy, files);
+  checkPendingPaths(policy, files, objects.tracked, read);
+  const { files: dependencies } = criticalClosure(policy.roots, files, read, matchesPattern);
+  return { ...policy, dependencyPaths: new Set(dependencies) };
+}
+
 function fixtureInventory(git, base, head) {
   const fields = git(['diff', '--name-status', '-z', '-M', base, head, '--']).split('\0');
   const files = [];
@@ -259,6 +290,9 @@ async function checkVerdicts(temp) {
   const scopeFile = 'scripts/deploy/scope.sh';
   const testFile = 'tests/fixture.test.js';
   const mockFile = 'apps/example/src/__mocks__/fixture.js';
+  const pendingFile = 'future.config.js';
+  const namingFile = 'scripts/deploy/runner.cjs';
+  const importedFile = 'support/config.mjs';
   const write = (filename, content) => writeFileSync(path.join(source, filename), content);
   const stage = (filename, content) => {
     write(filename, content);
@@ -270,9 +304,13 @@ async function checkVerdicts(temp) {
   };
   mkdirSync(path.join(source, 'scripts/deploy'), { recursive: true });
   mkdirSync(path.join(source, 'tests'));
+  mkdirSync(path.join(source, 'support'));
   stage(criticalFile, 'base\n');
   stage(renameFile, 'synthetic rename source\n');
   stage(scopeFile, 'scope\n');
+  stage(namingFile, "const config = 'future.config.js'; import('../../support/entry.mjs');\n");
+  stage('support/entry.mjs', "export { label } from './config.mjs';\n");
+  stage(importedFile, "export const label = 'synthetic';\n");
   stage(testFile, 'synthetic test\n');
   mkdirSync(path.dirname(path.join(source, mockFile)), { recursive: true });
   stage(mockFile, 'synthetic test double\n');
@@ -292,6 +330,9 @@ async function checkVerdicts(temp) {
   }
   const unchanged = buildCase('unchanged', () => stage('note.md', 'synthetic note\n'));
   const added = buildCase('added', () => stage('scripts/deploy/added.sh', 'synthetic addition\n'));
+  const pendingAdded = buildCase('pending-added', () => stage(pendingFile, 'synthetic config\n'), base);
+  const importedChanged = buildCase('imported-changed',
+    () => stage(importedFile, "export const label = 'changed';\n"), base);
   const removed = buildCase('removed', () => git(['rm', '--', criticalFile]));
   const missingInBoth = buildCase('after-removal', () => stage('note.md', 'synthetic note\n'), removed.head);
   const modeChanged = buildCase('mode-change', () => {
@@ -326,11 +367,14 @@ async function checkVerdicts(temp) {
   assert.throws(() => readEvent('merge_group', { merge_group: { base_sha: base, head_ref: 'refs/heads/main' } }),
     /Cannot identify PR/);
 
-  const policy = readPolicy({
-    paths: { releaseGates: ['.github/workflows/**'], production: ['scripts/deploy/**'] },
+  const rawPolicy = readPolicy({
+    paths: { production: ['scripts/deploy/**'] },
+    closureRoots: { releaseGates: [namingFile] },
+    pendingPaths: [{ path: pendingFile, namedBy: namingFile }],
     packageScriptFiles: ['package.json'],
     verdictAccountIds: [11],
   });
+  const policy = completePolicy(checkout, rawPolicy, objects);
   const docs = '## Critical changes (fixture)\nRecognize `scripts/deploy/`.\n**Not critical on their own.**';
   checkDocumentedPaths(docs, policy);
   assert.throws(() => checkDocumentedPaths(docs, { ...policy, patterns: ['.github/workflows/**'] }),
@@ -340,6 +384,10 @@ async function checkVerdicts(temp) {
     /Critical policy paths absent from the candidate tree: scripts\/deploy\/typo\.sh/);
   assert.throws(() => checkPolicyPaths({ ...policy, patterns: ['scripts/empty/**'] }, objects.files()),
     /Critical policy paths absent from the candidate tree: scripts\/empty\/\*\*/);
+  assert.throws(() => checkPendingPaths(policy, objects.files(), filename => filename === pendingFile, () => ''),
+    /Pending critical path is tracked: future\.config\.js/);
+  assert.throws(() => checkPendingPaths(policy, objects.files(), objects.tracked, () => "const config = 'old.config.js';"),
+    /Pending critical path is no longer named: future\.config\.js/);
   let nextId = 0;
   const earlier = '2026-01-01T00:00:00Z';
   const later = '2026-01-02T00:00:00Z';
@@ -371,6 +419,8 @@ async function checkVerdicts(temp) {
   }
 
   await assert.rejects(check(), /Missing review verdict/);
+  await assert.rejects(check({ candidate: pendingAdded }), /Missing review verdict/);
+  await assert.rejects(check({ candidate: importedChanged }), /Missing review verdict/);
   await assert.rejects(check({ comments: [comment('VERDICT: GO ' + head), comment('VERDICT: NO_GO ' + head)] }), /NO_GO/);
   const laterNoGo = comment('VERDICT: NO_GO ' + head, 11, later);
   const earlierGo = comment('VERDICT: GO ' + head);
@@ -422,7 +472,7 @@ async function checkVerdicts(temp) {
 
 async function selfCheck(root, policy) {
   checkDocumentedPaths(readFileSync(path.join(root, 'AGENTS.md'), 'utf8'), policy);
-  checkPolicyPaths(policy, gitObjects(root).files());
+  completePolicy(root, policy, gitObjects(root));
   const temp = mkdtempSync(path.join(tmpdir(), 'review-verdict-'));
   try {
     await checkVerdicts(temp);
@@ -437,7 +487,10 @@ async function main(env) {
   const policy = readPolicy(JSON.parse(readFileSync(path.join(root, 'config/ci/critical-paths.json'), 'utf8')));
   if (process.argv[2] === '--self-check') return selfCheck(root, policy);
   const event = readEvent(env.GITHUB_EVENT_NAME, JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8')));
-  console.log(await enforce(event, policy, githubClient(env.GITHUB_REPOSITORY, env.GITHUB_TOKEN), gitObjects(root)));
+  const objects = gitObjects(root);
+  if (objects.checkout() !== event.base) throw new Error('Verdict policy checkout does not match event base');
+  const resolved = completePolicy(root, policy, objects);
+  console.log(await enforce(event, resolved, githubClient(env.GITHUB_REPOSITORY, env.GITHUB_TOKEN), objects));
 }
 
 main(process.env).catch(error => {

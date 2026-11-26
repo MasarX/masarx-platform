@@ -8,8 +8,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const functionsRoot = path.join(__dirname, '..', '..', 'supabase', 'functions');
-const sharedSource = path.join(functionsRoot, '_shared');
+const { functionsPath, sharedName, isFunctionDirectory } = require('./shared-layout.cjs');
+const functionsRoot = path.join(__dirname, '..', '..', functionsPath);
+const sharedSource = path.join(functionsRoot, sharedName);
 
 if (process.argv.includes('--if-present') && !fs.existsSync(functionsRoot)) {
   console.log('[edge:sync-shared] Skipped: supabase/functions is absent from this checkout.');
@@ -55,8 +56,8 @@ const copyRecursive = (source, target) => {
 };
 
 const targets = fs.readdirSync(functionsRoot, { withFileTypes: true })
-  .filter((entry) => entry.isDirectory() && entry.name !== '_shared' && !entry.name.startsWith('.'))
-  .map((entry) => path.join(functionsRoot, entry.name, '_shared'));
+  .filter((entry) => entry.isDirectory() && isFunctionDirectory(entry.name))
+  .map((entry) => path.join(functionsRoot, entry.name, sharedName));
 
 targets.forEach((target) => {
   copyRecursive(sharedSource, target);
