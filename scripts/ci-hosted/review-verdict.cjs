@@ -308,8 +308,9 @@ async function checkVerdicts(temp) {
   stage(criticalFile, 'base\n');
   stage(renameFile, 'synthetic rename source\n');
   stage(scopeFile, 'scope\n');
-  stage(namingFile, "const config = 'future.config.js'; import('../../support/entry.mjs');\n");
-  stage('support/entry.mjs', "export { label } from './config.mjs';\n");
+  stage(namingFile, "const config = 'future.config.js'; import('../../support/entry.ts');\n");
+  stage('support/tsconfig.json', '{"extends":"external-config/tsconfig","compilerOptions":{"paths":{"@fixture/*":["./*"]}}}\n');
+  stage('support/entry.ts', "export { label } from '@fixture/config.mjs';\n");
   stage(importedFile, "export const label = 'synthetic';\n");
   stage(testFile, 'synthetic test\n');
   mkdirSync(path.dirname(path.join(source, mockFile)), { recursive: true });
@@ -388,6 +389,8 @@ async function checkVerdicts(temp) {
     /Pending critical path is tracked: future\.config\.js/);
   assert.throws(() => checkPendingPaths(policy, objects.files(), objects.tracked, () => "const config = 'old.config.js';"),
     /Pending critical path is no longer named: future\.config\.js/);
+  assert.throws(() => criticalClosure([namingFile], objects.files(), () => "require('./missing.cjs');", matchesPattern),
+    /Unresolved local import .*missing\.cjs/);
   let nextId = 0;
   const earlier = '2026-01-01T00:00:00Z';
   const later = '2026-01-02T00:00:00Z';

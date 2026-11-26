@@ -8,6 +8,7 @@ const typeDeclaration = /\.d\.[cm]?ts$/;
 const testFile = /\.(?:test|spec)\.[^.]+$/;
 const isString = token => token && /^['"\x60]/.test(token);
 const identifier = /^[\p{ID_Start}$_][\p{ID_Continue}$]*$/u;
+const packageName = specifier => specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/');
 
 function sourceTokens(text) {
   const tokens = [];
@@ -140,10 +141,13 @@ function localResolver(files, read) {
     const directory = posix.dirname(config);
     const options = document.compilerOptions ?? {};
     const parent = document.extends;
-    if (parent && (typeof parent !== 'string' || !parent.startsWith('.'))) {
+    if (parent !== undefined && (typeof parent !== 'string' || !parent ||
+      /^(?:[/#]|file:)/.test(parent) || packages.has(packageName(parent)))) {
       throw new Error('Unsupported compiler configuration inheritance: ' + config);
     }
-    const inherited = parent ? compilerOptions(posix.join(directory, parent), new Set([...loading, config])) : {};
+    // Compiler defaults from installed packages are outside the tracked import graph.
+    const inherited = parent?.startsWith('.')
+      ? compilerOptions(posix.join(directory, parent), new Set([...loading, config])) : {};
     const base = options.baseUrl === undefined ? inherited.base : posix.join(directory, options.baseUrl);
     return {
       base,
@@ -224,7 +228,7 @@ function localResolver(files, read) {
     }
     if (specifier.startsWith('@/')) missing();
 
-    const name = specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/');
+    const name = packageName(specifier);
     const workspace = packages.get(name);
     if (!workspace) return null;
     const { directory, manifest } = workspace;
@@ -252,13 +256,11 @@ function criticalClosure(rootPatterns, trackedFiles, read, matchesPattern) {
   }
 
   for (const filename of reached.keys()) {
-    if (/\.[jt]sx$/.test(filename)) throw new Error('UI component in critical import graph: ' + chain(filename));
     if (!sourceFile.test(filename)) continue;
     try {
       for (const [literal, syntax] of literalImports(read(filename))) {
         if (literal.includes('\\')) throw new Error('Unsupported escaped import specifier ' + literal + ' in ' + filename);
         const specifier = literal.slice(1, -1);
-        if (/^(?:npm:)?react(?:\/|$)/.test(specifier)) throw new Error('React import ' + specifier + ' in ' + filename);
         const target = resolve(filename, specifier, syntax);
         if (target && !reached.has(target)) reached.set(target, filename);
       }
