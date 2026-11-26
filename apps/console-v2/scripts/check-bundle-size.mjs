@@ -3,7 +3,7 @@
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-// Per-chunk budgets in KB (raw size). Tune as the app grows.
+// Per-chunk budgets in KiB (raw size).
 //
 // Phase F (2026-04-27): seed-mode vs. live-mode dual budget. The seed catalog
 // under `src/lib/seed-raw/` (~10k LOC across 30+ modules) is now lazy-loaded
@@ -69,6 +69,7 @@ const BASELINE_CHUNK_BUDGETS = {
   'maplibre-gl-': 1050,
   'pdf-preview-': 430,
   'shipments-': 113,
+  'supabase-auth-client-': 63_104 / 1024, // Exact emitted size from the hosted live build for #629.
 };
 
 const BUDGETS = {
