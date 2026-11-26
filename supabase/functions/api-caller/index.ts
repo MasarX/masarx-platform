@@ -470,7 +470,11 @@ const executeClaimedJob = async (
     if (error || data !== null) {
       throw new Error(`Could not defer renderer transport for job ${jobId}`);
     }
-    console.warn("[api-caller] renderer_transport_deferred");
+    logStructured("warn", "api_caller.renderer_transport_deferred", {
+      service: "api-caller",
+      code: "renderer_transport_deferred",
+      job_id: jobId,
+    });
     return {
       job_id: jobId,
       success: false,
