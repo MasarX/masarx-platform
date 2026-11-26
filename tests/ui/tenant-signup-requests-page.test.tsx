@@ -90,7 +90,15 @@ test.each([
   [422, { message: "A rejection reason is required." }, "A rejection reason is required."],
 ])("tenant review HTTP %s uses safe contextual copy (case %#)", async (status, error, message) => {
   fetchReview.mockResolvedValue({ ok: false, status, json: async () => ({ ok: false, error }) });
-  expect(await submitReview()).toEqual({ status: "error", message });
+  const result = await submitReview();
+  const expectedMessage = status === 422
+    ? "Unable to complete the review. Try again or contact your administrator."
+    : message;
+  if (status === 422) {
+    expect(result.message).toBe(expectedMessage);
+    expect(result.message).not.toContain("rejection reason");
+  }
+  expect(result).toEqual({ status: "error", message: expectedMessage });
   const [, request] = fetchReview.mock.calls[0];
   expect(JSON.parse(request.body)).toMatchObject({ request_id: requestId, decision: "rejected", reason: "Synthetic validation reason" });
 });

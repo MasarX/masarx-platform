@@ -916,11 +916,12 @@ test("portal exception row selection exposes the canonical action and removes a 
 
   expect(
     await screen.findByText(
-      "fresh queue read failed",
+      "The action was written, but its canonical read-back is not visible yet. Refresh and verify before retrying.",
       {},
       { timeout: 3_000 }
     )
   ).toBeInTheDocument();
+  expect(screen.queryByText("fresh queue read failed", { exact: false })).not.toBeInTheDocument();
   expect(
     screen.getByRole("checkbox", { name: "Select row REF-08C44B9E" })
   ).toBeInTheDocument();
@@ -2902,7 +2903,8 @@ test("bulk actions redact errors and emit telemetry on failure", async () => {
   expect(feedback).toHaveAttribute("data-action-key", "shipments.fail");
   expect(feedback).toHaveAttribute("data-phase", "error");
   expect(feedback).toHaveTextContent("Fail shipments:");
-  expect(feedback).toHaveTextContent("[redacted]");
+  expect(feedback.querySelector("p")?.textContent).toBe("Fail shipments: Fail shipments failed");
+  expect(feedback).not.toHaveTextContent("token=");
   expect(feedback).toHaveTextContent("Selected records: 1");
   expect(feedback).not.toHaveTextContent("payload.signature");
   const events = reporter.mock.calls.map((call) => call[0]);
@@ -3291,7 +3293,8 @@ test("readback callback rejection does not turn a completed mutation into failur
   await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(reporter.mock.calls.map(([event]) => event.type)).toContain("ui.bulk_action.success"));
   expect(reporter.mock.calls.map(([event]) => event.type)).not.toContain("ui.bulk_action.error");
-  expect(await screen.findByText("refresh offline")).toBeInTheDocument();
+  expect(await screen.findByText("The action was written, but its canonical read-back is not visible yet. Refresh and verify before retrying.")).toBeInTheDocument();
+  expect(screen.queryByText("refresh offline", { exact: false })).not.toBeInTheDocument();
   expect(screen.queryByText("Refresh result submitted")).not.toBeInTheDocument();
   expect(rpcMock).toHaveBeenCalledTimes(1);
 });
