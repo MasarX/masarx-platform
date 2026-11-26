@@ -28,7 +28,7 @@ test("dispatcher can open the route workspace and review pickup ledgers", async 
     const pickup = key !== dispatch.key;
     const failure = "ROUTE_ASSERTION_FAILED/" + key;
     const ready = page.getByTestId(prefix + "-ready");
-    const assertedLocator = pickup ? ready.getByRole("heading", { level: 1 }) : ready;
+    const assertedLocator = (pickup ? ready : page.getByRole("main")).getByRole("heading", { level: 1 });
     const blockingState = page
       .getByTestId(/^(console-context-unavailable|route-error-page)$/)
       .or(page.getByTestId(prefix + "-error"))
@@ -46,8 +46,8 @@ test("dispatcher can open the route workspace and review pickup ledgers", async 
         await expect(ready.getByTestId(prefix + "-blocked"), failure).toBeVisible();
         await expect(ready.getByTestId(prefix + "-create-submit"), failure).toHaveCount(0);
         await expect(ready.getByRole("article").first(), failure).toBeVisible();
-        await expect(assertedLocator, failure).toBeVisible();
       }
+      await expect(assertedLocator, failure).toBeVisible();
     } catch {
       throw new Error(failure);
     }

@@ -14,6 +14,7 @@ test("finance viewer can open the Console Dashboard", async ({ context }) => {
   const page = await strictConsoleSignIn(context, role, route);
   const failure = "ROUTE_ASSERTION_FAILED/dashboard";
   const ready = page.getByTestId("console-dashboard-ready");
+  const heading = page.getByRole("main").getByRole("heading", { level: 1 });
   const blockingState = page
     .getByTestId(/^(console-(context-unavailable|dashboard-error)|route-error-page)$/)
     .or(page.locator('[role="status"][aria-busy="true"]'))
@@ -24,8 +25,9 @@ test("finance viewer can open the Console Dashboard", async ({ context }) => {
     await expect(page.getByTestId(CONSOLE_AUTH_GATE), failure).toHaveCount(0);
     await expect(ready, failure).toBeVisible();
     await expect(blockingState, failure).toHaveCount(0);
+    await expect(heading, failure).toBeVisible();
   } catch {
     throw new Error(failure);
   }
-  await captureRouteEvidence(page, ready, { role, route });
+  await captureRouteEvidence(page, heading, { role, route });
 });
