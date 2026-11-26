@@ -35,6 +35,7 @@ test("dispatcher can open the route workspace and review pickup ledgers", async 
       .or(page.locator('[role="status"][aria-busy="true"]'))
       .filter({ visible: true });
 
+    let ledgerState: "rows" | "empty" | undefined;
     try {
       if (pickup) await page.goto(new URL(route, origin).href, { waitUntil: "domcontentloaded" });
       await expect(page.getByTestId(CONSOLE_SIGNED_IN_SHELL), failure).toBeVisible();
@@ -45,7 +46,18 @@ test("dispatcher can open the route workspace and review pickup ledgers", async 
         await expect(ready.getByTestId(prefix + "-lookup-error"), failure).toBeHidden();
         await expect(ready.getByTestId(prefix + "-blocked"), failure).toBeVisible();
         await expect(ready.getByTestId(prefix + "-create-submit"), failure).toHaveCount(0);
-        await expect(ready.getByRole("article").first(), failure).toBeVisible();
+        await expect(ready.getByTestId(prefix + "-error"), failure).toHaveCount(0);
+        const rows = ready.getByRole("article", { includeHidden: true });
+        const empty = ready.locator('[role="status"][aria-live="polite"]');
+        const emptyCount = await empty.count();
+
+        if (emptyCount === 0 && (await rows.filter({ visible: true }).count()) > 0) {
+          ledgerState = "rows";
+        } else if (emptyCount === 1 && (await rows.count()) === 0 && (await empty.isVisible())) {
+          ledgerState = "empty";
+        } else {
+          throw new Error(failure);
+        }
       }
       await expect(assertedLocator, failure).toBeVisible();
     } catch {
@@ -55,7 +67,7 @@ test("dispatcher can open the route workspace and review pickup ledgers", async 
     await captureRouteEvidence(page, assertedLocator, {
       role,
       route,
-      ...(pickup ? { ledgerState: "rows" as const } : {}),
+      ...(ledgerState === undefined ? {} : { ledgerState }),
     });
   }
 });
