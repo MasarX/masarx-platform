@@ -6,7 +6,7 @@ Follows engineering standard v1.29.3.
 
 ## Branching and merging
 
-- The `main` queue permits four concurrent builds. Use it without admission caps, drains or bypasses. Keep one migration item and one non-migration item in progress at a time.
+- The `main` queue permits four concurrent builds. Parallel builds let GitHub check later queue entries while earlier entries run. With `ALLGREEN` grouping, removing an earlier entry can change later combined trees and require fresh checks even after CI has passed. [#673](https://github.com/MasarX/masarx-platform/issues/673) records the observed build overlap and rebuild cost. Use the queue without admission caps, drains or bypasses. Keep one migration item and one non-migration item in progress at a time. Serializing migration items keeps timestamp assignment in landing order and reduces re-stamps as `main` advances.
 - The manual merge hold is retired. The DEV apply guard (G1–G3) protects DEV database applies.
 - The thread that made the change pushes its topic branch and opens its own PR ready under the project's agent identity. Each PR names its issue (`Closes #n` or `Refs #n`).
 - Use the approved tree-publisher App helper for authenticated GitHub work. If the helper fails, stop and report it to Delivery. Keep installation tokens and signing material out of output and shared artifacts. The owner login is reserved for approved settings changes and release tags.
