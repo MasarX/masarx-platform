@@ -192,7 +192,7 @@ export async function provisionSweep(env) {
   const authUsers = `${projectUrl}/auth/v1/admin/users`;
   const query = (sql, parameters, reason, readOnly = false) => request(
     `${management}/database/query`, managementHeaders, reason, 'POST',
-    { query: sql, parameters, read_only: readOnly, disable_statement_timeout: false },
+    { query: sql, parameters, read_only: readOnly },
   );
   const digest = createHash('sha256').update(`dev-design-sweep:${projectRef}`).digest('hex');
   const suffix = digest.slice(0, 16);
