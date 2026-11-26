@@ -95,6 +95,7 @@ type ResourceViewEntry = UiTableView & {
 };
 
 const t = createUiTranslator("ui.resourcePage");
+const errorT = createUiTranslator("ui.feedback.error");
 
 type ResourcePageProps = {
   appKey: "console" | "portal";
@@ -1371,7 +1372,14 @@ export async function ResourcePage({
           title={isTimeoutError ? t("timeout.title") : t("unavailable.title")}
           action={isTimeoutError ? t("timeout.action") : t("unavailable.action")}
           detailNode={unavailableNoticeDetail}
-          links={suggestedResourceLinks}
+          links={[
+            ...suggestedResourceLinks,
+            {
+              href: buildHref(safeBaseHref, new URLSearchParams(flattenSearchParams(searchParams))),
+              label: errorT("action"),
+              testId: errorTestId ? `${errorTestId}-retry` : undefined,
+            },
+          ]}
           linksTitle={
             suggestedResourceLinks.length > 0
               ? t("errors.suggestedResources")

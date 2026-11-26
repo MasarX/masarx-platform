@@ -39,18 +39,22 @@ export function getUiErrorMessage(error: unknown): string | null {
   return null;
 }
 
-const TECHNICAL_UI_ERROR_PATTERN = /\b(?:backend|read[-_\s]?back|event[-_\s]?read[-_\s]?back|correlation(?:[_\s-]?id)?|debug|diagnostic|raw[-_\s]?(?:backend|json|payload|response|table))\b/i;
+// App-authored error whose message is meant to be shown; formatUiError shows it through formatUiMessage.
+export class UiMessageError extends Error {}
 
+// Visible error text is the caller's translated fallback; backend text never passes through (#723).
 export function formatUiError(error: unknown, fallback: string) {
+  if (error instanceof UiMessageError) return formatUiMessage(error.message, fallback);
   const message = sanitizeUiError(getUiErrorMessage(error));
-  if (!message || isAuthorizationUiError(error)) return fallback;
-  if (!TECHNICAL_UI_ERROR_PATTERN.test(message)) return message;
-  // Retain blocked-state classification without exposing the diagnostic suffix.
-  if (isCapabilityDeniedMessage(message)) {
-    const key = extractCapabilityDeniedKey(message);
-    return key ? `Capability denied: ${key}` : "Capability denied";
-  }
-  return fallback;
+  if (!message || isAuthorizationUiError(error) || !isCapabilityDeniedMessage(message)) return fallback;
+  // Retain blocked-state classification without exposing the rest of the message.
+  const key = extractCapabilityDeniedKey(message);
+  return key ? `Capability denied: ${key}` : "Capability denied";
+}
+
+// The explicit path for app-authored text meant to be shown; never pass backend text here.
+export function formatUiMessage(message: unknown, fallback: string) {
+  return (typeof message === "string" && sanitizeUiError(message)) || fallback;
 }
 
 export function isSchemaCacheFunctionUnavailableError(
