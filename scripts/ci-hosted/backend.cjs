@@ -134,7 +134,10 @@ function timeHostedCloneCommand(summary, admin, ...commands) {
 
 function dropHostedDatabases(summary, admin, databases) {
   return stage(summary, 'database-clone-cleanup', async () => {
-    for (const database of databases) await admin(`DROP DATABASE ${database} WITH (FORCE)`);
+    // Each drop gets its own stage, so a slow drop is visible by name inside the combined cleanup.
+    for (const database of databases) {
+      await stage(summary, `database-clone-drop:${database}`, () => admin(`DROP DATABASE ${database} WITH (FORCE)`));
+    }
   });
 }
 

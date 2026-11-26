@@ -41,7 +41,12 @@ test('drops every hosted clone in a separate admin call', async () => {
     ['DROP DATABASE pgtap_worker_2 WITH (FORCE)'],
     ['DROP DATABASE pgtap_worker_3 WITH (FORCE)'],
   ]);
-  expect(summary.stages).toMatchObject([{ name: 'database-clone-cleanup', status: 'passed' }]);
+  expect(summary.stages).toMatchObject([
+    { name: 'database-clone-cleanup', status: 'passed' },
+    { name: 'database-clone-drop:pgtap_worker_1', status: 'passed' },
+    { name: 'database-clone-drop:pgtap_worker_2', status: 'passed' },
+    { name: 'database-clone-drop:pgtap_worker_3', status: 'passed' },
+  ]);
 });
 
 test('fails hosted clone cleanup when an individual drop fails', async () => {
@@ -54,5 +59,9 @@ test('fails hosted clone cleanup when an individual drop fails', async () => {
     ['DROP DATABASE pgtap_worker_1 WITH (FORCE)'],
     ['DROP DATABASE pgtap_worker_2 WITH (FORCE)'],
   ]);
-  expect(summary.stages).toMatchObject([{ name: 'database-clone-cleanup', status: 'failed' }]);
+  expect(summary.stages).toMatchObject([
+    { name: 'database-clone-cleanup', status: 'failed' },
+    { name: 'database-clone-drop:pgtap_worker_1', status: 'passed' },
+    { name: 'database-clone-drop:pgtap_worker_2', status: 'failed' },
+  ]);
 });
