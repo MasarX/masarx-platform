@@ -1,5 +1,6 @@
 jest.mock('node:child_process', () => ({ spawnSync: jest.fn() }));
 jest.mock('../../../config/edge/functions.json', () => ({
+  use_api_bundle_limit_bytes: 1024,
   functions: [{ name: 'fixture-edge', enabled: true }],
 }));
 
@@ -36,7 +37,7 @@ test('stages only the frozen Edge entry point and its verified digest', () => {
   expect(command).toBe('deno');
   expect(args).toEqual([
     'bundle', '--frozen', '--lock=deno.lock', '--no-config', '--node-modules-dir=none',
-    '--platform=deno', '--packages=bundle', '--output', path.join(workdir, entry), entry,
+    '--platform=deno', '--packages=bundle', '--minify', '--keep-names', '--output', path.join(workdir, entry), entry,
   ]);
   expect(options.env.DENO_DIR).not.toBe(process.env.DENO_DIR);
   expect(spawnSync.mock.calls[1]).toEqual(['deno', [
