@@ -11,13 +11,16 @@ name: Console V2 Auth qualification
 permissions:
   contents: read
 
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
 jobs:
   qualify:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
-      CANDIDATE_SHA: 322dc74135e780da6ded0010786cb93c7500b9c7
-      CANDIDATE_TREE: ecbb3cbe2f2a22a5159f595d7fee764fd5571609
+      CANDIDATE_SHA: 9bdb40233df50568fdc49e0b1efa2450d1f8e45b
+      CANDIDATE_TREE: 6542c872a5d57972e364f5b894aafac18029be6b
     steps:
       - name: Bind the reviewed workflow
         shell: bash

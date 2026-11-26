@@ -6,6 +6,8 @@ const fs = require('node:fs');
 const { createRequire } = require('node:module');
 const path = require('node:path');
 
+const expiryUnboundExitCode = 2;
+
 function loopbackUrl(value, protocols) {
   const address = new URL(value);
   assert(protocols.includes(address.protocol));
@@ -97,18 +99,22 @@ async function provisionFixture(env) {
   const client = createClient(apiOrigin, anonKey, options);
   const signed = await client.auth.signInWithPassword({ email, password });
   assert(!signed.error && signed.data?.session?.user?.id === userId);
-  assert.equal(signed.data.session.expires_in, jwtExpirySeconds);
+  const expiryBound = signed.data.session.expires_in === jwtExpirySeconds;
   const identity = await client.rpc('ui_me_v1');
   assert(!identity.error && identity.data?.user?.id === userId);
   assert.equal(identity.data.access_scope?.scope_type, 'platform');
   assert(Array.isArray(identity.data.capabilities) && identity.data.capabilities.length > 0);
   const logout = await client.auth.signOut();
   assert(!logout.error);
-  return { email, password };
+  return expiryBound ? { email, password } : null;
 }
 
 if (require.main === module) {
   provisionFixture(process.env).then(account => {
+    if (account === null) {
+      process.exitCode = expiryUnboundExitCode;
+      return;
+    }
     // The workflow captures this JSON in memory without printing or retaining it.
     process.stdout.write(JSON.stringify(account) + '\n');
   }).catch(() => {
@@ -117,4 +123,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { loopbackOrigin, qualificationInputs };
+module.exports = { expiryUnboundExitCode, loopbackOrigin, qualificationInputs };

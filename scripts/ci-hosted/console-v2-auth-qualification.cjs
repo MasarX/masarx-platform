@@ -1,11 +1,13 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { createRequire } = require('node:module');
 const { pathToFileURL } = require('node:url');
+const { expiryUnboundExitCode } = require('./console-v2-auth-qa-fixture.cjs');
 
 const root = process.cwd();
 const candidate = createRequire(path.join(root, 'package.json'));
@@ -26,6 +28,7 @@ const fileHash = file => sha256(fs.readFileSync(file));
 const baseEnv = {
   PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8', CI: 'true',
   ENV_FILE: '/dev/null', ENV_FILE_OVERRIDE: '0', ENV_FILE_APPEND: '0',
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true',
   NPM_CONFIG_UPDATE_NOTIFIER: 'false', NPM_CONFIG_FETCH_RETRIES: '0',
   NEXT_TELEMETRY_DISABLED: '1', NX_NO_CLOUD: 'true', DO_NOT_TRACK: '1',
   SUPABASE_TELEMETRY_DISABLED: '1', OTEL_SDK_DISABLED: 'true',
@@ -213,7 +216,11 @@ async function qualify() {
       await stage(`${mode}Build`, () => npm(['run', 'build', '--workspace', workspace], env));
       if (live) {
         try {
-          await stage('liveBundleBudget', () => npm(['run', 'check:bundle-size', '--workspace', workspace], env));
+          // Apply the reviewed ceiling from the workflow checkout to the untouched candidate build.
+          const checker = path.resolve(__dirname, '../../apps/console-v2/scripts/check-bundle-size.mjs');
+          await stage('liveBundleBudget', () => execFileSync(process.execPath, [checker], {
+            cwd: app, env, stdio: 'pipe', timeout: 30_000,
+          }));
         } catch {
           bundleFailed = true; // Preserve the budget failure while collecting independent browser evidence.
         }
@@ -256,11 +263,15 @@ async function qualify() {
     const qa = (name, env, timeout) =>
       quiet(process.execPath, [path.join(__dirname, `console-v2-auth-qa-${name}.cjs`)], env, timeout);
     const account = await stage('qaFixture', async () => {
-      const { email, password } = JSON.parse(await qa('fixture', {
+      const output = await qa('fixture', {
         ...qaEnv, SUPABASE_URL: apiUrl, SUPABASE_ANON_KEY: status.ANON_KEY,
         SUPABASE_SERVICE_ROLE_KEY: status.SERVICE_ROLE_KEY, DATABASE_URL: status.DB_URL,
         QA_JWT_EXPIRY_SECONDS: String(jwtExpirySeconds),
-      }, 60_000));
+      }, 60_000).catch(error => {
+        if (error.failure?.exitCode === expiryUnboundExitCode) report.qaRefreshReason = 'REFRESH_EXPIRY_UNBOUND';
+        throw error;
+      });
+      const { email, password } = JSON.parse(output);
       assert(typeof email === 'string' && email && typeof password === 'string' && password);
       return { email, password };
     });
@@ -294,8 +305,8 @@ async function qualify() {
         return record.result;
       });
       const speedStatus = measured.includes('FAIL') ? 'FAIL' : measured.includes('NOT_RUN') ? 'NOT_RUN' : 'PASS';
-      report.qa.startupP75 = speedStatus;
       assert.equal(results.startupP75, speedStatus);
+      report.qa.startupP75 = speedStatus;
       assert(Object.values(report.qa).every(result => result === 'PASS' || result === 'UNSUPPORTED'));
     });
     if (bundleFailed) throw new Error('bundle budget');

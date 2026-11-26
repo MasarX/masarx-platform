@@ -160,6 +160,8 @@ async function qualification(env, result) {
       assert(!await page.getByTestId('app-guard-unauthenticated').isVisible());
       assertStartup();
       demoSpeed = await speed(page, demo, 'demo');
+      assert(!backendRequest);
+      assertStartup();
       await page.context().close();
     });
 
