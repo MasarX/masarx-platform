@@ -35,6 +35,9 @@ for (const app of ['console', 'console-v2', 'portal']) {
             return await run();
           } catch (error) {
             console.log('\nSWEEP-FAIL', app, locale, theme, size, state, code);
+            if (code === 'marker' && error instanceof Error) {
+              console.log('SWEEP-ERROR ' + error.message.replaceAll('\n', '\nSWEEP-ERROR '));
+            }
             throw error;
           }
         }
