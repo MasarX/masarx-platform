@@ -1515,7 +1515,7 @@ export async function RouteOperationsWorkspacePage({
                 </div>
                 <div className="overflow-hidden rounded-lg border border-ui-border/60 bg-ui-surface/60">
                   <table
-                    className="w-full border-collapse text-left text-xs text-ui-ink"
+                    className="w-full border-collapse text-start text-xs text-ui-ink"
                     data-testid={
                       testIdPrefix ? `${testIdPrefix}-constraint-matrix` : undefined
                     }
@@ -1720,7 +1720,7 @@ export async function RouteOperationsWorkspacePage({
                 </div>
                 <div className="overflow-hidden rounded-lg border border-ui-border/60 bg-ui-surface/60">
                   <table
-                    className="w-full border-collapse text-left text-xs text-ui-ink"
+                    className="w-full border-collapse text-start text-xs text-ui-ink"
                     data-testid={
                       testIdPrefix ? `${testIdPrefix}-pod-customer-matrix` : undefined
                     }
@@ -1812,7 +1812,7 @@ export async function RouteOperationsWorkspacePage({
             ) : (
               <div className="overflow-hidden rounded-lg border border-ui-border/60 bg-ui-surface/60">
                 <table
-                  className="w-full border-collapse text-left text-xs text-ui-ink"
+                  className="w-full border-collapse text-start text-xs text-ui-ink"
                   data-testid={testIdPrefix ? `${testIdPrefix}-dispatch-board` : undefined}
                 >
                   <thead className="border-b border-ui-border bg-ui-paper/70 text-ui-muted">
@@ -2076,7 +2076,7 @@ export async function RouteOperationsWorkspacePage({
                 </div>
                 <div className="overflow-hidden rounded-lg border border-ui-border/60 bg-ui-surface/60">
                   <table
-                    className="w-full border-collapse text-left text-xs text-ui-ink"
+                    className="w-full border-collapse text-start text-xs text-ui-ink"
                     data-testid={
                       testIdPrefix ? `${testIdPrefix}-triage-matrix` : undefined
                     }

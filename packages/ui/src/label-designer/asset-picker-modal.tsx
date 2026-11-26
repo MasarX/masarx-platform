@@ -36,14 +36,14 @@ export function AssetPickerModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
       data-testid={`${prefix}-overlay`}
     >
       <div
-        className="w-full max-w-md rounded-xl border border-ui-border bg-white p-4 shadow-xl"
+        className="w-full max-w-md rounded-xl border border-ui-border bg-ui-surface p-4 shadow-xl"
         data-testid={`${prefix}-dialog`}
       >
         <div className="mb-3 flex items-center justify-between">
@@ -58,7 +58,7 @@ export function AssetPickerModal({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t("searchAssets")}
-          className="mb-3 w-full rounded border border-ui-border/50 bg-ui-paper/50 px-3 py-1.5 text-xs text-ui-ink placeholder:text-ui-muted focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="mb-3 w-full rounded border border-ui-border/50 bg-ui-paper/50 px-3 py-1.5 text-xs text-ui-ink placeholder:text-ui-muted focus:outline-none focus:ring-1 focus:ring-ui-accent"
           data-testid={`${prefix}-search`}
         />
 

@@ -297,13 +297,15 @@ function classifyFunctionHazard(nameValue) {
   if (/^pg_(?:try_)?advisory_xact_lock(?:_shared)?$/u.test(base)) return '';
   if (/^(?:nextval|setval)$/u.test(base)) return 'nontransactional_function';
   if (/^dblink/u.test(base) || /^pg_background/u.test(base)) return 'autonomous_side_effect';
-  if (/^http_/u.test(base) || /^net\.http_/u.test(name)) return 'autonomous_side_effect';
+  if (/^http(?:_|$)/u.test(base)) return 'autonomous_side_effect';
   if (/^cron\.(?:schedule|unschedule|alter_job)$/u.test(name)) return 'autonomous_side_effect';
-  if (/^(?:lo_import|lo_export)$/u.test(base)) return 'external_file_side_effect';
+  if (/^(?:lo_import|lo_export|pg_file_(?:write|rename|unlink|sync))$/u.test(base)) return 'external_file_side_effect';
   if (/^pg_logical_emit_message$/u.test(base)) return 'autonomous_side_effect';
   if (/^pg_(?:create|drop)_.*replication_slot$/u.test(base)) return 'autonomous_side_effect';
   if (/^pg_(?:terminate_backend|cancel_backend|reload_conf|promote|rotate_logfile)$/u.test(base)) return 'autonomous_side_effect';
   if (/^pg_(?:try_)?advisory_lock(?:_shared)?$/u.test(base)) return 'autonomous_side_effect';
+  if (/^pg_advisory_unlock(?:_shared|_all)?$/u.test(base)) return 'autonomous_side_effect';
+  if (/^pg_(?:switch_wal|create_restore_point|backup_start|backup_stop|wal_replay_pause|wal_replay_resume)$/u.test(base)) return 'autonomous_side_effect';
   return '';
 }
 
@@ -360,31 +362,31 @@ function classifyStatementHazard(statement, options = {}) {
   if (first === 'rollback' && second !== 'to' && options.allowExactFinalRollback !== true) return 'transaction_rollback_boundary';
   const lexicalModeHazard = classifyLexicalModeHazard(statement.tokens);
   if (lexicalModeHazard) return lexicalModeHazard;
+  if (first === 'execute') return 'dynamic_sql_unresolved';
   if (new Set(['vacuum', 'analyze', 'cluster', 'reindex', 'checkpoint', 'load', 'call']).has(first)) {
     return 'nontransactional_statement';
   }
   if (first === 'discard' && second === 'all') return 'nontransactional_statement';
   if (new Set(['create', 'drop']).has(first) && new Set(['database', 'tablespace']).has(second)) return 'nontransactional_statement';
   if (first === 'alter' && second === 'system') return 'nontransactional_statement';
-  if (
-    (first === 'create' && second === 'index' && words[2] === 'concurrently')
-    || (first === 'create' && second === 'unique' && words[2] === 'index' && words[3] === 'concurrently')
-    || (first === 'drop' && second === 'index' && words[2] === 'concurrently')
-  ) return 'nontransactional_statement';
-  if (first === 'refresh' && words[1] === 'materialized' && words[2] === 'view' && words.includes('concurrently')) return 'nontransactional_statement';
+  if (words.includes('concurrently')) return 'nontransactional_statement';
   if (new Set(['create', 'alter', 'drop']).has(first) && second === 'subscription') return 'autonomous_side_effect';
   if (first === 'copy') return classifyCopyHazard(statement);
   return '';
 }
 
-function hazardsFromDecodedSql(value, sourceLabel, depth = 0) {
+function analyzeDecodedSql(value, sourceLabel, depth = 0, { allowFinalCommit = false } = {}) {
   const lexed = lexSqlForIsolation(value);
+  const statements = splitTopLevelSqlStatements(lexed);
   const hazards = [];
   for (const error of lexed.errors) hazards.push({ code: error.code, line: error.line, column: error.column, source: sourceLabel });
   for (const meta of lexed.metaCommands) hazards.push({ code: meta.code, line: meta.line, column: meta.column, source: sourceLabel });
-  for (const statement of splitTopLevelSqlStatements(lexed)) {
+  for (const [index, statement] of statements.entries()) {
     const statementHazard = classifyStatementHazard(statement);
-    if (statementHazard) hazards.push({ code: statementHazard, line: statement.line, column: statement.column, source: sourceLabel });
+    const isAllowedCommit = allowFinalCommit && statementHazard === 'transaction_commit' && index === statements.length - 1;
+    if (statementHazard && !isAllowedCommit) {
+      hazards.push({ code: statementHazard, line: statement.line, column: statement.column, source: sourceLabel });
+    }
     for (const call of calledFunctions(statement.tokens)) {
       const code = classifyFunctionHazard(call.name);
       if (code) hazards.push({ code, line: call.line, column: call.column, source: sourceLabel });
@@ -394,7 +396,11 @@ function hazardsFromDecodedSql(value, sourceLabel, depth = 0) {
       else hazards.push(...inspectDoStatement(statement, depth + 1));
     }
   }
-  return hazards;
+  return { hazards, statementCount: statements.length };
+}
+
+function analyzeMigrationReplay(sql) {
+  return analyzeDecodedSql(sql, 'migration', 0, { allowFinalCommit: true });
 }
 
 function findMatchingCloseParen(tokens, openIndex) {
@@ -417,7 +423,7 @@ function inspectExecuteExpression(tokens, executeIndex, statement, depth = 0) {
   if (!expression.length) return unresolved();
   if (expression[0].type === 'string') {
     if (expression.length !== 1) return unresolved();
-    return hazardsFromDecodedSql(expression[0].literal, 'dynamic_sql_literal', depth + 1);
+    return analyzeDecodedSql(expression[0].literal, 'dynamic_sql_literal', depth + 1).hazards;
   }
   if (expression[0].type !== 'identifier' || expression[0].value !== 'format' || expression[1]?.value !== '(') {
     return unresolved();
@@ -437,12 +443,17 @@ function inspectExecuteExpression(tokens, executeIndex, statement, depth = 0) {
     }
     return unresolved();
   }
-  return hazardsFromDecodedSql(formatText, 'execute_format', depth + 1);
+  return analyzeDecodedSql(formatText, 'execute_format', depth + 1).hazards;
 }
 
 function inspectDoStatement(statement, depth = 0) {
   if (statementFirstWord(statement) !== 'do') return [];
   const hazards = [];
+  const languageIndex = statement.tokens.findIndex((token) => token.type === 'identifier' && token.value === 'language');
+  const language = languageIndex >= 0 ? statement.tokens[languageIndex + 1] : null;
+  if (languageIndex >= 0 && language?.value !== 'plpgsql') {
+    return [{ code: 'dynamic_sql_unresolved', line: statement.line, column: statement.column, source: 'do_body' }];
+  }
   const bodyTokens = statement.tokens.filter((token) => token.type === 'dollar_body' || token.type === 'string');
   if (bodyTokens.length !== 1) {
     return [{
@@ -733,6 +744,7 @@ function analyzeFocusedPgtapParallelEligibility(options = {}) {
   };
 }
 module.exports = {
+  analyzeMigrationReplay,
   analyzeFocusedPgtapParallelEligibility,
   analyzeFocusedPgtapIsolation,
   lexSqlForIsolation,

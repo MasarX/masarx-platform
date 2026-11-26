@@ -49,12 +49,12 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={onClose}
       data-testid="keyboard-shortcuts-modal"
     >
       <div
-        className="mx-4 max-h-[80vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl"
+        className="mx-4 max-h-[80vh] w-full max-w-md overflow-y-auto rounded-xl bg-ui-surface p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
@@ -72,7 +72,7 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
           {SHORTCUTS.map((shortcut) => (
             <div key={shortcut.key} className="flex items-center justify-between py-1">
               <span className="text-xs text-ui-muted">{shortcut.description}</span>
-              <kbd className="rounded bg-gray-100 px-2 py-0.5 text-[11px] font-mono text-ui-ink">
+              <kbd className="rounded bg-ui-highlight px-2 py-0.5 text-[11px] font-mono text-ui-ink">
                 {shortcut.key}
               </kbd>
             </div>

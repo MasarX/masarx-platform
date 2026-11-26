@@ -45,6 +45,12 @@ describe('public CI workflow contract', () => {
     for (const lane of ['unit', 'ui']) {
       expect(workflow.jobs[lane].steps.some(step => step.run === `node scripts/ci-hosted/base-guard.cjs jest.cjs ${lane}`)).toBe(true);
     }
+    const unit = workflow.jobs.unit.steps;
+    const installDeno = unit.find(step => step.name === 'Install pinned Deno');
+    const runUnit = unit.find(step => step.name === 'Run subject');
+    expect(installDeno.run).toBe('bash scripts/edge/install-pinned-deno.sh');
+    expect(installDeno.if).toBe(runUnit.if);
+    expect(unit.indexOf(installDeno)).toBeLessThan(unit.indexOf(runUnit));
     const appendOnly = workflow.jobs['append-only'].steps;
     const installPolicy = appendOnly.find(step => step.name === 'Check candidate install policy with base code');
     expect(installPolicy.run).toBe('node scripts/ci-hosted/base-guard.cjs install-policy.cjs');

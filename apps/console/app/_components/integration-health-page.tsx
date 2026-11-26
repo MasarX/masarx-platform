@@ -1,16 +1,22 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
+  EmptyState,
+  ErrorState,
   IntegrationHealth,
   type IntegrationHealthEntry,
   PageHeader,
   PageContainer,
 } from "@masarx/ui/client";
 
+export type IntegrationHealthLoadState = "ready" | "error" | "denied";
+
 type IntegrationHealthPageProps = {
   testIdPrefix?: string;
   integrations?: IntegrationHealthEntry[];
+  loadState?: IntegrationHealthLoadState;
 };
 
 /**
@@ -21,25 +27,45 @@ type IntegrationHealthPageProps = {
 export function IntegrationHealthPage({
   testIdPrefix = "console-integration-health",
   integrations = [],
+  loadState = "ready",
 }: IntegrationHealthPageProps) {
   const t = useTranslations("integrationHealth");
+  const router = useRouter();
   return (
     <PageContainer className="space-y-6">
       <PageHeader
         title={t("title")}
         description={t("description")}
       />
-      <div data-testid={`${testIdPrefix}-ready`}>
-        {integrations.length === 0 ? (
-          <div className="rounded-lg border border-ui-border/40 bg-ui-surface p-8 text-center">
-            <p className="text-sm text-ui-muted">
-              {t("empty")}
-            </p>
-          </div>
-        ) : (
-          <IntegrationHealth integrations={integrations} />
-        )}
-      </div>
+      {loadState === "error" ? (
+        <div role="alert">
+          <ErrorState
+            title={t("error.title")}
+            description={t("error.description")}
+            actionLabel={t("error.retry")}
+            onAction={() => router.refresh()}
+            testId={`${testIdPrefix}-error`}
+          />
+        </div>
+      ) : loadState === "denied" ? (
+        <EmptyState
+          title={t("denied.title")}
+          description={t("denied.description")}
+          testId={`${testIdPrefix}-denied`}
+        />
+      ) : (
+        <div data-testid={`${testIdPrefix}-ready`}>
+          {integrations.length === 0 ? (
+            <EmptyState
+              title={t("empty")}
+              variant="card"
+              testId={`${testIdPrefix}-empty`}
+            />
+          ) : (
+            <IntegrationHealth integrations={integrations} />
+          )}
+        </div>
+      )}
     </PageContainer>
   );
 }

@@ -1306,7 +1306,12 @@
       "description": "‏Dynamic resource view driven by ui_read_registry.",
       "unavailable": {
         "title": "‏Resource view unavailable.",
-        "action": "‏Confirm the UI registry and resource read RPCs are provisioned for this scope."
+        "action": "حدّث الصفحة أو حاول مرة أخرى لاحقًا."
+      },
+      "authRequired": {
+        "title": "هذه الصفحة غير متاحة حاليًا.",
+        "action": "سجّل الدخول أو حاول مرة أخرى لاحقًا.",
+        "signIn": "تسجيل الدخول"
       },
       "timeout": {
         "title": "‏Resource view timed out.",
@@ -3430,6 +3435,27 @@
       "drivers": "‏السائقون",
       "eta": "‏الوقت المتوقع",
       "noJobsDropHere": "‏لا توجد مهام — أسقط هنا للتعيين"
+    },
+    "pickupStatus": {
+      "unknown": "غير معروف",
+      "statuses": {
+        "pending": "قيد الانتظار",
+        "pickup_requested": "تم طلب الاستلام",
+        "scheduled": "مجدول",
+        "pickup_scheduled": "الاستلام مجدول",
+        "planned": "مخطط",
+        "assigned": "مُعيَّن",
+        "in_progress": "قيد التنفيذ",
+        "completed": "مكتمل",
+        "failed": "فشل",
+        "pickup_failed": "فشل الاستلام",
+        "cancelled": "ملغى"
+      },
+      "assignmentModes": {
+        "internal_driver": "سائق داخلي",
+        "partner": "شريك",
+        "unassigned": "غير مُعيَّن"
+      }
     },
     "commentThread": {
       "noComments": "‏لا توجد تعليقات بعد",
