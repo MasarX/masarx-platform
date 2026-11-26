@@ -34,13 +34,25 @@ const ensureRendererDeps = (): Promise<void> => {
   }
   return rendererDepsPromise;
 };
-import { readEnv } from "./_shared/mod.mjs";
+import { classifyError, logStructured, readEnv } from "./_shared/mod.mjs";
 import { resolveCorsPolicy } from "./_shared/cors.mjs";
 import { authorizeLabelRendererRequest, resolveLabelRendererOperation, verifyLabelRendererToken } from "./auth.mjs";
 import { BARCODE_MAX_CHARS, canonicalBarcodeType, encodeAdditionalBarcode, rotateBarcodePoint } from "./barcode.ts";
 import { executeHotpathRpc, hotpathModeEnabled } from "../_shared/db-hotpath.ts";
 import { projectSignedStorageUrlForResponse } from "../_shared/label-storage-url.ts";
 import { AssetCache } from "../_shared/asset-cache.ts";
+
+const logRenderer = (
+  level: "warn" | "error",
+  event: string,
+  { error, ...context }: Record<string, unknown> = {},
+) => {
+  logStructured(level, `label_renderer.${event}`, {
+    service: "label-renderer",
+    ...context,
+    ...(error == null ? {} : { error_type: classifyError(error) }),
+  });
+};
 
 interface LeaseRequest {
   organization_id?: string;
@@ -421,12 +433,10 @@ const defaultLabelTypeForTargetType = (targetType: string | null): string => {
 };
 
 if (!SUPABASE_URL || (!SUPABASE_SERVICE_OR_EDGE_KEY && !(SUPABASE_ANON_KEY && EDGE_DB_JWT))) {
-  console.error("Missing Supabase configuration for label renderer.");
+  logRenderer("error", "supabase_config_missing");
 }
 if (!SUPABASE_URL || STORAGE_AUTH_CANDIDATES.length === 0) {
-  console.error(
-    "Missing storage Supabase configuration for label renderer. Provide LABEL_RENDERER_DB_JWT+SUPABASE_ANON_KEY (preferred) or LABEL_RENDERER_STORAGE_TOKEN/EDGE_SUPABASE_SERVICE_ROLE_KEY.",
-  );
+  logRenderer("error", "storage_config_missing");
 }
 
 let supabase = null as ReturnType<typeof createClient> | null;
@@ -438,7 +448,7 @@ if (SUPABASE_URL) {
       global: { headers: { Authorization: `Bearer ${EDGE_DB_JWT}` } },
     });
   } else if (!EDGE_REQUIRE_DB_JWT && SUPABASE_SERVICE_OR_EDGE_KEY) {
-    console.warn("[label-renderer] EDGE_REQUIRE_DB_JWT not enforced; using LABEL_RENDERER_TOKEN/service-role fallback.");
+    logRenderer("warn", "database_jwt_fallback");
     supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_OR_EDGE_KEY, {
       auth: { persistSession: false },
       db: { schema: "api" },
@@ -455,10 +465,10 @@ if (SUPABASE_URL && SUPABASE_SERVICE_OR_EDGE_KEY) {
 }
 
 if (!supabase && EDGE_REQUIRE_DB_JWT) {
-  console.error("label-renderer missing LABEL_RENDERER_DB_JWT while EDGE_REQUIRE_DB_JWT=1");
+  logRenderer("error", "required_database_jwt_missing");
 }
 if (!STORAGE_API_BASE || STORAGE_AUTH_CANDIDATES.length === 0) {
-  console.error("label-renderer missing storage service key (LABEL_RENDERER_STORAGE_TOKEN / service role)");
+  logRenderer("error", "storage_service_key_missing");
 }
 
 type IntegrationContext =
@@ -910,7 +920,7 @@ const emitMetric = async (
   }
 
   if (lastError) {
-    console.warn(`metrics_webhook_events insert skipped (${payload.metric}): ${lastError}`);
+    logRenderer("warn", "metric_insert_failed", { metric: payload.metric, error: lastError });
   }
 };
 
@@ -925,7 +935,7 @@ const runBestEffortBackgroundTask = (
     return;
   }
   promise.catch((error) => {
-    console.warn(`${label} background task failed`, error);
+    logRenderer("warn", "background_task_failed", { task: label, error });
   });
 };
 
@@ -965,14 +975,14 @@ const fetchAsset = async (path: string, refresh = false): Promise<Uint8Array | n
   try {
     const { data, error } = await storageDownloadObject(ASSET_BUCKET, path);
     if (error || !data) {
-      console.warn(`Asset download failed for ${path}: ${error?.message}`);
+      logRenderer("warn", "template_asset_download_failed", { error });
       return null;
     }
     const bytes = new Uint8Array(await data.arrayBuffer());
     assetCache.set(path, bytes);
     return bytes;
   } catch (err) {
-    console.warn(`Asset download exception for ${path}:`, err);
+    logRenderer("warn", "template_asset_download_failed", { error: err });
     return null;
   }
 };
@@ -1121,7 +1131,7 @@ const resolveArtifactReturn = async (
         expiresSeconds,
       );
       if (signedError) {
-        console.warn("createSignedUrl failed for bundle artifact", signedError.message);
+        logRenderer("warn", "artifact_url_signing_failed", { error: signedError });
       } else if (signedData) {
         const signedRecord = signedData as Record<string, unknown>;
         signedUrl =
@@ -1140,7 +1150,7 @@ const resolveArtifactReturn = async (
           null;
       }
     } catch (err) {
-      console.warn("Signed URL generation error", err);
+      logRenderer("warn", "artifact_url_signing_failed", { error: err });
     }
     signedMs = performance.now() - signedStart;
     if (!expiresAt && expiresSeconds > 0) {
@@ -1269,10 +1279,11 @@ const deliverWorkflowStepResult = async (
     p_max_steps: workflowProgress.maxSteps,
   });
   if (error) {
-    console.warn(`progress_workflow_run_step_result_v1 failed for ${logLabel} callback`, {
-      workflowRunId: workflowProgress.workflowRunId,
-      workflowRunStepId: workflowProgress.workflowRunStepId,
-      error: error.message,
+    logRenderer("warn", "workflow_progress_failed", {
+      operation: logLabel,
+      workflow_run_id: workflowProgress.workflowRunId,
+      workflow_run_step_id: workflowProgress.workflowRunStepId,
+      error,
     });
     return null;
   }
@@ -1624,9 +1635,7 @@ const callRendererRpc = async <T>(
     if (!directResult.error) {
       return directResult;
     }
-    console.warn(
-      `[label-renderer] direct hotpath fallback ${functionName}: ${directResult.error.message}`,
-    );
+    logRenderer("warn", "direct_rpc_fallback", { rpc: functionName, error: directResult.error });
   }
 
   try {
@@ -2391,7 +2400,7 @@ const renderTemplateBlocksToPage = async (
     const resolver = (async () => {
       const bytes = await fetchAsset(key);
       if (!bytes) {
-        console.warn(`[label-renderer] Font asset missing: ${key}`);
+        logRenderer("warn", "font_asset_missing");
         return null;
       }
       ensureFontkitRegistered();
@@ -3099,9 +3108,7 @@ const renderAndUploadLabelFromComposedPayload = async (
     if (canUseTemplate && templateSnapshot) {
       renderResult = await renderTemplatePdf(payloadBody, typedJob, templateSnapshot);
     } else {
-      console.warn(
-        `Template snapshot unavailable or incomplete for job ${typedJob.id}; using fallback renderer.`,
-      );
+      logRenderer("warn", "template_snapshot_fallback", { job_id: typedJob.id });
       renderResult = await buildFallbackPdf(payloadBody, typedJob, templateSnapshot, integration);
     }
     renderMs = performance.now() - renderStart;
@@ -3504,7 +3511,7 @@ const collectBundleTargets = async (bundle: BundleRequest): Promise<BundleTarget
       },
     );
     if (error) {
-      console.warn("resolve_label_bundle_targets_for_file_urls failed for bundle:", error);
+      logRenderer("warn", "bundle_target_lookup_failed", { error });
       directUrls.forEach(() =>
         targets.push({ labelId: null, shipmentId: null, shipmentBoxId: null, fileUrl: null })
       );
@@ -3559,7 +3566,7 @@ const collectBundleTargets = async (bundle: BundleRequest): Promise<BundleTarget
   );
 
   if (error) {
-    console.warn("resolve_label_files_for_bundle failed:", error);
+    logRenderer("warn", "bundle_file_lookup_failed", { error });
     return targets;
   }
 
@@ -3583,7 +3590,7 @@ const downloadLabelPdf = async (filePath: string | null | undefined): Promise<Ui
   if (!filePath) return null;
   const { data, error } = await storageDownloadObject(LABEL_BUCKET, filePath);
   if (error || !data) {
-    console.warn(`Unable to download label asset: ${filePath}`, error?.message);
+    logRenderer("warn", "label_asset_download_failed", { error });
     return null;
   }
   return new Uint8Array(await data.arrayBuffer());
@@ -3596,12 +3603,12 @@ const downloadLabelPdfViaSignedUrl = async (
   try {
     const response = await fetch(signedUrl);
     if (!response.ok) {
-      console.warn(`Signed URL download failed for label asset: ${filePath}`, response.status);
+      logRenderer("warn", "signed_label_download_failed", { status: response.status });
       return null;
     }
     return new Uint8Array(await response.arrayBuffer());
   } catch (err) {
-    console.warn(`Signed URL download exception for label asset: ${filePath}`, err);
+    logRenderer("warn", "signed_label_download_failed", { error: err });
     return null;
   }
 };
@@ -3617,7 +3624,7 @@ const createSignedUrlsForBundle = async (
   try {
     const { data, error } = await storageCreateSignedUrls(LABEL_BUCKET, deduped, expiresSeconds);
     if (error) {
-      console.warn("createSignedUrls failed for bundle chunk", error.message);
+      logRenderer("warn", "bundle_chunk_url_signing_failed", { error });
       return resolved;
     }
     if (!Array.isArray(data)) return resolved;
@@ -3642,7 +3649,7 @@ const createSignedUrlsForBundle = async (
       }
     }
   } catch (err) {
-    console.warn("createSignedUrls exception for bundle chunk", err);
+    logRenderer("warn", "bundle_chunk_url_signing_failed", { error: err });
   }
 
   return resolved;
@@ -3750,7 +3757,7 @@ const buildBundleDocument = async (
           bundled.push(target);
           continue;
         } catch (err) {
-          console.warn("Failed to merge label PDF", target.fileUrl, err);
+          logRenderer("warn", "label_pdf_merge_failed", { error: err });
         }
       }
 
@@ -3855,7 +3862,7 @@ const logDecisionBestEffort = async (
 ) => {
   const { error } = await callRpcWithPublicFallback<unknown>("log_decision", payload);
   if (error) {
-    console.warn(`${context}: ${error}`);
+    logRenderer("warn", "decision_log_failed", { operation: context, error });
   }
 };
 
@@ -4381,7 +4388,7 @@ const handlePrintRequest = async (
             edgeDbMode,
           );
           if (completeFailError) {
-            console.warn(`complete_label_jobs failed after single-file render failure: ${completeFailError.message}`);
+            logRenderer("warn", "complete_failed_label_job_failed", { error: completeFailError });
           }
           throw new Error(rendered.error ?? "single-file passthrough render failed");
         }
@@ -5736,7 +5743,7 @@ const handleBundleRequest = async (
         p_decision_reason: null,
       });
     } catch (err) {
-      console.warn("Unable to log passthrough label bundle decision", err);
+      logRenderer("warn", "passthrough_bundle_decision_log_failed", { error: err });
     }
     scheduleMetricEmit(
       "label_bundle.completed",
@@ -5850,7 +5857,7 @@ const handleBundleRequest = async (
       },
       "Unable to log bundle failure decision",
     );
-    console.error("Failed to upload bundle PDF:", uploadMessage);
+    logRenderer("error", "bundle_pdf_upload_failed", { error: uploadError });
     scheduleMetricEmit("label_bundle.upload_failed", {
       org: bundleInput.organization_id,
       client: bundleInput.client_id ?? null,
@@ -5980,6 +5987,7 @@ const withCors = (res: Response, corsHeaders: Record<string, string>) => {
     headers.set(key, value);
   });
   headers.set("x-masarx-edge-function", "label-renderer");
+  headers.set("x-masarx-renderer-transport", "1");
   return new Response(res.body, { status: res.status, headers });
 };
 
@@ -6122,7 +6130,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           p_max_jobs: maxJobs,
         });
         if (batchError) {
-          console.warn("lease_label_jobs failed; falling back to lease_label_job", batchError.message);
+          logRenderer("warn", "batch_lease_fallback", { error: batchError });
         } else if (Array.isArray(batchJobs)) {
           batchJobs.forEach((job) => {
             if (job && typeof job === "object" && (job as Record<string, unknown>)?.["id"]) {
@@ -6131,7 +6139,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           });
         }
       } catch (err) {
-        console.warn("lease_label_jobs exception; falling back to lease_label_job", err);
+        logRenderer("warn", "batch_lease_fallback", { error: err });
       }
     }
 
@@ -6234,7 +6242,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       headers: { "content-type": "application/json" },
     }), corsHeaders);
   } catch (err) {
-    console.error("Label renderer failure:", err);
+    logRenderer("error", "request_failed", { error: err });
     return withCors(new Response(JSON.stringify({
       error: err instanceof Error ? err.message : "Unknown error",
     }), {
