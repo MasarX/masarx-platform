@@ -1,7 +1,6 @@
 # Supabase
 .branches
 .temp/*
-!.temp/cli-latest
 
 # dotenvx
 .env.keys

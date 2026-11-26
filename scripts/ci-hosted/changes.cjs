@@ -5,8 +5,9 @@ const gates = ['database', 'typecheck', 'unit', 'ui', 'build_console', 'build_po
 const state = value => Object.fromEntries(gates.map(gate => [gate, value]));
 const cdPaths = new Set([
   '.github/workflows/deploy.yml',
-  '.github/workflows/provenance-on-tag.yml',
+  '.github/workflows/release-on-tag.yml',
   'tests/unit/ops/dev-db-dry-run-workflow.test.js',
+  'tests/unit/ops/release-tag-types.test.js',
   'tests/unit/ops/release-workflow.test.js',
 ]);
 const sharedInputs = [
@@ -34,14 +35,26 @@ function select(files, event = 'pull_request') {
         // FieldOps has no hosted build target.
         affected.build_console = affected.build_portal = affected.build_landing = true;
       } else return state(true);
+    } else if (file === 'scripts/frontend/design-speed-budgets.cjs') {
+      affected.unit = affected.build_console = affected.build_portal = affected.e2e = true;
+    } else if (file.startsWith('tests/speed-e2e/')) {
+      affected.build_console = affected.build_portal = true;
     } else if (/^docs\/marketing\/(?:landing-v2|brand)\/|^scripts\/frontend\/(?:build|serve)-landing\.js$/.test(file)) {
       affected.unit = affected.build_landing = affected.e2e = true;
-    } else if (/^(?:tests\/unit|docs)\//.test(file) || /^[^/]+\.md$/i.test(file)) affected.unit = true;
+    } else if (/^tests\/unit\/app-[^/]+\.test\.tsx$/.test(file)) affected.unit = affected.ui = true;
+    else if (/^(?:tests\/unit|docs)\//.test(file) || /^[^/]+\.md$/i.test(file)) affected.unit = true;
     else if (file.startsWith('tests/ui/')) affected.unit = affected.ui = true;
+    else if (file.startsWith('tests/preview-sweep/')) affected.ui = true;
     else if (/^tests\/landing-e2e\/|^playwright\.landing\.config\.ts$/.test(file)) affected.unit = affected.e2e = true;
     else return state(true);
   }
   return affected;
+}
+
+function selectPreviewSweep(files, event = 'pull_request') {
+  if (!files || event !== 'pull_request') return true;
+  return files.some(file => sharedInputs.some(pattern => pattern.test(file))
+    || (!/^(?:apps\/(?:fieldops|landing)|tests\/ui)\//.test(file) && select([file]).ui));
 }
 
 function changedPaths(base, read = execFileSync) {
@@ -61,5 +74,6 @@ if (require.main === module) {
   for (const [gate, enabled] of Object.entries(select(files, process.env.GITHUB_EVENT_NAME))) {
     console.log(`${gate}=${enabled}`);
   }
+  console.log('preview_sweep=' + selectPreviewSweep(files, process.env.GITHUB_EVENT_NAME));
 }
-module.exports = { changedPaths, select };
+module.exports = { changedPaths, select, selectPreviewSweep };

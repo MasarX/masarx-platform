@@ -52,6 +52,15 @@ async function checkDatabaseLog(temp) {
   const backend = fs.readFileSync(require.resolve('./backend.cjs'), 'utf8');
   const qualify = backend.split('async function qualify(')[1].split('function saveFailure(')[0];
   const parallel = backend.split('async function runHostedShard(')[1].split('async function recordMigrationDeadlock(')[0];
+  assert.match(qualify,
+    /const useDatabaseInit\s*=\s*!pinState\.qualificationOnly\s*&&\s*needsHostedDatabaseInit\(process\.env\);/,
+    'hosted qualification evaluates the database init classifier');
+  assert.match(qualify,
+    /guard\s*=\s*await imageGuard\(pins,\s*path\.join\(temp,\s*'runtime-image-pins\.json'\),\s*env,\s*useDatabaseInit\s*\?\s*databaseContainer\s*:\s*undefined\);/,
+    'the classifier controls the init container passed to the image guard');
+  assert.match(qualify,
+    /if\s*\(useDatabaseInit\)\s*\{\s*summary\.databasePid1\s*=\s*await timed\('database-init',\s*\(\)\s*=>\s*verifyHostedDatabaseInit\(checked,\s*env,\s*databaseContainer\)\);\s*\}/,
+    'the classifier controls the database PID 1 verification');
   assert.match(qualify, /ok: false \}/);
   assert.match(qualify, /await timed\('migrations',[\s\S]*?migrationError = error;[\s\S]*?throw error;/, 'from-zero migration failure');
   assert.match(qualify, /await timed\(`pgtap:\$\{shard\}`,[\s\S]*?pgtapDeadline\(Date\.now\(\), env\.JOB_STARTED_AT\)[\s\S]*?\? runHostedShard\([\s\S]*?remaining, admin:[\s\S]*?: checked\(process\.execPath, \['scripts\/ci-hosted\/pgtap\.cjs'\], testEnv, remaining\(\)\);/, 'serial and parallel share the deadline');
