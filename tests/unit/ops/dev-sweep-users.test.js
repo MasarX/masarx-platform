@@ -256,6 +256,11 @@ test('sweep provisioner masks generated passwords before use and emits fixed lab
     expect(deletedRoles).toEqual(['dispatcher']);
     expect(users.size).toBe(3);
     expect(readdirSync(directory)).toEqual([]);
+
+    for (const [url, { body }] of request.mock.calls) {
+      if (!url.endsWith('/database/query')) continue;
+      expect(Object.keys(JSON.parse(body)).sort()).toEqual(['parameters', 'query', 'read_only']);
+    }
   } finally {
     request.mockRestore();
     log.mockRestore();
