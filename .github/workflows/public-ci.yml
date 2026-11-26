@@ -575,7 +575,9 @@ jobs:
               sed -u -nE \
                 -e '/^SWEEP (console|console-v2|portal) (en|ar) (light|dark) (desktop|phone) (session|loading|empty|error|denied|complete)$/p' \
                 -e '/^SWEEP-GEOM (console|console-v2|portal) (en|ar) (light|dark) (desktop|phone) (loading|empty|error|denied) [0-9]+ [0-9]+ (-?[0-9]+\.[0-9]{3} ){2}([0-9]+\.[0-9]{3} ){2}(0\.[0-9]{9}|1\.000000000)$/p' \
-                -e '/^SWEEP-FAIL (console|console-v2|portal) (en|ar) (light|dark) (desktop|phone) (loading|empty|error|denied) (new-session|new-context|route-guard|session-cookie|init-session|new-page|open-shell|shell-theme|open-mobile-menu|follow-route-link|close-mobile-menu|open-route|signed-in|marker|marker-in-view|language|direction|theme|screenshot|close-context)$/p'
+                -e '/^SWEEP-FAIL (console|console-v2|portal) (en|ar) (light|dark) (desktop|phone) (loading|empty|error|denied) (new-session|new-context|route-guard|session-cookie|init-session|new-page|open-shell|shell-theme|open-mobile-menu|follow-route-link|close-mobile-menu|open-route|signed-in|marker|marker-in-view|language|direction|theme|screenshot|close-context)$/p' \
+                -e 's/^SWEEP-ERROR (Error: )?strict mode violation: .* resolved to ([0-9]+) elements:$/SWEEP-ERROR strict mode violation: resolved to \2 elements/p' \
+                -e 's/^SWEEP-ERROR *(Error: |- )?(expect\(locator\)\.toBeVisible\(\) failed|Timeout: +[0-9]+ms|Target page, context or browser has been closed|Page crashed|Frame was detached|Execution context was destroyed, most likely because of a navigation)\.?$/SWEEP-ERROR \2/p'
           done
       - name: Upload signed-in preview screenshots
         if: ${{ !cancelled() && steps.preview-sweep.outcome == 'success' }}

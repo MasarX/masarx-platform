@@ -11,9 +11,11 @@ const heavy = [
   'npm:@pdf-lib/fontkit@1.1.1', 'npm:bidi-js@1.1.0', 'npm:bwip-js@4.11.2',
 ];
 let cors;
+let classifyError;
 
 beforeAll(async () => {
   cors = await import('../../../supabase/functions/_shared/cors.mjs');
+  ({ classifyError } = await import('../../../supabase/functions/_shared/mod.mjs'));
 });
 
 // Execute the real entrypoint and private construction boundaries with substituted
@@ -27,6 +29,7 @@ function loadRenderer({ pdfLoad, bidiFailure, env = {} } = {}) {
     return { getEmbeddingLevels() {}, getReorderedString: value => value };
   });
   const authorize = jest.fn(() => ({ ok: false, status: 401, message: 'Authentication required' }));
+  const logStructured = jest.fn();
   let handler;
   const sandbox = vm.createContext({
     Request, Response, Headers, URL, TextEncoder, TextDecoder, Uint8Array,
@@ -50,7 +53,7 @@ function loadRenderer({ pdfLoad, bidiFailure, env = {} } = {}) {
     'npm:@supabase/supabase-js@2.119.0': { createClient: jest.fn(() => {
       throw new Error('unexpected database access');
     }) },
-    './_shared/mod.mjs': { readEnv: key => env[key] ?? '' },
+    './_shared/mod.mjs': { classifyError, logStructured, readEnv: key => env[key] ?? '' },
     './_shared/cors.mjs': cors,
     './auth.mjs': { authorizeLabelRendererRequest: authorize, resolveLabelRendererOperation: () => 'jobs' },
     '../_shared/db-hotpath.ts': { executeHotpathRpc: jest.fn(), hotpathModeEnabled: () => false },
@@ -69,7 +72,7 @@ function loadRenderer({ pdfLoad, bidiFailure, env = {} } = {}) {
     if (specifier === pdfSpecifier && pdfLoad) return pdfLoad().then(() => pdf);
     return mocks[specifier];
   }, module, module.exports);
-  return { api: module.exports, handler, imports, createPdf, bidiFactory, reachedPdf, authorize };
+  return { api: module.exports, handler, imports, createPdf, bidiFactory, reachedPdf, authorize, logStructured };
 }
 
 describe('label renderer CORS', () => {
@@ -130,6 +133,8 @@ describe('label renderer lazy dependency startup', () => {
     const renderer = loadRenderer();
     expect(typeof renderer.handler).toBe('function');
     expect(renderer.imports).toEqual([]);
+    expect(renderer.logStructured.mock.calls.filter(([, event]) => event === 'label_renderer.supabase_config_missing'))
+      .toEqual([['error', 'label_renderer.supabase_config_missing', { service: 'label-renderer' }]]);
     const preflight = await renderer.handler(new Request('https://fixture.test', { method: 'OPTIONS' }));
     expect(preflight.status).toBe(204);
     expect(renderer.authorize).not.toHaveBeenCalled();
