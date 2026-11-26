@@ -280,7 +280,7 @@ test("bulk download partial failures use warning toast tone", async () => {
 test.each([
   ["HTTP rejection", { ok: false, payload: { errors: [{ id: "1", error: "Access denied" }] } }],
   ["empty URLs", { ok: true, payload: { urls: [] } }],
-  ["207 business failure", { ok: true, payload: { urls: [], errors: [{ id: "1", error: "Access denied eyJsecret.payload.signature" }] }, expectedError: "Access denied [redacted]" }],
+  ["207 business failure", { ok: true, payload: { urls: [], errors: [{ id: "1", error: "Access denied eyJsecret.payload.signature" }] }, expectedError: "Unable to download labels. [requestId=server-request-id]" }],
   ["missing URLs", { ok: true, payload: {} }],
   ["unsafe returned URL", { ok: true, payload: { urls: ["javascript:alert(1)"] } }],
   ["mixed trusted and unsafe URLs", { ok: true, payload: { urls: ["/download/safe", "https://attacker.example/file"] } }],
@@ -314,6 +314,8 @@ test.each([
     if (fixture.expectedError) {
       expect(document.querySelector('[data-tone="error"]')).toHaveTextContent(fixture.expectedError);
       expect(document.querySelector('[data-tone="error"]')).not.toHaveTextContent("eyJsecret.payload.signature");
+      const payloadError = (fixture.payload as { errors: Array<{ error: string }> }).errors[0].error;
+      expect(document.querySelector('[data-tone="error"]')).not.toHaveTextContent(payloadError);
     }
     if (!fixture.networkFailure && !fixture.anchorFailure) {
       expect(document.querySelector('[data-tone="error"]')).toHaveTextContent("requestId=server-request-id");

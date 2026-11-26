@@ -3417,7 +3417,8 @@ test("rejected backend mutation never calls its readback-success hook", async ()
   }]} selectedIds={["shipment-1"]} onSuccess={onSuccess} />);
   await user.click(screen.getByRole("button", { name: "Denied mutation" }));
   await submitBulkActionConfirm(user);
-  expect(await screen.findByText("mutation denied")).toBeInTheDocument();
+  expect(await screen.findByText("Denied mutation failed")).toBeInTheDocument();
+  expect(screen.queryByText("mutation denied", { exact: false })).not.toBeInTheDocument();
   expect(rpcMock).toHaveBeenCalledTimes(1);
   expect(onSuccess).not.toHaveBeenCalled();
 });

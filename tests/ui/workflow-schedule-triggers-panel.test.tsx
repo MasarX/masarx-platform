@@ -639,7 +639,8 @@ describe("schedule run acceptance receipt", () => {
       expect(run).toHaveBeenCalledTimes(1);
       if (scenario === "RPC failure") {
         expect(screen.queryByTestId("receipt-run-readback-trigger-1")).not.toBeInTheDocument();
-        expect(await screen.findByText("Run denied")).toBeInTheDocument();
+        expect(await screen.findByText("Run schedule")).toBeInTheDocument();
+        expect(screen.queryByText("Run denied", { exact: false })).not.toBeInTheDocument();
         expect(mockedNavigateTo).not.toHaveBeenCalled();
       } else {
         const receipt = screen.getByTestId("receipt-run-readback-trigger-1");
