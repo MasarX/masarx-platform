@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import {
@@ -312,10 +312,9 @@ test.each([
     });
     if (!fixture.anchorFailure) expect(clickSpy).not.toHaveBeenCalled();
     if (fixture.expectedError) {
-      expect(document.querySelector('[data-tone="error"]')).toHaveTextContent(fixture.expectedError);
+      expect(within(document.querySelector('[data-tone="error"]') as HTMLElement).getByText(fixture.expectedError)).toBeInTheDocument();
       expect(document.querySelector('[data-tone="error"]')).not.toHaveTextContent("eyJsecret.payload.signature");
-      const payloadError = (fixture.payload as { errors: Array<{ error: string }> }).errors[0].error;
-      expect(document.querySelector('[data-tone="error"]')).not.toHaveTextContent(payloadError);
+      expect(document.querySelector('[data-tone="error"]')).not.toHaveTextContent("Access denied");
     }
     if (!fixture.networkFailure && !fixture.anchorFailure) {
       expect(document.querySelector('[data-tone="error"]')).toHaveTextContent("requestId=server-request-id");
