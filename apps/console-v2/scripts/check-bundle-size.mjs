@@ -101,7 +101,7 @@ const files = readdirSync(dist).filter((f) => f.endsWith('.js'));
 const violations = [];
 
 for (const f of files) {
-  const sizeKB = statSync(join(dist, f)).size / 1024;
+  const sizeBytes = statSync(join(dist, f)).size;
   let budget = BUDGETS.default;
   for (const prefix of Object.keys(BUDGETS)) {
     if (prefix !== 'default' && f.startsWith(prefix)) {
@@ -109,13 +109,17 @@ for (const f of files) {
       break;
     }
   }
-  if (sizeKB > budget) violations.push({ file: f, sizeKB: sizeKB.toFixed(1), budget });
+  const budgetBytes = budget * 1024;
+  console.log(`  ${f}: ${sizeBytes} bytes`);
+  if (sizeBytes > budgetBytes) violations.push({ file: f, sizeBytes, budgetBytes });
 }
 
 const mode = SEED_ENABLED ? 'seed' : 'live';
 if (violations.length) {
   console.error(`Bundle size budget violations (mode=${mode}):`);
-  for (const v of violations) console.error(`  ${v.file}: ${v.sizeKB} KB > ${v.budget} KB`);
+  for (const v of violations) {
+    console.error(`  ${v.file}: ${v.sizeBytes} bytes > ${v.budgetBytes} bytes`);
+  }
   process.exit(1);
 }
 console.log(`All chunks within budget (mode=${mode}, index<=${BUDGETS['index-']} KB).`);
