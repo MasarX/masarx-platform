@@ -302,6 +302,14 @@ jobs:
         run: node scripts/ci-hosted/deploy-branch-refs.cjs
       - name: Test database deploy retry
         run: bash scripts/deploy/supabase-db-push-retry.test.sh
+      - name: Check pull request opener
+        if: github.event_name == 'pull_request'
+        run: node scripts/ci-hosted/identity-guard.cjs
+      - name: Check merge-group commit identities
+        if: github.event_name == 'merge_group'
+        env:
+          GROUP_HEAD: ${{ github.event.merge_group.head_sha }}
+        run: node scripts/ci-hosted/identity-guard.cjs
 
   lint:
     name: Lint
