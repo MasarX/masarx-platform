@@ -11,8 +11,10 @@ const finding = { line: 3, kind: 'jsx-text', text: 'Shipments' };
 describe('split i18n literal baseline', () => {
   let dir;
 
+  const allowancePath = (source) => path.join(dir, path.dirname(source), 'literal-' + path.basename(source) + '.txt');
+
   function addAllowance(source, count) {
-    const file = path.join(dir, source + '.txt');
+    const file = allowancePath(source);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, `${source} ${count}\n`);
   }
@@ -31,12 +33,12 @@ describe('split i18n literal baseline', () => {
     const current = new Map([[geocoding, [finding]], [zones, [finding, finding]]]);
     expect(check(current, readBaseline(dir))).toEqual([]);
 
-    fs.unlinkSync(path.join(dir, geocoding + '.txt'));
+    fs.unlinkSync(allowancePath(geocoding));
     current.delete(geocoding);
     expect(check(current, readBaseline(dir))).toEqual([]);
     expect(readBaseline(dir).entries).toEqual(new Map([[zones, 2]]));
 
-    fs.unlinkSync(path.join(dir, zones + '.txt'));
+    fs.unlinkSync(allowancePath(zones));
     current.delete(zones);
     expect(check(current, readBaseline(dir))).toEqual([]);
   });
@@ -51,7 +53,7 @@ describe('split i18n literal baseline', () => {
   });
 
   test('rejects a source listed in two allowance files', () => {
-    const duplicate = path.join(dir, marketplace + '.txt');
+    const duplicate = allowancePath(marketplace);
     fs.writeFileSync(duplicate, `${geocoding} 3\n`);
     expect(readBaseline(dir).problems).toEqual([
       `baseline lists ${geocoding} twice (also in ${path.relative(dir, duplicate)})`,
