@@ -502,8 +502,6 @@ import {
   MOBILE_V2_PREVIEW_WALLET,
   buildMobileV2PreviewHold,
   buildMobileV2PreviewLookupRecent,
-  type StopParcelStatus,
-  type StopProofStatus,
 } from "./fixtures";
 
 // Sample navigation payload that mirrors the post-Phase-2 SSOT registration.
@@ -1050,10 +1048,6 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
   const [pickupFailureNotes, setPickupFailureNotes] = React.useState("");
   const [lookupRecentExtras, setLookupRecentExtras] = React.useState<ReadonlyArray<MobileV2LookupRecent>>([]);
   const [tripStageOverrides, setTripStageOverrides] = React.useState<ReadonlyMap<string, MobileV2TripStage>>(() => new Map<string, MobileV2TripStage>());
-  // Stop screen interactive state — drivers can manually toggle parcel
-  // scan status (handheld jam workaround) and check off proof items.
-  type StopParcelStatus = "pending" | "scanned" | "missing" | "damaged";
-  type StopProofStatus = "pending" | "done";
   // The active stop id feeding useFieldopsStopDetailRpc. Defaults to the
   // fixture id; `onTaskPress` sets it to the tapped task's real
   // `route_stops` UUID — `resolve_fieldops_tasks_v1` builds `task_id` as
@@ -1067,44 +1061,17 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
     stopId: activeStopId,
     fallback: SAMPLE_STOP,
   });
-  const resolvedStop = resolveMobileV2StopDetailForRender({
+  // Parcel and proof status render only from the stop-detail read-back;
+  // scans and proof change it through their commands, never screen state.
+  const liveStop: MobileV2StopDetail = resolveMobileV2StopDetailForRender({
     data: stopDetailRpc.data,
     fallback: SAMPLE_STOP,
     stopId: activeStopId,
     allowPreviewFallback: isShowcase,
   });
-  // Interactive overrides keyed by parcel id / proof key. They layer on
-  // TOP of the RPC-resolved parcels/proof so the resolved data stays the
-  // source of truth and the driver's manual scan / check-off edits
-  // (handheld jam workaround) persist across re-resolves.
-  const [parcelStatusOverrides, setParcelStatusOverrides] = React.useState<
-    ReadonlyMap<string, StopParcelStatus>
-  >(() => new Map<string, StopParcelStatus>());
-  const [proofStatusOverrides, setProofStatusOverrides] = React.useState<
-    ReadonlyMap<string, StopProofStatus>
-  >(() => new Map<string, StopProofStatus>());
   const [podCapturedArtifactsByStopId, setPodCapturedArtifactsByStopId] = React.useState<
     ReadonlyMap<string, ReadonlyArray<MobileV2PodCapturedArtifact>>
   >(() => new Map<string, ReadonlyArray<MobileV2PodCapturedArtifact>>());
-  React.useEffect(() => {
-    setParcelStatusOverrides(new Map<string, StopParcelStatus>());
-    setProofStatusOverrides(new Map<string, StopProofStatus>());
-  }, [activeStopId]);
-  const liveStop: MobileV2StopDetail = React.useMemo(() => {
-    const parcels = resolvedStop.parcels.map((p) => {
-      const override = parcelStatusOverrides.get(p.id);
-      return override !== undefined ? { ...p, status: override } : p;
-    });
-    const proofChecklist = resolvedStop.proofChecklist.map((c) => {
-      const override = proofStatusOverrides.get(c.key);
-      return override !== undefined ? { ...c, status: override } : c;
-    });
-    return Object.freeze({
-      ...resolvedStop,
-      parcels: Object.freeze(parcels),
-      proofChecklist: Object.freeze(proofChecklist),
-    }) as MobileV2StopDetail;
-  }, [resolvedStop, parcelStatusOverrides, proofStatusOverrides]);
   const activeStopLocationReadback: MobileV2StopLocationReadback | null = React.useMemo(() => {
     const routeRow = routeRows.find((row) => row.id === activeStopTaskId) ?? null;
     return buildMobileV2StopLocationReadback(routeRow);
@@ -2815,9 +2782,11 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
         onSuccess: async (write) => {
           setDamageHoldReadbackPending(true);
           try {
+            // The stop-detail refetch renders the parcel as damaged from the open hold.
             const [latestReadback] = await Promise.all([
               latestDamageHoldRpc.refetch(),
               holdRpc.refetch(),
+              stopDetailRpc.refetch(),
             ]);
             const latest = latestReadback.data ?? null;
             if (
@@ -2851,11 +2820,6 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                 submittedAt: new Date().toISOString(),
               },
             );
-            setParcelStatusOverrides((prev) => {
-              const next = new Map(prev);
-              next.set(parcelId, "damaged");
-              return next;
-            });
             setToast({
               id: `damage-hold-${Date.now()}`,
               message: "Damage hold confirmed",
@@ -2887,6 +2851,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
     holdRpc,
     isShowcase,
     latestDamageHoldRpc,
+    stopDetailRpc,
     submitDamageHoldMutation,
   ]);
 
@@ -6147,10 +6112,6 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                   },
                 }),
                 () => {
-                  // The readback refetch already updated the stop-detail query;
-                  // clear manual proof overrides so the stop reflects backend
-                  // proof state, not a stale local checklist toggle.
-                  setProofStatusOverrides(new Map<string, StopProofStatus>());
                   clearActivePodArtifacts();
                   setToast({
                     id: `pod-commit-${Date.now()}`,
@@ -6201,6 +6162,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
           <MobileV2StopScreen
             theme={ctx.theme}
             stop={liveStop}
+            locale={ctx.locale}
             locationReadback={activeStopLocationReadback}
             terminalState={activeStopTerminalState}
             intentReadback={routeIntentReadback}
@@ -6291,41 +6253,17 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                 { success: "Share sheet opened", missing: "No address on this stop" },
               )
             }
+            // Parcel scans and proof items are recorded by the proof capture
+            // flow (submit_fieldops_proof_v1); the stop shows them from its read-back.
             onScanParcel={() => {
-              // Bulk-scan: mark the first still-pending parcel scanned.
-              const next = liveStop.parcels.find((p) => p.status === "pending");
-              if (next === undefined) {
-                setToast({ id: `scan-${Date.now()}`, message: "All parcels scanned", kind: "info" });
-                return;
-              }
-              setParcelStatusOverrides((prev) => {
-                const m = new Map(prev);
-                m.set(next.id, "scanned");
-                return m;
-              });
-              setToast({ id: `scan-${Date.now()}`, message: "Parcel scanned", kind: "success" });
-            }}
-            onParcelPress={(id) => {
-              // Manual toggle: pending ↔ scanned (handheld jam workaround).
-              const current = liveStop.parcels.find((p) => p.id === id);
-              if (current === undefined) return;
-              setParcelStatusOverrides((prev) => {
-                const m = new Map(prev);
-                m.set(id, current.status === "scanned" ? "pending" : "scanned");
-                return m;
-              });
-              setToast({ id: `parcel-${Date.now()}`, message: "Parcel status toggled", kind: "info" });
+              setPodFailSheetOpen(false);
+              setActiveTabId("mobile-pod");
             }}
             onDamageHold={openDamageHoldForActiveStop}
             onReschedule={openRescheduleForActiveStop}
-            onProofPress={(key) => {
-              const current = liveStop.proofChecklist.find((c) => c.key === key);
-              if (current === undefined) return;
-              setProofStatusOverrides((prev) => {
-                const m = new Map(prev);
-                m.set(key, current.status === "done" ? "pending" : "done");
-                return m;
-              });
+            onProofPress={() => {
+              setPodFailSheetOpen(false);
+              setActiveTabId("mobile-pod");
             }}
             onPodSubmit={() => {
               setPodFailSheetOpen(false);
