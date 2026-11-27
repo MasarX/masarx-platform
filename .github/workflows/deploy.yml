@@ -1050,7 +1050,7 @@ jobs:
     steps:
       - name: Guard Console V2 DEV configuration
         env:
-          CONFIGURED: ${{ vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.CLOUDFLARE_WORKER_CONSOLE_V2 != '' && vars.CONSOLE_V2_DEV_ORIGIN != '' && vars.SUPABASE_PROJECT_REF != '' && secrets.CLOUDFLARE_API_TOKEN != '' && secrets.E2E_CONSOLE_AUTH_EMAIL != '' && secrets.E2E_CONSOLE_AUTH_PASSWORD != '' }}
+          CONFIGURED: ${{ vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.CLOUDFLARE_WORKER_CONSOLE_V2 != '' && vars.CONSOLE_V2_DEV_ORIGIN != '' && vars.SUPABASE_PROJECT_REF != '' && secrets.CLOUDFLARE_API_TOKEN != '' && secrets.DEV_SWEEP_DISPATCHER_EMAIL != '' && secrets.DEV_SWEEP_DISPATCHER_PASSWORD != '' }}
         run: |
           if [[ "$DEPLOY_ENV:$GITHUB_REF" != dev:refs/heads/main || "$CONFIGURED" != true ]]; then
             echo '::error::Console V2 deployment requires the main ref and the approved DEV configuration.'
@@ -1066,8 +1066,10 @@ jobs:
           package-manager-cache: false
       - name: Install lockfile dependencies
         run: |
-          npm ci --ignore-scripts --no-audit --no-fund
-          npm ci --prefix tooling/apps/deploy --ignore-scripts --no-audit --no-fund
+          for attempt in 1 2 3; do npm ci --ignore-scripts --no-audit --no-fund && break
+            [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
+          for attempt in 1 2 3; do npm ci --prefix tooling/apps/deploy --ignore-scripts --no-audit --no-fund && break
+            [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
       - name: Build Console V2 in live mode
         env:
           CLOUDFLARE_WORKER_CONSOLE_V2: ${{ vars.CLOUDFLARE_WORKER_CONSOLE_V2 }}
@@ -1089,8 +1091,8 @@ jobs:
         if: steps.deploy.outputs.superseded != 'true'
         env:
           E2E_CONSOLE_LIVE: '1'
-          E2E_CONSOLE_AUTH_EMAIL: ${{ secrets.E2E_CONSOLE_AUTH_EMAIL }}
-          E2E_CONSOLE_AUTH_PASSWORD: ${{ secrets.E2E_CONSOLE_AUTH_PASSWORD }}
+          E2E_CONSOLE_AUTH_EMAIL: ${{ secrets.DEV_SWEEP_DISPATCHER_EMAIL }}
+          E2E_CONSOLE_AUTH_PASSWORD: ${{ secrets.DEV_SWEEP_DISPATCHER_PASSWORD }}
         run: node scripts/deploy/console-v2-dev.mjs readout
 
   portal:

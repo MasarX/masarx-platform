@@ -3,7 +3,10 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, globSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { pathToFileURL } from 'node:url';
 import securityHeaders from '../../apps/shared/security-headers.js';
+import { retry } from '../ci-hosted/process.cjs';
+import { RETRYABLE_NETWORK_ERROR_CODES } from '../ops/ci/github-api-retry.js';
 import vercelValidation from '../ops/vercel/validate-build.js';
 
 const env = process.env;
@@ -15,6 +18,8 @@ const shaPattern = /^[a-f0-9]{40}$/;
 const runNumberPattern = /^\d+$/;
 const versionPattern = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const { buildStaticSecurityHeaders, normalizeTrustedOrigin } = securityHeaders;
+const sweepRoles = JSON.parse(readFileSync(new URL('../../config/dev/sweep-roles.json', import.meta.url), 'utf8'));
+const dispatcherError = 'DEV_DISPATCHER_UNVERIFIED';
 
 class DeployError extends Error {}
 
@@ -47,7 +52,9 @@ function configPath() {
 
 function workerCommand(args, message) {
   try {
-    execFileSync(wrangler, [...args, '--config', configPath()], { stdio: ['ignore', 'pipe', 'pipe'] });
+    execFileSync(wrangler, [...args, '--config', configPath()], {
+      stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000, killSignal: 'SIGKILL',
+    });
   } catch {
     throw new DeployError(message);
   }
@@ -119,14 +126,26 @@ function prepare() {
   }));
 }
 
-async function jsonRequest(url, token, operation) {
-  const response = await fetch(url, {
-    redirect: 'error',
-    signal: AbortSignal.timeout(20_000),
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+export function jsonRequest(url, options, operation, wait = delay) {
+  return retry(operation, async () => {
+    const response = await fetch(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(20_000) });
+    if (response.ok) return response.json();
+    void response.body?.cancel().catch(() => {});
+    throw Object.assign(new DeployError(`${operation} failed with HTTP ${response.status}.`), {
+      status: response.status,
+    });
+  }, wait, {
+    quiet: true,
+    retryable: error => error.status === 429 || (error.status >= 500 && error.status < 600)
+      || error.name === 'TimeoutError' || error.name === 'AbortError'
+      || RETRYABLE_NETWORK_ERROR_CODES.has(error.cause?.code ?? error.code)
+      || error.message === 'terminated' || error.message === 'socket hang up'
+      || (error.message === 'fetch failed' && !error.cause),
   });
-  requireValue(response.ok, `${operation} failed with HTTP ${response.status}.`);
-  return response.json();
+}
+
+function providerRead(url, token, operation) {
+  return jsonRequest(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }, operation);
 }
 
 async function deploy() {
@@ -141,13 +160,13 @@ async function deploy() {
     'The prepared Worker does not match the configured DEV target.');
 
   const cf = async (path, operation) => {
-    const body = await jsonRequest(`https://api.cloudflare.com/client/v4/accounts/${account}/workers${path}`,
+    const body = await providerRead(`https://api.cloudflare.com/client/v4/accounts/${account}/workers${path}`,
       env.CLOUDFLARE_API_TOKEN, operation);
     requireValue(body.success === true && body.result != null, `${operation} returned no result.`);
     return body.result;
   };
   const script = `/scripts/${encodeURIComponent(name)}`;
-  const github = (path, operation) => jsonRequest(`${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}${path}`,
+  const github = (path, operation) => providerRead(`${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}${path}`,
     env.GH_TOKEN, operation);
   const hostname = new URL(origin).hostname;
   const checkDomain = async () => {
@@ -227,8 +246,24 @@ async function markerMatches(origin) {
     && await response.text() === `${sha}\n`;
 }
 
+export async function verifyDispatcher(session, readPolicy) {
+  const token = session?.access_token;
+  requireValue(typeof token === 'string' && token && session.user?.role === 'authenticated'
+    && session.user.app_metadata?.dev_design_sweep === 'dispatcher', dispatcherError);
+
+  const result = await readPolicy(token);
+  const policy = result?.eval;
+  const { scope, required, optional } = sweepRoles.dispatcher;
+  const caps = policy?.granted_capabilities;
+  requireValue(result?.ok === true && policy?.allowed === true && policy.scope_type === scope
+    && Array.isArray(policy.role_keys) && policy.role_keys.length === 1 && policy.role_keys[0] === 'dispatcher'
+    && Array.isArray(caps) && required.every(cap => caps.includes(cap))
+    && caps.every(cap => required.includes(cap) || optional.includes(cap)), dispatcherError);
+}
+
 async function readout() {
   const origin = targetOrigin();
+  requireValue(env.E2E_CONSOLE_AUTH_EMAIL?.trim() && env.E2E_CONSOLE_AUTH_PASSWORD, dispatcherError);
   for (let attempt = 0; !await markerMatches(origin); attempt += 1) {
     requireValue(attempt < 2, 'The DEV custom domain did not serve the exact commit marker.');
     await delay(60_000);
@@ -261,7 +296,36 @@ async function readout() {
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage({ baseURL: origin });
+    const supabaseOrigin = new URL(env.VITE_SUPABASE_URL).origin;
+    const dispatcher = Promise.withResolvers();
+    // Verify the user and policy with the same session before the app can use it.
+    await page.route(url => url.origin === supabaseOrigin && url.pathname === '/auth/v1/token'
+      && url.searchParams.get('grant_type') === 'password', async route => {
+      if (route.request().method() !== 'POST') return route.continue();
+      try {
+        const response = await route.fetch({ maxRedirects: 0, timeout: 20_000 });
+        requireValue(response.ok(), dispatcherError);
+        await verifyDispatcher(await response.json(), token => jsonRequest(
+          new URL('/rest/v1/rpc/user_capability_eval_v2', supabaseOrigin), {
+            method: 'POST',
+            headers: {
+              apikey: env.VITE_SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              'Content-Profile': 'api',
+            },
+            body: JSON.stringify({ p_args: { capability_key: 'shipments.read' } }),
+          }, dispatcherError,
+        ));
+        await route.fulfill({ response });
+        dispatcher.resolve();
+      } catch {
+        dispatcher.reject(new DeployError(dispatcherError));
+        await route.abort().catch(() => {});
+      }
+    });
     await Promise.all([
+      dispatcher.promise,
       waitForLiveRpc(page, 'ui_me_v1'),
       waitForLiveResourceList(page, 'shipments'),
       gotoSurface(page, '/operate/shipments'),
@@ -285,12 +349,14 @@ const commands = {
   readout,
 };
 
-const command = process.argv[2];
-try {
-  requireValue(Object.hasOwn(commands, command), 'Expected build, bundle, deploy, or readout.');
-  await commands[command]();
-} catch (error) {
-  // Provider and browser errors can contain private origins or request data.
-  console.error(error instanceof DeployError ? error.message : `Console V2 ${command} failed.`);
-  process.exitCode = 1;
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const command = process.argv[2];
+  try {
+    requireValue(Object.hasOwn(commands, command), 'Expected build, bundle, deploy, or readout.');
+    await commands[command]();
+  } catch (error) {
+    // Provider and browser errors can contain private origins or request data.
+    console.error(error instanceof DeployError ? error.message : `Console V2 ${command} failed.`);
+    process.exitCode = 1;
+  }
 }

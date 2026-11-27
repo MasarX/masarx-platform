@@ -1,12 +1,16 @@
 const { buildSecurityHeaders } = require('../../../apps/shared/security-headers');
+const { dispatcher } = require('../../../config/dev/sweep-roles.json');
 
 const origin = 'https://console.example.test';
 const placeholder = 'nonce-placeholder';
 let worker;
+let jsonRequest;
+let verifyDispatcher;
 let env;
 
 beforeAll(async () => {
   ({ default: worker } = await import('../../../tooling/apps/console-v2-worker/index.mjs'));
+  ({ jsonRequest, verifyDispatcher } = await import('../../../scripts/deploy/console-v2-dev.mjs'));
 });
 
 beforeEach(() => {
@@ -129,5 +133,67 @@ test('rewrites HTML metadata and replaces only placeholder nonces on each respon
   } finally {
     if (original === undefined) delete global.HTMLRewriter;
     else global.HTMLRewriter = original;
+  }
+});
+
+const sweepSession = {
+  access_token: 'synthetic-session',
+  user: { role: 'authenticated', app_metadata: { dev_design_sweep: 'dispatcher' } },
+};
+const dispatcherPolicy = {
+  allowed: true,
+  scope_type: dispatcher.scope,
+  role_keys: ['dispatcher'],
+  granted_capabilities: dispatcher.required,
+};
+
+test('accepts a synthetic dispatcher with only the configured read permissions', async () => {
+  const readPolicy = jest.fn().mockResolvedValue({ ok: true, eval: dispatcherPolicy });
+  await expect(verifyDispatcher(sweepSession, readPolicy)).resolves.toBeUndefined();
+  expect(readPolicy).toHaveBeenCalledWith(sweepSession.access_token);
+});
+
+test.each([
+  ['another role', { role_keys: ['finance_viewer'] }],
+  ['an additional role', { role_keys: ['dispatcher', 'finance_viewer'] }],
+  ['a missing role claim', { role_keys: undefined }],
+  ['a wider scope', { scope_type: 'global' }],
+  ['a wider permission', { granted_capabilities: [...dispatcher.required, 'shipments.update'] }],
+])('rejects a dispatcher session with %s', async (_label, overrides) => {
+  const readPolicy = jest.fn().mockResolvedValue({ ok: true, eval: { ...dispatcherPolicy, ...overrides } });
+  await expect(verifyDispatcher(sweepSession, readPolicy)).rejects.toThrow('DEV_DISPATCHER_UNVERIFIED');
+});
+
+test.each([undefined, 'finance_viewer'])('rejects a session with sweep marker %s before reading policy', async marker => {
+  const session = { ...sweepSession, user: { ...sweepSession.user, app_metadata: { dev_design_sweep: marker } } };
+  const readPolicy = jest.fn();
+  await expect(verifyDispatcher(session, readPolicy)).rejects.toThrow('DEV_DISPATCHER_UNVERIFIED');
+  expect(readPolicy).not.toHaveBeenCalled();
+});
+
+test.each([429, 500, 503])('retries a network failure and HTTP %i with increasing delays and a fresh timeout', async status => {
+  const networkError = new TypeError('fetch failed', { cause: { code: 'ECONNRESET' } });
+  const fetch = jest.spyOn(global, 'fetch').mockRejectedValueOnce(networkError)
+    .mockResolvedValueOnce(new Response(null, { status })).mockResolvedValueOnce(Response.json({ ok: true }));
+  const wait = jest.fn();
+  try {
+    await expect(jsonRequest(origin, {}, 'Readback', wait)).resolves.toEqual({ ok: true });
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(wait.mock.calls).toEqual([[5000], [15000]]);
+    expect(new Set(fetch.mock.calls.map(([, options]) => options.signal)).size).toBe(3);
+  } finally {
+    fetch.mockRestore();
+  }
+});
+
+test.each([[503, 3], [403, 1]])('stops after HTTP %i returns %i time(s)', async (status, attempts) => {
+  const fetch = jest.spyOn(global, 'fetch').mockImplementation(async () => new Response(null, { status }));
+  const wait = jest.fn();
+  try {
+    await expect(jsonRequest(origin, {}, 'Readback', wait)).rejects.toThrow(`Readback failed with HTTP ${status}.`);
+    expect(fetch).toHaveBeenCalledTimes(attempts);
+    expect(wait).toHaveBeenCalledTimes(attempts - 1);
+  } finally {
+    fetch.mockRestore();
   }
 });
