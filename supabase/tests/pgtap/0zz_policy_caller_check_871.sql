@@ -2,7 +2,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 
-SELECT plan(232);
+SELECT plan(235);
 
 CREATE FUNCTION pg_temp.check_policy_callers() RETURNS SETOF TEXT
 LANGUAGE plpgsql AS $test$
@@ -212,20 +212,32 @@ BEGIN
   RETURN NEXT throws_ok(format('SELECT * FROM api.resolve_pod_policy(%L::jsonb)',
     v_other || jsonb_build_object('resource_type', 'route_stop', 'resource_id', v_stop)),
     '42501', v_denial, 'POD checks explicit organization with a resolved stop branch');
-  RETURN NEXT throws_ok(format('SELECT * FROM api.resolve_device_policy(%L::jsonb)',
-    jsonb_build_object('resource_id', 'invalid')), '22023', 'Policy context contains an invalid scoped identifier',
-    'Device policy rejects a malformed scope identifier');
+  RETURN NEXT is((SELECT scope_type FROM api.resolve_device_policy(jsonb_build_object('resource_id', 'invalid'))),
+    'global', 'Device policy uses global scope for a malformed resource');
+  RETURN NEXT is((SELECT scope_type FROM api.resolve_mobile_shell_policy('[]'::jsonb)),
+    'global', 'Mobile shell uses global scope for non-object context');
   RETURN NEXT lives_ok(format('SELECT * FROM api.resolve_device_policy(%L::jsonb)',
     v_own || jsonb_build_object('actor_id', 'fixture')), 'Device policy accepts a non-scope actor label');
   RETURN NEXT throws_ok(format('SELECT * FROM api.resolve_device_policy(%L::jsonb)',
     jsonb_build_object('organization_id', NULL, 'client_id', v_client)), '42501', v_denial,
     'Device policy still checks the client with a null organization');
+  RETURN NEXT throws_ok(format('SELECT * FROM api.resolve_device_policy(%L::jsonb)',
+    jsonb_build_object('organization_id', 'invalid', 'client_id', v_client)), '42501', v_denial,
+    'Device policy still checks the client with a malformed organization');
   EXECUTE 'RESET ROLE';
 
   RETURN NEXT ok(public.ensure_task_type_from_catalog_v1(v_other_org, 'route_stop_execute', '{}') IS NOT NULL,
     'System provisioning resolves the bound task organization');
   RETURN NEXT is(public.compute_delivery_attempt_projection_v1(v_org, v_own_client, v_shipment, v_stop,
     'delivered', 'status_update', '{}')->>'outcome', 'delivered', 'Delivery projection resolves the policy for its route record');
+
+  UPDATE public.route_runs SET branch_id = NULL WHERE id = v_run;
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  RETURN NEXT ok((SELECT r.scope_path FROM api.resolve_pod_policy(jsonb_build_object(
+    'resource_type', 'route_stop', 'resource_id', v_stop)) AS r) @>
+    jsonb_build_array(jsonb_build_object('scope_type', 'tenant', 'scope_id', v_org)),
+    'POD binds a stop without a branch to its route organization');
+  EXECUTE 'RESET ROLE';
 
   INSERT INTO public.marketplace_participant_profiles(organization_id, participant_type_key, display_name)
     VALUES (v_other_org, 'provider_tenant', 'Policy fixture') RETURNING id INTO v_profile;

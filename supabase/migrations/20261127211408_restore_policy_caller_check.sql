@@ -35,13 +35,16 @@ DECLARE
   v_scope RECORD;
 BEGIN
   IF jsonb_typeof(v_context) IS DISTINCT FROM 'object' THEN
-    RAISE EXCEPTION 'Policy context must be a JSON object' USING ERRCODE = '22023';
+    IF v_map_context THEN
+      RAISE EXCEPTION 'map_policy context must be a JSON object' USING ERRCODE = '22023';
+    END IF;
+    v_context := '{}'::jsonb;
   END IF;
 
   -- A request retains its identity inside a definer. SQL service calls need no JWT.
   v_has_privileged_scope := COALESCE(v_role = 'service_role', FALSE)
     OR COALESCE(v_role = 'edge_label_renderer_role' AND p_scope_path IS NOT NULL
-                AND p_category IN ('label_design', 'label_print_policy'), FALSE);
+                AND p_category IN ('label_design', 'label_print_policy', 'shipment_reference_policy'), FALSE);
   IF NOT v_has_privileged_scope AND v_has_uuid_subject THEN
     v_has_privileged_scope := COALESCE(public.is_platform_user(), FALSE);
   END IF;
@@ -52,7 +55,7 @@ BEGIN
   END IF;
 
   FOR v_scope IN
-    SELECT selector.scope_type, v_context ->> selector.context_key AS scope_value,
+    SELECT selector.scope_type,
            CASE WHEN v_map_context THEN public.map_policy_context_uuid_v1(v_context, selector.context_key)
                 ELSE public.mapping_studio_try_uuid_v1(v_context ->> selector.context_key)
            END AS scope_id
@@ -60,21 +63,16 @@ BEGIN
                    ('source', 'webhook_source_id'), ('resource', 'resource_id')) selector(scope_type, context_key)
      WHERE p_scope_path IS NULL AND v_context ? selector.context_key
     UNION
-    SELECT r.scope_type, v_context ->> k.context_key,
-           public.mapping_studio_try_uuid_v1(v_context ->> k.context_key)
+    SELECT r.scope_type, public.mapping_studio_try_uuid_v1(v_context ->> k.context_key)
       FROM public.scope_type_registry r
       CROSS JOIN LATERAL jsonb_array_elements_text(r.context_keys) k(context_key)
      WHERE p_scope_path IS NOT NULL AND r.is_enabled AND r.entity_table IS NOT NULL
        AND v_context ? k.context_key
     UNION
-    SELECT entry ->> 'scope_type', entry ->> 'scope_id',
-           public.mapping_studio_try_uuid_v1(entry ->> 'scope_id')
+    SELECT entry ->> 'scope_type', public.mapping_studio_try_uuid_v1(entry ->> 'scope_id')
       FROM jsonb_array_elements(p_scope_path) AS path(entry)
   LOOP
-    CONTINUE WHEN v_scope.scope_value IS NULL;
-    IF v_scope.scope_id IS NULL THEN
-      RAISE EXCEPTION 'Policy context contains an invalid scoped identifier' USING ERRCODE = '22023';
-    END IF;
+    CONTINUE WHEN v_scope.scope_id IS NULL;
 
     IF v_scope.scope_type = 'tenant' THEN
       SELECT id INTO v_scope_org FROM public.organizations WHERE id = v_scope.scope_id;
@@ -223,19 +221,23 @@ SET search_path TO public, extensions, pg_temp
 AS $function$
 DECLARE
   v_context JSONB := p_context;
+  v_stop_org UUID;
+  v_context_org UUID;
   v_branch_id UUID;
 BEGIN
   IF v_context ->> 'resource_type' = 'route_stop' AND v_context ->> 'resource_id' IS NOT NULL THEN
-    SELECT b.id INTO v_branch_id
+    SELECT s.organization_id, b.id INTO v_stop_org, v_branch_id
     FROM public.route_stops s
     JOIN public.route_runs r ON r.id = s.route_run_id AND r.organization_id = s.organization_id
-    JOIN public.branches b ON b.id = r.branch_id AND b.organization_id = s.organization_id
-    WHERE s.id = public.mapping_studio_try_uuid_v1(v_context ->> 'resource_id');
+    LEFT JOIN public.branches b ON b.id = r.branch_id AND b.organization_id = s.organization_id
+    WHERE s.id = public.mapping_studio_try_uuid_v1(v_context ->> 'resource_id')
+      AND (r.branch_id IS NULL OR b.id IS NOT NULL);
 
-    IF v_branch_id IS NULL THEN
+    v_context_org := public.mapping_studio_try_uuid_v1(v_context ->> 'organization_id');
+    IF v_stop_org IS NULL OR (v_context_org IS NOT NULL AND v_context_org <> v_stop_org) THEN
       RAISE EXCEPTION 'Policy context is outside the permitted organization scope' USING ERRCODE = '42501';
     END IF;
-    v_context := jsonb_set(v_context, '{resource_id}', to_jsonb(v_branch_id));
+    v_context := jsonb_strip_nulls(v_context || jsonb_build_object('organization_id', v_stop_org, 'resource_id', v_branch_id));
   END IF;
 
   RETURN QUERY
@@ -323,7 +325,8 @@ $function$$checked$;
          jsonb_build_object('organization_id', v_req.requester_organization_id, 'request_kind_key', v_req.request_kind_key)
        )$before$,
        $after$(SELECT value FROM public.marketplace_policy_lookup_bound_v1(
-         'marketplace_execution_policy', jsonb_build_object('organization_id', v_req.requester_organization_id)
+         'marketplace_execution_policy',
+         jsonb_build_object('organization_id', v_req.requester_organization_id, 'request_kind_key', v_req.request_kind_key)
        ))$after$)
     ) AS changes(signature, before_text, after_text)
   LOOP
