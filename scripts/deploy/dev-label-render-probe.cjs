@@ -107,11 +107,17 @@ async function renderPreview(send, wait = delay) {
     if (status !== undefined) {
       if (status < 500 || status >= 600 || attempt === 2) {
         const body = await response.json().catch(() => null);
+        const { isRendererErrorClass, rendererInternalCode } =
+          await import('../../supabase/functions/label-renderer/error-response.mjs');
         const errorCode = body?.error?.code;
-        const rendererCode = previewErrorCodes.has(errorCode) ? errorCode : 'unavailable';
+        const errorClass = body?.error?.class;
+        const rendererCode = previewErrorCodes.has(errorCode) || errorCode === rendererInternalCode
+          ? errorCode : 'unavailable';
+        const rendererClass = errorCode === rendererInternalCode && isRendererErrorClass(errorClass)
+          ? errorClass : 'unavailable';
         return {
           code: EXIT.renderStatus,
-          diagnostic: `LABEL_PROBE_RENDER_ERROR status=${status} renderer_code=${rendererCode}`,
+          diagnostic: `LABEL_PROBE_RENDER_ERROR status=${status} renderer_code=${rendererCode} renderer_class=${rendererClass}`,
         };
       }
       await response.body?.cancel().catch(() => {});

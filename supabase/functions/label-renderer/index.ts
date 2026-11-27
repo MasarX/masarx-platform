@@ -38,6 +38,7 @@ import { classifyError, logStructured, readEnv } from "./_shared/mod.mjs";
 import { resolveCorsPolicy } from "./_shared/cors.mjs";
 import { authorizeLabelRendererRequest, resolveLabelRendererOperation, verifyLabelRendererToken } from "./auth.mjs";
 import { BARCODE_MAX_CHARS, canonicalBarcodeType, encodeAdditionalBarcode, rotateBarcodePoint } from "./barcode.ts";
+import { RendererConfigurationError, rendererInternalErrorBody } from "./error-response.mjs";
 import { executeHotpathRpc, hotpathModeEnabled } from "../_shared/db-hotpath.ts";
 import { projectSignedStorageUrlForResponse } from "../_shared/label-storage-url.ts";
 import { AssetCache } from "../_shared/asset-cache.ts";
@@ -500,7 +501,7 @@ const BUCKET_HEALTH_TTL_ERROR = 60 * 1000;
 
 const ensureSupabase = () => {
   if (!supabase) {
-    throw new Error(
+    throw new RendererConfigurationError(
       EDGE_REQUIRE_DB_JWT
         ? "Supabase client not initialised. Provide SUPABASE_URL + SUPABASE_ANON_KEY + LABEL_RENDERER_DB_JWT (EDGE_REQUIRE_DB_JWT=1)."
         : "Supabase client not initialised. Provide LABEL_RENDERER_DB_JWT (preferred) or LABEL_RENDERER_TOKEN/service role key.",
@@ -827,7 +828,7 @@ const storageCreateSignedUrl = async (
 
 const createUserClient = (token: string) => {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    throw new Error("Supabase anon credentials missing");
+    throw new RendererConfigurationError("Supabase anon credentials missing");
   }
   return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -3236,13 +3237,7 @@ const handleDesignerPreview = async (
     };
   }
 
-  let userClient;
-  try {
-    userClient = createUserClient(userJwt);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Preview configuration missing";
-    return { statusCode: 500, body: { ok: false, error: { code: "config_missing", message } } };
-  }
+  const userClient = createUserClient(userJwt);
 
   const { data: who, error: whoErr } = await userClient.rpc("label_designer_whoami").single();
   if (whoErr || !who || (who as any).ok !== true) {
@@ -5835,8 +5830,8 @@ const handleBundleRequest = async (
       returnMode: bundleReturnMode,
     });
   } catch (uploadError) {
-    const uploadMessage =
-      uploadError instanceof Error ? uploadError.message : "upload_failed";
+    const reason = "upload_failed";
+    const uploadMessage = uploadError instanceof Error ? uploadError.message : reason;
     await logDecisionBestEffort(
       {
         p_organization_id: bundleInput.organization_id,
@@ -5853,7 +5848,7 @@ const handleBundleRequest = async (
           client_id: bundleInput.client_id ?? null,
           sender_id: bundleInput.sender_id ?? null,
         },
-        p_decision_reason: "upload_failed",
+        p_decision_reason: reason,
       },
       "Unable to log bundle failure decision",
     );
@@ -5865,7 +5860,7 @@ const handleBundleRequest = async (
       integration: integration.kind,
       bucket: LABEL_BUCKET,
     }, { error: uploadMessage });
-    const responseBody = { status: "failed", error: uploadMessage, reason: "upload_failed" };
+    const responseBody = { status: "failed", error: reason, reason };
     return returnBundleResponse(500, responseBody);
   }
   const signedUrl: string | null = artifactReturn.signed_url;
@@ -6243,9 +6238,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }), corsHeaders);
   } catch (err) {
     logRenderer("error", "request_failed", { error: err });
-    return withCors(new Response(JSON.stringify({
-      error: err instanceof Error ? err.message : "Unknown error",
-    }), {
+    return withCors(new Response(JSON.stringify(rendererInternalErrorBody(err)), {
       status: 500,
       headers: { "content-type": "application/json" },
     }), corsHeaders);

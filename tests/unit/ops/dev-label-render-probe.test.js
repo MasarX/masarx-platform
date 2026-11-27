@@ -58,9 +58,9 @@ test('the DEV label probe requires HTTP 200, ok true and canonical base64 PDF by
 
 test.each([
   [[null, 503, 200], 0, [1000, 2000], null],
-  [[503, 502, 500], EXIT.renderStatus, [1000, 2000], 'LABEL_PROBE_RENDER_ERROR status=500 renderer_code=unavailable'],
+  [[503, 502, 500], EXIT.renderStatus, [1000, 2000], 'LABEL_PROBE_RENDER_ERROR status=500 renderer_code=unavailable renderer_class=unavailable'],
   [[null, null, null], EXIT.renderNetwork, [1000, 2000], null],
-  [[403], EXIT.renderStatus, [], 'LABEL_PROBE_RENDER_ERROR status=403 renderer_code=auth_required'],
+  [[403], EXIT.renderStatus, [], 'LABEL_PROBE_RENDER_ERROR status=403 renderer_code=auth_required renderer_class=unavailable'],
 ])('DEV label probe handles renderer results %j with code %i and waits %j', async (statuses, code, waits, diagnostic) => {
   const pdf = Buffer.from('%PDF-1.7\n\n');
   const send = jest.fn();
@@ -85,10 +85,29 @@ test.each([
 test('DEV label probe reports only allowlisted renderer errors', async () => {
   const result = await renderPreview(async () => ({
     status: 400,
-    json: async () => ({ error: { code: 'unknown_code', message: 'fixture detail' } }),
+    json: async () => ({ error: { code: 'unknown_code', class: '42501', message: 'fixture detail' } }),
   }));
   expect(result).toEqual({
     code: EXIT.renderStatus,
-    diagnostic: 'LABEL_PROBE_RENDER_ERROR status=400 renderer_code=unavailable',
+    diagnostic: 'LABEL_PROBE_RENDER_ERROR status=400 renderer_code=unavailable renderer_class=unavailable',
+  });
+});
+
+test.each([
+  ['config_missing', 'config_missing'],
+  ['unknown', 'unknown'],
+  ['42501', '42501'],
+  ['42501\n', 'unavailable'],
+  ['fixture detail', 'unavailable'],
+  [42501, 'unavailable'],
+  [undefined, 'unavailable'],
+])('DEV label probe reports the safe class for %j', async (received, reported) => {
+  const result = await renderPreview(async () => ({
+    status: 500,
+    json: async () => ({ error: { code: 'renderer_internal', class: received, message: 'fixture detail' } }),
+  }), async () => {});
+  expect(result).toEqual({
+    code: EXIT.renderStatus,
+    diagnostic: `LABEL_PROBE_RENDER_ERROR status=500 renderer_code=renderer_internal renderer_class=${reported}`,
   });
 });
