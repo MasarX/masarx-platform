@@ -7,7 +7,7 @@ import { findUntranslated } from '@/test/helpers/untranslated';
 import * as api from '@/lib/api';
 import { englishT, fill } from '@/lib/i18n';
 import ar from '@/lib/seed-raw/i18n/areas/ar/finance';
-import { ar as shellAr } from '@/lib/seed-raw/i18n/areas/shell';
+import shellAr from '@/lib/seed-raw/i18n/areas/ar/shell';
 import { LedgerModule } from './ledger';
 
 const realListResource = api.ui_list_resource_v1;
