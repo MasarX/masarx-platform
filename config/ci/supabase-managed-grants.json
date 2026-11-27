@@ -285,7 +285,7 @@
       "reason": "Reconciles row and truncate guards only on catalog-resolved public application tables. Preserves canonical ledger guards and drops only existing local table-contract guards when redundant or mutable. No privilege changes are dynamic."
     },
     {
-      "file": "supabase/migrations/20261125024423_console_live_broadcast_v1.sql",
+      "file": "supabase/migrations/20261127104100_console_live_broadcast_v1.sql",
       "sha256": "4474bb6e04c4e39ade5f39a72ede9f09d46637068325675302649f3685bfe25a",
       "reason": "Adds four tenant-bound Broadcast policies on realtime.messages for Console live invalidations. Preserves the managed schema, relation and role grants."
     }
