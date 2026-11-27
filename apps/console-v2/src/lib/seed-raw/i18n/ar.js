@@ -70,7 +70,7 @@ export const ar = {
     exceptions: { eyebrow: 'التشغيل', accent: 'الاستثناءات', plain: '(NDR)' },
     returnedToBranch: { eyebrow: 'التشغيل', accent: 'الإرجاع', plain: 'إلى الفرع' },
     pickups: {
-      eyebrow: 'التشغيل', accent: 'الالتقاط', plain: '— الميل الأول',
+      eyebrow: 'التشغيل', accent: 'الاستلام', plain: '— الميل الأول',
       invalidWindowTime: 'أدخل وقت بداية ووقت نهاية صالحين بالتوقيت المحلي.',
     },
     trackingMap: { eyebrow: 'التشغيل', accent: 'خريطة', plain: 'التتبّع' },
