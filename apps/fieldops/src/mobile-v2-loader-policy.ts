@@ -9,6 +9,7 @@
 
 import type { MobileV2IconName } from "./mobile-v2-icon-specs";
 import { MOBILE_V2_ICON_NAMES } from "./mobile-v2-icon-specs";
+import { EN_STRINGS, type FieldOpsStrings } from "./i18n";
 
 export type MobileV2LoaderScanMode = "single" | "bulk";
 
@@ -53,14 +54,14 @@ const ALLOWED_MODES: ReadonlySet<string> = new Set(["single", "bulk"]);
 const ICON_SET: ReadonlySet<string> = new Set(MOBILE_V2_ICON_NAMES as ReadonlyArray<string>);
 
 const DEFAULT_ACTIONS: ReadonlyArray<MobileV2LoaderAction> = Object.freeze([
-  Object.freeze({ key: "load", label: "Load", icon: "truck" }),
-  Object.freeze({ key: "unload", label: "Unload", icon: "package" }),
-  Object.freeze({ key: "receive", label: "Receive", icon: "box" }),
-  Object.freeze({ key: "sort", label: "Sort", icon: "split", submitRpc: "induct_fieldops_parcel_v1" }),
-  Object.freeze({ key: "verify", label: "Verify", icon: "check-double" }),
-  Object.freeze({ key: "damage", label: "Damage", icon: "alert" }),
-  Object.freeze({ key: "shelve", label: "Shelve", icon: "layers" }),
-  Object.freeze({ key: "inter_hub_transfer", label: "Transfer", icon: "route" }),
+  Object.freeze({ key: "load", label: EN_STRINGS.loaderScan.actions.load, icon: "truck" }),
+  Object.freeze({ key: "unload", label: EN_STRINGS.loaderScan.actions.unload, icon: "package" }),
+  Object.freeze({ key: "receive", label: EN_STRINGS.loaderScan.actions.receive, icon: "box" }),
+  Object.freeze({ key: "sort", label: EN_STRINGS.loaderScan.actions.sort, icon: "split", submitRpc: "induct_fieldops_parcel_v1" }),
+  Object.freeze({ key: "verify", label: EN_STRINGS.loaderScan.actions.verify, icon: "check-double" }),
+  Object.freeze({ key: "damage", label: EN_STRINGS.loaderScan.actions.damage, icon: "alert" }),
+  Object.freeze({ key: "shelve", label: EN_STRINGS.loaderScan.actions.shelve, icon: "layers" }),
+  Object.freeze({ key: "inter_hub_transfer", label: EN_STRINGS.loaderScan.actions.inter_hub_transfer, icon: "route" }),
 ]);
 
 export const MOBILE_V2_LOADER_DEFAULT_POLICY: MobileV2LoaderPolicy = Object.freeze({
@@ -248,6 +249,20 @@ export function shouldConfirmLoaderBulkSubmit(
 ): boolean {
   if (input.mode !== "bulk") return false;
   return input.scanCount > policy.confirmThreshold;
+}
+
+/**
+ * Display label for a loader action. The built-in default label (English
+ * catalog text) is shown in the active locale; any other label came from the
+ * policy row and is shown as-is.
+ */
+export function loaderActionLabel(
+  action: MobileV2LoaderAction,
+  strings: FieldOpsStrings = EN_STRINGS,
+): string {
+  const defaults: Readonly<Record<string, string>> = EN_STRINGS.loaderScan.actions;
+  const localized: Readonly<Record<string, string>> = strings.loaderScan.actions;
+  return defaults[action.key] === action.label ? localized[action.key] ?? action.label : action.label;
 }
 
 /** True when an action key is currently enabled for this hub. */

@@ -20,7 +20,7 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { FeatureFlagsModule } from '@/modules/platform/feature-flags';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/platform-feature-flags';
+import ar from '@/lib/seed-raw/i18n/areas/ar/platform-feature-flags';
 import * as dataSource from '@/lib/data-source';
 
 function lookup(catalog: unknown, path: string): unknown {

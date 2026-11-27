@@ -107,7 +107,7 @@ apps/console/app/marketplace/requests/page.tsx 1
 apps/console/app/marketplace/settlements/page.tsx 1
 apps/console/app/operations/public-tracking-requests/page.tsx 1
 apps/console/app/workflows/templates/page.tsx 2
-apps/fieldops/App.tsx 505
+apps/fieldops/App.tsx 332
 apps/fieldops/src/components/BottomSheet.tsx 2
 apps/fieldops/src/components/Skeleton.tsx 2
 apps/fieldops/src/fixtures/mobile-v2-bay-detail-fixtures.ts 1
@@ -156,11 +156,9 @@ apps/fieldops/src/mobile-v2-bottom-sheet.tsx 2
 apps/fieldops/src/mobile-v2-cash-drop-screen.tsx 28
 apps/fieldops/src/mobile-v2-cleaning-screen.tsx 17
 apps/fieldops/src/mobile-v2-cod-ledger-screen.tsx 12
-apps/fieldops/src/mobile-v2-damage-hold-policy.ts 5
 apps/fieldops/src/mobile-v2-driver-signup-flow.tsx 22
 apps/fieldops/src/mobile-v2-driver-signup.ts 4
 apps/fieldops/src/mobile-v2-driving-lock-screen.tsx 13
-apps/fieldops/src/mobile-v2-eor-screen.tsx 14
 apps/fieldops/src/mobile-v2-hold-queue-screen.tsx 17
 apps/fieldops/src/mobile-v2-hub-pickup-screen.tsx 24
 apps/fieldops/src/mobile-v2-inbound-dock-screen.tsx 10
@@ -170,8 +168,6 @@ apps/fieldops/src/mobile-v2-kyc-vehicle-photos-screen.tsx 14
 apps/fieldops/src/mobile-v2-kyc-vehicle-screen.tsx 25
 apps/fieldops/src/mobile-v2-list-state-view.tsx 6
 apps/fieldops/src/mobile-v2-loader-manifest-screen.tsx 9
-apps/fieldops/src/mobile-v2-loader-policy.ts 8
-apps/fieldops/src/mobile-v2-loader-scan-screen.tsx 23
 apps/fieldops/src/mobile-v2-loader-today-screen.tsx 11
 apps/fieldops/src/mobile-v2-login-screen.tsx 20
 apps/fieldops/src/mobile-v2-lookup-screen.tsx 13
@@ -179,15 +175,11 @@ apps/fieldops/src/mobile-v2-manifest-detail-screen.tsx 12
 apps/fieldops/src/mobile-v2-map-screen.tsx 20
 apps/fieldops/src/mobile-v2-more-actions.ts 6
 apps/fieldops/src/mobile-v2-more-screen.tsx 36
-apps/fieldops/src/mobile-v2-pickup-detail-screen.tsx 24
-apps/fieldops/src/mobile-v2-pickup-policy.ts 4
 apps/fieldops/src/mobile-v2-pickups-screen.tsx 23
-apps/fieldops/src/mobile-v2-pod-policy.ts 5
-apps/fieldops/src/mobile-v2-pod-screen.tsx 70
 apps/fieldops/src/mobile-v2-pre-shift-checklist-screen.tsx 6
 apps/fieldops/src/mobile-v2-pre-shift-gate-screen.tsx 18
 apps/fieldops/src/mobile-v2-preview-gallery.tsx 121
-apps/fieldops/src/mobile-v2-preview-screen.tsx 281
+apps/fieldops/src/mobile-v2-preview-screen.tsx 278
 apps/fieldops/src/mobile-v2-primitives.tsx 4
 apps/fieldops/src/mobile-v2-profile-screen.tsx 61
 apps/fieldops/src/mobile-v2-returns-screen.tsx 22
@@ -201,7 +193,6 @@ apps/fieldops/src/mobile-v2-settings-screen.tsx 21
 apps/fieldops/src/mobile-v2-settlements-screen.tsx 19
 apps/fieldops/src/mobile-v2-sheet-break.tsx 16
 apps/fieldops/src/mobile-v2-sheet-cash-drop.tsx 17
-apps/fieldops/src/mobile-v2-sheet-damage-hold.tsx 27
 apps/fieldops/src/mobile-v2-sheet-eod-recon.tsx 6
 apps/fieldops/src/mobile-v2-sheet-incident.tsx 25
 apps/fieldops/src/mobile-v2-sheet-note.tsx 2
@@ -220,14 +211,10 @@ apps/fieldops/src/mobile-v2-shell-helpers.ts 2
 apps/fieldops/src/mobile-v2-shell.tsx 9
 apps/fieldops/src/mobile-v2-signup-screen.tsx 27
 apps/fieldops/src/mobile-v2-sortation-screen.tsx 13
-apps/fieldops/src/mobile-v2-stop-screen.tsx 39
 apps/fieldops/src/mobile-v2-supervisor-screen.tsx 14
 apps/fieldops/src/mobile-v2-sync-queue-screen.tsx 12
-apps/fieldops/src/mobile-v2-tasks-screen.tsx 33
-apps/fieldops/src/mobile-v2-tasks-views.ts 37
 apps/fieldops/src/mobile-v2-today-screen.tsx 18
 apps/fieldops/src/mobile-v2-trip-nav-screen.tsx 9
-apps/fieldops/src/mobile-v2-trips-screen.tsx 61
 apps/fieldops/src/mobile-v2-wallet-screen.tsx 12
 apps/fieldops/src/screens/A11yDiagnosticsPanel.tsx 9
 apps/fieldops/src/screens/LocationScreen.tsx 7
@@ -272,11 +259,6 @@ packages/ui/src/label-designer/keyboard-shortcuts-modal.tsx 20
 packages/ui/src/label-designer/pdf-preview-document.tsx 1
 packages/ui/src/label-designer/utils.ts 3
 packages/ui/src/manual-review-resolve-form.tsx 3
-packages/ui/src/mapping-studio-page.tsx 84
-packages/ui/src/mapping-studio/openapi-operation-preview.tsx 2
-packages/ui/src/mapping-studio/payload-path-picker.tsx 2
-packages/ui/src/mapping-studio/review-diagnostics.tsx 16
-packages/ui/src/mapping-studio/spreadsheet-preview.tsx 2
 packages/ui/src/marketplace-action-form.tsx 3
 packages/ui/src/marketplace-contract-room-page.tsx 42
 packages/ui/src/marketplace-participant-requests-page.tsx 23
@@ -289,7 +271,6 @@ packages/ui/src/marketplace-request-workspace-page.tsx 45
 packages/ui/src/mutation-toast.ts 1
 packages/ui/src/navigation.tsx 1
 packages/ui/src/notification-center.tsx 1
-packages/ui/src/onboarding-readiness-page.tsx 57
 packages/ui/src/pickup-failures-page.tsx 15
 packages/ui/src/pickup-requests-page.tsx 34
 packages/ui/src/pod/pod-viewer.tsx 2
@@ -297,8 +278,6 @@ packages/ui/src/resource-detail-editable.tsx 1
 packages/ui/src/resource-detail-navigation.tsx 4
 packages/ui/src/resource-detail-skeleton.tsx 1
 packages/ui/src/resource-filter-builder.tsx 1
-packages/ui/src/resource-import-launcher.tsx 6
-packages/ui/src/resource-import-page.tsx 231
 packages/ui/src/route-error-page.tsx 1
 packages/ui/src/service-catalog-form.tsx 29
 packages/ui/src/service-catalog-page.tsx 12
@@ -322,7 +301,6 @@ packages/ui/src/vehicle-create-form.tsx 2
 packages/ui/src/vehicle-create-page.tsx 5
 packages/ui/src/warehouse-transfer-manifest-create-form.tsx 1
 packages/ui/src/warehouse-transfer-resource-page.tsx 1
-packages/ui/src/workflow-bindings-page.tsx 52
 packages/ui/src/workflow-canvas/edges/workflow-edge.tsx 1
 packages/ui/src/workflow-canvas/empty-canvas-state.tsx 3
 packages/ui/src/workflow-canvas/nodes/workflow-step-node.tsx 1

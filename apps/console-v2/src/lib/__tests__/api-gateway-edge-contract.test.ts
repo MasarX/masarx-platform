@@ -8,7 +8,10 @@ const apiCallerSource = readFileSync(path.join(repoRoot, 'supabase/functions/api
 const webhookReceiverSource = readFileSync(path.join(repoRoot, 'supabase/functions/webhook-receiver/index.ts'), 'utf8');
 const corsSource = readFileSync(path.join(repoRoot, 'supabase/functions/_shared/cors.mjs'), 'utf8').replace(/\r\n/g, '\n');
 const edgeHelpers = readFileSync(path.join(repoRoot, 'supabase/functions/_shared/mod.mjs'), 'utf8');
-const intakeTesterSource = readFileSync(path.join(repoRoot, 'apps/console-v2/src/lib/data-source.ts'), 'utf8');
+const intakeTesterSource = readFileSync(
+  path.join(repoRoot, 'apps/console-v2/src/lib/data-source/external-intake.ts'),
+  'utf8',
+);
 const leaseMigration = readFileSync(
   path.join(repoRoot, 'supabase/migrations/202608161600_b3_api_caller_bounded_batch_v1.sql'),
   'utf8',
