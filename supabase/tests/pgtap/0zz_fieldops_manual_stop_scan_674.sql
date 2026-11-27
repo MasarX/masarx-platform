@@ -106,13 +106,15 @@ BEGIN
     expired_reason, 'Expired fixture reason', 'active',
     fixture_capture_time - interval '2 days', fixture_capture_time - interval '1 day');
 
+  -- Client onboarding seeds a policy that takes precedence over the tenant default.
   SELECT s.cached_value INTO STRICT policy
-  FROM public.settings s WHERE s.category = 'scan_policy' AND s.scope_type = 'global';
+  FROM public.settings s
+  WHERE s.category = 'scan_policy' AND s.scope_type = 'client' AND s.scope_id = client_id;
   policy := policy || jsonb_build_object(
     'version', 3,
     'accepted_scan_types', (policy->'accepted_scan_types') || '["stop_parcel"]'::jsonb,
     'manual_entry', jsonb_build_object('enabled', FALSE, 'reason_codes', reason_codes));
-  PERFORM 1 FROM public.upsert_settings_value_v1('scan_policy', 'tenant', org_id, policy, 3, 'pgTAP stop scan disabled');
+  PERFORM 1 FROM public.upsert_settings_value_v1('scan_policy', 'client', client_id, policy, 3, 'pgTAP stop scan disabled');
 
   PERFORM set_config('request.jwt.claim.sub', driver_id::text, true);
   PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
@@ -134,12 +136,14 @@ BEGIN
     'Manual entry is unavailable for this scan under the resolved scan policy', 'disabled policy rejects manual entry');
 
   EXECUTE 'SET LOCAL ROLE postgres';
-  PERFORM 1 FROM public.upsert_settings_value_v1('scan_policy', 'tenant', org_id,
+  PERFORM 1 FROM public.upsert_settings_value_v1('scan_policy', 'client', client_id,
     jsonb_set(policy, '{manual_entry,enabled}', 'true'::jsonb), 3, 'pgTAP stop scan enabled');
   EXECUTE 'SET LOCAL ROLE authenticated';
 
   RETURN NEXT is((SELECT p.value#>'{manual_entry,reason_codes}'
-    FROM api.resolve_scan_policy(jsonb_build_object('organization_id', org_id)) p),
+    FROM api.resolve_scan_policy(jsonb_build_object(
+      'organization_id', org_id, 'user_id', driver_id, 'resource_id', fixture_branch,
+      'client_id', client_id, 'event_type', 'scan_event')) p),
     reason_codes, 'assigned driver reads scope-specific reason choices from the policy');
 
   FOR entry IN SELECT * FROM (VALUES
