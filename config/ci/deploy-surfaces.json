@@ -1805,10 +1805,10 @@
         "propagates_to_surface_ids": []
       },
       "allowed_secret_keys": [
-        "CLOUDFLARE_API_TOKEN"
+        "CLOUDFLARE_API_TOKEN",
+        "CLOUDFLARE_ACCOUNT_ID"
       ],
       "allowed_var_keys": [
-        "CLOUDFLARE_ACCOUNT_ID",
         "CLOUDFLARE_PAGES_PROJECT_LANDING",
         "LANDING_SITE_URL",
         "LANDING_CUSTOM_DOMAINS",
@@ -1830,10 +1830,10 @@
         "prewarm_supported": true,
         "full_deploy_required_on_pr_full_mode": false,
         "required_preview_secret_keys": [
-          "CLOUDFLARE_API_TOKEN"
+          "CLOUDFLARE_API_TOKEN",
+          "CLOUDFLARE_ACCOUNT_ID"
         ],
         "required_preview_var_keys": [
-          "CLOUDFLARE_ACCOUNT_ID",
           "CLOUDFLARE_PAGES_PROJECT_LANDING",
           "LANDING_SITE_URL",
           "LANDING_CUSTOM_DOMAINS",
@@ -2190,10 +2190,10 @@
         "propagates_to_surface_ids": []
       },
       "allowed_secret_keys": [
-        "CLOUDFLARE_API_TOKEN"
+        "CLOUDFLARE_API_TOKEN",
+        "CLOUDFLARE_ACCOUNT_ID"
       ],
       "allowed_var_keys": [
-        "CLOUDFLARE_ACCOUNT_ID",
         "CLOUDFLARE_ZONE_NAME",
         "SUPABASE_URL",
         "API_INGRESS_DEPLOY_GUARD",
@@ -2210,10 +2210,10 @@
         "prewarm_supported": true,
         "full_deploy_required_on_pr_full_mode": false,
         "required_preview_secret_keys": [
-          "CLOUDFLARE_API_TOKEN"
+          "CLOUDFLARE_API_TOKEN",
+          "CLOUDFLARE_ACCOUNT_ID"
         ],
         "required_preview_var_keys": [
-          "CLOUDFLARE_ACCOUNT_ID",
           "CLOUDFLARE_ZONE_NAME",
           "SUPABASE_URL",
           "API_INGRESS_DEPLOY_GUARD",

@@ -9,7 +9,11 @@ name: Verify Console V2 Worker
       - apps/shared/security-headers.js
       - packages/config/**
       - packages/ui/**
+      - config/dev/console-v2-readout.json
+      - config/dev/sweep-roles.json
       - scripts/deploy/console-v2-dev.mjs
+      - scripts/deploy/dev-sweep-role.cjs
+      - scripts/deploy/dev-synthetic-fixture.cjs
       - scripts/ops/vercel/validate-build.js
       - tooling/apps/console-v2-worker/**
       - tooling/apps/deploy/**

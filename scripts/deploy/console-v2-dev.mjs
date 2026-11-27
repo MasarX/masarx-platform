@@ -8,6 +8,9 @@ import securityHeaders from '../../apps/shared/security-headers.js';
 import { retry } from '../ci-hosted/process.cjs';
 import { RETRYABLE_NETWORK_ERROR_CODES } from '../ops/ci/github-api-retry.js';
 import vercelValidation from '../ops/vercel/validate-build.js';
+import preview from '../ops/workspace/preview-project.js';
+import { ensureTenantRole } from './dev-sweep-role.cjs';
+import { FixtureError, requireFixture, withDevFixture } from './dev-synthetic-fixture.cjs';
 
 const env = process.env;
 const assets = resolve('apps/console-v2/dist');
@@ -19,9 +22,33 @@ const runNumberPattern = /^\d+$/;
 const versionPattern = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const { buildStaticSecurityHeaders, normalizeTrustedOrigin } = securityHeaders;
 const sweepRoles = JSON.parse(readFileSync(new URL('../../config/dev/sweep-roles.json', import.meta.url), 'utf8'));
+const { additionalReadCapabilities } = JSON.parse(
+  readFileSync(new URL('../../config/dev/console-v2-readout.json', import.meta.url), 'utf8'),
+);
 const dispatcherError = 'DEV_DISPATCHER_UNVERIFIED';
+const dispatcherCleanupError = 'DEV_DISPATCHER_CLEANUP_FAILED';
+const dispatcherCleanupExit = 22;
+const dispatcherRole = 'dispatcher';
+const { scope, required, optional } = sweepRoles[dispatcherRole];
+const dispatcherRequired = [...required, ...additionalReadCapabilities];
+const dispatcherFixtureExit = {
+  configuration: dispatcherError,
+  credentials: dispatcherError,
+  database: dispatcherError,
+  authCreate: dispatcherError,
+  fixture: dispatcherError,
+  signIn: dispatcherError,
+  cleanupDatabase: dispatcherCleanupError,
+  cleanupAuth: dispatcherCleanupError,
+  cleanupVerify: dispatcherCleanupError,
+};
 
-class DeployError extends Error {}
+class DeployError extends Error {
+  constructor(message, exitCode = 1) {
+    super(message);
+    this.exitCode = exitCode;
+  }
+}
 
 function requireValue(condition, message) {
   if (!condition) throw new DeployError(message);
@@ -66,7 +93,7 @@ function prepare() {
     'Set CLOUDFLARE_WORKER_CONSOLE_V2 to the approved Worker name.');
   const supabase = normalizeTrustedOrigin(env.VITE_SUPABASE_URL);
   requireValue(/^[a-z]{20}$/.test(env.SUPABASE_PROJECT_REF)
-    && supabase === `https://${env.SUPABASE_PROJECT_REF}.supabase.co`,
+    && supabase === preview.buildSupabaseProjectUrl(env.SUPABASE_PROJECT_REF),
     'Console V2 requires the configured DEV Supabase project origin.');
   requireValue(env.VITE_USE_SEED === 'false', 'Console V2 DEV must build with VITE_USE_SEED=false.');
   try {
@@ -246,24 +273,54 @@ async function markerMatches(origin) {
     && await response.text() === `${sha}\n`;
 }
 
-export async function verifyDispatcher(session, readPolicy) {
+export async function verifyDispatcher(session, readPolicy, organizationId) {
   const token = session?.access_token;
   requireValue(typeof token === 'string' && token && session.user?.role === 'authenticated'
-    && session.user.app_metadata?.dev_design_sweep === 'dispatcher', dispatcherError);
+    && session.user.app_metadata?.dev_design_sweep === dispatcherRole, dispatcherError);
 
   const result = await readPolicy(token);
   const policy = result?.eval;
-  const { scope, required, optional } = sweepRoles.dispatcher;
   const caps = policy?.granted_capabilities;
   requireValue(result?.ok === true && policy?.allowed === true && policy.scope_type === scope
-    && Array.isArray(policy.role_keys) && policy.role_keys.length === 1 && policy.role_keys[0] === 'dispatcher'
-    && Array.isArray(caps) && required.every(cap => caps.includes(cap))
-    && caps.every(cap => required.includes(cap) || optional.includes(cap)), dispatcherError);
+    && typeof organizationId === 'string' && policy.scope_id === organizationId
+    && Array.isArray(policy.role_keys) && policy.role_keys.length === 1 && policy.role_keys[0] === dispatcherRole
+    && Array.isArray(caps) && dispatcherRequired.every(cap => caps.includes(cap))
+    && caps.every(cap => dispatcherRequired.includes(cap) || optional.includes(cap)), dispatcherError);
+}
+
+async function seedDispatcher(db, { organizationId, email, tag }, userId) {
+  const rows = await ensureTenantRole(async (sql, params) => (await db.query(sql, params)).rows,
+    organizationId, dispatcherRole, dispatcherRequired);
+  requireFixture(rows.length === 1, dispatcherError);
+  await db.query(`INSERT INTO public.users (id, organization_id, email, full_name, user_type, status, access_scope_type)
+    VALUES ($1, $2, $3, $4, $5, 'active', $6)`, [userId, organizationId, email, tag, dispatcherRole, scope]);
+}
+
+export async function runDispatcherReadout(environment, readShipment, runFixture = withDevFixture) {
+  requireValue(scope === 'tenant' && [...dispatcherRequired, ...optional].every(cap => /^[a-z_]+\.read$/.test(cap))
+    && ['push', 'workflow_dispatch'].includes(environment.GITHUB_EVENT_NAME)
+    && normalizeTrustedOrigin(environment.VITE_SUPABASE_URL) === preview.buildSupabaseProjectUrl(environment.SUPABASE_PROJECT_REF),
+  dispatcherError);
+  const receipt = await runFixture(environment, {
+    prefix: 'dev-console-v2-probe',
+    marker: 'dev_console_v2_probe',
+    appMetadata: { dev_design_sweep: dispatcherRole },
+    exit: dispatcherFixtureExit,
+    seedUser: seedDispatcher,
+  }, readShipment).catch(error => {
+    if (error instanceof FixtureError) throw new DeployError(dispatcherError);
+    throw error;
+  });
+  if (receipt.cleanupErrors.length) {
+    if (receipt.error) console.error(receipt.error instanceof DeployError ? receipt.error.message : dispatcherError);
+    throw new DeployError(dispatcherCleanupError, dispatcherCleanupExit);
+  }
+  if (receipt.error instanceof DeployError) throw receipt.error;
+  requireValue(!receipt.error && receipt.cleaned, dispatcherError);
 }
 
 async function readout() {
   const origin = targetOrigin();
-  requireValue(env.E2E_CONSOLE_AUTH_EMAIL?.trim() && env.E2E_CONSOLE_AUTH_PASSWORD, dispatcherError);
   for (let attempt = 0; !await markerMatches(origin); attempt += 1) {
     requireValue(attempt < 2, 'The DEV custom domain did not serve the exact commit marker.');
     await delay(60_000);
@@ -290,23 +347,37 @@ async function readout() {
   const missing = await fetchAsset(origin, `/assets/missing-${buildId()}.js`, { Accept: 'text/html' });
   requireValue(missing.status === 404, 'A missing JavaScript asset must return 404.');
 
+  await runDispatcherReadout(env, fixture => readDispatcher(origin, fixture));
+  appendFileSync(env.GITHUB_STEP_SUMMARY,
+    '\nExact commit marker, security headers, live dispatcher shipment read, and fixture cleanup verified.\n');
+}
+
+async function readDispatcher(origin, { organizationId, projectUrl, credentials, signIn, tracking }) {
   const { chromium } = await import('@playwright/test');
   const { gotoSurface, waitForLiveResourceList, waitForLiveRpc } =
     await import('../../apps/console-v2/tests/e2e/fixtures.ts');
-  const browser = await chromium.launch();
+  const browserEnv = { ...env };
+  delete browserEnv.SUPABASE_ACCESS_TOKEN;
+  delete browserEnv.SUPABASE_DB_PASSWORD;
+  const browser = await chromium.launch({ env: browserEnv });
   try {
     const page = await browser.newPage({ baseURL: origin });
-    const supabaseOrigin = new URL(env.VITE_SUPABASE_URL).origin;
     const dispatcher = Promise.withResolvers();
     // Verify the user and policy with the same session before the app can use it.
-    await page.route(url => url.origin === supabaseOrigin && url.pathname === '/auth/v1/token'
+    await page.route(url => url.origin === projectUrl && url.pathname === '/auth/v1/token'
       && url.searchParams.get('grant_type') === 'password', async route => {
       if (route.request().method() !== 'POST') return route.continue();
       try {
-        const response = await route.fetch({ maxRedirects: 0, timeout: 20_000 });
-        requireValue(response.ok(), dispatcherError);
-        await verifyDispatcher(await response.json(), token => jsonRequest(
-          new URL('/rest/v1/rpc/user_capability_eval_v2', supabaseOrigin), {
+        const posted = route.request().postDataJSON();
+        requireValue(posted?.email === credentials.email && posted?.password === credentials.password, dispatcherError);
+        let response;
+        const session = await signIn(async () => {
+          response = await route.fetch({ maxRedirects: 0, timeout: 20_000 });
+          requireValue(response.ok(), dispatcherError);
+          return response.json();
+        });
+        await verifyDispatcher(session, token => jsonRequest(
+          new URL('/rest/v1/rpc/user_capability_eval_v2', projectUrl), {
             method: 'POST',
             headers: {
               apikey: env.VITE_SUPABASE_ANON_KEY,
@@ -316,7 +387,7 @@ async function readout() {
             },
             body: JSON.stringify({ p_args: { capability_key: 'shipments.read' } }),
           }, dispatcherError,
-        ));
+        ), organizationId);
         await route.fulfill({ response });
         dispatcher.resolve();
       } catch {
@@ -328,10 +399,10 @@ async function readout() {
       dispatcher.promise,
       waitForLiveRpc(page, 'ui_me_v1'),
       waitForLiveResourceList(page, 'shipments'),
-      gotoSurface(page, '/operate/shipments'),
+      gotoSurface(page, '/operate/shipments', credentials),
     ]);
     await page.waitForURL(new URL('/operate/shipments', origin).href);
-    await page.locator('.dt__table tbody tr').first().waitFor();
+    await page.locator('.dt__table tbody tr').getByText(tracking, { exact: true }).waitFor();
     requireValue(await markerMatches(origin), 'The DEV commit marker changed during the dispatcher readout.');
   } catch (error) {
     if (error instanceof DeployError) throw error;
@@ -339,7 +410,6 @@ async function readout() {
   } finally {
     await browser.close();
   }
-  appendFileSync(env.GITHUB_STEP_SUMMARY, '\nExact commit marker, security headers, and live dispatcher shipment read verified.\n');
 }
 
 const commands = {
@@ -357,6 +427,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   } catch (error) {
     // Provider and browser errors can contain private origins or request data.
     console.error(error instanceof DeployError ? error.message : `Console V2 ${command} failed.`);
-    process.exitCode = 1;
+    process.exitCode = error instanceof DeployError ? error.exitCode : 1;
   }
 }

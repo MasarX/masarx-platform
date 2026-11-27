@@ -1032,7 +1032,7 @@ jobs:
 
   console-v2:
     needs: database
-    if: ${{ !cancelled() && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && needs.database.outputs.configured == 'true' }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && needs.database.outputs.configured == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: dev
@@ -1050,7 +1050,7 @@ jobs:
     steps:
       - name: Guard Console V2 DEV configuration
         env:
-          CONFIGURED: ${{ vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.CLOUDFLARE_WORKER_CONSOLE_V2 != '' && vars.CONSOLE_V2_DEV_ORIGIN != '' && vars.SUPABASE_PROJECT_REF != '' && secrets.CLOUDFLARE_API_TOKEN != '' && secrets.DEV_SWEEP_DISPATCHER_EMAIL != '' && secrets.DEV_SWEEP_DISPATCHER_PASSWORD != '' }}
+          CONFIGURED: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' && vars.CLOUDFLARE_WORKER_CONSOLE_V2 != '' && vars.CONSOLE_V2_DEV_ORIGIN != '' && vars.SUPABASE_PROJECT_REF != '' && secrets.CLOUDFLARE_API_TOKEN != '' }}
         run: |
           if [[ "$DEPLOY_ENV:$GITHUB_REF" != dev:refs/heads/main || "$CONFIGURED" != true ]]; then
             echo '::error::Console V2 deployment requires the main ref and the approved DEV configuration.'
@@ -1083,7 +1083,7 @@ jobs:
         id: deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_WORKER_CONSOLE_V2: ${{ vars.CLOUDFLARE_WORKER_CONSOLE_V2 }}
           GH_TOKEN: ${{ github.token }}
         run: node scripts/deploy/console-v2-dev.mjs deploy
@@ -1091,8 +1091,9 @@ jobs:
         if: steps.deploy.outputs.superseded != 'true'
         env:
           E2E_CONSOLE_LIVE: '1'
-          E2E_CONSOLE_AUTH_EMAIL: ${{ secrets.DEV_SWEEP_DISPATCHER_EMAIL }}
-          E2E_CONSOLE_AUTH_PASSWORD: ${{ secrets.DEV_SWEEP_DISPATCHER_PASSWORD }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         run: node scripts/deploy/console-v2-dev.mjs readout
 
   portal:

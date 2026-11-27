@@ -166,8 +166,7 @@ async function maybeVisible(locator: Locator): Promise<boolean> {
   }
 }
 
-async function signInThroughConsoleUi(page: Page): Promise<void> {
-  const credentials = resolveLiveAuthCredentials();
+async function signInThroughConsoleUi(page: Page, credentials = resolveLiveAuthCredentials()): Promise<void> {
   const signInRequired = page.getByRole('region', { name: 'Sign in required' });
   if (await maybeVisible(signInRequired)) {
     await signInRequired.getByRole('button', { name: /^Sign in$/ }).click();
@@ -182,7 +181,7 @@ async function signInThroughConsoleUi(page: Page): Promise<void> {
   await page.getByRole('button', { name: /^Sign in$/ }).click();
 }
 
-async function ensureConsoleAuthenticated(page: Page): Promise<void> {
+async function ensureConsoleAuthenticated(page: Page, credentials?: LiveAuthCredentials): Promise<void> {
   if (!isLiveConsoleE2E()) return;
   if (await maybeVisible(page.locator('header'))) return;
 
@@ -190,10 +189,10 @@ async function ensureConsoleAuthenticated(page: Page): Promise<void> {
   const signInRequired = page.getByRole('region', { name: 'Sign in required' });
   const sessionError = page.getByRole('region', { name: 'Session error' });
   if (await maybeVisible(loginModule) || await maybeVisible(signInRequired)) {
-    await signInThroughConsoleUi(page);
+    await signInThroughConsoleUi(page, credentials);
   } else if (await maybeVisible(sessionError)) {
     await sessionError.getByRole('button', { name: /^Sign in again$/ }).click();
-    await signInThroughConsoleUi(page);
+    await signInThroughConsoleUi(page, credentials);
   }
 
   await page.waitForSelector('header', { timeout: 30_000 });
@@ -259,9 +258,11 @@ export async function clickFirstDataTableRow(page: Page): Promise<void> {
 /** Navigate to a surface and wait for the shell to render. The wait budget
  *  is generous because Vite dev-mode HMR can cause re-bundling pauses
  *  between tests in the same suite run. */
-export async function gotoSurface(page: Page, hashPath: string): Promise<void> {
+export async function gotoSurface(
+  page: Page, hashPath: string, credentials?: LiveAuthCredentials,
+): Promise<void> {
   await page.goto(hashPath, { waitUntil: 'load' });
-  await ensureConsoleAuthenticated(page);
+  await ensureConsoleAuthenticated(page, credentials);
   // The shell's `<header>` (banner) renders only after the IdentityProvider +
   // I18nProvider are mounted — waiting for it gives a deterministic anchor
   // for "the surface is alive" rather than a fixed sleep.

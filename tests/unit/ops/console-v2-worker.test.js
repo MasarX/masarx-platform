@@ -1,16 +1,21 @@
+const { readFileSync } = require('node:fs');
+const { resolve } = require('node:path');
+const { parse } = require('yaml');
 const { buildSecurityHeaders } = require('../../../apps/shared/security-headers');
 const { dispatcher } = require('../../../config/dev/sweep-roles.json');
+const { additionalReadCapabilities } = require('../../../config/dev/console-v2-readout.json');
 
 const origin = 'https://console.example.test';
 const placeholder = 'nonce-placeholder';
 let worker;
 let jsonRequest;
 let verifyDispatcher;
+let runDispatcherReadout;
 let env;
 
 beforeAll(async () => {
   ({ default: worker } = await import('../../../tooling/apps/console-v2-worker/index.mjs'));
-  ({ jsonRequest, verifyDispatcher } = await import('../../../scripts/deploy/console-v2-dev.mjs'));
+  ({ jsonRequest, verifyDispatcher, runDispatcherReadout } = await import('../../../scripts/deploy/console-v2-dev.mjs'));
 });
 
 beforeEach(() => {
@@ -143,13 +148,14 @@ const sweepSession = {
 const dispatcherPolicy = {
   allowed: true,
   scope_type: dispatcher.scope,
+  scope_id: 'fixture-tenant',
   role_keys: ['dispatcher'],
-  granted_capabilities: dispatcher.required,
+  granted_capabilities: [...dispatcher.required, ...additionalReadCapabilities],
 };
 
 test('accepts a synthetic dispatcher with only the configured read permissions', async () => {
   const readPolicy = jest.fn().mockResolvedValue({ ok: true, eval: dispatcherPolicy });
-  await expect(verifyDispatcher(sweepSession, readPolicy)).resolves.toBeUndefined();
+  await expect(verifyDispatcher(sweepSession, readPolicy, dispatcherPolicy.scope_id)).resolves.toBeUndefined();
   expect(readPolicy).toHaveBeenCalledWith(sweepSession.access_token);
 });
 
@@ -158,16 +164,17 @@ test.each([
   ['an additional role', { role_keys: ['dispatcher', 'finance_viewer'] }],
   ['a missing role claim', { role_keys: undefined }],
   ['a wider scope', { scope_type: 'global' }],
-  ['a wider permission', { granted_capabilities: [...dispatcher.required, 'shipments.update'] }],
+  ['a wider permission', { granted_capabilities: [...dispatcherPolicy.granted_capabilities, 'shipments.update'] }],
+  ['missing shell metadata access', { granted_capabilities: dispatcher.required }],
 ])('rejects a dispatcher session with %s', async (_label, overrides) => {
   const readPolicy = jest.fn().mockResolvedValue({ ok: true, eval: { ...dispatcherPolicy, ...overrides } });
-  await expect(verifyDispatcher(sweepSession, readPolicy)).rejects.toThrow('DEV_DISPATCHER_UNVERIFIED');
+  await expect(verifyDispatcher(sweepSession, readPolicy, dispatcherPolicy.scope_id)).rejects.toThrow('DEV_DISPATCHER_UNVERIFIED');
 });
 
 test.each([undefined, 'finance_viewer'])('rejects a session with sweep marker %s before reading policy', async marker => {
   const session = { ...sweepSession, user: { ...sweepSession.user, app_metadata: { dev_design_sweep: marker } } };
   const readPolicy = jest.fn();
-  await expect(verifyDispatcher(session, readPolicy)).rejects.toThrow('DEV_DISPATCHER_UNVERIFIED');
+  await expect(verifyDispatcher(session, readPolicy, dispatcherPolicy.scope_id)).rejects.toThrow('DEV_DISPATCHER_UNVERIFIED');
   expect(readPolicy).not.toHaveBeenCalled();
 });
 
@@ -196,4 +203,80 @@ test.each([[503, 3], [403, 1]])('stops after HTTP %i returns %i time(s)', async 
   } finally {
     fetch.mockRestore();
   }
+});
+
+test('rejects a dispatcher session outside its fixture tenant', async () => {
+  const readPolicy = jest.fn().mockResolvedValue({ ok: true, eval: { ...dispatcherPolicy, scope_id: 'another-tenant' } });
+  await expect(verifyDispatcher(sweepSession, readPolicy, 'fixture-tenant')).rejects.toThrow('DEV_DISPATCHER_UNVERIFIED');
+});
+
+const projectRef = 'a'.repeat(20);
+const readoutEnv = {
+  GITHUB_EVENT_NAME: 'push',
+  SUPABASE_PROJECT_REF: projectRef,
+  VITE_SUPABASE_URL: `https://${projectRef}.supabase.co`,
+};
+
+test('the DEV readout seeds only the configured dispatcher in the shared fixture', async () => {
+  const fixture = { organizationId: 'fixture-tenant', email: 'fixture@example.invalid', tag: 'fixture-tag' };
+  const readShipment = jest.fn();
+  const db = { query: jest.fn().mockResolvedValueOnce({ rows: [{ settings_id: 'fixture-policy' }] }) };
+  const runFixture = jest.fn(async (_, options, use) => {
+    expect(options.appMetadata).toEqual({ dev_design_sweep: 'dispatcher' });
+    expect(options.marker).toBe('dev_console_v2_probe');
+    await options.seedUser(db, fixture, 'fixture-user');
+    await use(fixture);
+    return { cleanupErrors: [], cleaned: true };
+  });
+
+  await expect(runDispatcherReadout(readoutEnv, readShipment, runFixture)).resolves.toBeUndefined();
+  const [policySql, [organizationId, policyPatch, role]] = db.query.mock.calls[0];
+  expect(policySql).toContain('upsert_settings_value_v1');
+  expect(organizationId).toBe(fixture.organizationId);
+  expect(role).toBe('dispatcher');
+  expect(JSON.parse(policyPatch)).toEqual([{ key: role, capability_keys: dispatcherPolicy.granted_capabilities }]);
+  expect(db.query).toHaveBeenCalledTimes(2);
+  expect(db.query).toHaveBeenNthCalledWith(2, expect.stringContaining('INSERT INTO public.users'),
+    ['fixture-user', fixture.organizationId, fixture.email, fixture.tag, role, dispatcher.scope]);
+  expect(readShipment).toHaveBeenCalledWith(fixture);
+});
+
+test('the runtime fixture can only start on an eligible deployment', async () => {
+  const runFixture = jest.fn();
+  const readShipment = jest.fn();
+  await expect(runDispatcherReadout({ ...readoutEnv, GITHUB_EVENT_NAME: 'pull_request' }, readShipment, runFixture))
+    .rejects.toThrow('DEV_DISPATCHER_UNVERIFIED');
+  await expect(runDispatcherReadout({ ...readoutEnv, VITE_SUPABASE_URL: origin }, readShipment, runFixture))
+    .rejects.toThrow('DEV_DISPATCHER_UNVERIFIED');
+  expect(runFixture).not.toHaveBeenCalled();
+});
+
+test('readout cleanup failure overrides readout success with a fixed job exit code', async () => {
+  const runFixture = jest.fn().mockResolvedValue({ cleanupErrors: ['failure'], cleaned: false });
+  await expect(runDispatcherReadout(readoutEnv, jest.fn(), runFixture))
+    .rejects.toMatchObject({ message: 'DEV_DISPATCHER_CLEANUP_FAILED', exitCode: 22 });
+});
+
+test('the workflow passes Supabase fixture secrets only to the main-branch DEV readout step', () => {
+  const { on, jobs } = parse(readFileSync(resolve(__dirname, '../../../.github/workflows/deploy.yml'), 'utf8'));
+  const job = jobs['console-v2'];
+  const readout = job.steps.find(step => step.run === 'node scripts/deploy/console-v2-dev.mjs readout');
+  expect(on).not.toHaveProperty('pull_request');
+  expect(job.if).toContain("github.ref == 'refs/heads/main'");
+  expect(job.if).toContain("github.event_name == 'push' || github.event_name == 'workflow_dispatch'");
+  expect(job.environment).toBe('dev');
+  expect(job.env).not.toHaveProperty('CLOUDFLARE_ACCOUNT_ID');
+  expect(job.steps[0].env.CONFIGURED).toContain("secrets.CLOUDFLARE_ACCOUNT_ID != ''");
+  expect(job.steps.find(step => step.id === 'deploy').env.CLOUDFLARE_ACCOUNT_ID).toBe('${{ secrets.CLOUDFLARE_ACCOUNT_ID }}');
+  expect(JSON.stringify(job)).not.toContain('vars.CLOUDFLARE_ACCOUNT_ID');
+  expect(job.env).not.toHaveProperty('SUPABASE_ACCESS_TOKEN');
+  expect(job.env).not.toHaveProperty('SUPABASE_DB_PASSWORD');
+  expect(readout.env).toEqual({
+    E2E_CONSOLE_LIVE: '1',
+    SUPABASE_ACCESS_TOKEN: '${{ secrets.SUPABASE_ACCESS_TOKEN }}',
+    SUPABASE_DB_PASSWORD: '${{ secrets.SUPABASE_DB_PASSWORD }}',
+    SUPABASE_PROJECT_REF: '${{ vars.SUPABASE_PROJECT_REF }}',
+  });
+  expect(job.steps.filter(step => step !== readout).every(step =>
+    !/secrets\.SUPABASE_(?:ACCESS_TOKEN|DB_PASSWORD)/.test(JSON.stringify(step)))).toBe(true);
 });
