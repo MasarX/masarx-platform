@@ -166,8 +166,6 @@ async function runIntegration(selected, env, checked, remaining, raw) {
     RUN_API_GATEWAY_HTTP_TESTS: 'true',
     RUN_WEBHOOK_HTTP_TESTS: 'true',
     RUN_LABELS_WEBHOOK_TESTS: 'true',
-    RUN_RLS_INTEGRATION_TESTS: 'true',
-    RUN_MATRIX_E2E: 'true',
     RUN_LIVE_3PL_TESTS: 'false',
     RUN_LIVE_COMMS_TESTS: 'false',
     RUN_LIVE_GEOCODING_TESTS: 'false',

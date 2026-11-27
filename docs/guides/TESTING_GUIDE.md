@@ -79,6 +79,10 @@ ENV_FILE=config/env/.env.cloud npm run test:integration -- --runInBand
 Live external calls are guarded by env toggles (for example: `RUN_LIVE_*` flags).
 The cloud integration runner keeps caller-provided `RUN_*` values when loading an environment file, including in override mode. Its child processes inherit the resolved environment.
 
+The RLS and Data API boundary tests run whenever Jest selects their files. Use an isolated backend.
+RLS tests require `DATABASE_URL`. Data API boundary tests require `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
+Missing settings fail the affected suite. The hosted integration shards supply these settings from their disposable Supabase stack.
+
 ---
 
 ### 4) Edge Smoke Tests (cloud)
