@@ -11,6 +11,7 @@ SET search_path TO pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_live_refresh jsonb := (to_jsonb(NEW)->TG_ARGV[0])->'live_refresh';
+  v_live_refresh_schema jsonb;
   v_properties jsonb;
   v_key text;
   v_bounds jsonb;
@@ -21,16 +22,27 @@ BEGIN
       USING ERRCODE = '23514';
   END IF;
 
-  SELECT schema #> '{properties,live_refresh,properties}'
-    INTO v_properties
+  -- shortcut: bounds come from the newest active schema; validate per row schema_version when a second schema version is active.
+  SELECT schema #> '{properties,live_refresh}'
+    INTO v_live_refresh_schema
     FROM public.schema_registry
    WHERE category = NEW.category
      AND is_active
    ORDER BY version DESC
    LIMIT 1;
 
+  v_properties := v_live_refresh_schema->'properties';
   IF jsonb_typeof(v_properties) IS DISTINCT FROM 'object' OR v_properties = '{}'::jsonb THEN
     RAISE EXCEPTION 'ui_presentation_policy row %: missing live_refresh schema properties', NEW.id
+      USING ERRCODE = '23514';
+  END IF;
+
+  IF v_live_refresh_schema->'additionalProperties' = 'false'::jsonb AND EXISTS (
+    SELECT 1
+      FROM jsonb_object_keys(v_live_refresh) AS supplied(key)
+     WHERE NOT (v_properties ? supplied.key)
+  ) THEN
+    RAISE EXCEPTION 'ui_presentation_policy row %: unknown key in live_refresh', NEW.id
       USING ERRCODE = '23514';
   END IF;
 
@@ -75,6 +87,7 @@ BEGIN
   UPDATE public.schema_registry
      SET schema = jsonb_set(schema, '{properties,live_refresh}', '{
            "type": "object",
+           "additionalProperties": false,
            "properties": {
              "poll_interval_ms": {"type": "integer", "minimum": 5000, "maximum": 300000},
              "offline_after_ms": {"type": "integer", "minimum": 15000, "maximum": 600000},

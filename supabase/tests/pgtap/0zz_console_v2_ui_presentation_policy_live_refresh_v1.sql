@@ -1,7 +1,7 @@
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(18);
+SELECT plan(21);
 
 CREATE TEMP TABLE live_refresh_policy_fixture AS
 SELECT s.id, s.settings_version_id, s.cached_value
@@ -100,6 +100,40 @@ SELECT throws_ok(
   '23514',
   format('ui_presentation_policy row %s: invalid live_refresh.max_reconnects', id),
   'direct cache writes enforce the same bounds and identify the cache row'
+)
+FROM live_refresh_policy_fixture;
+
+SELECT lives_ok(
+  format('UPDATE public.settings_versions SET value = jsonb_set(value, ''{live_refresh}'', %L::jsonb) WHERE id = %L',
+         '{"poll_interval_ms":30000,"offline_after_ms":60000,"max_reconnects":11,"refetch_interval_ms":10000}',
+         settings_version_id),
+  'live refresh bounds do not apply to another settings category'
+)
+FROM public.settings
+WHERE category = 'worker_cadence'
+  AND scope_type = 'global'
+  AND scope_id IS NULL;
+
+SELECT throws_ok(
+  format('UPDATE public.settings_versions SET value = %L::jsonb WHERE id = %L',
+         jsonb_set(cached_value, '{live_refresh,extra}', 'true'::jsonb), settings_version_id),
+  '23514',
+  format('ui_presentation_policy row %s: unknown key in live_refresh', settings_version_id),
+  'live refresh rejects an unknown key and identifies the version row'
+)
+FROM live_refresh_policy_fixture;
+
+UPDATE public.schema_registry
+   SET schema = schema #- '{properties,live_refresh,properties}'
+ WHERE category = 'ui_presentation_policy'
+   AND is_active;
+
+SELECT throws_ok(
+  format('UPDATE public.settings_versions SET value = %L::jsonb WHERE id = %L',
+         cached_value, settings_version_id),
+  '23514',
+  format('ui_presentation_policy row %s: missing live_refresh schema properties', settings_version_id),
+  'live refresh rejects writes when schema properties are missing'
 )
 FROM live_refresh_policy_fixture;
 
