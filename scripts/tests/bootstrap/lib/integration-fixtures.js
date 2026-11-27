@@ -73,7 +73,7 @@ function buildFixtureProfile(env = process.env) {
       },
       clientAckB: {
         sourceIdentifier: 'test-client-b-ack',
-        token: prefix === 'test' ? 'EXAMPLE_PASSWORD' : mk('EXAMPLE_PASSWORD'),
+        token: mk('client-b-ack-token'),
         mappingKey: `${prefix}::webhook::ack-b`,
       },
     },
