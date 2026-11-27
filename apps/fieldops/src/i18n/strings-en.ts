@@ -1,4 +1,9 @@
 export const EN_STRINGS = {
+  routeReadAccess: {
+    title: "Access denied",
+    message: "Choose an authorized role or ask your administrator for access.",
+    openMenu: "Open role menu",
+  },
   routeLoad: {
     title: "Route parcel loading", cold: "Cold-chain", weight: "Known weight",
     partial: "Unrecorded parcels", scanned: "Scanned", pending: "Not yet scanned",

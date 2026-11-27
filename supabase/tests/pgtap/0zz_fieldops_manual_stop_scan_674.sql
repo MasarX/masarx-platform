@@ -75,13 +75,19 @@ BEGIN
 
   PERFORM public.provision_rbac_roles_from_templates_v1(org_id, ARRAY['driver', 'ops_admin'], driver_id);
   PERFORM public.provision_rbac_roles_from_templates_v1(foreign_org, ARRAY['driver'], foreign_driver);
+  INSERT INTO public.rbac_roles (organization_id, key, name)
+  VALUES (org_id, 'dispatcher', 'Dispatcher');
   INSERT INTO public.rbac_user_role_assignments (organization_id, user_id, role_id, assigned_by_user_id, metadata)
   SELECT r.organization_id, actor.id, r.id, actor.id, '{"source":"pgtap"}'::jsonb
   FROM (VALUES (driver_id, org_id, 'driver'), (other_driver, org_id, 'driver'),
-               (foreign_driver, foreign_org, 'driver'), (operator_id, org_id, 'ops_admin')
+               (foreign_driver, foreign_org, 'driver'), (operator_id, org_id, 'ops_admin'),
+               (operator_id, org_id, 'dispatcher')
   ) AS actor(id, org_id, role_key)
   JOIN public.rbac_roles r ON r.organization_id = actor.org_id AND r.key = actor.role_key
   ON CONFLICT DO NOTHING;
+
+  INSERT INTO public.mobile_v2_active_role (user_id, organization_id, role_key)
+  VALUES (operator_id, org_id, 'dispatcher');
 
   INSERT INTO public.clients (id, organization_id, name, slug, status)
   VALUES (client_id, org_id, 'Scan Fixture Client', 'pgt-stop-scan-' || left(client_id::text, 8), 'active');
@@ -247,7 +253,7 @@ BEGIN
         'device_platform', 'android', 'device_identifier_sha256', encode(digest(other_driver::text, 'sha256'), 'hex')
       )) d))), '42501', 'Stop parcel scan requires access to the assigned stop',
     'same-tenant unassigned driver cannot write a new stop parcel scan');
-  RETURN NEXT is(api.resolve_fieldops_stop_detail_v1(stop_id, 'supervisor')#>>'{parcels,0,status}', 'pending',
+  RETURN NEXT throws_ok(format('SELECT api.resolve_fieldops_stop_detail_v1(%L, %L)', stop_id, 'supervisor'), '42501', NULL,
     'an unassigned driver cannot use the requested role to read ledger confirmation');
 
   PERFORM set_config('request.jwt.claim.sub', operator_id::text, true);

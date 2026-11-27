@@ -83,7 +83,7 @@ import {
 } from "./mobile-v2-theme-context";
 import { MobileV2TasksScreen, type MobileV2TasksDataState } from "./mobile-v2-tasks-screen";
 import { MobileV2LoginScreen, type MobileV2LoginStep } from "./mobile-v2-login-screen";
-import { useFieldopsTasksRpc } from "./mobile-v2-rpc-hooks";
+import { isMobileV2RpcAccessDenied, useFieldopsTasksRpc } from "./mobile-v2-rpc-hooks";
 import {
   filterMobileV2TasksByQuery,
 } from "./mobile-v2-tasks-types";
@@ -3921,14 +3921,30 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
     );
   }
 
+  const routeReadErrors: Readonly<Record<string, unknown>> = {
+    "mobile-tasks": tasksRpc.error,
+    "mobile-route": routeRpc.error,
+    "mobile-map": routeRpc.error,
+    "mobile-cod-ledger": routeRpc.error,
+    "mobile-stop": stopDetailRpc.error,
+    "mobile-pod": stopDetailRpc.error,
+    "mobile-pickups": pickupsRpc.error,
+    "mobile-pickup-detail": pickupsRpc.error,
+    "mobile-trips": tripsRpc.error,
+    "mobile-trip-detail": tripsRpc.error,
+    "mobile-trip-nav": tripsRpc.error,
+  };
+  const routeReadDenied = isMobileV2RpcAccessDenied(routeReadErrors[activeTabId]);
+  const routeReadAccess = getStrings(resolveLocaleCode(ctx.locale)).routeReadAccess;
+
   return (
     <>
       <ScreenShell
         // The POD wizard renders its own per-step app-bar — suppress the
         // shell's bar on that tab so two headers do not stack.
-        hideAppBar={activeTabId === "mobile-pod"}
+        hideAppBar={activeTabId === "mobile-pod" && !routeReadDenied}
         title={
-          activeTabId === "mobile-stop"
+          routeReadDenied ? routeReadAccess.title : activeTabId === "mobile-stop"
             ? // Design ScrStopDetail (flow-route.jsx:318) titles the app
               // bar `Stop <seq> of <total>` (e.g. "Stop 3 of 12"). The
               // sequence + route total are resolver-driven (liveStop.seq +
@@ -4026,7 +4042,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
               : undefined
         }
         sub={
-          activeTabId === "mobile-stop"
+          routeReadDenied ? undefined : activeTabId === "mobile-stop"
             ? // Design ScrStopDetail subtitle (flow-route.jsx:318):
               // `SLA <window> · <eta>` where the eta segment reads
               // "arrives in <n>m" while en route, "arriving now" once the
@@ -4194,7 +4210,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
             : undefined
         }
         right={
-          activeTabId === "mobile-stop" ? (
+          routeReadDenied ? null : activeTabId === "mobile-stop" ? (
             // Design ScrStopDetail app bar (flow-route.jsx:319) carries a
             // `map` icon at top-right that opens the live-route map.
             <Pressable
@@ -4339,7 +4355,19 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
         toast={toast}
         onDismissToast={() => setToast(null)}
       >
-        {activeTabId === "mobile-more" ? (
+        {routeReadDenied ? (
+          <MobileV2ListStateView
+            theme={ctx.theme}
+            isLoading={false}
+            isError
+            errorTitle={routeReadAccess.title}
+            errorMessage={routeReadAccess.message}
+            retryLabel={routeReadAccess.openMenu}
+            onRetry={() => setDrawerOpen(true)}
+          >
+            {null}
+          </MobileV2ListStateView>
+        ) : activeTabId === "mobile-more" ? (
           <MobileV2MoreScreen
             theme={ctx.theme}
             activeThemeKey={ctx.themeKey}
