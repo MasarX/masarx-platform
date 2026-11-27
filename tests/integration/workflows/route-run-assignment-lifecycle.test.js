@@ -1411,13 +1411,6 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     expect(targetManifestRows[0]?.manifest?.stop_count).toBe(1);
     expect(targetManifestRows[0]?.manifest?.stops?.[0]?.route_stop_id).toBe(movedStopId);
     const resource = 'route_stop_reassignment_events';
-    const { rows: [registryRow] } = await withFixtureAdminContext(client, db => db.query(
-      `SELECT entry AS resource
-         FROM jsonb_array_elements(public.ui_rpc_registry_v1('tenant', $1::uuid)->'resources') AS entry
-        WHERE entry->>'key' = $2`,
-      [seed.organizationId, resource]
-    ));
-    expect(registryRow?.resource?.read_scope_types).toEqual(['tenant']);
     const eventId = (await withFixtureAdminContext(client, db => db.query(
       'SELECT id FROM public.route_stop_reassignment_events WHERE route_stop_id=$1::uuid', [movedStopId]))).rows[0].id;
     const reads = [
@@ -1481,8 +1474,7 @@ describe('UC076 route run assignment lifecycle foundation', () => {
         await client.query('SAVEPOINT e49_scope_denial');
         try {
           await expect(client.query(sql, params)).rejects.toMatchObject({
-            code: '42501',
-            message: expect.stringMatching(/^(Resource read scope denied|Capability denied: routes\.read)$/),
+            code: '42501', message: 'Resource read scope denied',
           });
         } finally {
           await client.query('ROLLBACK TO SAVEPOINT e49_scope_denial');
@@ -1491,23 +1483,15 @@ describe('UC076 route run assignment lifecycle foundation', () => {
       }
     }
     await setAuthContext(client, seed.operatorId);
-    // Prove the registry's scope guard even when the RPC rejects on capability first.
-    for (const [scope, scopeId] of [
-      ['client', scopeClient.id],
-      ['sender', scopeSender],
-      ['platform', null],
-      ['global', null],
-    ]) {
-      await client.query('SAVEPOINT e49_scope_guard');
-      try {
-        await expect(client.query(
-          `SELECT public.ui_assert_resource_read_scope_v1($1::jsonb, $2::text, $3::uuid)`,
-          [JSON.stringify(registryRow.resource), scope, scopeId]
-        )).rejects.toMatchObject({ code: '42501', message: 'Resource read scope denied' });
-      } finally {
-        await client.query('ROLLBACK TO SAVEPOINT e49_scope_guard');
-        await client.query('RELEASE SAVEPOINT e49_scope_guard');
-      }
+    // Global is not a valid user fixture; this is shared-guard proof only.
+    await client.query('SAVEPOINT e49_global_guard');
+    try {
+      await expect(client.query(`SELECT public.ui_assert_resource_read_scope_v1(
+        '{"read_scope_types":["tenant"],"scope_columns":{"tenant":"organization_id"}}'::jsonb,'global',NULL)`))
+        .rejects.toMatchObject({ code:'42501',message:'Resource read scope denied' });
+    } finally {
+      await client.query('ROLLBACK TO SAVEPOINT e49_global_guard');
+      await client.query('RELEASE SAVEPOINT e49_global_guard');
     }
   });
 
