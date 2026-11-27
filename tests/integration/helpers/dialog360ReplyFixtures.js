@@ -1,3 +1,4 @@
+const { DIALOG360_FIXTURE_BASE_URL } = require('../../fixtures/builders/hosts');
 const { randomUUID } = require('crypto');
 
 const dialog360ReplyWebhookToken = (process.env.DIALOG360_REPLY_WEBHOOK_TOKEN || '').trim();
@@ -8,7 +9,6 @@ const {
 
 const fixtureProfile = getIntegrationFixtureProfile();
 const preferredFixtureOrgSlug = fixtureProfile.organizations.alpha.slug;
-const dialog360DefaultBaseUrl = 'https://waba-sandbox.360dialog.io';
 
 const resolveWebhookSourceWithSenderClient = async (
   client,
@@ -225,7 +225,7 @@ const ensureDialog360ProviderDefaults = async (
           updated_at = now()
       WHERE id = $1::uuid
     `,
-    [providerId, dialog360DefaultBaseUrl],
+    [providerId, DIALOG360_FIXTURE_BASE_URL],
   );
 
   const providerDefaults = {

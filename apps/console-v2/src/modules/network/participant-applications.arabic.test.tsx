@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/marketplace-geocoding';
+import ar from '@/lib/seed-raw/i18n/areas/ar/marketplace-geocoding';
 import { ParticipantApplicationsModule } from '@/modules/network/participant-applications';
 
 const FULL_CAPS = [

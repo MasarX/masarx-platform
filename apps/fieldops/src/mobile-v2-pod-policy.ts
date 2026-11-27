@@ -11,6 +11,8 @@
 // rather than throwing — frontend should always be able to render the POD
 // screen, even with corrupted policy.
 
+import { EN_STRINGS, type FieldOpsStrings } from "./i18n";
+
 export type MobileV2PodMethod =
   | "scan"
   | "photo"
@@ -62,7 +64,7 @@ export const MOBILE_V2_POD_DEFAULT_POLICY: MobileV2PodPolicy = Object.freeze({
   failReasons: Object.freeze([
     Object.freeze({
       code: "recipient_unavailable",
-      label: "Recipient unavailable",
+      label: EN_STRINGS.pod.reasonRecipientUnavailable,
       reattempt: true,
       photo: false,
       note: true,
@@ -71,7 +73,7 @@ export const MOBILE_V2_POD_DEFAULT_POLICY: MobileV2PodPolicy = Object.freeze({
     }),
     Object.freeze({
       code: "address_not_found",
-      label: "Address not found",
+      label: EN_STRINGS.pod.reasonAddressNotFound,
       reattempt: true,
       photo: true,
       note: true,
@@ -80,7 +82,7 @@ export const MOBILE_V2_POD_DEFAULT_POLICY: MobileV2PodPolicy = Object.freeze({
     }),
     Object.freeze({
       code: "access_restricted",
-      label: "Access restricted",
+      label: EN_STRINGS.pod.reasonAccessRestricted,
       reattempt: true,
       photo: false,
       note: true,
@@ -89,7 +91,7 @@ export const MOBILE_V2_POD_DEFAULT_POLICY: MobileV2PodPolicy = Object.freeze({
     }),
     Object.freeze({
       code: "parcel_damaged",
-      label: "Parcel damaged",
+      label: EN_STRINGS.pod.reasonParcelDamaged,
       reattempt: false,
       photo: true,
       note: true,
@@ -98,7 +100,7 @@ export const MOBILE_V2_POD_DEFAULT_POLICY: MobileV2PodPolicy = Object.freeze({
     }),
     Object.freeze({
       code: "cod_unpaid",
-      label: "COD not paid",
+      label: EN_STRINGS.pod.reasonCodUnpaid,
       reattempt: true,
       photo: false,
       note: true,
@@ -108,6 +110,27 @@ export const MOBILE_V2_POD_DEFAULT_POLICY: MobileV2PodPolicy = Object.freeze({
   ]),
   codCurrency: "SAR",
 });
+
+const DEFAULT_FAIL_REASON_LABEL_KEYS: Readonly<Record<string, keyof FieldOpsStrings["pod"]>> = Object.freeze({
+  recipient_unavailable: "reasonRecipientUnavailable",
+  address_not_found: "reasonAddressNotFound",
+  access_restricted: "reasonAccessRestricted",
+  parcel_damaged: "reasonParcelDamaged",
+  cod_unpaid: "reasonCodUnpaid",
+});
+
+/**
+ * Display label for a fail reason. Only the built-in default labels are
+ * translated; a label that came from the policy row is shown as written.
+ */
+export function resolveMobileV2PodFailReasonLabel(
+  reason: MobileV2PodFailReason,
+  strings: FieldOpsStrings = EN_STRINGS,
+): string {
+  const key = DEFAULT_FAIL_REASON_LABEL_KEYS[reason.code];
+  if (key === undefined || reason.label !== EN_STRINGS.pod[key]) return reason.label;
+  return strings.pod[key];
+}
 
 function asString(value: unknown): string | null {
   if (typeof value !== "string") return null;

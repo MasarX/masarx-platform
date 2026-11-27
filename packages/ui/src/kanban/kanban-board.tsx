@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Badge } from "../badge";
 import { createUiTranslator } from "../i18n";
+import { Select } from "../select";
 import { cn } from "../utils";
 
 export type KanbanCard = {
@@ -29,7 +30,8 @@ type KanbanBoardProps = {
 
 /**
  * Kanban board with status columns for visual pipeline management.
- * Supports card click and drag-to-move between columns.
+ * Supports card click and moving cards between columns by drag or by each card's
+ * "Move to column" select (WCAG 2.5.7: a single-pointer and keyboard path).
  */
 export function KanbanBoard({
   columns,
@@ -70,10 +72,27 @@ export function KanbanBoard({
 
           <div className="flex-1 space-y-2 p-2">
             {column.cards.map((card) => (
-              <div key={card.id} draggable onDragStart={() => handleDragStart(card.id, column.id)} onClick={() => onCardClick?.(card, column.id)} className={cn("cursor-pointer rounded-lg border border-ui-border/30 bg-ui-paper p-3 shadow-sm transition", "hover:border-ui-accent/30 hover:shadow-md", "active:scale-[0.98]")}>
-                <p className="text-sm font-medium text-ui-ink">{card.title}</p>
-                {card.subtitle ? (<p className="mt-0.5 text-xs text-ui-muted truncate">{card.subtitle}</p>) : null}
-                {card.meta ? (<p className="mt-1 text-[10px] text-ui-muted/60">{card.meta}</p>) : null}
+              <div key={card.id} draggable onDragStart={() => handleDragStart(card.id, column.id)} className={cn("rounded-lg border border-ui-border/30 bg-ui-paper p-3 shadow-sm transition", "hover:border-ui-accent/30 hover:shadow-md")}>
+                <button type="button" onClick={() => onCardClick?.(card, column.id)} className="block w-full cursor-pointer text-start active:scale-[0.98]">
+                  <span className="block text-sm font-medium text-ui-ink">{card.title}</span>
+                  {card.subtitle ? (<span className="mt-0.5 block truncate text-xs text-ui-muted">{card.subtitle}</span>) : null}
+                  {card.meta ? (<span className="mt-1 block text-[10px] text-ui-muted/60">{card.meta}</span>) : null}
+                </button>
+                {onCardMove && columns.length > 1 ? (
+                  <Select
+                    aria-label={t("moveCard", { card: card.title })}
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) onCardMove(card.id, column.id, e.target.value);
+                    }}
+                    className="mt-2 h-8 text-xs"
+                  >
+                    <option value="">{t("moveTo")}</option>
+                    {columns.filter((other) => other.id !== column.id).map((other) => (
+                      <option key={other.id} value={other.id}>{other.title}</option>
+                    ))}
+                  </Select>
+                ) : null}
               </div>
             ))}
             {column.cards.length === 0 ? (

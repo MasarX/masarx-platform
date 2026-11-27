@@ -1,7 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.119.0";
 import { DOMParser } from "npm:@xmldom/xmldom@0.9.12";
 import { isPngContainer, isJpegContainer } from "./_shared/raster-images.mjs";
-import { extractToken, logStructured, parseRequestBody, readEnv } from "./_shared/mod.mjs";
+import { canonicalStorageKey, extractToken, logStructured, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -100,11 +100,6 @@ const sanitizeFileName = (raw: string) => {
     .replace(/_+/g, "_")
     .replace(/^_+|_+$/g, "");
   return cleaned.slice(0, 120);
-};
-
-const assertOrgPath = (orgId: string, path: string) => {
-  const prefix = `${orgId}/${DESIGNER_DIR}/`;
-  return path.startsWith(prefix);
 };
 
 const createUserClient = (token: string) => {
@@ -232,18 +227,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     if (typed.mode === "signed_url") {
-      const path = asString((typed as any).path);
+      const rawPath = typed.path;
       const expires = Number((typed as any).expires_seconds ?? 60);
-      if (!path) return json(400, { ok: false, error: { code: "path_required" } }, corsHeaders);
-      if (!assertOrgPath(orgId, path)) {
+      if (!rawPath) return json(400, { ok: false, error: { code: "path_required" } }, corsHeaders);
+      const path = canonicalStorageKey(rawPath, orgId, { allowShared: true });
+      if (!path || (path.startsWith(`${orgId}/`) && !path.startsWith(`${orgId}/${DESIGNER_DIR}/`))) {
         return json(403, { ok: false, error: { code: "forbidden_path" } }, corsHeaders);
       }
       const ttl = Number.isFinite(expires) && expires > 0 ? Math.min(600, Math.floor(expires)) : 60;
-      const { data, error } = await storageClient.storage.from(ASSET_BUCKET).createSignedUrl(path, ttl);
-      if (error || !data?.signedUrl) {
-        return rejectWithLog(400, "signed_url_failed", "Could not create a signed URL", error ?? "Missing signed URL");
+      const { data, error } = await storageClient.storage.from(ASSET_BUCKET).createSignedUrls([path], ttl);
+      const signed = data?.[0];
+      if (error || !signed?.signedUrl) {
+        return rejectWithLog(400, "signed_url_failed", "Could not create a signed URL", error ?? signed?.error ?? "Missing signed URL");
       }
-      return json(200, { ok: true, signed_url: data.signedUrl }, corsHeaders);
+      return json(200, { ok: true, signed_url: signed.signedUrl }, corsHeaders);
     }
 
     if (typed.mode === "upload") {
@@ -254,7 +251,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (!fileBase64) return json(400, { ok: false, error: { code: "file_base64_required" } }, corsHeaders);
 
       const safeName = sanitizeFileName(fileNameRaw);
-      if (!safeName) return json(400, { ok: false, error: { code: "invalid_file_name" } }, corsHeaders);
+      if (!safeName || safeName === "." || safeName === "..") {
+        return json(400, { ok: false, error: { code: "invalid_file_name" } }, corsHeaders);
+      }
 
       let bytes: Uint8Array;
       try {
@@ -285,9 +284,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     if (typed.mode === "delete") {
-      const path = asString((typed as any).path);
-      if (!path) return json(400, { ok: false, error: { code: "path_required" } }, corsHeaders);
-      if (!assertOrgPath(orgId, path)) {
+      if (!typed.path) return json(400, { ok: false, error: { code: "path_required" } }, corsHeaders);
+      const path = canonicalStorageKey(typed.path, orgId, { write: true });
+      if (!path?.startsWith(`${orgId}/${DESIGNER_DIR}/`)) {
         return json(403, { ok: false, error: { code: "forbidden_path" } }, corsHeaders);
       }
       const { error } = await storageClient.storage.from(ASSET_BUCKET).remove([path]);

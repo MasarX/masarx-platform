@@ -17,20 +17,25 @@ test('F244 conflicting natural keys retain persisted city/district IDs and downs
       const { id:foreign } = await createOrganization(db, 'F244 foreign ' + randomUUID());
       const { id:clientId } = await createClient(db, org, 'F244 client');
       const senderId = await createSender(db, clientId, 'F244 sender');
-      const cityId = randomUUID(), districtId = randomUUID();
-      const foreignCity = randomUUID(), foreignDistrict = randomUUID();
+      async function seedGeography(organizationId, marker) {
+        const { rows: [{ id: cityId }] } = await db.query(`INSERT INTO public.canonical_cities
+          (id,organization_id,name_canonical,province,country_code,source,is_active,metadata)
+          VALUES($1,$2,'Riyadh','Riyadh','SA','manual_seed',true,jsonb_build_object('f244',$3::text))
+          ON CONFLICT (organization_id,name_canonical) WHERE source_city_id IS NULL
+          DO UPDATE SET metadata=coalesce(canonical_cities.metadata,'{}'::jsonb)||excluded.metadata
+          RETURNING id`, [randomUUID(),organizationId,marker]);
+        const { rows: [{ id: districtId }] } = await db.query(`INSERT INTO public.canonical_districts
+          (id,organization_id,city_id,name_canonical,source,is_active,metadata)
+          VALUES($1,$2,$3,'Al Olaya','manual_seed',true,jsonb_build_object('f244',$4::text))
+          ON CONFLICT (organization_id,city_id,name_canonical) WHERE source_district_id IS NULL
+          DO UPDATE SET metadata=coalesce(canonical_districts.metadata,'{}'::jsonb)||excluded.metadata
+          RETURNING id`, [randomUUID(),organizationId,cityId,marker]);
+        return { cityId, districtId };
+      }
+      const { cityId, districtId } = await seedGeography(org, 'owned');
+      const { cityId: foreignCity, districtId: foreignDistrict } = await seedGeography(foreign, 'foreign');
       expect(cityId).not.toBe(deterministicUuid('qa-public-tracking-city:' + org));
       expect(districtId).not.toBe(deterministicUuid('qa-public-tracking-district:' + org));
-      await db.query(`INSERT INTO public.canonical_cities
-        (id,organization_id,name_canonical,province,country_code,source,is_active,metadata)
-        VALUES($1,$2,'Riyadh','Riyadh','SA','manual_seed',true,'{"f244":"owned"}'),
-              ($3,$4,'Riyadh','Riyadh','SA','manual_seed',true,'{"f244":"foreign"}')`,
-      [cityId,org,foreignCity,foreign]);
-      await db.query(`INSERT INTO public.canonical_districts
-        (id,organization_id,city_id,name_canonical,source,is_active,metadata)
-        VALUES($1,$2,$3,'Al Olaya','manual_seed',true,'{"f244":"owned"}'),
-              ($4,$5,$6,'Al Olaya','manual_seed',true,'{"f244":"foreign"}')`,
-      [districtId,org,cityId,foreignDistrict,foreign,foreignCity]);
       const snapshot = async () => (await db.query(`
         SELECT 'city' kind,to_jsonb(c) row FROM public.canonical_cities c WHERE id=$1 AND organization_id=$3
         UNION ALL SELECT 'district',to_jsonb(d) FROM public.canonical_districts d WHERE id=$2 AND organization_id=$3

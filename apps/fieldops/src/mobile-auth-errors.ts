@@ -1,36 +1,41 @@
 import { redactOutboxErrorText } from "@masarx/mobile-core";
+import { EN_STRINGS, type FieldOpsStrings } from "./i18n";
 
-export function formatAuthErrorMessage(error: unknown): string {
-  const message = String((error as { message?: unknown })?.message || error || "Unknown error");
+// Sample address inside the credentials hint; data, not copy.
+const EXAMPLE_EMAIL = "sipkxyzyxvgvtksowrxwjgpn@example.invalid";
+
+export function formatAuthErrorMessage(error: unknown, strings: FieldOpsStrings = EN_STRINGS): string {
+  const copy = strings.signIn;
+  const message = String((error as { message?: unknown })?.message || error || copy.unknownError);
 
   if (/failed to fetch|network request failed|fetch failed/i.test(message)) {
-    return "Unable to reach the MasarX server. Check your connection and try again.";
+    return strings.auth.networkUnreachable;
   }
 
   if (/invalid login credentials/i.test(message)) {
-    return "Invalid login credentials. Verify email/password and remove spaces from email (e.g. sipkxyzyxvgvtksowrxwjgpn@example.invalid).";
+    return copy.invalidCredentials.replace("{example}", EXAMPLE_EMAIL);
   }
 
   if (/\bemail not confirmed\b/i.test(message)) {
-    return "Email not confirmed. Check your inbox for the confirmation email, then retry.";
+    return copy.emailNotConfirmed;
   }
 
   if (/\bemail rate limit exceeded\b/i.test(message)) {
-    return "Email rate limit exceeded. Wait before requesting another email.";
+    return copy.emailRateLimited;
   }
 
   if (/\btoken has expired or is invalid\b/i.test(message)) {
-    return "Token has expired or is invalid. Request a new link or code, then retry.";
+    return copy.tokenExpired;
   }
 
   const passwordMinimum = /\bpassword should be at least\b(?: ([0-9]{1,3}) characters\b)?/i.exec(message);
   if (passwordMinimum) {
-    const hint = "Choose a longer password and try again.";
-    return passwordMinimum[1] ? `Password should be at least ${passwordMinimum[1]} characters. ${hint}` : hint;
+    const hint = copy.passwordHint;
+    return passwordMinimum[1] ? `${copy.passwordMinimum.replace("{count}", passwordMinimum[1])} ${hint}` : hint;
   }
 
   if (/400|email|otp|token/i.test(message)) {
-    return "Verify email format (no spaces), then retry.";
+    return copy.checkEmailFormat;
   }
 
   return redactOutboxErrorText(message);

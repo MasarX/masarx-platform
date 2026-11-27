@@ -4,7 +4,7 @@ import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/marketplace-geocoding';
+import ar from '@/lib/seed-raw/i18n/areas/ar/marketplace-geocoding';
 import { MarketplaceModule } from './marketplace';
 
 // Header title, KPI labels and deltas, the tab strip and table headers are module copy; table cells hold seeded data.

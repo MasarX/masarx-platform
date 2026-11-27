@@ -84,6 +84,9 @@ import { todayDateInputValue } from '@/lib/date-input';
 import { sanitizeOperatorMessage } from '@/components/operatorMessages';
 import { reportError } from '@/lib/telemetry';
 import type { ListResult } from '@/types/domain';
+import { asRecord, compactReference, compactReferenceToken, firstText } from './shipment-display';
+
+export { compactReferenceToken } from './shipment-display';
 
 const AddressTabLazy = lazy(() =>
   import('./shipments-address-tab').then((module) => ({ default: module.AddressTab })),
@@ -353,29 +356,6 @@ function operatorShipmentCreateErrorMessage(error: unknown, t: Translate = engli
   );
 }
 
-export function compactReferenceToken(raw: unknown, label?: string, t: Translate = englishT): string {
-  const value = String(raw ?? '').trim();
-  if (!value) return '—';
-  const parts = value
-    .split(/[^a-z0-9]+/i)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const meaningful = parts.length > 1 ? parts[parts.length - 1] : parts[0];
-  const suffix = String(meaningful ?? '').replace(/[^a-z0-9]/gi, '').toUpperCase().slice(-6);
-  return `${label ?? t('shipments.common.reference')} #${suffix || 'UNKNOWN'}`;
-}
-
-function compactReference(raw: unknown, label?: string, t: Translate = englishT): ReactNode {
-  const resolvedLabel = label ?? t('shipments.common.reference');
-  const compact = compactReferenceToken(raw, resolvedLabel);
-  if (compact === '—') return compact;
-  return (
-    <span className="mono" title={fill(t('shipments.common.referenceTitle'), { label: resolvedLabel })}>
-      {compact}
-    </span>
-  );
-}
-
 function titleCaseKey(raw: unknown, fallback?: string, t: Translate = englishT): string {
   const value = String(raw ?? '').trim();
   if (!value) return fallback ?? t('shipments.common.notRecorded');
@@ -393,12 +373,6 @@ function lookupDisplayValue(lookup: string, value: unknown, fallback?: string, t
   return String(lookupRow(lookup, token)?.label ?? titleCaseKey(token, resolvedFallback));
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function nestedRecord(value: unknown, path: string[]): Record<string, unknown> | null {
   let cursor: unknown = value;
   for (const key of path) {
@@ -407,14 +381,6 @@ function nestedRecord(value: unknown, path: string[]): Record<string, unknown> |
     cursor = record[key];
   }
   return asRecord(cursor);
-}
-
-function firstText(...values: unknown[]): string | null {
-  for (const value of values) {
-    const text = String(value ?? '').trim();
-    if (text) return text;
-  }
-  return null;
 }
 
 function workflowMutationProofRows(
@@ -506,7 +472,7 @@ function previewSummaryValue(key: string, value: unknown, t: Translate = english
   if (typeof value === 'number') return String(value);
   if (typeof value === 'string') {
     if (/_id$/.test(key) || key.includes('resolution') || key.includes('template')) {
-      return compactReferenceToken(value, t('shipments.common.reference'));
+      return compactReferenceToken(value, undefined, t);
     }
     return titleCaseKey(value, undefined, t);
   }
@@ -3733,10 +3699,19 @@ export function ShipmentContextPanel({
       id: 'scans',
       label: t('shipments.drawer.scans'),
       count: directory?.scan_event_count,
-      render: () => <ScansTab shipment={shipment} />,
+      render: async () => {
+        const { ScansTab } = await import('./shipment-history');
+        return <ScansTab shipment={shipment} />;
+      },
     },
-    { id: 'decisions', label: t('shipments.drawer.decisions'), render: () => <DecisionsTab shipment={shipment} /> },
-    { id: 'audit', label: t('shipments.drawer.audit'), render: () => <AuditTab shipment={shipment} /> },
+    { id: 'decisions', label: t('shipments.drawer.decisions'), render: async () => {
+        const { DecisionsTab } = await import('./shipment-history');
+        return <DecisionsTab shipment={shipment} />;
+      } },
+    { id: 'audit', label: t('shipments.drawer.audit'), render: async () => {
+        const { AuditTab } = await import('./shipment-history');
+        return <AuditTab shipment={shipment} />;
+      } },
   ];
 
   const summary: ReactNode = (
@@ -3903,8 +3878,8 @@ function EvidenceTab({ shipment }: { shipment: Shipment }) {
     { key: 'recipient_name', label: t('shipments.common.recipient'), value: latest.recipientName ?? latest.recipientClass ?? t('shipments.common.notRecorded'), editable: false },
     { key: 'identity', label: t('shipments.evidence.identityProof'), value: identityText, editable: false },
     { key: 'otp', label: t('shipments.evidence.otp'), value: latest.otpLast4 ? fill(t('shipments.evidence.confirmedEndingOtplast4'), { otpLast4: String(latest.otpLast4) }) : latest.otpConfirmed ? t('shipments.common.confirmed') : t('shipments.evidence.notCaptured'), editable: false },
-    { key: 'signature', label: t('shipments.evidence.recipientSignature'), value: latest.signatureArtifactId ? compactReference(latest.signatureArtifactId, t('shipments.evidence.artifact'), t) : t('shipments.evidence.notLinked'), editable: false },
-    { key: 'photo', label: t('shipments.evidence.proofPhoto'), value: latest.photoArtifactId ? compactReference(latest.photoArtifactId, t('shipments.evidence.artifact'), t) : t('shipments.evidence.notLinked'), editable: false },
+    { key: 'signature', label: t('shipments.evidence.recipientSignature'), value: latest.signatureArtifactId ? compactReference(latest.signatureArtifactId, t('shipments.evidence.artifact')) : t('shipments.evidence.notLinked'), editable: false },
+    { key: 'photo', label: t('shipments.evidence.proofPhoto'), value: latest.photoArtifactId ? compactReference(latest.photoArtifactId, t('shipments.evidence.artifact')) : t('shipments.evidence.notLinked'), editable: false },
     { key: 'artifact_bundle', label: t('shipments.evidence.artifactBundle'), value: artifactSummary, editable: false },
     { key: 'payment_outcome', label: t('shipments.evidence.paymentOutcome'), value: paymentOutcome, editable: false },
     { key: 'payment_method', label: t('shipments.evidence.paymentMethod'), value: paymentMethod, editable: false },
@@ -3914,7 +3889,7 @@ function EvidenceTab({ shipment }: { shipment: Shipment }) {
     { key: 'payment_discrepancy', label: t('shipments.evidence.codDiscrepancy'), value: payment?.discrepancyKind ? titleCaseKey(payment.discrepancyKind, undefined, t) : t('shipments.common.notRecorded'), editable: false },
     { key: 'payment_receipt', label: t('shipments.evidence.receiptContext'), value: payment?.receiptContext ?? t('shipments.common.notRecorded'), editable: false },
     { key: 'geostamp', label: t('shipments.evidence.geostamp'), value: geostampText, mono: geostampText !== t('shipments.evidence.notCaptured'), editable: false },
-    { key: 'route_stop_id', label: t('shipments.evidence.routeStop'), value: latest.routeStopId ? compactReference(latest.routeStopId, t('shipments.evidence.stop'), t) : t('shipments.evidence.notLinked'), mono: Boolean(latest.routeStopId), editable: false },
+    { key: 'route_stop_id', label: t('shipments.evidence.routeStop'), value: latest.routeStopId ? compactReference(latest.routeStopId, t('shipments.evidence.stop')) : t('shipments.evidence.notLinked'), mono: Boolean(latest.routeStopId), editable: false },
     { key: 'captured_at', label: t('shipments.evidence.captured'), value: latest.capturedAt ? fmtDateTime(latest.capturedAt) : t('shipments.evidence.notCaptured'), editable: false },
     { key: 'source', label: t('shipments.common.source'), value: latest.sourceLabel, editable: false },
   ];
@@ -3935,7 +3910,7 @@ function EvidenceTab({ shipment }: { shipment: Shipment }) {
           <h4 className="eyebrow" style={{ margin: 0 }}>{t('shipments.evidence.artifacts')}</h4>
           {latest.artifactIds.map((artifactId) => (
             <div key={artifactId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <span className="mono">{compactReference(artifactId, t('shipments.evidence.artifact'), t)}</span>
+              <span className="mono">{compactReference(artifactId, t('shipments.evidence.artifact'))}</span>
               <Button
                 label={t('shipments.evidence.copyId')}
                 iconName="copy"
@@ -4494,7 +4469,7 @@ function TasksTab({ shipment }: { shipment: Shipment }) {
   return (
     <DataTable
       columns={[
-        { key: 'task_id', label: t('shipments.tasks.task'), sortable: true, render: (raw) => compactReference(raw, t('shipments.tasks.task'), t) },
+        { key: 'task_id', label: t('shipments.tasks.task'), sortable: true, render: (raw) => compactReference(raw, t('shipments.tasks.task')) },
         { key: 'task_type', label: t('shipments.common.type'), lookup: 'task_type' },
         { key: 'status', label: t('shipments.common.status'), lookup: 'task_status', editable: canTransitionTask },
         { key: 'sla_due_at', label: t('shipments.tasks.slaDue'), format: 'datetime' },
@@ -4958,7 +4933,7 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
       <DataTable
         columns={[
           { key: 'barcode', label: t('shipments.common.barcode'), mono: true },
-          { key: 'active_version_id', label: t('shipments.labels.activeVersion'), render: (raw) => compactReference(raw, t('shipments.labels.version'), t) },
+          { key: 'active_version_id', label: t('shipments.labels.activeVersion'), render: (raw) => compactReference(raw, t('shipments.labels.version')) },
           { key: 'print_count', label: t('shipments.labels.prints'), align: 'right' },
           { key: 'last_printed_at', label: t('shipments.labels.lastPrinted'), format: 'datetime' },
           { key: 'reprint_reason', label: t('shipments.labels.reprintReason') },
@@ -5062,198 +5037,4 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
       </div>
     </div>
   );
-}
-
-function ScansTab({ shipment }: { shipment: Shipment }) {
-  const t = useT();
-  // CLAIM-OPERATIONS-WIRING (Phase C1) — read seam moved from `api.seed.*` to
-  // canonical resource registry (`ui_list_resource_v1('scan_events')`).
-  // Backed by public.scan_events (HASH partitioned;
-  // supabase/migrations/202601251060_scan_events_v1.sql:49).
-  const { data, isLoading, error } = useResourceList<Record<string, unknown>>('scan_events', {
-    filter: { shipment_id: shipment.id },
-    sort: { key: 'occurred_at', dir: 'desc' },
-  });
-  if (isLoading) return <StateView kind="loading" />;
-  if (error) return <StateView kind="error" hint={(error as Error).message} />;
-  const scans = data?.rows ?? [];
-  return (
-    <DataTable
-      columns={[
-        { key: 'occurred_at', label: t('shipments.common.when'), format: 'datetime' },
-        { key: 'scan_type', label: t('shipments.scans.scanType'), render: (raw) => humanizeToken(raw) },
-        { key: 'box_barcode', label: t('shipments.common.barcode'), mono: true },
-        { key: 'user_id', label: t('shipments.scans.user'), render: (raw) => compactReference(raw, t('shipments.scans.user'), t) },
-        { key: 'notes', label: t('shipments.common.notes') },
-      ]}
-      rows={scans}
-      allowSelection={false}
-      emptyText={t('shipments.scans.noScansYet')}
-    />
-  );
-}
-
-function DecisionsTab({ shipment }: { shipment: Shipment }) {
-  const t = useT();
-  const go = useConsoleNavigator();
-  const destinationAddressId = String(
-    (shipment as { destination_address_id?: string | null }).destination_address_id ?? '',
-  ).trim();
-  const log = useResourceList<Record<string, unknown>>('decision_log', {
-    filter: { resource_type: 'shipment', resource_id: shipment.id },
-    sort: { key: 'timestamp', dir: 'desc' },
-  });
-  const reviewTasks = useResourceList<Record<string, unknown>>('manual_review_tasks', {
-    filter: destinationAddressId ? { address_id: destinationAddressId } : { address_id: '__none__' },
-    sort: { key: 'updated_at', dir: 'desc' },
-    page_size: 10,
-  }, { enabled: Boolean(destinationAddressId) });
-  const latestReviewTaskId = useMemo(() => {
-    const rows = reviewTasks.data?.rows ?? [];
-    return firstText(rows.find((row) => String(row.task_type ?? '').trim().toLowerCase() === 'geocoding')?.id);
-  }, [reviewTasks.data?.rows]);
-  const reviewDecisionLog = useResourceList<Record<string, unknown>>(
-    'decision_log',
-    {
-      filter: latestReviewTaskId
-        ? { resource_type: 'manual_review_task', resource_id: latestReviewTaskId }
-        : { resource_type: 'manual_review_task', resource_id: '__none__' },
-      sort: { key: 'timestamp', dir: 'desc' },
-    },
-    { enabled: Boolean(latestReviewTaskId) },
-  );
-  const rows = useMemo(() => {
-    const byId = new Map<string, Record<string, unknown>>();
-    for (const row of [...(log.data?.rows ?? []), ...(reviewDecisionLog.data?.rows ?? [])]) {
-      const key = String(row.id ?? `${row.resource_type ?? ''}:${row.resource_id ?? ''}:${row.timestamp ?? ''}`);
-      byId.set(key, row);
-    }
-    return Array.from(byId.values()).sort((a, b) => {
-      const at = Date.parse(String(a.timestamp ?? a.created_at ?? ''));
-      const bt = Date.parse(String(b.timestamp ?? b.created_at ?? ''));
-      return (Number.isFinite(bt) ? bt : 0) - (Number.isFinite(at) ? at : 0);
-    });
-  }, [log.data?.rows, reviewDecisionLog.data?.rows]);
-  if (log.isLoading || reviewTasks.isLoading || reviewDecisionLog.isLoading) return <StateView kind="loading" />;
-  if (log.error && reviewDecisionLog.error) return <StateView kind="error" hint={(log.error as Error).message} />;
-  return (
-    <div className="stack">
-      {log.error || reviewDecisionLog.error ? (
-        <p className="state__hint">
-          {t('shipments.decisions.oneDecisionStreamIsUnavailable')}
-        </p>
-      ) : null}
-      <DataTable
-        columns={[
-          { key: 'timestamp', label: t('shipments.common.when'), format: 'datetime' },
-          { key: 'decision_category', label: t('shipments.decisions.category'), lookup: 'decision_category' },
-          { key: 'decision_point', label: t('shipments.decisions.decision'), render: (raw) => humanizeToken(raw) },
-          { key: 'decision_outcome', label: t('shipments.decisions.outcome'), render: (raw) => humanizeToken(raw) },
-          { key: 'resolved_from', label: t('shipments.decisions.scope') },
-          { key: 'settings_resolution_id', label: t('shipments.decisions.resolution'), render: (raw) => compactReference(raw, t('shipments.decisions.resolution'), t) },
-        ]}
-        rows={rows}
-        allowSelection={false}
-        emptyText={t('shipments.decisions.noDecisionsRecordedForThis')}
-        rowActions={[
-          {
-            label: t('shipments.decisions.viewActivity'),
-            icon: 'trace_tree',
-            onClick: (row) => {
-              go(`/insights/traces?correlation_id=${encodeURIComponent(
-                String(row.correlation_id ?? ''),
-              )}`);
-            },
-          },
-        ]}
-      />
-    </div>
-  );
-}
-
-function AuditTab({ shipment }: { shipment: Shipment }) {
-  const t = useT();
-  const log = useResourceList<Record<string, unknown>>('audit_table_changes', {
-    filter: { table_name: 'shipments', pk: { id: shipment.id } },
-    sort: { key: 'created_at', dir: 'desc' },
-  });
-  const actions = useResourceList<Record<string, unknown>>('shipment_actions', {
-    filter: { shipment_id: shipment.id },
-    sort: { key: 'timestamp', dir: 'desc' },
-    page_size: 50,
-  });
-  if (log.isLoading || actions.isLoading) return <StateView kind="loading" />;
-  if (log.error && actions.error) {
-    return (
-      <div className="state state--denied">
-        <h3 className="state__title">{t('shipments.audit.auditAccessDenied')}</h3>
-        <p className="state__hint">{t('shipments.audit.auditActivityPermissionIsRequired')}</p>
-      </div>
-    );
-  }
-  const all = log.data?.rows ?? [];
-  const tableRows: Record<string, unknown>[] = log.error
-    ? []
-    : all
-        .filter((row) => auditPkMatchesShipment(row.pk, shipment.id))
-        .map((row) => ({
-          ...row,
-          audit_source: t('shipments.audit.systemAudit'),
-        }));
-  const actionRows: Record<string, unknown>[] = actions.error
-    ? []
-    : (actions.data?.rows ?? []).map((row) => {
-        const actionData = asRecord(row.action_data) ?? {};
-        return {
-          id: row.id ?? `shipment_action_${row.timestamp ?? row.created_at ?? ''}`,
-          created_at: row.timestamp ?? row.created_at,
-          op: row.action_type ?? 'shipment_action',
-          changed_by: row.performed_by_user_id ?? row.performed_by_system ?? row.created_by ?? row.actor_user_id,
-          correlation_id: row.correlation_id ?? actionData.correlation_id,
-          audit_source: t('shipments.common.shipmentAction'),
-        };
-      });
-  const rows: Record<string, unknown>[] = [...tableRows, ...actionRows].sort((a, b) => {
-    const at = Date.parse(String(a['created_at'] ?? ''));
-    const bt = Date.parse(String(b['created_at'] ?? ''));
-    return (Number.isFinite(bt) ? bt : 0) - (Number.isFinite(at) ? at : 0);
-  });
-  return (
-    <div className="stack">
-      {log.error || actions.error ? (
-        <p className="state__hint">
-          {t('shipments.audit.oneAuditStreamIsUnavailable')}
-        </p>
-      ) : null}
-      <DataTable
-        columns={[
-          { key: 'created_at', label: t('shipments.common.when'), format: 'datetime' },
-          { key: 'audit_source', label: t('shipments.common.source') },
-          { key: 'op', label: t('shipments.audit.operation'), render: (raw) => humanizeToken(raw) },
-          { key: 'changed_by', label: t('shipments.audit.actor'), render: (raw) => compactReference(raw, t('shipments.audit.actor'), t) },
-          { key: 'correlation_id', label: t('shipments.common.activity'), render: (raw) => (raw ? t('shipments.common.linked') : '-') },
-        ]}
-        rows={rows}
-        allowSelection={false}
-        emptyText={t('shipments.audit.noAuditChangesRecordedFor')}
-      />
-    </div>
-  );
-}
-
-function auditPkMatchesShipment(pk: unknown, shipmentId: string): boolean {
-  if (pk === shipmentId) return true;
-  if (typeof pk === 'string') {
-    if (pk === shipmentId) return true;
-    try {
-      return auditPkMatchesShipment(JSON.parse(pk), shipmentId);
-    } catch {
-      return false;
-    }
-  }
-  if (pk && typeof pk === 'object') {
-    const rec = pk as Record<string, unknown>;
-    return rec.id === shipmentId || rec.shipment_id === shipmentId;
-  }
-  return false;
 }

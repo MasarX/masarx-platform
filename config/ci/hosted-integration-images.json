@@ -1,0 +1,38 @@
+[
+  {
+    "role": "postgrest",
+    "image": "supabase/postgrest",
+    "tag": "v16.1",
+    "source": "tests/fixtures/ci/supabase-services-2.116.0.json:1",
+    "registry_endpoint": "https://ghcr.io/v2/supabase/postgrest/manifests/v16.1",
+    "digest": "sha256:5922bde07147b82b1c9d8f749e48c1e5b99ebb233f3888bb7ab65f07cf4ac82d",
+    "amd64_manifest": "sha256:73e76c305027cb1119bc7c6ab82449d9e1a50a9e8697f4ebac5443dc63590c90",
+    "image_id": "sha256:eb4951a2f9ac02288100937995af3cb7fb64c296b1228405de5d77ca4dd3410d",
+    "mirror": "ghcr.io",
+    "cli_tag": "v16.1"
+  },
+  {
+    "role": "edge-runtime",
+    "image": "supabase/edge-runtime",
+    "tag": "v1.74.3",
+    "source": "tests/fixtures/ci/supabase-services-2.116.0.json:1",
+    "registry_endpoint": "https://ghcr.io/v2/supabase/edge-runtime/manifests/v1.74.3",
+    "digest": "sha256:c52405002a890ca9fcf77978671c57f3a988e03174afb277f84ac65bc917013c",
+    "amd64_manifest": "sha256:cc355c3d0e9c063a351cad56d1c4c52a3c4d85aff4e1fad9d91688e75f9aad09",
+    "image_id": "sha256:04332d354964b089d81eb872ce1604119a9cf62b54d3556338f3a46d81bfcc8e",
+    "mirror": "ghcr.io",
+    "cli_tag": "v1.74.3"
+  },
+  {
+    "role": "mailpit",
+    "image": "supabase/mailpit",
+    "tag": "v1.30.2",
+    "source": "https://github.com/supabase/cli/blob/v2.116.0/apps/cli-go/pkg/config/templates/Dockerfile#L5",
+    "registry_endpoint": "https://ghcr.io/v2/supabase/mailpit/manifests/v1.30.2",
+    "digest": "sha256:37a38e48e9338cd7e89dfeb487f37b02ebfcd9cb23111bed2d345e79d37d6dd6",
+    "amd64_manifest": "sha256:f0b0ed33c8cf53aac0dd004abbe245c83420a7ae44914e25178f7791dec5723a",
+    "image_id": "sha256:cdb09a322d77e0b233727104beaafb4b7b503fd3badce6a6d9e58fd9993025f6",
+    "mirror": "ghcr.io",
+    "cli_tag": "v1.30.2"
+  }
+]

@@ -4,7 +4,7 @@ import { waitFor } from '@testing-library/react';
 import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/customers-network';
+import ar from '@/lib/seed-raw/i18n/areas/ar/customers-network';
 import { SendersModule } from './senders';
 
 const untranslated = (selector: string) =>

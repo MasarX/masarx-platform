@@ -44,6 +44,7 @@ import { isTabularLimitError } from "./resource-import/tabular-file-limits";
 import { parseTabularFileWithWorker } from "./resource-import/tabular-file-parser-worker-client";
 import { sanitizeTargetFieldForTestId } from "./resource-import/target-field-test-id";
 import { buildHref } from "./url";
+import { createUiTranslator } from "./i18n";
 import { resolveSafeHref, resolveTrustedExternalDataUrl } from "./url-guard";
 import { useToast } from "./use-toast";
 import type { ComboboxOption } from "./use-combobox";
@@ -100,7 +101,12 @@ type MappingRowEntry = {
   status: MappingRowStatus;
 };
 
+type Translator = ReturnType<typeof createUiTranslator>;
+
 const IMPORT_SCOPE_ORDER: ScopeContextKey[] = ["tenant", "client", "sender"];
+// Run statuses and row actions with catalog labels; anything else is shown as the server sent it.
+const RUN_STATUS_KEYS = new Set(["queued", "processing", "completed", "completed_with_errors", "failed", "canceled", "cancelled"]);
+const ROW_ACTION_KEYS = new Set(["create", "update", "skip", "block", "link"]);
 
 function stringifyImportValue(value: unknown) {
   if (value == null) return "";
@@ -133,10 +139,8 @@ function buildScopeContextPayload(scopeContext: ScopeContextMap) {
   }, {});
 }
 
-function resolveScopeTypeLabel(scopeType: ScopeContextKey) {
-  if (scopeType === "tenant") return "Organization";
-  if (scopeType === "client") return "Client";
-  return "Sender";
+function resolveScopeTypeLabel(scopeType: ScopeContextKey, tr: Translator) {
+  return tr(`scopeTypes.${scopeType}`);
 }
 
 function normalizeReferenceFilters(filters: Record<string, unknown>) {
@@ -186,6 +190,7 @@ function buildReferenceOptionLabel(
   item: Record<string, unknown>,
   column: UiReadColumn | null | undefined,
   targetResource: UiReadResource | null,
+  fallbackLabel: string,
 ) {
   const reference = resolveImportReference(column);
   const preferredKeys = [
@@ -202,7 +207,7 @@ function buildReferenceOptionLabel(
     return labels.join(" | ");
   }
   const fallbackId = stringifyImportValue(item[targetResource?.id_column ?? "id"]).trim();
-  return fallbackId || stringifyImportValue(item.id).trim() || "Select";
+  return fallbackId || stringifyImportValue(item.id).trim() || fallbackLabel;
 }
 
 function resolveFieldDiagnosticTargetKeys(row: ResourceImportRow) {
@@ -239,6 +244,7 @@ function ImportValueEditor({
   placeholder,
   disabled = false,
 }: ImportValueEditorProps) {
+  const tr = React.useMemo(() => createUiTranslator("ui.resourceImport.editor"), []);
   const lookupOptions = React.useMemo(() => resolveLookupOptions(column), [column]);
   const enumOptions = React.useMemo(
     () => (lookupOptions.length > 0 ? [] : resolveEnumOptions(column)),
@@ -274,7 +280,7 @@ function ImportValueEditor({
     const normalizedValue = value.trim();
     const selectOptions =
       normalizedValue && !options.some((option) => option.value === normalizedValue)
-        ? [{ value: normalizedValue, label: `Current value: ${normalizedValue}` }, ...options]
+        ? [{ value: normalizedValue, label: tr("currentValue", { value: normalizedValue }) }, ...options]
         : options;
     return (
       <Select
@@ -310,7 +316,7 @@ function ImportValueEditor({
           loading={referenceOptions?.loading ?? false}
           disabled={disabled}
           placeholder={placeholder}
-          emptyMessage={`No ${targetResource.label ?? targetResource.key} found`}
+          emptyMessage={tr("noReferenceResults", { resource: targetResource.label ?? targetResource.key })}
         />
       </div>
     );
@@ -360,22 +366,22 @@ function findRuleForTarget(rules: TabularImportFieldRule[], targetField: string)
   return rules.find((rule) => rule.target_field === targetField) ?? null;
 }
 
-function describeRuleCoverage(rule: TabularImportFieldRule | null) {
-  if (!rule) return "Needs attention";
+function describeRuleCoverage(rule: TabularImportFieldRule | null, tr: Translator) {
+  if (!rule) return tr("needsAttention");
   const mode = resolveTabularRuleMode(rule);
   if (mode === "fixed") {
-    return rule.fixed_value === undefined ? "Needs attention" : "One value will be applied to every row.";
+    return rule.fixed_value === undefined ? tr("needsAttention") : tr("coverage.fixedValue");
   }
   return rule.source_column?.trim()
-    ? `Mapped from source column ${rule.source_column}.`
-    : "Needs attention";
+    ? tr("coverage.sourceColumn", { column: rule.source_column })
+    : tr("needsAttention");
 }
 
-function resolveArtifactLabel(relationType: string | null | undefined, fileName: string | null | undefined) {
+function resolveArtifactLabel(relationType: string | null | undefined, fileName: string | null | undefined, tr: Translator) {
   const relation = String(relationType ?? "").trim().toLowerCase();
-  if (relation === "source_file") return fileName?.trim() || "Source file";
-  if (relation === "error_export") return fileName?.trim() || "Annotated error export";
-  return fileName?.trim() || relationType?.trim() || "Artifact";
+  if (relation === "source_file") return fileName?.trim() || tr("artifacts.sourceFile");
+  if (relation === "error_export") return fileName?.trim() || tr("artifacts.errorExport");
+  return fileName?.trim() || relationType?.trim() || tr("artifacts.fallback");
 }
 
 const REQUIRED_IMPORT_DIAGNOSTIC_CODES = new Set([
@@ -435,12 +441,15 @@ function buildScopeProvidedState(params: {
   scopeContext: Record<string, string>;
   currentAccessScopeType: string;
   prefix?: string | null;
+  tr: Translator;
 }) {
   const providedTargetKeys = new Set<string>();
   const reasons: Record<string, string> = {};
   const scopeColumns = params.scopeColumns ?? null;
   const prefix = String(params.prefix ?? "").trim();
   const accessScopeType = params.currentAccessScopeType;
+  const selectedScopeReason = params.tr("scopeReasons.selectedScope");
+  const accessScopeReason = params.tr("scopeReasons.accessScope");
   const tenantKey = typeof scopeColumns?.tenant === "string" ? scopeColumns.tenant.trim() : "";
   const clientKey = typeof scopeColumns?.client === "string" ? scopeColumns.client.trim() : "";
   const senderKey = typeof scopeColumns?.sender === "string" ? scopeColumns.sender.trim() : "";
@@ -458,33 +467,27 @@ function buildScopeProvidedState(params: {
   if (tenantKey && hasTenant) {
     add(
       tenantKey,
-      accessScopeType === "platform"
-        ? "This value comes from the selected import scope."
-        : "This value comes from your current access scope.",
+      accessScopeType === "platform" ? selectedScopeReason : accessScopeReason,
     );
   }
   if (clientKey && hasClient) {
     add(
       clientKey,
-      accessScopeType === "client" || accessScopeType === "sender"
-        ? "This value comes from your current access scope."
-        : "This value comes from the selected import scope.",
+      accessScopeType === "client" || accessScopeType === "sender" ? accessScopeReason : selectedScopeReason,
     );
   } else if (clientKey && hasSender) {
-    add(clientKey, "This value will be derived automatically from the selected sender scope.");
+    add(clientKey, params.tr("scopeReasons.derivedFromSender"));
   }
   if (senderKey && hasSender) {
     add(
       senderKey,
-      accessScopeType === "sender"
-        ? "This value comes from your current access scope."
-        : "This value comes from the selected import scope.",
+      accessScopeType === "sender" ? accessScopeReason : selectedScopeReason,
     );
   }
   if (tenantKey && !hasTenant && hasClient) {
-    add(tenantKey, "This value will be derived automatically from the selected client scope.");
+    add(tenantKey, params.tr("scopeReasons.derivedFromClient"));
   } else if (tenantKey && !hasTenant && hasSender) {
-    add(tenantKey, "This value will be derived automatically from the selected sender scope.");
+    add(tenantKey, params.tr("scopeReasons.derivedFromSender"));
   }
 
   return {
@@ -542,9 +545,10 @@ function normalizeRunStatus(status: string | null | undefined) {
   return String(status ?? "").trim().toLowerCase();
 }
 
-function humanizeRunStatus(status: string | null | undefined) {
+function humanizeRunStatus(status: string | null | undefined, tr: Translator) {
   const normalized = normalizeRunStatus(status);
-  if (!normalized) return "Queued";
+  if (!normalized) return tr("runStatuses.queued");
+  if (RUN_STATUS_KEYS.has(normalized)) return tr(`runStatuses.${normalized}`);
   return normalized
     .split("_")
     .filter(Boolean)
@@ -561,21 +565,13 @@ function resolveRunStatusTone(status: string | null | undefined) {
   return "neutral" as const;
 }
 
-function resolveRunStatusSummary(status: string | null | undefined) {
+function resolveRunStatusSummary(status: string | null | undefined, tr: Translator) {
   const normalized = normalizeRunStatus(status);
-  if (normalized === "processing") {
-    return "The importer is actively writing rows now. This status card refreshes automatically until the final report is ready.";
-  }
-  if (normalized === "completed") {
-    return "The import completed and the final operation report is ready below.";
-  }
-  if (normalized === "failed") {
-    return "The import failed. Review the run details and final report to see which rows were written and which rows need correction.";
-  }
-  if (normalized === "canceled" || normalized === "cancelled") {
-    return "The import was canceled before completion. You can reopen the staged run and retry after adjusting the mapping or source file.";
-  }
-  return "The run is queued and waiting for a background worker to pick it up. Keep this drawer open and it will refresh automatically.";
+  if (normalized === "processing") return tr("runSummaries.processing");
+  if (normalized === "completed") return tr("runSummaries.completed");
+  if (normalized === "failed") return tr("runSummaries.failed");
+  if (normalized === "canceled" || normalized === "cancelled") return tr("runSummaries.canceled");
+  return tr("runSummaries.queued");
 }
 
 export function ResourceImportPage({
@@ -590,6 +586,8 @@ export function ResourceImportPage({
   onOpenImportedRecord,
 }: ResourceImportPageProps) {
   const t = useTranslations("ui.tabularFile");
+  // Read from the UI catalogs directly, so the page also works where no intl provider wraps it.
+  const tr = React.useMemo(() => createUiTranslator("ui.resourceImport"), []);
   const ui = React.useMemo(() => createUiClient(), []);
   const searchParams = useSearchParams();
   const { toast } = useToast();
@@ -677,8 +675,8 @@ export function ResourceImportPage({
       .catch((error) => {
         if (cancelled) return;
         toast({
-          title: "Import workspace unavailable",
-          description: error instanceof Error ? error.message : "Unable to load import context.",
+          title: tr("toasts.workspaceUnavailableTitle"),
+          description: error instanceof Error ? error.message : tr("toasts.workspaceUnavailableDescription"),
           tone: "error",
         });
       })
@@ -688,7 +686,7 @@ export function ResourceImportPage({
     return () => {
       cancelled = true;
     };
-  }, [toast, ui]);
+  }, [toast, tr, ui]);
 
   const importResources = React.useMemo(
     () => resolveImportResources(registry, me),
@@ -977,7 +975,7 @@ export function ResourceImportPage({
               if (!value) return null;
               return {
                 value,
-                label: buildReferenceOptionLabel(item, column, targetResource),
+                label: buildReferenceOptionLabel(item, column, targetResource, tr("selectFallback")),
               };
             })
             .filter((option): option is ComboboxOption => Boolean(option));
@@ -1001,7 +999,7 @@ export function ResourceImportPage({
           }));
         });
     },
-    [registry, ui],
+    [registry, tr, ui],
   );
 
   const mappedSourceHeaders = React.useMemo(
@@ -1059,8 +1057,9 @@ export function ResourceImportPage({
         scopeColumns: selectedResource?.scope_columns ?? null,
         scopeContext: effectiveScopeContext,
         currentAccessScopeType,
+        tr,
       }),
-    [currentAccessScopeType, effectiveScopeContext, selectedResource?.scope_columns],
+    [currentAccessScopeType, effectiveScopeContext, selectedResource?.scope_columns, tr],
   );
   const relatedScopeProvidedStates = React.useMemo(() => {
     const states = new Map<string, ReturnType<typeof buildScopeProvidedState>>();
@@ -1072,11 +1071,12 @@ export function ResourceImportPage({
           scopeContext: effectiveScopeContext,
           currentAccessScopeType,
           prefix: contract.node_key,
+          tr,
         }),
       );
     });
     return states;
-  }, [activeRelatedNodes, currentAccessScopeType, effectiveScopeContext]);
+  }, [activeRelatedNodes, currentAccessScopeType, effectiveScopeContext, tr]);
   const scopeProvidedTargetKeys = React.useMemo(() => {
     const keys = new Set<string>(primaryScopeProvidedState.targetKeys);
     relatedScopeProvidedStates.forEach((state) => {
@@ -1246,8 +1246,8 @@ export function ResourceImportPage({
         }
         failedPrepareRevisionRef.current = draftRevision;
         toast({
-          title: "Dry-run failed",
-          description: error instanceof Error ? error.message : "Unable to prepare the import.",
+          title: tr("toasts.dryRunFailedTitle"),
+          description: error instanceof Error ? error.message : tr("toasts.dryRunFailedDescription"),
           tone: "error",
         });
         return false;
@@ -1267,6 +1267,7 @@ export function ResourceImportPage({
       selectedFile,
       selectedResource,
       toast,
+      tr,
       ui,
       writeMode,
     ],
@@ -1279,8 +1280,8 @@ export function ResourceImportPage({
       if (!file) return;
       if (!selectedResourceAccess?.allowed) {
         toast({
-          title: "Choose an importable table first",
-          description: "Select a resource that has import enabled before uploading a file.",
+          title: tr("toasts.chooseTableTitle"),
+          description: tr("toasts.chooseTableDescription"),
           tone: "warning",
         });
         return;
@@ -1295,7 +1296,7 @@ export function ResourceImportPage({
         const acceptedFormats = resolveImportAcceptedFormats(selectedResource);
         if (!acceptedFormats.includes(parsed.format)) {
           throw new Error(
-            `This resource accepts ${acceptedFormats.join(", ")} files. Received ${parsed.format}.`,
+            tr("errors.acceptedFormats", { formats: acceptedFormats.join(", "), format: parsed.format }),
           );
         }
         const inferred = inferTabularFieldRules(parsed.headers, selectedResource, registry);
@@ -1322,8 +1323,8 @@ export function ResourceImportPage({
       } catch (error) {
         if (parsing.signal.aborted) return;
         toast({
-          title: "File parse failed",
-          description: error instanceof Error ? (isTabularLimitError(error.message) ? t(error.message) : error.message) : "Unable to inspect the uploaded file.",
+          title: tr("toasts.fileParseFailedTitle"),
+          description: error instanceof Error ? (isTabularLimitError(error.message) ? t(error.message) : error.message) : tr("toasts.fileParseFailedDescription"),
           tone: "error",
         });
       } finally {
@@ -1343,6 +1344,7 @@ export function ResourceImportPage({
       selectedResourceAccess?.allowed,
       sheetName,
       toast,
+      tr,
     ],
   );
 
@@ -1376,8 +1378,8 @@ export function ResourceImportPage({
       } catch (error) {
         if (parsing.signal.aborted) return;
         toast({
-          title: "Worksheet parse failed",
-          description: error instanceof Error ? (isTabularLimitError(error.message) ? t(error.message) : error.message) : "Unable to read the selected worksheet.",
+          title: tr("toasts.worksheetParseFailedTitle"),
+          description: error instanceof Error ? (isTabularLimitError(error.message) ? t(error.message) : error.message) : tr("toasts.worksheetParseFailedDescription"),
           tone: "error",
         });
       } finally {
@@ -1387,7 +1389,7 @@ export function ResourceImportPage({
         }
       }
     },
-    [applyLocalInference, prepareImport, registry, selectedFile, selectedResource, toast, t],
+    [applyLocalInference, prepareImport, registry, selectedFile, selectedResource, toast, t, tr],
   );
 
   const updateRuleForTarget = React.useCallback(
@@ -1617,30 +1619,30 @@ export function ResourceImportPage({
           profile_name:
             profileName.trim() ||
             matchedProfile?.profile_name ||
-            `${selectedResource?.label ?? effectiveResourceKey} import`,
+            tr("defaultProfileName", { resource: selectedResource?.label ?? effectiveResourceKey }),
           profile_id: saveProfileMode === "update" ? matchedProfile?.id ?? null : null,
         };
       }
       const response = await ui.resourceImports.start(payload);
       if (requestId !== runRequestRef.current) return;
       if (!response.run || response.run.id !== dryRun.run_id) {
-        throw new Error("The server did not confirm the requested import run. Refresh its status before trying again.");
+        throw new Error(tr("errors.runNotConfirmed"));
       }
       setRun(response.run ?? null);
       setReport(response.report ?? response.run?.report ?? null);
       if (response.processing_warning) {
-        toast({ title: "Import queued; processing delayed", description: response.processing_warning, tone: "warning" });
+        toast({ title: tr("toasts.queuedDelayedTitle"), description: response.processing_warning, tone: "warning" });
       } else if (!response.report && response.run?.status && ["queued", "processing"].includes(response.run.status)) {
         toast({
-          title: "Import queued",
-          description: "The run is now being tracked below. It will refresh automatically until the worker completes it and writes the final report.",
+          title: tr("toasts.queuedTitle"),
+          description: tr("toasts.queuedDescription"),
         });
       }
     } catch (error) {
       if (requestId !== runRequestRef.current) return;
       toast({
-        title: "Import start failed",
-        description: error instanceof Error ? error.message : "Unable to start the import run.",
+        title: tr("toasts.startFailedTitle"),
+        description: error instanceof Error ? error.message : tr("toasts.startFailedDescription"),
         tone: "error",
       });
     } finally {
@@ -1655,6 +1657,7 @@ export function ResourceImportPage({
     saveProfileMode,
     selectedResource,
     toast,
+    tr,
     ui,
   ]);
 
@@ -1667,29 +1670,29 @@ export function ResourceImportPage({
       const response = await ui.resourceImports.cancel({ runId: run.id, reason });
       if (requestId !== runRequestRef.current) return;
       if (!response.run || response.run.id !== run.id || !response.run.status?.trim()) {
-        throw new Error("The server did not confirm the requested import run. Refresh its status before trying again.");
+        throw new Error(tr("errors.runNotConfirmed"));
       }
       setRun(response.run);
       setReport(response.run.report ?? null);
       const canceled = ["canceled", "cancelled"].includes(normalizeRunStatus(response.run.status));
       toast({
-        title: canceled ? "Import canceled" : "Import status refreshed",
+        title: canceled ? tr("toasts.canceledTitle") : tr("toasts.statusRefreshedTitle"),
         description: canceled
-          ? "The server confirmed cancellation. The staged rows remain available for review."
-          : `The server reports this run as ${humanizeRunStatus(response.run.status).toLowerCase()}; it was not canceled by this request.`,
+          ? tr("toasts.canceledDescription")
+          : tr("toasts.notCanceledDescription", { status: humanizeRunStatus(response.run.status, tr).toLowerCase() }),
         tone: canceled ? "warning" : "info",
       });
     } catch (error) {
       if (requestId !== runRequestRef.current) return;
       toast({
-        title: "Cancel failed",
-        description: error instanceof Error ? error.message : "Unable to cancel the import run.",
+        title: tr("toasts.cancelFailedTitle"),
+        description: error instanceof Error ? error.message : tr("toasts.cancelFailedDescription"),
         tone: "error",
       });
     } finally {
       if (requestId === runRequestRef.current) setBusy(null);
     }
-  }, [busy, cancelReason, run, toast, ui]);
+  }, [busy, cancelReason, run, toast, tr, ui]);
 
   const handleRefreshRun = React.useCallback(async () => {
     if (!run?.id || busy) return;
@@ -1698,20 +1701,20 @@ export function ResourceImportPage({
     try {
       const nextRun = await ui.resourceImports.getRun({ runId: run.id });
       if (requestId !== runRequestRef.current) return;
-      if (nextRun.id !== run.id) throw new Error("The server returned a different import run.");
+      if (nextRun.id !== run.id) throw new Error(tr("errors.differentRun"));
       setRun(nextRun);
       setReport(nextRun.report ?? null);
     } catch (error) {
       if (requestId !== runRequestRef.current) return;
       toast({
-        title: "Refresh failed",
-        description: error instanceof Error ? error.message : "Unable to refresh the import status.",
+        title: tr("toasts.refreshFailedTitle"),
+        description: error instanceof Error ? error.message : tr("toasts.refreshFailedDescription"),
         tone: "error",
       });
     } finally {
       if (requestId === runRequestRef.current) setBusy(null);
     }
-  }, [busy, run, toast, ui]);
+  }, [busy, run, toast, tr, ui]);
 
   React.useEffect(() => {
     if (!run?.id || busy) return;
@@ -1724,7 +1727,7 @@ export function ResourceImportPage({
       void ui.resourceImports.getRun({ runId: run.id! })
         .then((nextRun) => {
           if (cancelled || requestId !== runRequestRef.current) return;
-          if (nextRun.id !== run.id) throw new Error("The server returned a different import run.");
+          if (nextRun.id !== run.id) throw new Error(tr("errors.differentRun"));
           setRun(nextRun);
           setReport(nextRun.report ?? null);
           const nextStatus = nextRun.status?.trim().toLowerCase();
@@ -1742,7 +1745,7 @@ export function ResourceImportPage({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [busy, run?.id, run?.status, ui]);
+  }, [busy, run?.id, run?.status, tr, ui]);
 
   const reportReadyRef = React.useRef<string | null>(null);
   React.useEffect(() => {
@@ -1758,24 +1761,24 @@ export function ResourceImportPage({
     toast({
       title:
         canceled
-          ? "Import canceled"
+          ? tr("toasts.canceledTitle")
           : normalizedRunStatus === "failed"
-          ? "Import failed"
+          ? tr("toasts.reportFailedTitle")
           : completedWithIssues
-            ? "Import completed with issues"
-            : "Import completed",
+            ? tr("toasts.reportIssuesTitle")
+            : tr("toasts.reportCompletedTitle"),
       description:
         canceled
-          ? "Open the persisted report to review any rows written before cancellation."
+          ? tr("toasts.reportCanceledDescription")
           : normalizedRunStatus === "failed"
-          ? "Open the final report to review the failure details and any generated error export."
+          ? tr("toasts.reportFailedDescription")
           : completedWithIssues
-            ? "The final report is ready. Some rows were skipped or blocked, so review the report and error export."
-            : "The final report is ready and the imported rows were written successfully.",
+            ? tr("toasts.reportIssuesDescription")
+            : tr("toasts.reportCompletedDescription"),
       tone: normalizedRunStatus === "failed" ? "error" : canceled || completedWithIssues ? "warning" : "success",
     });
     onReportReady?.(report, run);
-  }, [onReportReady, report, run, toast]);
+  }, [onReportReady, report, run, toast, tr]);
 
   const fieldMappingRows = React.useMemo(() => {
     return [...importableColumns]
@@ -1952,7 +1955,7 @@ export function ResourceImportPage({
   const canonicalCancelReason = typeof cancellation?.reason === "string" ? cancellation.reason
     : typeof runSummary?.cancel_reason === "string" ? runSummary.cancel_reason : null;
   const importedRecords = React.useMemo(() => deriveResourceImportHandoffRows(run, registry), [run, registry]);
-  const runStatusLabel = humanizeRunStatus(run?.status);
+  const runStatusLabel = humanizeRunStatus(run?.status, tr);
   const runStatusTone = resolveRunStatusTone(run?.status);
   const runProcessedCount =
     (run?.created_count ?? 0) +
@@ -1967,12 +1970,11 @@ export function ResourceImportPage({
       ? Math.max(0, Math.min(100, Math.round((runProcessedCount / runTotalRows) * 100)))
       : 0;
   const currentStepIndex = step === "upload" ? 0 : step === "mapping" ? 1 : step === "review" ? 2 : 3;
-  const stepItems = [
-    { label: "1 Upload", detail: "Choose the target table and file." },
-    { label: "2 Mapping", detail: "Auto-match and adjust columns if needed." },
-    { label: "3 Review", detail: "Approve only after diagnostics are clear." },
-    { label: "4 Execution", detail: "Track the run and review the persisted import report." },
-  ];
+  const stepItems = ["upload", "mapping", "review", "execution"].map((stepKey) => ({
+    label: tr(`steps.${stepKey}.label`),
+    detail: tr(`steps.${stepKey}.detail`),
+  }));
+  const rowActionLabel = (action: string) => (ROW_ACTION_KEYS.has(action) ? tr(`rowActions.${action}`) : action);
 
   const renderMappingRow = React.useCallback(
     (entry: MappingRowEntry) => {
@@ -2002,46 +2004,46 @@ export function ResourceImportPage({
                 {column.label ?? column.key}
               </div>
               {isRelated && nodeLabel ? <Badge tone="info">{nodeLabel}</Badge> : null}
-              <Badge tone={required ? "warning" : "neutral"}>{required ? "Required" : "Optional"}</Badge>
-              {status === "required_missing" ? <Badge tone="danger">Needs attention</Badge> : null}
-              {scopeProvided ? <Badge tone="info">Provided by import scope</Badge> : null}
-              {mode === "fixed" && configured ? <Badge tone="info">One value for all rows</Badge> : null}
-              {mode === "source" && configured && !scopeProvided ? <Badge tone="success">Mapped from file</Badge> : null}
+              <Badge tone={required ? "warning" : "neutral"}>{required ? tr("mapping.required") : tr("mapping.optional")}</Badge>
+              {status === "required_missing" ? <Badge tone="danger">{tr("needsAttention")}</Badge> : null}
+              {scopeProvided ? <Badge tone="info">{tr("mapping.providedByScope")}</Badge> : null}
+              {mode === "fixed" && configured ? <Badge tone="info">{tr("mapping.oneValueForAllRows")}</Badge> : null}
+              {mode === "source" && configured && !scopeProvided ? <Badge tone="success">{tr("mapping.mappedFromFile")}</Badge> : null}
             </div>
             <div className="text-xs text-ui-muted">{targetField}</div>
             <p className="text-sm text-ui-muted">
               {scopeProvided
-                ? scopeProvidedReasonMap[targetField] ?? "This field will be injected automatically from the selected import scope."
-                : describeRuleCoverage(rule)}
+                ? scopeProvidedReasonMap[targetField] ?? tr("mapping.scopeInjected")
+                : describeRuleCoverage(rule, tr)}
             </p>
             {mode === "source" && rule?.source && configured && !scopeProvided ? (
               <div className="text-xs text-ui-muted">
                 {rule.source === "exact_key"
-                  ? "Matched from exact column key."
+                  ? tr("mapping.matchExactKey")
                   : rule.source === "label"
-                    ? "Matched from table label."
+                    ? tr("mapping.matchLabel")
                     : rule.source === "alias"
-                      ? "Matched from configured aliases."
+                      ? tr("mapping.matchAlias")
                       : rule.source.startsWith("related_prefix:")
-                        ? `Matched from the ${rule.source.replace("related_prefix:", "")} related-node prefix.`
-                        : "Manual mapping."}
-                {rule.confidence ? ` Confidence ${Math.round(rule.confidence * 100)}%.` : ""}
+                        ? tr("mapping.matchRelatedPrefix", { prefix: rule.source.replace("related_prefix:", "") })
+                        : tr("mapping.matchManual")}
+                {rule.confidence ? ` ${tr("mapping.confidence", { percent: Math.round(rule.confidence * 100) })}` : ""}
               </div>
             ) : null}
             {status === "required_missing" ? (
               <div className="rounded-xl border border-[rgb(var(--ui-danger)/0.35)] bg-[rgb(var(--ui-danger)/0.08)] p-3 text-sm text-ui-ink">
-                This field is mandatory for the destination schema. Either map a column from the file or set one shared value that will be applied to every row.
+                {tr("mapping.requiredMissing")}
               </div>
             ) : null}
           </div>
 
           {scopeProvided ? (
             <div className="rounded-xl border border-[rgb(var(--ui-info)/0.35)] bg-[rgb(var(--ui-info)/0.08)] p-3 text-sm text-ui-ink">
-              No mapping is needed. The importer will add this field automatically from the selected import scope.
+              {tr("mapping.scopeNoMapping")}
             </div>
           ) : (
             <label className="space-y-2 text-sm">
-              <span className="font-medium text-ui-ink">Fill mode</span>
+              <span className="font-medium text-ui-ink">{tr("mapping.fillMode")}</span>
               <Select
                 value={configured ? mode : required ? "" : "empty"}
                 onChange={(event) =>
@@ -2057,11 +2059,11 @@ export function ResourceImportPage({
                 data-testid={`${prefix}-mode-${testIdKey}`}
               >
                 <option value="" disabled>
-                  {required ? "Choose how to fill this required field" : "Choose how to fill this field"}
+                  {required ? tr("mapping.chooseFillRequired") : tr("mapping.chooseFill")}
                 </option>
-                <option value="source">Map from file column</option>
-                <option value="fixed">Use one value for all rows</option>
-                {!required ? <option value="empty">Leave empty</option> : null}
+                <option value="source">{tr("mapping.modeSource")}</option>
+                <option value="fixed">{tr("mapping.modeFixed")}</option>
+                {!required ? <option value="empty">{tr("mapping.modeEmpty")}</option> : null}
               </Select>
             </label>
           )}
@@ -2069,11 +2071,11 @@ export function ResourceImportPage({
           <div className="space-y-2">
             {scopeProvided ? (
               <div className="rounded-xl border border-ui-border/40 bg-ui-surface/70 p-3 text-sm text-ui-muted">
-                {scopeProvidedReasonMap[targetField] ?? "Scope values are resolved automatically during dry-run and execution."}
+                {scopeProvidedReasonMap[targetField] ?? tr("mapping.scopeResolved")}
               </div>
             ) : mode === "fixed" ? (
               <label className="space-y-2 text-sm">
-                <span className="font-medium text-ui-ink">Shared value</span>
+                <span className="font-medium text-ui-ink">{tr("mapping.sharedValue")}</span>
                 <ImportValueEditor
                   column={column}
                   registry={registry}
@@ -2082,26 +2084,26 @@ export function ResourceImportPage({
                   ensureReferenceOptions={ensureReferenceOptions}
                   referenceOptions={referenceOptions}
                   referenceFilters={filters}
-                  placeholder={`Set ${column.label ?? column.key} once for every row`}
+                  placeholder={tr("mapping.sharedValuePlaceholder", { field: column.label ?? column.key })}
                   testId={`${prefix}-fixed-${testIdKey}`}
                 />
                 <p className="text-xs text-ui-muted">
                   {reference
-                    ? "Choose an existing record from the current scope. The importer stores the canonical ID, not the display label."
+                    ? tr("mapping.referenceHint")
                     : resolveLookupOptions(column).length > 0 || resolveEnumOptions(column).length > 0
-                      ? "Choose one of the allowed values. The dry-run will still validate it before approval."
-                      : "The dry-run will coerce and validate this shared value against the schema before approval."}
+                      ? tr("mapping.optionsHint")
+                      : tr("mapping.coerceHint")}
                 </p>
               </label>
             ) : mode === "source" || required ? (
               <label className="space-y-2 text-sm">
-                <span className="font-medium text-ui-ink">Source column</span>
+                <span className="font-medium text-ui-ink">{tr("mapping.sourceColumn")}</span>
                 <Select
                   value={rule?.source_column?.trim() ?? ""}
                   onChange={(event) => updateRuleSourceColumn(targetField, event.target.value)}
                   data-testid={`${prefix}-source-${testIdKey}`}
                 >
-                  <option value="">Choose a source column</option>
+                  <option value="">{tr("mapping.chooseSourceColumn")}</option>
                   {(parsedFile?.headers ?? []).map((header) => (
                     <option key={header} value={header}>
                       {header}
@@ -2109,12 +2111,12 @@ export function ResourceImportPage({
                   ))}
                 </Select>
                 <p className="text-xs text-ui-muted">
-                  Map the uploaded column that should populate this schema field.
+                  {tr("mapping.sourceColumnHint")}
                 </p>
               </label>
             ) : (
               <div className="rounded-xl border border-ui-border/40 bg-ui-surface/70 p-3 text-sm text-ui-muted">
-                This optional field will be left empty for this import.
+                {tr("mapping.optionalEmpty")}
               </div>
             )}
           </div>
@@ -2129,6 +2131,7 @@ export function ResourceImportPage({
       registry,
       resolveReferenceFilters,
       scopeProvidedReasonMap,
+      tr,
       updateRuleFixedValue,
       updateRuleSourceColumn,
       updateTargetMode,
@@ -2143,16 +2146,16 @@ export function ResourceImportPage({
     <div className="space-y-6" data-testid={`${prefix}-ready`}>
       {presentation === "page" ? (
         <PageHeader
-          title="Universal import"
+          title={tr("header.title")}
           actions={
             <div className="flex flex-wrap items-center gap-2">
               {initialReturnTo ? (
                 <Button asChild size="sm" variant="ghost">
-                  <a href={returnHref}>Back to table</a>
+                  <a href={returnHref}>{tr("header.backToTable")}</a>
                 </Button>
               ) : null}
               <Button asChild size="sm" variant="ghost">
-                <a href={advancedStudioHref}>Open advanced mapping studio</a>
+                <a href={advancedStudioHref}>{tr("header.openAdvancedStudio")}</a>
               </Button>
             </div>
           }
@@ -2160,22 +2163,22 @@ export function ResourceImportPage({
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ui-border/40 bg-ui-surface/70 p-4">
           <div className="space-y-1">
-            <div className="text-sm font-semibold text-ui-ink">Advanced mapping and full-page fallback</div>
+            <div className="text-sm font-semibold text-ui-ink">{tr("header.drawerTitle")}</div>
             <p className="text-sm text-ui-muted">
-              The import stays on this table by default. Use the advanced studio only when the automatic flow needs deeper mapping work.
+              {tr("header.drawerDescription")}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button asChild size="sm" variant="ghost">
-              <a href={advancedStudioHref}>Open advanced mapping studio</a>
+              <a href={advancedStudioHref}>{tr("header.openAdvancedStudio")}</a>
             </Button>
           </div>
         </div>
       )}
 
       <Section
-        title="Automatic flow"
-        description="The importer handles upload, mapping, dry-run validation, and the final persisted report in one guided flow."
+        title={tr("flow.title")}
+        description={tr("flow.description")}
       >
         <div className="grid gap-3 lg:grid-cols-4">
           {stepItems.map((item, index) => {
@@ -2188,7 +2191,7 @@ export function ResourceImportPage({
                 <div className="flex items-center gap-2">
                   <Badge tone={tone}>{item.label}</Badge>
                   {index === currentStepIndex ? (
-                    <span className="text-xs font-medium text-ui-ink">Current</span>
+                    <span className="text-xs font-medium text-ui-ink">{tr("flow.current")}</span>
                   ) : null}
                 </div>
                 <p className="mt-3 text-sm text-ui-muted">{item.detail}</p>
@@ -2199,51 +2202,57 @@ export function ResourceImportPage({
       </Section>
 
       <Section
-        title="Import source"
-        description="Choose a table, upload a CSV/XLSX file, and the dry-run review will be built automatically before the final approval step."
+        title={tr("source.title")}
+        description={tr("source.description")}
       >
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
           <div className="space-y-4 rounded-2xl border border-ui-border/50 bg-ui-surface/70 p-4">
             <div className="grid gap-4 md:grid-cols-2">
               <label className="space-y-2 text-sm">
-                <span className="font-medium text-ui-ink">Target table</span>
+                <span className="font-medium text-ui-ink">{tr("source.targetTable")}</span>
                 <Select
                   value={resourceKey}
                   onChange={(event) => setResourceKey(event.target.value)}
                   data-testid={`${prefix}-resource-select`}
                 >
-                  <option value="">Select a table</option>
-                  {importResources.map((entry) => (
-                    <option key={entry.resource.key} value={entry.resource.key}>
-                      {entry.resource.label ?? entry.resource.key}
-                      {!entry.enabled ? " (Import disabled)" : entry.allowed ? "" : " (No access)"}
-                    </option>
-                  ))}
+                  <option value="">{tr("source.selectTable")}</option>
+                  {importResources.map((entry) => {
+                    const table = entry.resource.label ?? entry.resource.key;
+                    return (
+                      <option key={entry.resource.key} value={entry.resource.key}>
+                        {!entry.enabled
+                          ? tr("source.tableImportDisabled", { table })
+                          : entry.allowed
+                            ? table
+                            : tr("source.tableNoAccess", { table })}
+                      </option>
+                    );
+                  })}
                 </Select>
               </label>
 
               <label className="space-y-2 text-sm">
-                <span className="font-medium text-ui-ink">Write mode</span>
+                <span className="font-medium text-ui-ink">{tr("source.writeMode")}</span>
                 <Select
                   value={writeMode}
                   onChange={(event) => setWriteMode(event.target.value === "upsert" ? "upsert" : "create")}
                   disabled={!selectedResource || selectedResource.import?.allow_upsert !== true}
                   data-testid={`${prefix}-write-mode`}
                 >
-                  <option value="create">Create only</option>
-                  <option value="upsert">Upsert</option>
+                  <option value="create">{tr("source.createOnly")}</option>
+                  <option value="upsert">{tr("source.upsert")}</option>
                 </Select>
               </label>
             </div>
 
             {selectedResourceAccess && !selectedResourceAccess.enabled ? (
               <div className="rounded-xl border border-[rgb(var(--ui-warning)/0.35)] bg-[rgb(var(--ui-warning)/0.08)] p-3 text-sm text-ui-ink">
-                This table is visible in the resource registry, but import is not enabled for it yet.
+                {tr("source.importNotEnabled")}
               </div>
             ) : null}
             {selectedResourceAccess && selectedResourceAccess.enabled && !selectedResourceAccess.allowed ? (
               <div className="rounded-xl border border-[rgb(var(--ui-warning)/0.35)] bg-[rgb(var(--ui-warning)/0.08)] p-3 text-sm text-ui-ink">
-                Import is enabled for this table, but your current role is missing the required capability:
+                {tr("source.missingCapability")}
                 {" "}
                 <code>{selectedResourceAccess.capability}</code>
               </div>
@@ -2252,15 +2261,15 @@ export function ResourceImportPage({
             {scopeSelectorRows.length > 0 ? (
               <div className="space-y-3 rounded-2xl border border-ui-border/40 bg-ui-paper/60 p-4">
                 <div className="space-y-1">
-                  <div className="text-sm font-semibold text-ui-ink">Import scope</div>
+                  <div className="text-sm font-semibold text-ui-ink">{tr("source.scopeTitle")}</div>
                   <p className="text-sm text-ui-muted">
-                    Choose the tenant, client, or sender context once. The importer will reuse that scope automatically for matching, validation, related pickers, and the final write.
+                    {tr("source.scopeDescription")}
                   </p>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {scopeSelectorRows.map((entry) => (
                     <label key={entry.scopeType} className="space-y-2 text-sm">
-                      <span className="font-medium text-ui-ink">{resolveScopeTypeLabel(entry.scopeType)}</span>
+                      <span className="font-medium text-ui-ink">{resolveScopeTypeLabel(entry.scopeType, tr)}</span>
                       <ImportValueEditor
                         column={entry.column}
                         registry={registry}
@@ -2271,20 +2280,20 @@ export function ResourceImportPage({
                         referenceFilters={entry.referenceFilters}
                         placeholder={
                           entry.locked
-                            ? `${resolveScopeTypeLabel(entry.scopeType)} is fixed by your access scope`
-                            : `Choose ${resolveScopeTypeLabel(entry.scopeType).toLowerCase()}`
+                            ? tr("source.scopeLockedPlaceholder", { scope: resolveScopeTypeLabel(entry.scopeType, tr) })
+                            : tr("source.scopeChoosePlaceholder", { scope: resolveScopeTypeLabel(entry.scopeType, tr).toLowerCase() })
                         }
                         disabled={Boolean(busy) || entry.locked || entry.parentBlocked || !selectedResourceAccess?.allowed}
                         testId={`${prefix}-scope-${entry.scopeType}`}
                       />
                       <p className="text-xs text-ui-muted">
                         {entry.locked
-                          ? "This scope is fixed by your current access context."
+                          ? tr("source.scopeLockedHint")
                           : entry.parentBlocked && entry.scopeType === "client"
-                            ? "Choose the organization first so the client list stays scoped correctly."
+                            ? tr("source.scopeNeedsOrganization")
                             : entry.parentBlocked && entry.scopeType === "sender"
-                              ? "Choose the client first so the sender list stays scoped correctly."
-                              : "The dry-run will apply this scope automatically to every matching schema field."}
+                              ? tr("source.scopeNeedsClient")
+                              : tr("source.scopeAutoHint")}
                       </p>
                     </label>
                   ))}
@@ -2293,7 +2302,7 @@ export function ResourceImportPage({
             ) : null}
 
             <label className="space-y-2 text-sm">
-              <span className="font-medium text-ui-ink">Upload file</span>
+              <span className="font-medium text-ui-ink">{tr("source.uploadFile")}</span>
               <Input
                 type="file"
                 accept={TABULAR_FILE_ACCEPT}
@@ -2305,7 +2314,7 @@ export function ResourceImportPage({
 
             {parsedFile?.workbookSheets.length && parsedFile.workbookSheets.length > 1 ? (
               <label className="space-y-2 text-sm">
-                <span className="font-medium text-ui-ink">Worksheet</span>
+                <span className="font-medium text-ui-ink">{tr("source.worksheet")}</span>
                 <Select
                   value={sheetName || parsedFile.selectedSheet}
                   onChange={(event) => void handleSheetChange(event.target.value)}
@@ -2321,9 +2330,9 @@ export function ResourceImportPage({
             ) : null}
 
             <div className="flex flex-wrap items-center gap-2 text-xs text-ui-muted">
-              {selectedFile ? <Badge tone="info">{selectedFile.name}</Badge> : <Badge tone="neutral">No file selected</Badge>}
-              {parsedFile?.headers?.length ? <Badge tone="neutral">{parsedFile.headers.length} headers</Badge> : null}
-              {parsedFile?.totalRows ? <Badge tone="neutral">{parsedFile.totalRows} rows</Badge> : null}
+              {selectedFile ? <Badge tone="info">{selectedFile.name}</Badge> : <Badge tone="neutral">{tr("source.noFile")}</Badge>}
+              {parsedFile?.headers?.length ? <Badge tone="neutral">{tr("source.headerCount", { count: parsedFile.headers.length })}</Badge> : null}
+              {parsedFile?.totalRows ? <Badge tone="neutral">{tr("source.rowCount", { count: parsedFile.totalRows })}</Badge> : null}
               {parsedFile?.headers?.length ? (
                 <Badge tone="neutral">{buildTabularHeaderFingerprint(parsedFile.headers)}</Badge>
               ) : null}
@@ -2332,7 +2341,7 @@ export function ResourceImportPage({
             <div className="rounded-xl border border-ui-border/40 bg-ui-paper/60 p-3 text-sm text-ui-muted">
               {requiredColumns.length > 0 ? (
                 <>
-                  <div className="font-medium text-ui-ink">Required target columns</div>
+                  <div className="font-medium text-ui-ink">{tr("source.requiredColumns")}</div>
                   <div className="mt-3 space-y-2">
                     {requiredColumns.map((column) => {
                       const rule = findRuleForTarget(rules, column.key);
@@ -2355,12 +2364,12 @@ export function ResourceImportPage({
                           </div>
                           <Badge tone={satisfied ? "success" : "danger"}>
                             {scopeProvided
-                              ? "Provided by import scope"
+                              ? tr("mapping.providedByScope")
                               : configured
                                 ? mode === "fixed"
-                                ? "One value for all rows"
-                                : "Mapped from file"
-                              : "Needs attention"}
+                                ? tr("mapping.oneValueForAllRows")
+                                : tr("mapping.mappedFromFile")
+                              : tr("needsAttention")}
                           </Badge>
                         </div>
                       );
@@ -2369,9 +2378,9 @@ export function ResourceImportPage({
                 </>
               ) : (
                 <>
-                  <div className="font-medium text-ui-ink">Schema checks stay automatic</div>
+                  <div className="font-medium text-ui-ink">{tr("source.schemaChecksTitle")}</div>
                   <p className="mt-2">
-                    The dry-run still validates required fields, formatting, and row-level blockers even when the table contract does not pre-label them here.
+                    {tr("source.schemaChecksDescription")}
                   </p>
                 </>
               )}
@@ -2380,20 +2389,20 @@ export function ResourceImportPage({
 
           <div className="space-y-4 rounded-2xl border border-ui-border/50 bg-ui-paper/50 p-4">
             <div className="space-y-2">
-              <div className="text-sm font-semibold text-ui-ink">Profile resolution</div>
+              <div className="text-sm font-semibold text-ui-ink">{tr("profile.resolutionTitle")}</div>
               {matchedProfile?.profile_name ? (
                 <div className="rounded-xl border border-[rgb(var(--ui-success)/0.25)] bg-[rgb(var(--ui-success)/0.08)] p-3 text-sm text-ui-ink">
-                  Exact profile match: <strong>{matchedProfile.profile_name}</strong>
+                  {tr("profile.exactMatch")} <strong>{matchedProfile.profile_name}</strong>
                 </div>
               ) : (
                 <p className="text-sm text-ui-muted">
-                  No exact saved profile matched this header shape yet. The system inferred the best mapping from your table columns.
+                  {tr("profile.noMatch")}
                 </p>
               )}
             </div>
 
             <div className="space-y-2">
-              <div className="text-sm font-semibold text-ui-ink">Profile persistence</div>
+              <div className="text-sm font-semibold text-ui-ink">{tr("profile.persistenceTitle")}</div>
               <Select
                 value={saveProfileMode}
                 onChange={(event) =>
@@ -2401,25 +2410,25 @@ export function ResourceImportPage({
                 }
                 data-testid={`${prefix}-profile-mode`}
               >
-                <option value="none">Do not save a profile</option>
-                {matchedProfile?.id ? <option value="update">Update matched profile</option> : null}
-                <option value="new">Save as new profile</option>
+                <option value="none">{tr("profile.modeNone")}</option>
+                {matchedProfile?.id ? <option value="update">{tr("profile.modeUpdate")}</option> : null}
+                <option value="new">{tr("profile.modeNew")}</option>
               </Select>
               {saveProfileMode !== "none" ? (
                 <Input
                   value={profileName}
                   onChange={(event) => setProfileName(event.target.value)}
-                  placeholder={matchedProfile?.profile_name ?? "Orders import profile"}
+                  placeholder={matchedProfile?.profile_name ?? tr("profile.namePlaceholder")}
                   data-testid={`${prefix}-profile-name`}
                 />
               ) : null}
               {availableProfiles.length > 0 ? (
                 <div className="rounded-xl border border-ui-border/40 bg-ui-surface/70 p-3 text-xs text-ui-muted">
-                  Existing profiles for this table: {availableProfiles.map((profile) => profile.profile_name).filter(Boolean).join(", ")}
+                  {tr("profile.existing", { profiles: availableProfiles.map((profile) => profile.profile_name).filter(Boolean).join(", ") })}
                 </div>
               ) : null}
               <div className="rounded-xl border border-ui-border/40 bg-ui-surface/70 p-3 text-xs text-ui-muted">
-                Upload starts the dry-run automatically. Manual mapping changes and row-specific fixes re-run the review automatically too, and you can still use <strong>Rebuild review</strong> for an explicit refresh before approval.
+                {tr("profile.autoRerunBefore")} <strong>{tr("mapping.rebuildReview")}</strong> {tr("profile.autoRerunAfter")}
               </div>
             </div>
           </div>
@@ -2429,8 +2438,8 @@ export function ResourceImportPage({
       {parsedFile ? (
         <React.Suspense fallback={<LoadingState variant="section" />}>
           <Section
-            title="Spreadsheet preview"
-            description="The importer automatically inspects headers and sample rows before it stages the dry-run."
+            title={tr("preview.title")}
+            description={tr("preview.description")}
           >
             <SpreadsheetPreview
               columns={parsedFile.headers}
@@ -2444,40 +2453,42 @@ export function ResourceImportPage({
 
       {step === "mapping" || step === "review" ? (
         <Section
-          title="Schema mapping"
-          description="Required fields are highlighted first. Optional fields can stay empty, or you can set one value for all rows when the file does not include that column."
+          title={tr("mapping.title")}
+          description={tr("mapping.description")}
         >
           <div ref={mappingControlsRef} className="space-y-4 rounded-2xl border border-ui-border/50 bg-ui-surface/70 p-4">
             <div className="grid gap-3 lg:grid-cols-3">
               <div className="rounded-2xl border border-[rgb(var(--ui-warning)/0.28)] bg-[rgb(var(--ui-warning)/0.08)] p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ui-ink">Mandatory fields</div>
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ui-ink">{tr("mapping.mandatoryFields")}</div>
                 <div className="mt-2 text-3xl font-semibold text-ui-ink">{requiredColumns.length}</div>
                 <p className="mt-2 text-sm text-ui-muted">
                   {unresolvedRequiredColumns.length > 0
-                    ? `${unresolvedRequiredColumns.length} required field(s) still need a source column or one shared value.`
-                    : "Every required destination field is currently covered."}
+                    ? tr("mapping.requiredRemaining", { count: unresolvedRequiredColumns.length })
+                    : tr("mapping.requiredCovered")}
                 </p>
               </div>
               <div className="rounded-2xl border border-ui-border/40 bg-ui-paper/60 p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ui-ink">Optional fields left empty</div>
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ui-ink">{tr("mapping.optionalEmptyTitle")}</div>
                 <div className="mt-2 text-3xl font-semibold text-ui-ink">{optionalEmptyColumns.length}</div>
                 <p className="mt-2 text-sm text-ui-muted">
-                  Optional fields can remain empty. Map them only when the file carries useful data.
+                  {tr("mapping.optionalEmptyDescription")}
                 </p>
               </div>
               <div className="rounded-2xl border border-ui-border/40 bg-ui-paper/60 p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ui-ink">One value for all rows</div>
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ui-ink">{tr("mapping.oneValueForAllRows")}</div>
                 <div className="mt-2 text-3xl font-semibold text-ui-ink">{fixedValueColumns.length}</div>
                 <p className="mt-2 text-sm text-ui-muted">
-                  Use this when the same schema value should be applied to every imported row.
+                  {tr("mapping.oneValueDescription")}
                 </p>
               </div>
             </div>
 
             {runtimeDiscoveredRequiredColumns.length > 0 ? (
               <div className="rounded-2xl border border-[rgb(var(--ui-info)/0.35)] bg-[rgb(var(--ui-info)/0.08)] p-4 text-sm text-ui-ink">
-                The dry-run found {runtimeDiscoveredRequiredColumns.length} additional mandatory field(s) from the live destination schema:{" "}
-                {runtimeDiscoveredRequiredColumns.map((column) => column.label ?? column.key).join(", ")}.
+                {tr("mapping.runtimeRequired", {
+                  count: runtimeDiscoveredRequiredColumns.length,
+                  fields: runtimeDiscoveredRequiredColumns.map((column) => column.label ?? column.key).join(", "),
+                })}
               </div>
             ) : null}
 
@@ -2489,9 +2500,9 @@ export function ResourceImportPage({
               <div className="rounded-2xl border border-ui-border/40 bg-ui-paper/60 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="text-sm font-semibold text-ui-ink">Related nodes</div>
+                    <div className="text-sm font-semibold text-ui-ink">{tr("mapping.relatedNodesTitle")}</div>
                     <div className="mt-1 text-xs text-ui-muted">
-                      Attach optional child nodes when the same row should also create, match, or link related records before the primary record is written.
+                      {tr("mapping.relatedNodesDescription")}
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -2502,7 +2513,7 @@ export function ResourceImportPage({
                           onChange={(event) => setRelatedNodePickerValue(event.target.value)}
                           data-testid={`${prefix}-related-node-picker`}
                         >
-                          <option value="">Choose a related node</option>
+                          <option value="">{tr("mapping.chooseRelatedNode")}</option>
                           {inactiveRelatedNodes.map((contract) => (
                             <option key={contract.node_key} value={contract.node_key}>
                               {contract.node_label ?? contract.node_key}
@@ -2516,11 +2527,11 @@ export function ResourceImportPage({
                           onClick={() => handleAttachRelatedNode(relatedNodePickerValue)}
                           data-testid={`${prefix}-related-node-add`}
                         >
-                          Attach node
+                          {tr("mapping.attachNode")}
                         </Button>
                       </>
                     ) : (
-                      <Badge tone="neutral">All available related nodes are already attached</Badge>
+                      <Badge tone="neutral">{tr("mapping.allNodesAttached")}</Badge>
                     )}
                   </div>
                 </div>
@@ -2535,17 +2546,17 @@ export function ResourceImportPage({
                       <div className="text-sm font-semibold text-ui-ink">
                         {section.contract.node_label ?? section.contract.node_key}
                       </div>
-                      <Badge tone="info">Related node</Badge>
+                      <Badge tone="info">{tr("relatedNode")}</Badge>
                       {section.contract.target_label ? <Badge tone="neutral">{section.contract.target_label}</Badge> : null}
                     </div>
                     <div className="mt-1 text-xs text-ui-muted">
                       {section.contract.create_mode === "link_only"
-                        ? "Rows for this node must match an existing record."
+                        ? tr("mapping.nodeLinkOnly")
                         : section.contract.create_mode === "create_only"
-                          ? "Rows for this node will always create a new related record."
-                          : "The importer will try to match first, then create when no existing record is found."}
+                          ? tr("mapping.nodeCreateOnly")
+                          : tr("mapping.nodeMatchOrCreate")}
                       {(section.contract.match_fields?.length ?? 0) > 0
-                        ? ` Match fields: ${section.contract.match_fields?.join(", ")}.`
+                        ? ` ${tr("mapping.nodeMatchFields", { fields: section.contract.match_fields?.join(", ") ?? "" })}`
                         : ""}
                     </div>
                   </div>
@@ -2556,7 +2567,7 @@ export function ResourceImportPage({
                     onClick={() => handleRemoveRelatedNode(section.contract.node_key)}
                     data-testid={`${prefix}-related-node-remove-${section.contract.node_key}`}
                   >
-                    Remove node
+                    {tr("mapping.removeNode")}
                   </Button>
                 </div>
 
@@ -2573,24 +2584,24 @@ export function ResourceImportPage({
                 disabled={!parsedFile || Boolean(busy)}
                 data-testid={`${prefix}-rebuild-review`}
               >
-                {busy === "prepare" ? "Building review..." : "Rebuild review"}
+                {busy === "prepare" ? tr("mapping.buildingReview") : tr("mapping.rebuildReview")}
               </Button>
               {unresolvedRequiredColumns.length > 0 ? (
                 <Badge tone="warning">
-                  {unresolvedRequiredColumns.length} required field(s) still need attention
+                  {tr("mapping.requiredAttention", { count: unresolvedRequiredColumns.length })}
                 </Badge>
               ) : null}
               {unmatchedSourceHeaders.length > 0 ? (
                 <Badge tone="neutral">
-                  {unmatchedSourceHeaders.length} source column(s) are currently skipped
+                  {tr("mapping.skippedSourceColumns", { count: unmatchedSourceHeaders.length })}
                 </Badge>
               ) : null}
-              {rulesDirty || rowOverridesDirty || scopeContextDirty ? <Badge tone="info">Review refresh pending...</Badge> : null}
+              {rulesDirty || rowOverridesDirty || scopeContextDirty ? <Badge tone="info">{tr("mapping.refreshPending")}</Badge> : null}
             </div>
 
             {unmatchedSourceHeaders.length > 0 ? (
               <div className="rounded-2xl border border-ui-border/40 bg-ui-surface/70 p-4">
-                <div className="text-sm font-semibold text-ui-ink">Source columns not currently used</div>
+                <div className="text-sm font-semibold text-ui-ink">{tr("mapping.unusedSourceColumns")}</div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {unmatchedSourceHeaders.map((header) => (
                     <Badge key={header} tone="neutral">
@@ -2607,39 +2618,39 @@ export function ResourceImportPage({
       {dryRun ? (
         <div ref={reviewSectionRef} tabIndex={-1} className="outline-none">
           <Section
-            title="Dry-run review"
-            description="The dry-run is authoritative. It stages rows, checks formatting, applies safe corrections, and blocks anything unsafe before the final approval."
+            title={tr("review.title")}
+            description={tr("review.description")}
           >
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
             <div className="space-y-4 rounded-2xl border border-ui-border/50 bg-ui-surface/70 p-4">
               <div className="grid gap-3 md:grid-cols-4">
                 <div className="rounded-xl border border-ui-border/40 bg-ui-paper/60 p-3">
-                  <div className="text-xs text-ui-muted">Will create</div>
+                  <div className="text-xs text-ui-muted">{tr("review.willCreate")}</div>
                   <div className="mt-1 text-2xl font-semibold text-ui-ink">{dryRun.will_create ?? 0}</div>
                 </div>
                 <div className="rounded-xl border border-ui-border/40 bg-ui-paper/60 p-3">
-                  <div className="text-xs text-ui-muted">Will update</div>
+                  <div className="text-xs text-ui-muted">{tr("review.willUpdate")}</div>
                   <div className="mt-1 text-2xl font-semibold text-ui-ink">{dryRun.will_update ?? 0}</div>
                 </div>
                 <div className="rounded-xl border border-ui-border/40 bg-ui-paper/60 p-3">
-                  <div className="text-xs text-ui-muted">Will skip</div>
+                  <div className="text-xs text-ui-muted">{tr("review.willSkip")}</div>
                   <div className="mt-1 text-2xl font-semibold text-ui-ink">{dryRun.will_skip ?? 0}</div>
                 </div>
                 <div className="rounded-xl border border-ui-border/40 bg-ui-paper/60 p-3">
-                  <div className="text-xs text-ui-muted">Blocked issues</div>
+                  <div className="text-xs text-ui-muted">{tr("review.blockedIssues")}</div>
                   <div className="mt-1 text-2xl font-semibold text-ui-ink">{dryRun.blocked_count ?? 0}</div>
                 </div>
               </div>
 
               {matchedProfile?.profile_name ? (
                 <div className="rounded-xl border border-[rgb(var(--ui-success)/0.25)] bg-[rgb(var(--ui-success)/0.08)] p-3 text-sm text-ui-ink">
-                  Profile used: <strong>{matchedProfile.profile_name}</strong>
+                  {tr("review.profileUsed")} <strong>{matchedProfile.profile_name}</strong>
                 </div>
               ) : null}
 
               {(dryRun.blocking_diagnostics?.length ?? 0) > 0 ? (
                 <div className="space-y-3">
-                  <div className="text-sm font-semibold text-ui-ink">Blocked issues</div>
+                  <div className="text-sm font-semibold text-ui-ink">{tr("review.blockedIssues")}</div>
                   {dryRun.blocking_diagnostics?.map((diagnostic, index) => (
                     <div
                       key={`${diagnostic.code}-${diagnostic.fieldPath ?? ""}-${index}`}
@@ -2647,7 +2658,7 @@ export function ResourceImportPage({
                     >
                       <div className="font-medium text-[rgb(var(--ui-danger))]">{diagnostic.message}</div>
                       <div className="mt-1 text-xs text-ui-muted">{diagnostic.why}</div>
-                      <div className="mt-2 text-xs text-ui-ink">Fix: {diagnostic.recommended_fix}</div>
+                      <div className="mt-2 text-xs text-ui-ink">{tr("review.fix", { fix: diagnostic.recommended_fix })}</div>
                     </div>
                   ))}
                 </div>
@@ -2655,7 +2666,7 @@ export function ResourceImportPage({
 
               {(dryRun.warning_diagnostics?.length ?? 0) > 0 ? (
                 <div className="space-y-3">
-                  <div className="text-sm font-semibold text-ui-ink">Warnings</div>
+                  <div className="text-sm font-semibold text-ui-ink">{tr("review.warnings")}</div>
                   {dryRun.warning_diagnostics?.map((diagnostic, index) => (
                     <div
                       key={`${diagnostic.code}-${diagnostic.fieldPath ?? ""}-${index}`}
@@ -2663,7 +2674,7 @@ export function ResourceImportPage({
                     >
                       <div className="font-medium text-ui-ink">{diagnostic.message}</div>
                       <div className="mt-1 text-xs text-ui-muted">{diagnostic.why}</div>
-                      <div className="mt-2 text-xs text-ui-ink">Suggested fix: {diagnostic.recommended_fix}</div>
+                      <div className="mt-2 text-xs text-ui-ink">{tr("review.suggestedFix", { fix: diagnostic.recommended_fix })}</div>
                     </div>
                   ))}
                 </div>
@@ -2671,7 +2682,7 @@ export function ResourceImportPage({
 
               {(dryRun.automatic_corrections?.length ?? 0) > 0 ? (
                 <div className="space-y-3">
-                  <div className="text-sm font-semibold text-ui-ink">Automatic corrections</div>
+                  <div className="text-sm font-semibold text-ui-ink">{tr("review.automaticCorrections")}</div>
                   {dryRun.automatic_corrections?.map((coercion, index) => (
                     <div
                       key={`${coercion.target_field}-${coercion.source_path ?? ""}-${index}`}
@@ -2679,7 +2690,7 @@ export function ResourceImportPage({
                     >
                       <div className="font-medium text-ui-ink">{coercion.target_field}</div>
                       <div className="mt-1 text-xs text-ui-muted">
-                        {coercion.original_type} {"->"} {coercion.converted_type}
+                        {tr("review.typeChange", { from: coercion.original_type, to: coercion.converted_type })}
                       </div>
                       <div className="mt-2 text-xs text-ui-ink">{coercion.reason}</div>
                     </div>
@@ -2689,19 +2700,19 @@ export function ResourceImportPage({
 
               {(dryRun.related_nodes?.length ?? 0) > 0 ? (
                 <div className="space-y-3">
-                  <div className="text-sm font-semibold text-ui-ink">Related node preview</div>
+                  <div className="text-sm font-semibold text-ui-ink">{tr("review.relatedPreview")}</div>
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                     {dryRun.related_nodes?.map((node) => (
                       <div key={node.node_key} className="rounded-xl border border-ui-border/40 bg-ui-paper/60 p-3 text-sm">
                         <div className="font-medium text-ui-ink">{node.node_label ?? node.node_key}</div>
                         <div className="mt-1 text-xs text-ui-muted">
-                          {node.target_resource ?? "Related resource"}
+                          {node.target_resource ?? tr("review.relatedResource")}
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                          <Badge tone="success">Create {node.will_create ?? 0}</Badge>
-                          <Badge tone="info">Link {node.will_link ?? 0}</Badge>
-                          {(node.blocked_count ?? 0) > 0 ? <Badge tone="danger">Blocked {node.blocked_count ?? 0}</Badge> : null}
-                          {(node.skipped_count ?? 0) > 0 ? <Badge tone="warning">Skip {node.skipped_count ?? 0}</Badge> : null}
+                          <Badge tone="success">{tr("review.nodeCreate", { count: node.will_create ?? 0 })}</Badge>
+                          <Badge tone="info">{tr("review.nodeLink", { count: node.will_link ?? 0 })}</Badge>
+                          {(node.blocked_count ?? 0) > 0 ? <Badge tone="danger">{tr("review.nodeBlocked", { count: node.blocked_count ?? 0 })}</Badge> : null}
+                          {(node.skipped_count ?? 0) > 0 ? <Badge tone="warning">{tr("review.nodeSkip", { count: node.skipped_count ?? 0 })}</Badge> : null}
                         </div>
                       </div>
                     ))}
@@ -2712,9 +2723,9 @@ export function ResourceImportPage({
               {rowFixEntries.length > 0 ? (
                 <div className="space-y-3 rounded-xl border border-[rgb(var(--ui-warning)/0.3)] bg-[rgb(var(--ui-warning)/0.08)] p-4">
                   <div>
-                    <div className="text-sm font-semibold text-ui-ink">Row-specific fixes</div>
+                    <div className="text-sm font-semibold text-ui-ink">{tr("review.rowFixesTitle")}</div>
                     <div className="mt-1 text-xs text-ui-muted">
-                      Fix only the affected rows here. These overrides do not change the global mapping and the dry-run reruns automatically after each edit.
+                      {tr("review.rowFixesDescription")}
                     </div>
                   </div>
                   <div className="space-y-4">
@@ -2722,9 +2733,9 @@ export function ResourceImportPage({
                       <div key={row.row_number} className="rounded-xl border border-ui-border/40 bg-ui-paper/60 p-4">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
-                            <div className="text-sm font-medium text-ui-ink">Row {row.row_number}</div>
+                            <div className="text-sm font-medium text-ui-ink">{tr("review.rowLabel", { row: row.row_number })}</div>
                             <div className="text-xs text-ui-muted">
-                              Override only the fields listed below for this row.
+                              {tr("review.rowFixHint")}
                             </div>
                           </div>
                           <Badge
@@ -2738,7 +2749,7 @@ export function ResourceImportPage({
                                     : "success"
                             }
                           >
-                            {row.action ?? row.execution_status ?? "create"}
+                            {rowActionLabel(row.action ?? row.execution_status ?? "create")}
                           </Badge>
                         </div>
                         {(row.reason_messages?.length ?? 0) > 0 ? (
@@ -2749,12 +2760,12 @@ export function ResourceImportPage({
                         {originalRow ? (
                           <div className="mt-3 rounded-xl border border-ui-border/30 bg-ui-surface/70 p-3">
                             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ui-muted">
-                              Original file row
+                              {tr("review.originalRow")}
                             </div>
                             <div className="mt-2 flex flex-wrap gap-2 text-xs">
                               {Object.entries(originalRow).slice(0, 8).map(([key, value]) => (
                                 <Badge key={`${row.row_number}-${key}`} tone="neutral">
-                                  {key}: {stringifyImportValue(value) || "empty"}
+                                  {key}: {stringifyImportValue(value) || tr("review.emptyValue")}
                                 </Badge>
                               ))}
                             </div>
@@ -2763,7 +2774,7 @@ export function ResourceImportPage({
                         {(row.related_nodes?.length ?? 0) > 0 ? (
                           <div className="mt-3 rounded-xl border border-ui-border/30 bg-ui-surface/70 p-3">
                             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ui-muted">
-                              Related node actions
+                              {tr("review.relatedActions")}
                             </div>
                             <div className="mt-2 flex flex-wrap gap-2 text-xs">
                               {row.related_nodes?.map((node) => (
@@ -2779,7 +2790,10 @@ export function ResourceImportPage({
                                           : "success"
                                   }
                                 >
-                                  {(node.node_label ?? node.node_key) || "Related node"}: {node.action ?? node.execution_status ?? "create"}
+                                  {tr("review.nodeAction", {
+                                  node: (node.node_label ?? node.node_key) || tr("relatedNode"),
+                                  action: rowActionLabel(node.action ?? node.execution_status ?? "create"),
+                                })}
                                 </Badge>
                               ))}
                             </div>
@@ -2811,11 +2825,11 @@ export function ResourceImportPage({
                                   })()
                                 }
                                 referenceFilters={resolveReferenceFilters(descriptor.column)}
-                                placeholder={`Fix ${descriptor.column.label ?? descriptor.column.key} for row ${row.row_number}`}
+                                placeholder={tr("review.rowFixPlaceholder", { field: descriptor.column.label ?? descriptor.column.key, row: row.row_number })}
                                 testId={`${prefix}-row-${row.row_number}-${sanitizeTargetFieldForTestId(descriptor.targetField)}`}
                               />
                               <p className="text-xs text-ui-muted">
-                                This override applies only to row {row.row_number}. Leave it blank to keep the current mapped value.
+                                {tr("review.rowFixScope", { row: row.row_number })}
                               </p>
                             </label>
                           ))}
@@ -2828,12 +2842,12 @@ export function ResourceImportPage({
 
               {(dryRun.rows?.length ?? 0) > 0 ? (
                 <details className="rounded-xl border border-ui-border/40 bg-ui-paper/60 p-4">
-                  <summary className="cursor-pointer text-sm font-medium text-ui-ink">Row review sample</summary>
+                  <summary className="cursor-pointer text-sm font-medium text-ui-ink">{tr("review.rowSample")}</summary>
                   <div className="mt-3 space-y-3">
                     {dryRun.rows?.slice(0, 10).map((row) => (
                       <div key={row.row_number} className="rounded-xl border border-ui-border/30 bg-ui-surface/70 p-3 text-xs">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium text-ui-ink">Row {row.row_number}</span>
+                          <span className="font-medium text-ui-ink">{tr("review.rowLabel", { row: row.row_number })}</span>
                           <Badge
                             tone={
                               row.action === "block"
@@ -2845,7 +2859,7 @@ export function ResourceImportPage({
                                     : "success"
                             }
                           >
-                            {row.action ?? row.execution_status ?? "create"}
+                            {rowActionLabel(row.action ?? row.execution_status ?? "create")}
                           </Badge>
                         </div>
                         {(row.reason_messages?.length ?? 0) > 0 ? (
@@ -2868,7 +2882,10 @@ export function ResourceImportPage({
                                         : "success"
                                 }
                               >
-                                {(node.node_label ?? node.node_key) || "Related node"}: {node.action ?? node.execution_status ?? "create"}
+                                {tr("review.nodeAction", {
+                                  node: (node.node_label ?? node.node_key) || tr("relatedNode"),
+                                  action: rowActionLabel(node.action ?? node.execution_status ?? "create"),
+                                })}
                               </Badge>
                             ))}
                           </div>
@@ -2882,41 +2899,41 @@ export function ResourceImportPage({
 
             <div className="space-y-4 rounded-2xl border border-ui-border/50 bg-ui-paper/50 p-4">
               <div className="space-y-2">
-                <div className="text-sm font-semibold text-ui-ink">What will be saved</div>
+                <div className="text-sm font-semibold text-ui-ink">{tr("summary.title")}</div>
                 <div className="rounded-xl border border-ui-border/40 bg-ui-surface/70 p-3 text-sm text-ui-muted">
-                  <div>Target table: <span className="font-medium text-ui-ink">{selectedResource?.label ?? selectedResource?.key ?? effectiveResourceKey}</span></div>
-                  <div>Write mode: <span className="font-medium text-ui-ink">{writeMode}</span></div>
-                  <div>Import scope: <span className="font-medium text-ui-ink">{Object.entries(effectiveScopeContext).map(([scopeType, value]) => `${resolveScopeTypeLabel(scopeType as ScopeContextKey)} ${value}`).join(" | ") || "Current access scope"}</span></div>
-                  <div>Source file: <span className="font-medium text-ui-ink">{parsedFile?.fileName ?? "n/a"}</span></div>
-                  <div>Worksheet: <span className="font-medium text-ui-ink">{dryRun.sheet_name ?? parsedFile?.selectedSheet ?? "n/a"}</span></div>
-                  <div>Rows staged: <span className="font-medium text-ui-ink">{dryRun.total_rows ?? 0}</span></div>
-                  <div>Related nodes: <span className="font-medium text-ui-ink">{activeRelatedNodes.length > 0 ? activeRelatedNodes.map((node) => node.node_label ?? node.node_key).join(" | ") : "None attached"}</span></div>
+                  <div>{tr("summary.targetTable")} <span className="font-medium text-ui-ink">{selectedResource?.label ?? selectedResource?.key ?? effectiveResourceKey}</span></div>
+                  <div>{tr("summary.writeMode")} <span className="font-medium text-ui-ink">{tr(`writeModes.${writeMode}`)}</span></div>
+                  <div>{tr("summary.importScope")} <span className="font-medium text-ui-ink">{Object.entries(effectiveScopeContext).map(([scopeType, value]) => `${resolveScopeTypeLabel(scopeType as ScopeContextKey, tr)} ${value}`).join(" | ") || tr("summary.currentAccessScope")}</span></div>
+                  <div>{tr("summary.sourceFile")} <span className="font-medium text-ui-ink">{parsedFile?.fileName ?? tr("summary.notAvailable")}</span></div>
+                  <div>{tr("summary.worksheet")} <span className="font-medium text-ui-ink">{dryRun.sheet_name ?? parsedFile?.selectedSheet ?? tr("summary.notAvailable")}</span></div>
+                  <div>{tr("summary.rowsStaged")} <span className="font-medium text-ui-ink">{dryRun.total_rows ?? 0}</span></div>
+                  <div>{tr("summary.relatedNodes")} <span className="font-medium text-ui-ink">{activeRelatedNodes.length > 0 ? activeRelatedNodes.map((node) => node.node_label ?? node.node_key).join(" | ") : tr("summary.noneAttached")}</span></div>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <div className="text-sm font-semibold text-ui-ink">Approval</div>
+                <div className="text-sm font-semibold text-ui-ink">{tr("approval.title")}</div>
                 <p className="text-sm text-ui-muted">
-                  Auto-detection and formatting checks are complete. The import will not write any rows until you approve it.
+                  {tr("approval.description")}
                 </p>
                 {(dryRun?.blocked_count ?? 0) > 0 && actionableWriteCount > 0 ? (
                   <div className="rounded-xl border border-[rgb(var(--ui-warning)/0.35)] bg-[rgb(var(--ui-warning)/0.08)] p-3 text-sm text-ui-ink">
-                    {dryRun?.blocked_count} row(s) are blocked and will be skipped into the annotated error export. Valid rows can still be imported after approval.
+                    {tr("approval.blockedRows", { count: dryRun?.blocked_count ?? 0 })}
                   </div>
                 ) : null}
                 {onlyBlockedRows ? (
                   <div className="rounded-xl border border-[rgb(var(--ui-danger)/0.35)] bg-[rgb(var(--ui-danger)/0.08)] p-3 text-sm text-ui-ink">
-                    Every staged row is currently blocked or skipped. Fix the file or mapping first so there is at least one valid row to import.
+                    {tr("approval.onlyBlocked")}
                   </div>
                 ) : null}
                 {fixedValueColumns.length > 0 ? (
                   <div className="rounded-xl border border-[rgb(var(--ui-info)/0.35)] bg-[rgb(var(--ui-info)/0.08)] p-3 text-sm text-ui-ink">
-                    {fixedValueColumns.length} field(s) will use one shared value for every row. Review the automatic corrections below before approval.
+                    {tr("approval.fixedValues", { count: fixedValueColumns.length })}
                   </div>
                 ) : null}
                 {optionalEmptyColumns.length > 0 ? (
                   <div className="rounded-xl border border-ui-border/40 bg-ui-surface/70 p-3 text-sm text-ui-ink">
-                    {optionalEmptyColumns.length} optional field(s) are intentionally left empty for this import.
+                    {tr("approval.optionalEmpty", { count: optionalEmptyColumns.length })}
                   </div>
                 ) : null}
               </div>
@@ -2928,7 +2945,7 @@ export function ResourceImportPage({
                   disabled={Boolean(busy) || hasApprovalBlockers}
                   data-testid={`${prefix}-approve-import`}
                 >
-                  {busy === "start" ? "Starting import..." : "Approve and import"}
+                  {busy === "start" ? tr("approval.starting") : tr("approval.approve")}
                 </Button>
                 <Button
                   type="button"
@@ -2936,7 +2953,7 @@ export function ResourceImportPage({
                   onClick={() => void handleRebuildReview()}
                   disabled={Boolean(busy)}
                 >
-                  Re-run checks
+                  {tr("approval.rerun")}
                 </Button>
               </div>
             </div>
@@ -2948,8 +2965,8 @@ export function ResourceImportPage({
       {run ? (
         <div ref={runningSectionRef} tabIndex={-1} className="outline-none">
           <Section
-            title={runCancelable ? "Import in progress" : "Import status"}
-            description="This view shows the canonical import run and any persisted report. Active runs refresh automatically."
+            title={runCancelable ? tr("run.inProgressTitle") : tr("run.statusTitle")}
+            description={tr("run.description")}
           >
           <div className="space-y-4">
             <div className="rounded-2xl border border-ui-border/50 bg-ui-surface/70 p-4">
@@ -2957,11 +2974,11 @@ export function ResourceImportPage({
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge tone={runStatusTone}>{runStatusLabel}</Badge>
-                    <Badge tone="info">{runProgressPercent}% complete</Badge>
-                    {run?.id ? <Badge tone="neutral">Run {run.id}</Badge> : null}
+                    <Badge tone="info">{tr("run.percentComplete", { percent: runProgressPercent })}</Badge>
+                    {run?.id ? <Badge tone="neutral">{tr("run.runId", { id: run.id })}</Badge> : null}
                   </div>
                   <p className="max-w-2xl text-sm text-ui-muted">
-                    {resolveRunStatusSummary(run?.status)}
+                    {resolveRunStatusSummary(run?.status, tr)}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -2972,7 +2989,7 @@ export function ResourceImportPage({
                     disabled={Boolean(busy) || !run?.id}
                     data-testid={`${prefix}-refresh-import`}
                   >
-                    {busy === "refresh-run" ? "Refreshing..." : "Refresh status"}
+                    {busy === "refresh-run" ? tr("run.refreshing") : tr("run.refreshStatus")}
                   </Button>
                   {runCancelable ? <Button
                     type="button"
@@ -2981,19 +2998,19 @@ export function ResourceImportPage({
                     disabled={Boolean(busy) || !run?.id || !cancelReason.trim()}
                     data-testid={`${prefix}-cancel-import`}
                   >
-                    {busy === "cancel" ? "Canceling..." : "Cancel import"}
+                    {busy === "cancel" ? tr("run.canceling") : tr("run.cancelImport")}
                   </Button> : null}
                 </div>
               </div>
               {runCancelable ? (
                 <div className="mt-4 max-w-2xl space-y-2">
-                  <label htmlFor={`${prefix}-cancel-reason`} className="text-sm font-medium text-ui-ink">Cancellation reason (required)</label>
+                  <label htmlFor={`${prefix}-cancel-reason`} className="text-sm font-medium text-ui-ink">{tr("run.cancelReasonLabel")}</label>
                   <Input id={`${prefix}-cancel-reason`} required value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} disabled={Boolean(busy)} aria-describedby={`${prefix}-cancel-reason-hint`} />
-                  <p id={`${prefix}-cancel-reason-hint`} className="text-sm text-ui-muted">The reason is saved with the server-confirmed cancellation for audit.</p>
+                  <p id={`${prefix}-cancel-reason-hint`} className="text-sm text-ui-muted">{tr("run.cancelReasonHint")}</p>
                 </div>
               ) : null}
-              {canonicalCancelReason ? <p className="mt-4 break-words text-sm text-ui-ink">Cancellation reason: {canonicalCancelReason}</p> : null}
-              {run?.canceled_at ? <p className="mt-2 text-sm text-ui-muted">Canceled at: <time dateTime={run.canceled_at}>{run.canceled_at}</time></p> : null}
+              {canonicalCancelReason ? <p className="mt-4 break-words text-sm text-ui-ink">{tr("run.cancelReason", { reason: canonicalCancelReason })}</p> : null}
+              {run?.canceled_at ? <p className="mt-2 text-sm text-ui-muted">{tr("run.canceledAt")} <time dateTime={run.canceled_at}>{run.canceled_at}</time></p> : null}
               <div className="mt-4 h-2 overflow-hidden rounded-full bg-ui-paper/80">
                 <div
                   className="h-full rounded-full bg-[rgb(var(--ui-info))] transition-[width] duration-300"
@@ -3002,48 +3019,48 @@ export function ResourceImportPage({
               </div>
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-ui-muted">
                 <span>
-                  Processed {runProcessedCount} of {runTotalRows || 0} staged row(s)
+                  {tr("run.processed", { processed: runProcessedCount, total: runTotalRows || 0 })}
                 </span>
                 <span>
                   {normalizedRunStatus === "queued"
-                    ? "Waiting for worker pickup"
+                    ? tr("run.waiting")
                     : normalizedRunStatus === "processing"
-                      ? `${runRemainingCount} row(s) remaining`
-                      : "Auto-refresh completed"}
+                      ? tr("run.remaining", { count: runRemainingCount })
+                      : tr("run.autoRefreshDone")}
                 </span>
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-5">
               <div className="rounded-xl border border-ui-border/40 bg-ui-surface/70 p-3">
-                <div className="text-xs text-ui-muted">Created</div>
+                <div className="text-xs text-ui-muted">{tr("run.counts.created")}</div>
                 <div className="mt-1 text-lg font-semibold text-ui-ink">{run?.created_count ?? 0}</div>
               </div>
               <div className="rounded-xl border border-ui-border/40 bg-ui-surface/70 p-3">
-                <div className="text-xs text-ui-muted">Updated</div>
+                <div className="text-xs text-ui-muted">{tr("run.counts.updated")}</div>
                 <div className="mt-1 text-lg font-semibold text-ui-ink">{run?.updated_count ?? 0}</div>
               </div>
               <div className="rounded-xl border border-ui-border/40 bg-ui-surface/70 p-3">
-                <div className="text-xs text-ui-muted">Skipped</div>
+                <div className="text-xs text-ui-muted">{tr("run.counts.skipped")}</div>
                 <div className="mt-1 text-lg font-semibold text-ui-ink">{run?.skipped_count ?? 0}</div>
               </div>
               <div className="rounded-xl border border-ui-border/40 bg-ui-surface/70 p-3">
-                <div className="text-xs text-ui-muted">Blocked</div>
+                <div className="text-xs text-ui-muted">{tr("run.counts.blocked")}</div>
                 <div className="mt-1 text-lg font-semibold text-ui-ink">{run?.blocked_count ?? 0}</div>
               </div>
               <div className="rounded-xl border border-ui-border/40 bg-ui-surface/70 p-3">
-                <div className="text-xs text-ui-muted">Failed</div>
+                <div className="text-xs text-ui-muted">{tr("run.counts.failed")}</div>
                 <div className="mt-1 text-lg font-semibold text-ui-ink">{run?.failed_count ?? 0}</div>
               </div>
             </div>
           </div>
           {!report && Array.isArray(run?.artifacts) && run.artifacts.length > 0 ? (
             <div className="mt-4 rounded-2xl border border-ui-border/50 bg-ui-surface/70 p-4">
-              <div className="text-sm font-semibold text-ui-ink">Run artifacts</div>
+              <div className="text-sm font-semibold text-ui-ink">{tr("run.artifacts")}</div>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 {run.artifacts.map((artifact) => {
                   const rawUrl = artifact.signed_url?.trim() || "";
                   const href = resolveTrustedExternalDataUrl(rawUrl);
-                  const label = resolveArtifactLabel(artifact.relation_type, artifact.file_name);
+                  const label = resolveArtifactLabel(artifact.relation_type, artifact.file_name, tr);
                   return href ? (
                     <Button key={`${artifact.artifact_id ?? label}-${artifact.relation_type ?? "artifact"}`} asChild size="sm" variant="ghost">
                       <a href={href} target="_blank" rel="noreferrer">
@@ -3064,7 +3081,7 @@ export function ResourceImportPage({
       ) : null}
 
       {importedRecords.length > 0 ? (
-        <Section title="Imported records" description="Open records confirmed by the persisted import run.">
+        <Section title={tr("imported.title")} description={tr("imported.description")}>
           <div className="flex flex-wrap gap-2">
             {importedRecords.map((record) => {
               const href = buildResourceImportRecordHref(appBasePath, record.resource, record.id, requestedReturnTo);
@@ -3075,7 +3092,7 @@ export function ResourceImportPage({
                     event.preventDefault();
                     onOpenImportedRecord(record.resource, record.id);
                   } : undefined}>
-                    Open {record.label} {record.id}
+                    {tr("imported.open", { label: record.label, id: record.id })}
                   </a>
                 </Button>
               ) : null;
@@ -3088,15 +3105,15 @@ export function ResourceImportPage({
         <div ref={reportSectionRef} tabIndex={-1} className="outline-none">
           <React.Suspense fallback={<LoadingState variant="section" />}>
             <Section
-              title="Operation report"
-              description="Every import writes a persisted report that can be reopened later from the normal resource surfaces."
+              title={tr("report.title")}
+              description={tr("report.description")}
             >
             {Array.isArray(run?.artifacts) && run.artifacts.length > 0 ? (
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 {run.artifacts.map((artifact) => {
                   const rawUrl = artifact.signed_url?.trim() || "";
                   const href = resolveTrustedExternalDataUrl(rawUrl);
-                  const label = resolveArtifactLabel(artifact.relation_type, artifact.file_name);
+                  const label = resolveArtifactLabel(artifact.relation_type, artifact.file_name, tr);
                   return href ? (
                     <Button key={`${artifact.artifact_id ?? label}-${artifact.relation_type ?? "artifact"}-report`} asChild size="sm" variant="ghost">
                       <a href={href} target="_blank" rel="noreferrer">
