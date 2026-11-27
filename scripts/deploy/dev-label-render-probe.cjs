@@ -20,6 +20,11 @@ const EXIT = Object.freeze({
 });
 const pdfHeader = Buffer.from('%PDF-');
 const labelType = 'shipping';
+// Only fixed codes from the renderer's non-200 designer preview responses are safe to report.
+const previewErrorCodes = new Set([
+  'auth_required', 'draft_id_required', 'shipment_id_required', 'config_missing',
+  'org_required', 'draft_not_found', 'template_missing', 'payload_missing',
+]);
 
 function checkPreview(status, body) {
   if (status !== 200) return { code: EXIT.renderStatus };
@@ -35,13 +40,13 @@ function checkPreview(status, body) {
 
 async function renderPreview(send, wait = delay) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    let response;
     let status;
     let text;
     try {
-      const response = await send();
+      response = await send();
       status = response.status;
       if (status === 200) text = await response.text();
-      else await response.body?.cancel().catch(() => {});
     } catch {
       status = undefined;
     }
@@ -54,9 +59,20 @@ async function renderPreview(send, wait = delay) {
       }
       return checkPreview(status, result);
     }
-    if (status !== undefined && (status < 500 || status >= 600)) return checkPreview(status);
+    if (status !== undefined) {
+      if (status < 500 || status >= 600 || attempt === 2) {
+        const body = await response.json().catch(() => null);
+        const errorCode = body?.error?.code;
+        const rendererCode = previewErrorCodes.has(errorCode) ? errorCode : 'unavailable';
+        return {
+          code: EXIT.renderStatus,
+          diagnostic: `LABEL_PROBE_RENDER_ERROR status=${status} renderer_code=${rendererCode}`,
+        };
+      }
+      await response.body?.cancel().catch(() => {});
+    }
     if (attempt < 2) await wait(1000 * 2 ** attempt);
-    else return { code: status === undefined ? EXIT.renderNetwork : EXIT.renderStatus };
+    else return { code: EXIT.renderNetwork };
   }
 }
 
@@ -94,6 +110,7 @@ async function seedLabel(db, { organizationId, shipmentId, boxId, draftId, tag, 
 }
 
 async function run(env) {
+  let renderDiagnostic;
   const { result, error, cleanupErrors, cleaned } = await withDevFixture(env, {
     prefix: 'dev-label-probe',
     marker: 'dev_label_probe',
@@ -112,26 +129,30 @@ async function run(env) {
         draft_id: draftId, shipment_id: shipmentId, shipment_box_id: boxId,
       },
     ));
+    // Kept outside the callback so a non-200 render still reports its status after cleanup.
+    renderDiagnostic = rendered.diagnostic;
     requireProbe(rendered.code === 0, rendered.code);
     return rendered.pdfBytes;
   });
   const errors = error ? [error instanceof ProbeError ? error.code : EXIT.renderNetwork] : [];
-  return { pdfBytes: result, cleaned, errors: [...errors, ...cleanupErrors] };
+  return { pdfBytes: result, renderDiagnostic, cleaned, errors: [...errors, ...cleanupErrors] };
 }
 
 async function main() {
   const summary = process.env.GITHUB_STEP_SUMMARY;
   const evidence = [];
   let errors = [];
+  let renderDiagnostic;
   try {
     const result = await run(process.env);
-    errors = result.errors;
+    ({ errors, renderDiagnostic } = result);
     if (result.pdfBytes) evidence.push(`LABEL_PROBE status=200 pdf_bytes=${result.pdfBytes} sha=${process.env.GITHUB_SHA}`);
     if (result.cleaned) evidence.push('LABEL_PROBE_CLEANUP rows=0');
   } catch (error) {
     errors.push(error instanceof ProbeError ? error.code : EXIT.unexpected);
   }
   const failures = errors.map(code => `LABEL_PROBE_ERROR code=${code}`);
+  if (renderDiagnostic) failures.push(renderDiagnostic);
   for (const line of evidence) console.log(line);
   for (const line of failures) console.error(line);
   if (summary) {
