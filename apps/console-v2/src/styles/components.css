@@ -304,8 +304,6 @@
   flex-shrink: 0;
 }
 @keyframes live-spin { to { transform: rotate(360deg); } }
-.is-updated, tr.is-updated > td { animation: live-flash 2.4s var(--ease-out) 1; }
-@keyframes live-flash { from { background: var(--info-soft); } }
 .new-rows {
   display: flex;
   align-items: center;
@@ -355,8 +353,7 @@
 }
 .toast__actions { display: flex; gap: 8px; }
 @media (prefers-reduced-motion: reduce) {
-  .is-updated, tr.is-updated > td, .dot--pulse, .live-spinner { animation: none !important; }
-  .is-updated, .is-updated > td { background: color-mix(in oklab, var(--info-soft) 70%, var(--paper)); }
+  .dot--pulse, .live-spinner { animation: none !important; }
 }
 
 /* ---------- Scope pill (resolved-from) ---------- */
