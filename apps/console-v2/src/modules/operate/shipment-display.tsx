@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
-import { useI18n } from '@/lib/i18n';
+import { englishT, useI18n, type Translate } from '@/lib/i18n';
 
-export function compactReferenceToken(raw: unknown, label = 'Reference'): string {
+export function compactReferenceToken(raw: unknown, label?: string, t: Translate = englishT): string {
   const value = String(raw ?? '').trim();
   if (!value) return '—';
   const parts = value
@@ -10,7 +10,7 @@ export function compactReferenceToken(raw: unknown, label = 'Reference'): string
     .filter(Boolean);
   const meaningful = parts.length > 1 ? parts[parts.length - 1] : parts[0];
   const suffix = String(meaningful ?? '').replace(/[^a-z0-9]/gi, '').toUpperCase().slice(-6);
-  return `${label} #${suffix || 'UNKNOWN'}`;
+  return `${label ?? t('shipments.common.reference', 'Reference')} #${suffix || 'UNKNOWN'}`;
 }
 
 export function compactReference(raw: unknown, label = 'Reference'): ReactNode {
