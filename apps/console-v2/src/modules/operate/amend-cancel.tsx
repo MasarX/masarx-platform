@@ -35,6 +35,7 @@ import * as api from '@/lib/api';
 import { CAP } from '@/lib/capabilities';
 import { useConsoleNavigator } from '@/lib/useConsoleNavigator';
 import { readUrlParam } from '@/lib/url-params';
+import { englishT, fill, useT, type Translate } from '@/lib/i18n';
 
 interface AmendRequestMetadata {
   requested_op?: 'amend_address' | 'amend_cod' | 'cancel' | 'reschedule' | string;
@@ -112,8 +113,8 @@ function compactReferenceText(raw: unknown): string {
   return displayReferenceValue(raw);
 }
 
-function requestedOpLabel(op: string | null): string {
-  if (!op) return 'Missing details';
+function requestedOpLabel(op: string | null, t: Translate = englishT): string {
+  if (!op) return t('amendCancel.missingDetails');
   const row = api.lookupRow('shipment_amend_op', op) as { label?: string } | null;
   return row?.label ?? op.replace(/_/g, ' ');
 }
@@ -166,30 +167,32 @@ function stablePayloadKey(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function summarizeReviewValue(value: unknown): string {
-  if (value == null || value === '') return 'Not set';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+function summarizeReviewValue(value: unknown, t: Translate = englishT): string {
+  if (value == null || value === '') return t('amendCancel.values.notSet');
+  if (typeof value === 'boolean') return value ? t('common.yes') : t('common.no');
   if (typeof value === 'number') return String(value);
   if (typeof value === 'string') return value.replace(/[_-]+/g, ' ');
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+  if (Array.isArray(value)) {
+    return fill(t(value.length === 1 ? 'amendCancel.values.itemOne' : 'amendCancel.values.itemOther'), { n: value.length });
+  }
   if (typeof value === 'object') {
     const count = Object.keys(value as Record<string, unknown>).length;
-    return `${count} detail${count === 1 ? '' : 's'}`;
+    return fill(t(count === 1 ? 'amendCancel.values.detailOne' : 'amendCancel.values.detailOther'), { n: count });
   }
   return String(value);
 }
 
-function summarizeReviewEntries(value: unknown): Array<{ key: string; value: string }> {
+function summarizeReviewEntries(value: unknown, t: Translate = englishT): Array<{ key: string; value: string }> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
   return Object.entries(value as Record<string, unknown>)
     .slice(0, 8)
     .map(([key, raw]) => ({
       key,
-      value: summarizeReviewValue(raw),
+      value: summarizeReviewValue(raw, t),
     }));
 }
 
-export function canUseBatchForRequests(rows: AmendTaskRow[]): { ok: true; op: string; payload: Record<string, unknown>; ids: string[] } | { ok: false; reason: string } {
+export function canUseBatchForRequests(rows: AmendTaskRow[], t: Translate = englishT): { ok: true; op: string; payload: Record<string, unknown>; ids: string[] } | { ok: false; reason: string } {
   const prepared = rows
     .map((row) => {
       const args = buildAmendMutationArgs(row);
@@ -197,16 +200,16 @@ export function canUseBatchForRequests(rows: AmendTaskRow[]): { ok: true; op: st
     })
     .filter(Boolean) as Array<{ row: AmendTaskRow; args: NonNullable<ReturnType<typeof buildAmendMutationArgs>> }>;
   if (prepared.length !== rows.length || prepared.length === 0) {
-    return { ok: false, reason: 'Some selected requests are missing operation or shipment details.' };
+    return { ok: false, reason: t('amendCancel.batch.missing') };
   }
   const first = prepared[0]!.args;
   const firstPayload = stablePayloadKey(first.payload);
   const sameContract = prepared.every(({ args }) => args.op === first.op && stablePayloadKey(args.payload) === firstPayload);
   if (!sameContract) {
-    return { ok: false, reason: 'Selected requests have different operations or payloads.' };
+    return { ok: false, reason: t('amendCancel.batch.mixed') };
   }
   if (first.op !== 'cancel' && first.op !== 'reschedule') {
-    return { ok: false, reason: 'Selected amend requests need individual workflow review.' };
+    return { ok: false, reason: t('amendCancel.batch.individual') };
   }
   return {
     ok: true,
@@ -237,6 +240,7 @@ function taskActionNextStatus(kind: 'approve' | 'reject'): string {
 }
 
 export function AmendCancelModule() {
+  const t = useT();
   const { scope } = useIdentity();
   const go = useConsoleNavigator();
   const canRead = useCapability(CAP.SHIPMENTS_READ);
@@ -255,11 +259,11 @@ export function AmendCancelModule() {
 
   const columns: Array<DataTableColumn<AmendTaskRow>> = useMemo(
     () => [
-      { key: 'task_id', label: 'Task', sortable: true, render: compactReference },
-      { key: 'shipment_id', label: 'Shipment', sortable: true, filterable: true, render: compactReference },
+      { key: 'task_id', label: t('amendCancel.columns.task'), sortable: true, render: compactReference },
+      { key: 'shipment_id', label: t('amendCancel.columns.shipment'), sortable: true, filterable: true, render: compactReference },
       {
         key: 'op',
-        label: 'Operation',
+        label: t('amendCancel.columns.operation'),
         sortable: true,
         filterable: true,
         render: (_raw: unknown, row: AmendTaskRow) => {
@@ -267,23 +271,23 @@ export function AmendCancelModule() {
           // W54-C — render an explicit `(metadata missing)` chip when
           // canonical `tasks.metadata.requested_op` is absent.
           return op
-            ? <Chip size="xs" label={requestedOpLabel(op)} />
-            : <Chip size="xs" kind="warn" label="(metadata missing)" />;
+            ? <Chip size="xs" label={requestedOpLabel(op, t)} />
+            : <Chip size="xs" kind="warn" label={t('amendCancel.metadataMissing')} />;
         },
       },
       {
         key: 'requested_by',
-        label: 'Requested by',
+        label: t('amendCancel.columns.requestedBy'),
         sortable: true,
         filterable: true,
         render: (_raw: unknown, row: AmendTaskRow) => {
           const requestedBy = readRequestedBy(row);
-          return <span>{requestedBy ?? '(metadata missing)'}</span>;
+          return <span>{requestedBy ? <bdi>{requestedBy}</bdi> : t('amendCancel.metadataMissing')}</span>;
         },
       },
-      { key: 'status', label: 'Status', sortable: true, filterable: true, lookup: 'task_status', editable: canTransitionTask },
+      { key: 'status', label: t('amendCancel.columns.status'), sortable: true, filterable: true, lookup: 'task_status', editable: canTransitionTask },
     ],
-    [canTransitionTask],
+    [canTransitionTask, t],
   );
 
   function openAmendDrawer(row: AmendTaskRow) {
@@ -307,6 +311,7 @@ export function AmendCancelModule() {
   // Drawer body — runs the dry-run on mount and renders the live diff +
   // resolved policy values from the response. No hardcoded values.
   function AmendDrawerBody({ task }: { task: AmendTaskRow }) {
+    const t = useT();
     const op = readRequestedOp(task);
     const requestedBy = readRequestedBy(task);
     const [preview, setPreview] = useState<{
@@ -328,7 +333,7 @@ export function AmendCancelModule() {
           const res = await amend.mutateAsync(args);
           setPreview(res as typeof preview);
         } catch {
-          setError('Preview changes could not be prepared. Try again.');
+          setError(t('amendCancel.drawer.previewError'));
         }
       })();
       return null;
@@ -339,8 +344,8 @@ export function AmendCancelModule() {
       return (
         <StateView
           kind="error"
-          title="Missing amend request details"
-          hint="This request is missing the operation details needed for preview."
+          title={t('amendCancel.drawer.missingTitle')}
+          hint={t('amendCancel.drawer.missingHint')}
         />
       );
     }
@@ -348,39 +353,40 @@ export function AmendCancelModule() {
     return (
       <div>
         <p className="state__hint">
-          Access, lock checks, preview, and final apply run through the approved shipment-change workflow.
+          {t('amendCancel.drawer.hint')}
         </p>
         <div className="card" style={{ marginTop: '12px' }}>
-          <Kv k="Operation" v={requestedOpLabel(op)} />
-          <Kv k="Requested by" v={requestedBy ?? 'Not recorded'} />
+          <Kv k={t('amendCancel.columns.operation')} v={<bdi>{requestedOpLabel(op, t)}</bdi>} />
+          <Kv k={t('amendCancel.columns.requestedBy')} v={requestedBy ? <bdi>{requestedBy}</bdi> : t('amendCancel.values.notRecorded')} />
           <Kv
-            k="Workflow"
-            v={preview?.workflow_template ? 'Ready' : <span className="state__hint">Checking...</span>}
+            k={t('amendCancel.drawer.workflow')}
+            v={preview?.workflow_template ? t('amendCancel.values.ready') : <span className="state__hint">{t('amendCancel.values.checking')}</span>}
           />
           <Kv
-            k="Policy check"
-            v={preview?.settings_resolution_id ? 'Passed' : <span className="state__hint">Checking...</span>}
+            k={t('amendCancel.drawer.policyCheck')}
+            v={preview?.settings_resolution_id ? t('amendCancel.values.passed') : <span className="state__hint">{t('amendCancel.values.checking')}</span>}
           />
         </div>
-        <h4 className="eyebrow" style={{ marginTop: '14px' }}>Preview changes</h4>
+        <h4 className="eyebrow" style={{ marginTop: '14px' }}>{t('amendCancel.drawer.previewChanges')}</h4>
         {error ? (
           <div className="state state--denied">
             <p className="state__hint">{error}</p>
           </div>
         ) : preview?.diff != null ? (
           <div className="card" style={{ marginTop: '8px' }}>
-            {summarizeReviewEntries(preview.diff).map((entry) => (
-              <Kv key={entry.key} k={entry.key.replace(/[_-]+/g, ' ')} v={entry.value} />
+            {summarizeReviewEntries(preview.diff, t).map((entry) => (
+              <Kv key={entry.key} k={<bdi>{entry.key.replace(/[_-]+/g, ' ')}</bdi>} v={<bdi>{entry.value}</bdi>} />
             ))}
           </div>
         ) : (
-          <div className="state__hint">Preparing preview...</div>
+          <div className="state__hint">{t('amendCancel.drawer.preparing')}</div>
         )}
       </div>
     );
   }
 
   function AmendDrawerFooter({ task }: { task: AmendTaskRow }) {
+    const t = useT();
     const op = readRequestedOp(task);
     const mutationArgs = buildAmendMutationArgs(task);
     // W54-C — actions disabled when canonical requested_op is missing.
@@ -388,19 +394,19 @@ export function AmendCancelModule() {
     return (
       <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
         <Button
-          label="Reject"
+          label={t('common.reject')}
           iconName="close"
           kind="ghost"
           capability={CAP.TASKS_COMPLETE}
           onClick={async () => {
             await transition.mutateAsync({ taskId: task.id, transition: { next_status: taskActionNextStatus('reject') } });
-            pushToast('Review rejected', 'info');
+            pushToast(t('amendCancel.toast.rejected'), 'info');
             drawer.close();
           }}
         />
         <div style={{ flex: 1 }} />
         <Button
-          label="Preview again"
+          label={t('amendCancel.actions.previewAgain')}
           iconName="check"
           kind="ghost"
           disabled={opMissing}
@@ -412,14 +418,14 @@ export function AmendCancelModule() {
             // canonical workflow_template id is missing.
             const tpl = (res as { workflow_template?: string }).workflow_template;
             if (!tpl) {
-              pushToast('Shipment-change workflow is not configured.', 'danger');
+              pushToast(t('amendCancel.toast.notConfigured'), 'danger');
               return;
             }
-            pushToast('Preview refreshed', 'info');
+            pushToast(t('amendCancel.toast.refreshed'), 'info');
           }}
         />
         <Button
-          label="Apply change"
+          label={t('amendCancel.actions.applyChange')}
           iconName="play"
           kind="primary"
           capabilities={[CAP.SHIPMENTS_WRITE, CAP.TASKS_COMPLETE]}
@@ -432,10 +438,10 @@ export function AmendCancelModule() {
             // canonical workflow_run_id is missing.
             const wf = (res as { workflow_run_id?: string }).workflow_run_id;
             if (!wf) {
-              pushToast('Shipment-change workflow could not be started.', 'danger');
+              pushToast(t('amendCancel.toast.notStarted'), 'danger');
               return;
             }
-            pushToast('Shipment-change workflow started', 'good');
+            pushToast(t('amendCancel.toast.started'), 'good');
             // After apply, transition the review task to completed so the
             // queue reflects reality.
             await transition.mutateAsync({ taskId: task.id, transition: { next_status: taskActionNextStatus('approve') } });
@@ -463,23 +469,23 @@ export function AmendCancelModule() {
         ((value.delete as Record<string, unknown> | undefined)?.window_hours as number | undefined);
       if (lockAfter == null || cancelWindowHours == null) {
         drawer.open({
-          title: 'Shipment-change policy',
+          title: t('amendCancel.policy.title'),
           body: (
             <StateView
               kind="error"
-              title="Shipment-change policy is incomplete"
-              hint="Configure the amend lock point and cancel window before pre-flight review."
+              title={t('amendCancel.policy.incompleteTitle')}
+              hint={t('amendCancel.policy.incompleteHint')}
             />
           ),
         });
         return;
       }
       pushToast(
-        `Shipment-change policy ready · ${resolvedFrom} · amend lock ${lockAfter} · cancel window ${cancelWindowHours}h`,
+        fill(t('amendCancel.toast.policyReady'), { source: resolvedFrom, lock: lockAfter, hours: cancelWindowHours }),
         'info',
       );
     } catch {
-      pushToast('Policy check could not be completed. Try again.', 'warn');
+      pushToast(t('amendCancel.toast.policyFailed'), 'warn');
     }
   }
 
@@ -488,22 +494,17 @@ export function AmendCancelModule() {
     // (amend/cancel review queue scopes via current_user_org_id()).
     // `scopeId` is identity-derived. See shipments.tsx top-of-file SSOT note.
     <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
-    <Chip key="seam" size="xs" label="Workflow-backed review queue" />,
+    <Chip key="seam" size="xs" label={t('amendCancel.seamChip')} />,
   ];
 
   if (!canRead) {
     return (
       <div className="page">
-        <PageHeader
-          moduleKey="amendCancel"
-          eyebrow="Operate"
-          titleAccent="Amend"
-          titlePlain="& cancel · review queue"
-        />
+        <PageHeader moduleKey="amendCancel" titlePlain={t('amendCancel.titlePlain')} />
         <StateView
           kind="denied"
           capability={CAP.SHIPMENTS_READ}
-          hint="You do not have permission to view the amend & cancel queue."
+          hint={t('amendCancel.denied')}
         />
       </div>
     );
@@ -513,14 +514,12 @@ export function AmendCancelModule() {
     <div className="page">
       <PageHeader
         moduleKey="amendCancel"
-        eyebrow="Operate"
-        titleAccent="Amend"
-        titlePlain="& cancel · review queue"
+        titlePlain={t('amendCancel.titlePlain')}
         pills={pills}
         actions={[
           <Button
             key="preflight"
-            label="Pre-flight policy"
+            label={t('amendCancel.preflight')}
             iconName="check"
             kind="ghost"
             onClick={openPreflightPolicy}
@@ -547,15 +546,15 @@ export function AmendCancelModule() {
               }
             : undefined}
           rowActions={[
-            { label: 'Open review', icon: 'eye', onClick: openAmendDrawer },
+            { label: t('amendCancel.actions.openReview'), icon: 'eye', onClick: openAmendDrawer },
             {
-              label: 'Preview change',
+              label: t('amendCancel.actions.previewChange'),
               icon: 'check',
               onClick: async (r) => {
                 // W54-C — strict no-fallback. NO inline 'tpl_amend_cancel'.
                 const op = readRequestedOp(r);
                 if (!op) {
-                  pushToast('Missing amend request details; cannot preview.', 'danger');
+                  pushToast(t('amendCancel.toast.missingPreview'), 'danger');
                   return;
                 }
                 const args = buildAmendMutationArgs(r, true);
@@ -563,14 +562,14 @@ export function AmendCancelModule() {
                 const res = await amend.mutateAsync(args);
                 const tpl = (res as { workflow_template?: string }).workflow_template;
                 if (!tpl) {
-                  pushToast('Shipment-change workflow is not configured.', 'danger');
+                  pushToast(t('amendCancel.toast.notConfigured'), 'danger');
                   return;
                 }
-                pushToast('Preview ready', 'info');
+                pushToast(t('amendCancel.toast.previewReady'), 'info');
               },
             },
             {
-              label: 'Apply change',
+              label: t('amendCancel.actions.applyChange'),
               icon: 'play',
               kind: 'primary',
               capabilities: [CAP.SHIPMENTS_WRITE, CAP.TASKS_COMPLETE],
@@ -578,7 +577,7 @@ export function AmendCancelModule() {
                 // W54-C — strict no-fallback. NO inline 'wfr_unknown'.
                 const op = readRequestedOp(r);
                 if (!op) {
-                  pushToast('Missing amend request details; cannot apply.', 'danger');
+                  pushToast(t('amendCancel.toast.missingApply'), 'danger');
                   return;
                 }
                 const args = buildAmendMutationArgs(r);
@@ -586,43 +585,43 @@ export function AmendCancelModule() {
                 const res = await amend.mutateAsync(args);
                 const wf = (res as { workflow_run_id?: string }).workflow_run_id;
                 if (!wf) {
-                  pushToast('Shipment-change workflow could not be started.', 'danger');
+                  pushToast(t('amendCancel.toast.notStarted'), 'danger');
                   return;
                 }
-                pushToast('Shipment-change workflow started', 'good');
+                pushToast(t('amendCancel.toast.started'), 'good');
                 await transition.mutateAsync({ taskId: r.id, transition: { next_status: taskActionNextStatus('approve') } });
               },
             },
             {
-              label: 'Open shipment',
+              label: t('amendCancel.actions.openShipment'),
               icon: 'right',
               onClick: (r) => {
                 const path = shipmentFocusPath(r);
                 if (!path) {
-                  pushToast('Missing shipment details; cannot open shipment.', 'danger');
+                  pushToast(t('amendCancel.toast.missingShipment'), 'danger');
                   return;
                 }
                 go(path);
               },
             },
             {
-              label: 'Reject',
+              label: t('common.reject'),
               icon: 'close',
               kind: 'danger',
               capability: CAP.TASKS_COMPLETE,
               onClick: async (r) => {
                 await transition.mutateAsync({ taskId: r.id, transition: { next_status: taskActionNextStatus('reject') } });
-                pushToast('Review rejected', 'warn');
+                pushToast(t('amendCancel.toast.rejected'), 'warn');
               },
             },
           ]}
           bulkActions={[
             {
-              label: 'Bulk preview',
+              label: t('amendCancel.actions.bulkPreview'),
               icon: 'check',
               kind: 'ghost',
               onClick: async (rs) => {
-                const batch = canUseBatchForRequests(rs);
+                const batch = canUseBatchForRequests(rs, t);
                 if (batch.ok) {
                   await batchOp.mutateAsync({
                     ids: batch.ids,
@@ -638,16 +637,16 @@ export function AmendCancelModule() {
                   }
                   await Promise.all(args.map((arg) => amend.mutateAsync(arg!)));
                 }
-                pushToast(`Previewed ${rs.length} requests`, 'info');
+                pushToast(fill(t('amendCancel.toast.previewed'), { n: rs.length }), 'info');
               },
             },
             {
-              label: 'Bulk apply',
+              label: t('amendCancel.actions.bulkApply'),
               icon: 'play',
               kind: 'primary',
               capabilities: [CAP.SHIPMENTS_WRITE, CAP.TASKS_COMPLETE],
               onClick: async (rs) => {
-                const batch = canUseBatchForRequests(rs);
+                const batch = canUseBatchForRequests(rs, t);
                 if (batch.ok) {
                   await batchOp.mutateAsync({
                     ids: batch.ids,
@@ -662,7 +661,7 @@ export function AmendCancelModule() {
                   }
                   await Promise.all(args.map((arg) => amend.mutateAsync(arg!)));
                 }
-                pushToast(`Started ${rs.length} workflow runs`, 'good');
+                pushToast(fill(t('amendCancel.toast.startedRuns'), { n: rs.length }), 'good');
                 await Promise.all(
                   rs.map((r) => transition.mutateAsync({ taskId: r.id, transition: { next_status: taskActionNextStatus('approve') } })),
                 );
@@ -677,7 +676,7 @@ export function AmendCancelModule() {
   );
 }
 
-interface KvProps { k: string; v: ReactNode }
+interface KvProps { k: ReactNode; v: ReactNode }
 function Kv({ k, v }: KvProps) {
   return (
     <div style={{ display: 'flex', padding: '4px 0', borderBottom: '1px solid var(--line)', fontSize: '11.5px' }}>
