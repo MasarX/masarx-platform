@@ -463,7 +463,7 @@ async function qualify(diagnostic) {
   const useDatabaseInit = !pinState.qualificationOnly && needsHostedDatabaseInit(process.env);
   const workers = process.env.PGTAP_WORKERS || 'nproc';
   if (disposableShard) hostedWorkerLimit(workers, PGTAP_WORKER_CAP);
-  const selected = shard ? shardFiles(fs.readdirSync('supabase/tests/pgtap'), shard) : undefined;
+  const selected = shard ? shardFiles(fs.readdirSync('supabase/tests/pgtap'), shard, { hosted: disposableShard }) : undefined;
   if (shard && fs.existsSync('supabase/tests/pgtap/.pgtap-skip.json')) {
     const skip = JSON.parse(fs.readFileSync('supabase/tests/pgtap/.pgtap-skip.json', 'utf8'));
     if (!Array.isArray(skip) || skip.length) throw new Error('pgTAP shards cannot use a malformed/nonempty skip list');
