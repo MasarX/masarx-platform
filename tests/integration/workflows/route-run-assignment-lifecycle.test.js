@@ -16,7 +16,7 @@ const {
 
 const {
   completeRouteStopTask,
-  fetchLookupValues,
+  fetchLookupValue,
   openDriverShiftSession,
   registerMobileArtifact,
   transitionTaskAsUser,
@@ -1411,6 +1411,13 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     expect(targetManifestRows[0]?.manifest?.stop_count).toBe(1);
     expect(targetManifestRows[0]?.manifest?.stops?.[0]?.route_stop_id).toBe(movedStopId);
     const resource = 'route_stop_reassignment_events';
+    const { rows: [registryRow] } = await withFixtureAdminContext(client, db => db.query(
+      `SELECT entry AS resource
+         FROM jsonb_array_elements(public.ui_rpc_registry_v1('tenant', $1::uuid)->'resources') AS entry
+        WHERE entry->>'key' = $2`,
+      [seed.organizationId, resource]
+    ));
+    expect(registryRow?.resource?.read_scope_types).toEqual(['tenant']);
     const eventId = (await withFixtureAdminContext(client, db => db.query(
       'SELECT id FROM public.route_stop_reassignment_events WHERE route_stop_id=$1::uuid', [movedStopId]))).rows[0].id;
     const reads = [
@@ -1424,10 +1431,9 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     expect(own[0].items).toHaveLength(1);
     expect(own[0].items[0]).toMatchObject({ id: eventId, route_stop_id: movedStopId,
       source_route_run_id: seed.routeRunId, target_route_run_id: targetRouteRunId });
-    expect(own[0].items[0].payload).toEqual(eventRows[0].payload);
-    expect(own[1]).toMatchObject({ id: eventId, payload: eventRows[0].payload });
-    const expectedColumns = ['id','organization_id','route_stop_id','shipment_id',
-      'source_route_run_id','target_route_run_id','event_type','actor_user_id','notes','payload','created_at'].sort();
+    expect(own[1]).toEqual(own[0].items[0]);
+    const expectedColumns = ['id','route_stop_id','shipment_id','source_route_run_id',
+      'target_route_run_id','event_type','notes','created_at'].sort();
     expect(Object.keys(own[0].items[0]).sort()).toEqual(expectedColumns);
     expect(Object.keys(own[1]).sort()).toEqual(expectedColumns);
     expect(own[2].total).toBe(1);
@@ -1475,7 +1481,8 @@ describe('UC076 route run assignment lifecycle foundation', () => {
         await client.query('SAVEPOINT e49_scope_denial');
         try {
           await expect(client.query(sql, params)).rejects.toMatchObject({
-            code: '42501', message: 'Resource read scope denied',
+            code: '42501',
+            message: expect.stringMatching(/^(Resource read scope denied|Capability denied: routes\.read)$/),
           });
         } finally {
           await client.query('ROLLBACK TO SAVEPOINT e49_scope_denial');
@@ -1484,15 +1491,23 @@ describe('UC076 route run assignment lifecycle foundation', () => {
       }
     }
     await setAuthContext(client, seed.operatorId);
-    // Global is not a valid user fixture; this is shared-guard proof only.
-    await client.query('SAVEPOINT e49_global_guard');
-    try {
-      await expect(client.query(`SELECT public.ui_assert_resource_read_scope_v1(
-        '{"read_scope_types":["tenant"],"scope_columns":{"tenant":"organization_id"}}'::jsonb,'global',NULL)`))
-        .rejects.toMatchObject({ code:'42501',message:'Resource read scope denied' });
-    } finally {
-      await client.query('ROLLBACK TO SAVEPOINT e49_global_guard');
-      await client.query('RELEASE SAVEPOINT e49_global_guard');
+    // Prove the registry's scope guard even when the RPC rejects on capability first.
+    for (const [scope, scopeId] of [
+      ['client', scopeClient.id],
+      ['sender', scopeSender],
+      ['platform', null],
+      ['global', null],
+    ]) {
+      await client.query('SAVEPOINT e49_scope_guard');
+      try {
+        await expect(client.query(
+          `SELECT public.ui_assert_resource_read_scope_v1($1::jsonb, $2::text, $3::uuid)`,
+          [JSON.stringify(registryRow.resource), scope, scopeId]
+        )).rejects.toMatchObject({ code: '42501', message: 'Resource read scope denied' });
+      } finally {
+        await client.query('ROLLBACK TO SAVEPOINT e49_scope_guard');
+        await client.query('RELEASE SAVEPOINT e49_scope_guard');
+      }
     }
   });
 
@@ -2136,44 +2151,14 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     });
 
     await setServiceContext(seed.operatorId, seed.organizationId);
-    const [
-      attemptOutcomes,
-      completionKinds,
-      handoverModes,
-      paymentOutcomes,
-      paymentMethods,
-    ] = await Promise.all([
-      fetchLookupValues(client, 'attempt_outcome'),
-      fetchLookupValues(client, 'delivery_completion_kind'),
-      fetchLookupValues(client, 'delivery_handover_mode'),
-      fetchLookupValues(client, 'payment_collection_outcome'),
-      fetchLookupValues(client, 'payment_collection_method'),
-    ]);
-    const deliveredOutcome = requireLookupValue(
-      attemptOutcomes,
-      'delivered',
-      'attempt_outcome'
-    );
-    const fullCompletionKind = requireLookupValue(
-      completionKinds,
-      'full',
-      'delivery_completion_kind'
-    );
-    const namedRecipientMode = requireLookupValue(
-      handoverModes,
-      'named_recipient',
-      'delivery_handover_mode'
-    );
-    const collectedOutcome = requireLookupValue(
-      paymentOutcomes,
-      'collected',
-      'payment_collection_outcome'
-    );
-    const cashMethod = requireLookupValue(
-      paymentMethods,
-      'cash',
-      'payment_collection_method'
-    );
+    const [deliveredOutcome, fullCompletionKind, namedRecipientMode, collectedOutcome, cashMethod] =
+      (await Promise.all([
+        fetchLookupValue(client, 'attempt_outcome', 'delivered'),
+        fetchLookupValue(client, 'delivery_completion_kind', 'full'),
+        fetchLookupValue(client, 'delivery_handover_mode', 'named_recipient'),
+        fetchLookupValue(client, 'payment_collection_outcome', 'collected'),
+        fetchLookupValue(client, 'payment_collection_method', 'cash'),
+      ])).map(row => row.value);
 
     const routeStopTasks = await listRouteStopExecutionTasks(seed.routeRunId);
     expect(routeStopTasks).toHaveLength(2);
