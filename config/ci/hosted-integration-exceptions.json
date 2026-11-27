@@ -243,30 +243,6 @@
     "expires": "2026-12-08"
   },
   {
-    "file": "tests/integration/workflows/route-run-assignment-lifecycle.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Integration test references an undefined identifier",
-    "issue": "#573",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/workflows/engine-lifecycle.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Integration test references an undefined identifier",
-    "issue": "#573",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/ack/async-headers-and-provenance.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Integration test references an undefined identifier",
-    "issue": "#573",
-    "expires": "2026-12-08"
-  },
-  {
     "file": "tests/integration/workflows/workflow-intake.test.js",
     "kind": "known-failure",
     "runner": "Hosted integration",

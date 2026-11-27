@@ -2,6 +2,29 @@ const { Pool } = require('pg');
 const { randomUUID } = require('crypto');
 const { applySetting } = require('../helpers/tenant-utils');
 
+function normalizeProgressResult(result) {
+  return {
+    status: result.status,
+    reason: result.reason ?? null,
+    handler_key: result.handler_key ?? null,
+    in_progress_operation: result.in_progress_operation ?? null,
+    has_step_reference: Boolean(result.step_id),
+    has_next_run_at: Boolean(result.next_run_at),
+    skipped: result.skipped ?? false,
+  };
+}
+
+function summarizeWorkflowSteps(state) {
+  return state.steps.map(({ decision_log_id, operation_result, ...step }) => {
+    const { planned_tracking_number, planned_resource_id, ...result } = operation_result;
+    return {
+      ...step,
+      has_decision: Boolean(decision_log_id),
+      operation_result: result,
+    };
+  });
+}
+
 /**
  * Integration coverage for workflow engine lifecycle semantics:
  * - pending -> in_progress -> completed transitions

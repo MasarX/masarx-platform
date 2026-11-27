@@ -16,7 +16,7 @@ const {
 
 const {
   completeRouteStopTask,
-  fetchLookupValues,
+  fetchLookupValue,
   openDriverShiftSession,
   registerMobileArtifact,
   transitionTaskAsUser,
@@ -1424,10 +1424,9 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     expect(own[0].items).toHaveLength(1);
     expect(own[0].items[0]).toMatchObject({ id: eventId, route_stop_id: movedStopId,
       source_route_run_id: seed.routeRunId, target_route_run_id: targetRouteRunId });
-    expect(own[0].items[0].payload).toEqual(eventRows[0].payload);
-    expect(own[1]).toMatchObject({ id: eventId, payload: eventRows[0].payload });
-    const expectedColumns = ['id','organization_id','route_stop_id','shipment_id',
-      'source_route_run_id','target_route_run_id','event_type','actor_user_id','notes','payload','created_at'].sort();
+    expect(own[1]).toEqual(own[0].items[0]);
+    const expectedColumns = ['id','route_stop_id','shipment_id','source_route_run_id',
+      'target_route_run_id','event_type','notes','created_at'].sort();
     expect(Object.keys(own[0].items[0]).sort()).toEqual(expectedColumns);
     expect(Object.keys(own[1]).sort()).toEqual(expectedColumns);
     expect(own[2].total).toBe(1);
@@ -2136,44 +2135,14 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     });
 
     await setServiceContext(seed.operatorId, seed.organizationId);
-    const [
-      attemptOutcomes,
-      completionKinds,
-      handoverModes,
-      paymentOutcomes,
-      paymentMethods,
-    ] = await Promise.all([
-      fetchLookupValues(client, 'attempt_outcome'),
-      fetchLookupValues(client, 'delivery_completion_kind'),
-      fetchLookupValues(client, 'delivery_handover_mode'),
-      fetchLookupValues(client, 'payment_collection_outcome'),
-      fetchLookupValues(client, 'payment_collection_method'),
-    ]);
-    const deliveredOutcome = requireLookupValue(
-      attemptOutcomes,
-      'delivered',
-      'attempt_outcome'
-    );
-    const fullCompletionKind = requireLookupValue(
-      completionKinds,
-      'full',
-      'delivery_completion_kind'
-    );
-    const namedRecipientMode = requireLookupValue(
-      handoverModes,
-      'named_recipient',
-      'delivery_handover_mode'
-    );
-    const collectedOutcome = requireLookupValue(
-      paymentOutcomes,
-      'collected',
-      'payment_collection_outcome'
-    );
-    const cashMethod = requireLookupValue(
-      paymentMethods,
-      'cash',
-      'payment_collection_method'
-    );
+    const [deliveredOutcome, fullCompletionKind, namedRecipientMode, collectedOutcome, cashMethod] =
+      (await Promise.all([
+        fetchLookupValue(client, 'attempt_outcome', 'delivered'),
+        fetchLookupValue(client, 'delivery_completion_kind', 'full'),
+        fetchLookupValue(client, 'delivery_handover_mode', 'named_recipient'),
+        fetchLookupValue(client, 'payment_collection_outcome', 'collected'),
+        fetchLookupValue(client, 'payment_collection_method', 'cash'),
+      ])).map(row => row.value);
 
     const routeStopTasks = await listRouteStopExecutionTasks(seed.routeRunId);
     expect(routeStopTasks).toHaveLength(2);
