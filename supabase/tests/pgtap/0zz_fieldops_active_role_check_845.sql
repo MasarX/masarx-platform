@@ -151,4 +151,4 @@ $test$;
 
 SELECT * FROM pg_temp.test_fieldops_active_role_check_845();
 SELECT * FROM finish();
-ROLLBACK;\n
+ROLLBACK;
