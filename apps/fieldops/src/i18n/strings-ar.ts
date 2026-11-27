@@ -1,5 +1,10 @@
 import type { FieldOpsStrings } from "./strings-en";
 export const AR_STRINGS: FieldOpsStrings = {
+  routeReadAccess: {
+    title: "الوصول مرفوض",
+    message: "اختر دورًا مصرحًا به أو اطلب صلاحية الوصول من المسؤول.",
+    openMenu: "فتح قائمة الأدوار",
+  },
   routeLoad: {
     title: "تحميل طرود المسار", cold: "السلسلة الباردة", weight: "الوزن المسجل",
     partial: "طرود ببيانات غير مسجلة", scanned: "تم المسح", pending: "لم تُمسح بعد",
