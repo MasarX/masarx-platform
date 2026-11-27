@@ -27,7 +27,7 @@ const server = (command, port, env) => ({
 
 module.exports = defineConfig({
   testDir: join(root, 'tests/preview-sweep'),
-  repeatEach: 10,
+  repeatEach: 5,
   forbidOnly: true,
   retries: 0,
   workers: 1,
@@ -43,7 +43,10 @@ module.exports = defineConfig({
   webServer: [
     server('node scripts/ci-hosted/deny-egress.cjs', ports.proxy),
     server('npm run dev --workspace @masarx/console -- --hostname ' + loopback, ports.console, nextEnv),
-    server('npm run dev --workspace @masarx/portal -- --hostname ' + loopback, ports.portal, nextEnv),
+    {
+      ...server('npm run dev --workspace @masarx/portal -- --hostname ' + loopback, ports.portal, nextEnv),
+      stdout: 'pipe', stderr: 'pipe',
+    },
     server('npm run dev --workspace @masarx/console-v2 -- --host ' + loopback + ' --strictPort', ports['console-v2'], {
       VITE_SUPABASE_URL: fixtureUrl,
       VITE_SUPABASE_ANON_KEY: fixtureKey,

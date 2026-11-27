@@ -43,27 +43,18 @@ for (const app of ['console', 'console-v2', 'portal']) {
               console.log('SWEEP-ERROR ' + error.message.replaceAll('\n', '\nSWEEP-ERROR '));
               const markerTestId = portalMarkers[state];
               if (page && markerTestId && error.message.includes('resolved to 2 elements')) {
-                const [markers, removed] = await page.evaluate(testId => {
-                  const publicId = /^(portal-resource-(blocked|error|ready|shipment-search)|portal-app-shell-sidebar|route-(loading|error)-page)$/;
-                  const publicTag = /^(a|article|aside|div|main|p|section|span)$/;
-                  const matches = document.querySelectorAll(`[data-testid="${testId}"]`);
-                  const removed = (window.__sweepRemoved || []).join(' ') || 'none';
-                  if (matches.length !== 2) return [`count=${matches.length}`, removed];
-                  const pair = Array.from(matches, element => {
-                    const chain = [];
-                    for (let node = element; node; node = node.parentElement) {
-                      const id = node.getAttribute('data-testid');
-                      if (id !== null) chain.unshift(publicId.test(id) ? id : 'other');
-                    }
-                    const { width, height } = element.getBoundingClientRect();
-                    const visible = width > 0 && height > 0 && getComputedStyle(element).visibility === 'visible';
-                    const tag = publicTag.test(element.localName) ? element.localName : 'other';
-                    return `${tag}:${visible ? 'visible' : 'hidden'}:${chain.join('>')}`;
-                  }).join(' ');
-                  return [pair, removed];
-                }, markerTestId).catch(() => ['miss', 'none']);
+                const openingTag = /^[ \t]*([12])\) <([a-z][a-z0-9]{0,15})(?=[ \t/>])((?:[^<>"'\r\n]|"[^"\r\n]*"|'[^'\r\n]*')*)>/gm;
+                for (const [, index, tag, attributes] of error.message.matchAll(openingTag)) {
+                  const names = Array.from(attributes.matchAll(/\s+([^\s=]+)(?:=(?:"[^"]*"|'[^']*'|[^\s]+))?/g),
+                    ([, name]) => name);
+                  const hiddenAttr = names.includes('hidden');
+                  const styleAttr = names.includes('style');
+                  console.log('\nSWEEP-PAIR', app, locale, theme, size, state, index, tag,
+                    hiddenAttr ? 'hidden' : '-', styleAttr ? 'style' : '-');
+                }
+                const markers = await page.getByTestId(markerTestId).count()
+                  .then(count => `count=${count}`, () => 'miss');
                 console.log('\nSWEEP-MARKERS', app, locale, theme, size, state, markers);
-                console.log('\nSWEEP-REMOVED', app, locale, theme, size, state, removed);
               }
             }
             throw error;
@@ -97,28 +88,6 @@ for (const app of ['console', 'console-v2', 'portal']) {
             }
             const page = await check(state, 'new-page', () => context.newPage());
             if (markerTestId) {
-              await page.addInitScript(selector => {
-                const removed = window.__sweepRemoved = [];
-                const publicId = /^(portal-resource-(blocked|error|ready|shipment-search)|portal-app-shell-sidebar|route-(loading|error)-page)$/;
-                new MutationObserver(records => {
-                  if (removed.length === 5) return;
-                  for (const record of records) {
-                    for (const node of record.removedNodes) {
-                      if (node.nodeType !== 1 || !(node.matches(selector) || node.querySelector(selector))) continue;
-                      const chain = [];
-                      for (let element = record.target; element?.nodeType === 1; element = element.parentElement) {
-                        const id = element.getAttribute('data-testid');
-                        if (publicId.test(id)) chain.push(id);
-                        else if (/^[SBP]:/.test(element.id)) chain.push('seg');
-                        else if (element.hasAttribute('hidden')) chain.push('hidden');
-                        else if (element.localName === 'template') chain.push('template');
-                      }
-                      removed.push(chain.join('>') || 'root');
-                      if (removed.length === 5) return;
-                    }
-                  }
-                }).observe(document, { childList: true, subtree: true });
-              }, `[data-testid="${markerTestId}"]`);
               const shipmentsURL = new URL(path, baseURL).href;
               page.on('response', response => {
                 if (response.url() !== shipmentsURL) return;
@@ -149,9 +118,12 @@ for (const app of ['console', 'console-v2', 'portal']) {
               // Reading the stream here keeps its completion out of the marker assertion's timing.
               const html = await documentResponse.text().catch(() => null);
               if (html !== null) {
-                const markerCount = html.split(`data-testid="${markerTestId}"`).length - 1;
-                const segmentCount = html.split('<div hidden id="S:').length - 1;
-                console.log('\nSWEEP-SSR', app, locale, theme, size, state, markerCount, segmentCount);
+                const marker = `data-testid="${markerTestId}"`;
+                const markerCount = html.split(marker).length - 1;
+                const streamTokens = new RegExp(String.raw`<template id="(B:\d+)"|<div hidden id="(S:\d+)"|\$RC\("B:(\d+)","S:(\d+)"\)|${marker}`, 'g');
+                const order = Array.from(html.matchAll(streamTokens)).slice(0, 40)
+                  .map(([, boundary, segment, target, source]) => boundary ?? segment ?? (target ? `RC:${target}:${source}` : 'M'));
+                console.log('\nSWEEP-SSR', app, locale, theme, size, state, markerCount, order.join(',') || 'none');
               }
             }
             account.dispose();
