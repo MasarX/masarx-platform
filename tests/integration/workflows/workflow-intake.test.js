@@ -2,6 +2,7 @@ const { Pool } = require('pg');
 const { randomUUID } = require('crypto');
 const { loadEnv } = require('../../../scripts/utils/load-env');
 const { upsertWebhookPolicy } = require('../../utils/policies');
+const { createOrganization, createClient, createSender, createMappingConfig } = require('../helpers/tenant-utils');
 
 loadEnv();
 
@@ -10,69 +11,31 @@ const pool = new Pool({
 });
 
 const seedData = async (client) => {
-  await client.query(`
-    INSERT INTO organizations (id, name, slug)
-    VALUES ('aaaa1000-0000-0000-0000-000000000004', 'Webhook Org', 'webhook-org')
-    ON CONFLICT (id) DO NOTHING;
-
-    INSERT INTO mapping_configs (
-      id,
-      mapping_type,
-      mapping_key,
-      mapping_config,
-      mapping_version,
-      notes
-    )
-    VALUES (
-      'cccc1000-0000-0000-0000-000000000004',
-      'webhook_inbound',
-      'webhook-test::default',
-      '{}'::jsonb,
-      1,
-      'Integration test webhook intake mapping'
-    )
-    ON CONFLICT (id) DO NOTHING;
-
-    INSERT INTO webhook_sources (
-      id, organization_id, source_identifier, name, provider_type, auth_token, mapping_config_id, enabled
-    ) VALUES (
-      'bbbb1000-0000-0000-0000-000000000004',
-      'aaaa1000-0000-0000-0000-000000000004',
-      'webhook-test',
-      'Webhook Test Source',
-      'provider',
-      'token-webhook-test',
-      'cccc1000-0000-0000-0000-000000000004',
-      'eeee1000-0000-0000-0000-000000000004',
-      TRUE
-    )
-    ON CONFLICT (id) DO UPDATE
-      SET sender_id = EXCLUDED.sender_id,
-          mapping_config_id = EXCLUDED.mapping_config_id,
-          enabled = EXCLUDED.enabled;
-
-  `);
-
-  const clientId = randomUUID();
-  await client.query(`INSERT INTO clients(id,organization_id,name,slug,sla_tier,status)
-    VALUES($1::uuid,'aaaa1000-0000-0000-0000-000000000004','Webhook fixture client',$2,'standard','active')`,
-    [clientId,`webhook-fixture-${clientId}`]);
-  await client.query(`WITH owned_sender AS (
-    INSERT INTO senders(client_id,name,status) VALUES($1::uuid,'Workflow fixture sender','active') RETURNING id
-  ) UPDATE webhook_sources SET sender_id=(SELECT id FROM owned_sender)
-    WHERE id='bbbb1000-0000-0000-0000-000000000004'`, [clientId]);
+  const { id: organizationId } = await createOrganization(client, 'Workflow intake fixture');
+  const { id: clientId } = await createClient(client, organizationId, 'Workflow intake client');
+  const senderId = await createSender(client, clientId, 'Workflow intake sender');
+  const mappingId = await createMappingConfig(client, 'webhook_inbound', `workflow-intake-${randomUUID()}`);
+  const token = `workflow-intake-${randomUUID()}`;
+  const { rows: [{ id: sourceId }] } = await client.query(
+    `INSERT INTO webhook_sources (
+       organization_id, source_identifier, name, provider_type, auth_token, mapping_config_id, sender_id, enabled
+     ) VALUES ($1, $2, 'Webhook Test Source', 'provider', $3, $4, $5, TRUE) RETURNING id`,
+    [organizationId, `fixture-${randomUUID()}`, token, mappingId, senderId]
+  );
   const { rows: templates } = await client.query("SELECT id FROM workflow_templates WHERE name='webhook_shipment_create_v1' AND status='active' ORDER BY version DESC,updated_at DESC LIMIT 1");
   expect(templates).toHaveLength(1);
   const policyValue = {
-    version: 1,
-    response: { mode: 'accepted_async', default_headers: { 'cache-control': 'no-store' } },
+    version: 3,
+    ack: { mode: 'accepted_async', status_code: 202, default_headers: { 'cache-control': 'no-store' } },
     workflow: { template_id: templates[0].id, intent:'shipment.create' },
   };
-  await upsertWebhookPolicy('source', 'bbbb1000-0000-0000-0000-000000000004', policyValue, 'Test webhook intake policy', client);
+  await upsertWebhookPolicy('source', sourceId, policyValue, 'Test webhook intake policy', client);
+  return token;
 };
 
 describe('workflow_intake_webhook', () => {
   let client;
+  let token;
 
   beforeAll(async () => {
     client = await pool.connect();
@@ -85,7 +48,7 @@ describe('workflow_intake_webhook', () => {
 
   beforeEach(async () => {
     await client.query('BEGIN');
-    await seedData(client);
+    token = await seedData(client);
   });
 
   afterEach(async () => {
@@ -106,7 +69,7 @@ describe('workflow_intake_webhook', () => {
     const { rows } = await client.query(
       'SELECT workflow_intake_webhook($1::text, $2::jsonb, $3::text, $4::jsonb) AS response',
       [
-        'token-webhook-test',
+        token,
         JSON.stringify({ 'content-type': 'application/json' }),
         JSON.stringify({
           event: { id: 'evt-workflow-intake-test', type: 'shipment.create' },

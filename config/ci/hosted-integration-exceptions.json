@@ -195,83 +195,11 @@
     "maxSkipped": 2
   },
   {
-    "file": "tests/integration/workspace/f244-native-city-district.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Onboarding defaults collide with fixture setup or teardown",
-    "issue": "#570",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/workflows/api-gateway-provider-update.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Fixture uses retired address validation status values",
-    "issue": "#571",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/label/label-renderer-bundle.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Renderer fixture uses the older authorization contract",
-    "issue": "#572",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/label/label-renderer-bundle-sender-scope.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Renderer fixture uses the older authorization contract",
-    "issue": "#572",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/label/label-renderer-bundle-e2e.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Renderer fixture uses the older authorization contract",
-    "issue": "#572",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/label/label-renderer-bundle-order.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Renderer fixture uses the older authorization contract",
-    "issue": "#572",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/label/label-renderer-print-sync.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Renderer fixture uses the older authorization contract",
-    "issue": "#572",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/label/label-renderer-targets-request.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Renderer fixture uses the older authorization contract",
-    "issue": "#572",
-    "expires": "2026-12-08"
-  },
-  {
     "file": "tests/integration/workflows/route-run-assignment-lifecycle.test.js",
     "kind": "known-failure",
     "runner": "Hosted integration",
     "reason": "Integration test references an undefined identifier",
     "issue": "#573",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/workflows/workflow-intake.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Fixture SQL or data does not match the migrated schema and settings",
-    "issue": "#574",
     "expires": "2026-12-08"
   },
   {
@@ -283,23 +211,7 @@
     "expires": "2026-12-08"
   },
   {
-    "file": "tests/integration/label-renderer-edge.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Fixture SQL or data does not match the migrated schema and settings",
-    "issue": "#574",
-    "expires": "2026-12-08"
-  },
-  {
     "file": "tests/integration/cross-surface-delivery.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Hosted results differ from the current integration assertions",
-    "issue": "#575",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/tasks/tasks-ssot-core.test.js",
     "kind": "known-failure",
     "runner": "Hosted integration",
     "reason": "Hosted results differ from the current integration assertions",
