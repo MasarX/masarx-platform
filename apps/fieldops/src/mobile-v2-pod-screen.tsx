@@ -20,6 +20,7 @@ import {
   PanResponder,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -153,6 +154,8 @@ export interface MobileV2PodScreenProps {
   readonly customerPhone?: string;
   /** COD amount due, rendered in the COD step. */
   readonly codAmount?: number;
+  /** Display locale for wizard text and accessibility labels; defaults to English. */
+  readonly locale?: string;
   /** True while the final write + same-context confirmation is pending. */
   readonly submitting?: boolean;
   /** When set, the fail-reason sheet renders inline at the bottom. */
@@ -180,7 +183,6 @@ export interface MobileV2PodScreenProps {
     context: MobileV2PodFailSubmitContext,
   ) => void;
   readonly style?: StyleProp<ViewStyle>;
-  readonly locale?: string;
 }
 
 const EMPTY_MOBILE_V2_POD_ARTIFACTS: ReadonlyArray<MobileV2PodCapturedArtifact> = Object.freeze([]);
@@ -1408,7 +1410,10 @@ function PodSigBody(props: {
   );
 }
 
-/** PodOtp — 4-digit OTP entry with boxed digit cells + helper actions. */
+/**
+ * PodOtp — 4-digit OTP entry. A real TextInput lies over the digit boxes, so
+ * focus lands on a visible, named field and a ring draws around the boxes.
+ */
 function PodOtpBody(props: {
   readonly theme: MobileV2Theme;
   readonly strings: FieldOpsStrings;
@@ -1416,7 +1421,7 @@ function PodOtpBody(props: {
   readonly onChangeCode: (code: string) => void;
 }): React.ReactElement {
   const t = props.theme;
-  const inputRef = React.useRef<TextInput | null>(null);
+  const [focused, setFocused] = React.useState(false);
   const code = props.code;
   const setCode = (next: string): void => {
     props.onChangeCode(next.replace(/\D/g, "").slice(0, 4));
@@ -1434,48 +1439,61 @@ function PodOtpBody(props: {
       >
         {props.strings.pod.otpPrompt}
       </Text>
-      <Pressable
-        onPress={() => inputRef.current?.focus()}
-        accessibilityRole="button"
-        accessibilityLabel={props.strings.pod.otpA11y}
-      >
-        <FxRow gap={MOBILE_V2_SPACING.xl} justify="center">
-          {[0, 1, 2, 3].map((i) => (
-            <View
-              key={i}
-              style={{
-                width: 54,
-                height: 64,
-                borderRadius: 12,
-                borderWidth: 1,
-                borderColor: code.length === i ? t.accent : t.border,
-                backgroundColor: t.surfaceAlt,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text
+      <View style={{ alignSelf: "center", padding: 4 }}>
+        {/* The boxes only mirror the input's value, so screen readers skip them. */}
+        <View aria-hidden>
+          <FxRow gap={MOBILE_V2_SPACING.xl} justify="center">
+            {[0, 1, 2, 3].map((i) => (
+              <View
+                key={i}
                 style={{
-                  fontSize: 24,
-                  fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold,
-                  fontFamily: MOBILE_V2_FONT_MONO,
-                  color: t.ink,
+                  width: 54,
+                  height: 64,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: code.length === i ? t.accent : t.border,
+                  backgroundColor: t.surfaceAlt,
+                  alignItems: "center",
+                  justifyContent: "center",
                 }}
               >
-                {code[i] ?? ""}
-              </Text>
-            </View>
-          ))}
-        </FxRow>
-      </Pressable>
-      <TextInput
-        ref={inputRef}
-        value={code}
-        onChangeText={setCode}
-        keyboardType="number-pad"
-        maxLength={4}
-        style={{ position: "absolute", opacity: 0, left: -9999, width: 1, height: 1 }}
-      />
+                <Text
+                  style={{
+                    fontSize: 24,
+                    fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold,
+                    fontFamily: MOBILE_V2_FONT_MONO,
+                    color: t.ink,
+                  }}
+                >
+                  {code[i] ?? ""}
+                </Text>
+              </View>
+            ))}
+          </FxRow>
+        </View>
+        <TextInput
+          value={code}
+          onChangeText={setCode}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          accessibilityLabel={props.strings.podOtp.label}
+          accessibilityHint={props.strings.podOtp.hint}
+          keyboardType="number-pad"
+          textContentType="oneTimeCode"
+          autoComplete="sms-otp"
+          maxLength={4}
+          caretHidden
+          // The input covers the boxes and paints nothing itself; the boxes show the digits.
+          style={[StyleSheet.absoluteFill, { color: "transparent", backgroundColor: "transparent", borderWidth: 0 }]}
+        />
+        {focused ? (
+          <View
+            testID="pod-otp-focus-ring"
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { borderRadius: 16, borderWidth: 2, borderColor: t.accent }]}
+          />
+        ) : null}
+      </View>
       <FxRow justify="space-between" style={{ marginTop: 14 }}>
         <FxButton theme={t} variant="ghost" size="sm" onPress={() => setCode("")}>
           {props.strings.pod.clear}

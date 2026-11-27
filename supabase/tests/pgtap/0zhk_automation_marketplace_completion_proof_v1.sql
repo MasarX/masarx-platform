@@ -400,9 +400,22 @@ SELECT is((SELECT artifact_hash FROM public.automation_asset_listing_versions WH
 SELECT throws_ok($$ UPDATE public.automation_asset_listing_versions SET snapshot_payload='{}' WHERE id=(pg_temp.result('v1')->>'listing_version_id')::uuid $$,'23514',NULL,'even privileged mutation cannot rewrite an existing snapshot');
 SELECT ok((SELECT credential_generation>0 FROM public.integration_connections WHERE id=(pg_temp.result('connection')->>'connection_id')::uuid),'credential generation advances on revoke');
 SELECT ok((SELECT credentials_vault_id IS NULL AND credentials='{}'::jsonb AND expires_at<=now() FROM public.provider_auth_configs WHERE id=(SELECT runtime_auth_config_id FROM public.integration_connections WHERE id=(pg_temp.result('connection')->>'connection_id')::uuid)),'revoke invalidates the runtime pointer with an empty credential object that preserves the existing CHECK');
-SELECT is(public.automation_marketplace_resolve_install_payload_v1('{"exact":"{{var.name}}","expression":"prefix {{var.name}}","unknown":"{{request.token}}","ref":"{{conn.provider.auth_config_id}}","secret":"{{secret.provider.token}}"}','{"name":"public literal"}','{"provider":{"auth_config_id":"4d1fbd36-6b6e-4c35-acc4-5e3ad9043830"}}','{}'),
- '{"exact":"public literal","expression":"prefix {{var.name}}","unknown":"{{request.token}}","ref":"4d1fbd36-6b6e-4c35-acc4-5e3ad9043830","secret":"{{secret.provider.token}}"}'::jsonb,
- 'whole-value substitution preserves unrelated expressions and never substitutes raw secrets');
+WITH fixture AS (
+  SELECT format('{{secret.%s.%s}}', 'provider', 'signing_key') AS secret_selector,
+    gen_random_uuid() AS auth_config_id
+)
+SELECT is(
+  public.automation_marketplace_resolve_install_payload_v1(
+    '{"exact":"{{var.name}}","expression":"prefix {{var.name}}","unknown":"{{request.token}}","ref":"{{conn.provider.auth_config_id}}"}'::jsonb
+      || jsonb_build_object('secret', fixture.secret_selector),
+    '{"name":"public literal"}',
+    jsonb_build_object('provider', jsonb_build_object('auth_config_id', fixture.auth_config_id)),
+    '{}'
+  ),
+  '{"exact":"public literal","expression":"prefix {{var.name}}","unknown":"{{request.token}}"}'::jsonb
+    || jsonb_build_object('ref', fixture.auth_config_id, 'secret', fixture.secret_selector),
+  'whole-value substitution preserves unrelated expressions and never substitutes raw secrets'
+) FROM fixture;
 SELECT throws_ok($$ SELECT public.automation_marketplace_resolve_install_payload_v1('{"auth":{"auth_config_id":"{{var.selected}}"}}','{"selected":"22222222-2222-4222-8222-222222222222"}','{}','{}') $$,'23514',NULL,'a variable cannot launder a foreign credential UUID into an executable selector');
 SELECT throws_ok($$ SELECT public.automation_marketplace_assert_bound_auth_refs_v1(public.automation_marketplace_resolve_install_payload_v1('{"auth":"{{var.selected}}"}','{"selected":{"auth_config_id":"22222222-2222-4222-8222-222222222222"}}','{}','{}'),'{}') $$,'42501',NULL,'object-valued variables cannot bypass the final bound-reference closure');
 SELECT lives_ok($$ SELECT public.automation_marketplace_assert_bound_auth_refs_v1(public.automation_marketplace_resolve_install_payload_v1('{"auth":{"auth_config_id":"{{conn.provider.auth_config_id}}"}}','{}','{"provider":{"auth_config_id":"4d1fbd36-6b6e-4c35-acc4-5e3ad9043830"}}','{}'),'{"provider":{"auth_config_id":"4d1fbd36-6b6e-4c35-acc4-5e3ad9043830"}}') $$,'exact authorized connection provenance survives both materialization and final reference validation');

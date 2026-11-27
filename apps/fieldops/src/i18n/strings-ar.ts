@@ -583,6 +583,10 @@ export const AR_STRINGS: FieldOpsStrings = {
     earnings: "الأرباح",
     view_details: "عرض التفاصيل",
   },
+  podOtp: {
+    label: "رمز التحقق، 4 أرقام",
+    hint: "اكتب الرمز الذي وصل إلى المستلم في رسالة نصية.",
+  },
   errorBoundary: {
     tryAgain: "إعادة المحاولة",
     copyDetails: "نسخ تفاصيل الخطأ",
@@ -840,7 +844,6 @@ export const AR_STRINGS: FieldOpsStrings = {
     signatureRegistered: "تم تسجيل التوقيع",
     registerSignature: "تسجيل التوقيع",
     otpPrompt: "أدخل رمز التحقق المكوّن من 4 أرقام",
-    otpA11y: "إدخال رمز التحقق",
     resendSms: "إعادة إرسال الرسالة النصية",
     idMatch: "مطابقة الهوية الوطنية",
     idMustMatch: "يجب أن يُبرز المستلم هوية مطابقة لـ:",

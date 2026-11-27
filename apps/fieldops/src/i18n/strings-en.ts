@@ -580,6 +580,10 @@ export const EN_STRINGS = {
     earnings: "Earnings",
     view_details: "View details",
   },
+  podOtp: {
+    label: "OTP code, 4 digits",
+    hint: "Type the code the recipient received by SMS.",
+  },
   errorBoundary: {
     tryAgain: "Try again",
     copyDetails: "Copy error details",
@@ -837,7 +841,6 @@ export const EN_STRINGS = {
     signatureRegistered: "Signature registered",
     registerSignature: "Register signature",
     otpPrompt: "Enter the 4-digit OTP",
-    otpA11y: "Enter OTP code",
     resendSms: "Resend SMS",
     idMatch: "National ID match",
     idMustMatch: "Recipient must show ID matching:",

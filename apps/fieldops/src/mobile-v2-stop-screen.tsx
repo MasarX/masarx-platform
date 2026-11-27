@@ -12,6 +12,7 @@ import * as React from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Defs, G, Path, Pattern, Rect, Text as SvgText } from "react-native-svg";
 
+import { EN_STRINGS, getStrings, resolveLocaleCode, type FieldOpsStrings } from "./i18n";
 import { FxIcon } from "./mobile-v2-icon";
 import type { MobileV2IconName } from "./mobile-v2-icon-specs";
 import {
@@ -39,7 +40,6 @@ import {
   resolveMobileV2StopParcelStatus,
 } from "./mobile-v2-stop-parcel-status";
 import type { MobileV2StopLocationReadback } from "./mobile-v2-route-map-location";
-import { EN_STRINGS, getStrings, resolveLocaleCode, type FieldOpsStrings } from "./i18n";
 
 export type MobileV2StopChipTone =
   | "neutral"
@@ -124,6 +124,8 @@ export interface MobileV2StopDetail {
 export interface MobileV2StopScreenProps {
   readonly theme: MobileV2Theme;
   readonly stop: MobileV2StopDetail;
+  /** Display locale for stop text and accessibility labels; defaults to English. */
+  readonly locale?: string;
   readonly locationReadback?: MobileV2StopLocationReadback | null;
   readonly terminalState?: "done" | "failed" | "partial" | null;
   readonly intentReadback?: {
@@ -131,20 +133,19 @@ export interface MobileV2StopScreenProps {
     readonly eventType: string | null;
     readonly eventCount: number;
   } | null;
-  readonly locale?: string;
   readonly onCall?: () => void;
   readonly onWhatsApp?: () => void;
   readonly onNavigate?: () => void;
   readonly onCopyAddress?: () => void;
   readonly onShareAddress?: () => void;
   readonly onScanParcel?: () => void;
-  /** Tap a parcel to open its detail / toggle scan state manually. */
+  /** Tap a parcel to open its detail. Parcel status renders only from the stop read-back. */
   readonly onParcelPress?: (parcelId: string) => void;
   /** Open the damaged-parcel hold sheet for this stop. */
   readonly onDamageHold?: () => void;
   /** Open the delivery reschedule sheet for this stop. */
   readonly onReschedule?: () => void;
-  /** Tap a proof checklist item to mark it done (e.g. photo captured). */
+  /** Tap a proof checklist item to open proof capture. Done state renders only from the stop read-back. */
   readonly onProofPress?: (key: string) => void;
   readonly onPodSubmit?: () => void;
   readonly onFail?: () => void;
@@ -1026,9 +1027,9 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                         ? () => props.onProofPress!(c.key)
                         : undefined
                     }
-                    accessibilityRole="checkbox"
-                    accessibilityLabel={c.label}
-                    accessibilityState={{ checked: done, disabled: isTerminal }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${c.label}, ${done ? strings.home.counter_done : strings.home.counter_pending}`}
+                    accessibilityState={{ disabled: isTerminal }}
                     disabled={isTerminal}
                     style={{
                       flexDirection: "row",

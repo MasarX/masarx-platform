@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { type ContextStore, useContextStore, useContextStoreValue } from "./context-store";
 
 type LayoutMode = "full" | "contained";
 
@@ -51,7 +52,7 @@ const EMPTY_STATE: NavigationState = {
 
 const DEFAULT_LAYOUT_MODES: LayoutMode[] = ["full", "contained"];
 
-const NavigationStateContext = React.createContext<NavigationStateValue | null>(
+const NavigationStateContext = React.createContext<ContextStore<NavigationStateValue> | null>(
   null
 );
 
@@ -278,10 +279,12 @@ function useNavigationStateInternal({
       defaults,
       resolvedLayoutModeOptions
     );
-    setState((current) =>
-      areNavigationStatesEqual(current, next) ? current : next
-    );
-    setHydrated(true);
+    React.startTransition(() => {
+      setState((current) =>
+        areNavigationStatesEqual(current, next) ? current : next
+      );
+      setHydrated(true);
+    });
   }, [defaults, legacyStorageKey, storageKey, resolvedLayoutModeOptions]);
 
   const updateState = React.useCallback(
@@ -425,9 +428,10 @@ export function NavigationStateProvider({
   ...options
 }: NavigationStateProviderProps) {
   const value = useNavigationStateInternal(options);
+  const store = useContextStore(value);
   return React.createElement(
     NavigationStateContext.Provider,
-    { value },
+    { value: store },
     children
   );
 }
@@ -435,8 +439,8 @@ export function NavigationStateProvider({
 export function useNavigationState(
   options?: NavigationStateOptions
 ): NavigationStateValue {
-  const context = React.useContext(NavigationStateContext);
-  if (context) return context;
+  const value = useOptionalNavigationState();
+  if (value) return value;
   if (!options) {
     throw new Error("NavigationStateProvider is missing required options.");
   }
@@ -444,5 +448,5 @@ export function useNavigationState(
 }
 
 export function useOptionalNavigationState(): NavigationStateValue | null {
-  return React.useContext(NavigationStateContext);
+  return useContextStoreValue(React.useContext(NavigationStateContext));
 }

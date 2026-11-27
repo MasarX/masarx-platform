@@ -18,3 +18,4 @@ This matrix maps each workflow handler to its primary use cases, inputs/outputs,
 Notes
 - Operation template `call_type` is enforced and propagated (pgTAP: `supabase/tests/pgtap/010_operation_templates_call_type.sql`).
 - Handler registry resolution is enforced (pgTAP: `supabase/tests/pgtap/007_workflow_handlers.sql`).
+- Provider dispatch preserves the caller's `search_path` (pgTAP: `supabase/tests/pgtap/0zz_workflow_handler_search_path_isolation.sql`).
