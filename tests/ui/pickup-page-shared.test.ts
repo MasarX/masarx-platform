@@ -17,7 +17,8 @@ describe('pickup choices and readable scoped rows', () => {
   it('reports denied assignment lookups instead of falling back to raw tables', async () => {
     uiRpc.mockRejectedValue(new Error('scope denied'));
     const result = await loadPickupAssignmentOptions('organization-a');
-    expect(result.error).toContain('scope denied');
+    expect(result.error).toBe('Pickup assignment choices could not be loaded. Reload to retry.');
+    expect(result.error).not.toContain('scope denied');
     expect(result.options.drivers).toEqual([]);
     expect(listResource).not.toHaveBeenCalled();
   });
@@ -33,6 +34,7 @@ describe('pickup choices and readable scoped rows', () => {
     uiRpc.mockRejectedValue(new Error('labels unavailable'));
     const result = await loadPickupRequestRows({});
     expect(result.rows).toEqual([{ shipment_id: 'visible-a' }]);
-    expect(result.error).toContain('labels unavailable');
+    expect(result.error).toBe('Pickup display labels could not be loaded. Reload to retry.');
+    expect(result.error).not.toContain('labels unavailable');
   });
 });

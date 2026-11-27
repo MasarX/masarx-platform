@@ -45,13 +45,15 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import sqlScanner from '../../../scripts/ops/pr-validation-focused-isolation.js';
+
+const { lexSqlForIsolation, splitTopLevelSqlStatements } = sqlScanner;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..', '..');
 const APP_ROOT = resolve(__dirname, '..');
-// Paths can be overridden via env vars for test isolation. Production CI uses
-// the defaults (FE registry under apps/console-v2 and migrations under
-// supabase/migrations at the repo root).
+// Tests can supply fixture paths for the registry, migrations, and drift lists.
+const LISTS_PATH = process.env.LINT_CAPABILITIES_LISTS_PATH;
 const REGISTRY_PATH = process.env.LINT_CAPABILITIES_REGISTRY_PATH
   ? resolve(process.env.LINT_CAPABILITIES_REGISTRY_PATH)
   : join(APP_ROOT, 'src', 'lib', 'seed-raw', 'registry.js');
@@ -120,7 +122,7 @@ const FE_ONLY_PENDING = Object.freeze(new Set([
   // gates for the operator console. Backend declares fine-grained
   // marketplace_*.read|write per resource (see
   // 202603071110_marketplace_network_registry_rls_v1.sql) plus action-scoped
-  // capabilities (`marketplace.award`, `marketplace.settle`, etc.).
+  // commands (`marketplace.award`, `marketplace.settle`, etc.).
   // Follow-up: either register the roll-up `marketplace.read|write` keys or
   // refactor the FE to gate on the per-resource keys.
   'marketplace.read',
@@ -212,11 +214,16 @@ const BACKEND_ONLY_ACCEPTED = Object.freeze(new Set([
   'addresses.write',           // surface uses addresses.read; writes flow via shipments.write
   'agreements.read',           // see ALIAS_MAP for `service_offerings.read`
   'agreements.write',          // canonical for service_offerings + branches surfaces
+  // Surfaced by the Next.js Console. Console V2 hosts no automation marketplace module.
+  'automation_marketplace.install',
+  'automation_marketplace.manage_connections',
+  'automation_marketplace.publish',
+  'automation_marketplace.read',
+  'automation_marketplace.review',
+  'automation_marketplace.upgrade',
   'api_routes.read',           // backend ingress observability internal
   'baskets.read',              // marketplace baskets — internal
   'baskets.write',
-  'dispatch_exception_review.complete',
-  'dispatch_exception_review_mine.complete',
   'fleet.read',                // FE surfaces drivers.* / vehicles.* aliases
   'fleet.write',
   'finance.read',              // FE umbrella surface; cod/settlements/billing roll up here
@@ -238,33 +245,15 @@ const BACKEND_ONLY_ACCEPTED = Object.freeze(new Set([
   // surfaces; the native app consumes them through row-driven mobile
   // navigation/RPC policy and the console proof lives in Mobile V2 evidence.
   'cash_drop.write',
+  'finance.withdrawal.request',
   'hold.read',
   'hold.write',
+  'kyc.write',
   'location_pings.write',      // mobile-only (Field Ops app)
   'manual_review.read',        // surface uses pickups.read / tasks.read aggregations
   'manual_review.resolve',
   'mappings.read',             // mapping studio internals
   'mappings.write',
-  // Marketplace action-scoped capabilities — fine-grained RPC asserts.
-  // Console surfaces (network/marketplace) gate on the roll-up
-  // `marketplace.read|write` (see FE_ONLY_PENDING). Each of these is
-  // consumed inside its corresponding RPC body.
-  'marketplace.accept_award',
-  'marketplace.approve',
-  'marketplace.award',
-  'marketplace.complete_work',
-  'marketplace.counter',
-  'marketplace.dispute',
-  'marketplace.expire',
-  'marketplace.finalize_settlement',
-  'marketplace.publish_availability',
-  'marketplace.quote',
-  'marketplace.reject_award',
-  'marketplace.release',
-  'marketplace.reopen',
-  'marketplace.reverse_settlement',
-  'marketplace.settle',
-  'marketplace.submit_offer',
   // Marketplace per-resource RLS keys — FE surfaces use the roll-up; the
   // per-resource keys are RLS-internal.
   'marketplace_awards.read',
@@ -288,81 +277,60 @@ const BACKEND_ONLY_ACCEPTED = Object.freeze(new Set([
   'marketplace_verification_records.write',
   'marketplace_work_packages.read',
   'marketplace_work_packages.write',
-  // Exception action-scoped capabilities consumed inside RPC bodies.
-  'mis_sort_exceptions.resolve_reassign',
   'operation_handlers.write',  // workflow handler internals
   'organizations.write',       // FE surfaces organizations.read; writes are
                                // tenant_signup_requests.review + RPC-level
   'provider_auth.read',        // integrations internals
   'requests.create',           // policy-request flow (FE uses inline UI)
   'requests.read',             // policy-request flow
-  // Route plan RPC-scoped capabilities — surface gates on route_plans.read|write
-  // (which IS in the backend declarations — verified by the lint).
-  'route_plans.publish',
-  'route_plans.rebalance',
-  'route_plans.solve_sequence',
-  // Route run / route stop / route assignment capabilities — driver-mobile only.
-  'route_runs.assign',         // Console command key, not a FE capability gate
-  'route_runs.accept_assignment',
-  'route_runs.acknowledge_assignment',
-  'route_runs.confirm_departure', // Console command key, not a FE capability gate
-  'route_runs.refuse_assignment',
-  'route_stops.reassign',
-  'routes.assign',
-  'routes.reassign',
   'scan_events.read',          // warehouse + driver mobile
   'scan_events.write',
   'settings.approve',          // FE surfaces settings.write at the surface
   'settings.request',
   'settings_category_registry.read', // Access/RBAC metadata plumbing; Console settings metadata reads gate on console_metadata.read/settings.read.
-  'shipments.delete',          // RPC-scoped (surface uses shipments.write)
-  'shipments.edit',
-  'shipments.print_labels',
-  'shipments.reschedule',
-  'shipments.resort',
-  'shipments.update_geocode',
-  'sla_deadline_alerts.complete',
-  'tabular_import.process',
-  // Task action-scoped capabilities consumed by mobile + RPC bodies.
-  'tasks.arrived',
-  'tasks.close_route',
-  'tasks.complete',
-  'tasks.en_route',
-  'tasks.exception',
-  'tasks.open',
-  'tasks.transition',          // Console command key, not a FE capability gate
+  'tasks.complete',            // action-scoped gate used by mobile and RPCs
   'trips.read',                // mobile-only (Field Ops app)
   'token_rotation.approve',    // platform/security-admin only
   'token_rotation.read',
   'token_rotation.request',
-  'unassigned_exceptions.claim',
   'usage.read',                // SaaS metering — internal
   'user_devices.read',         // FE uses devices.write surface alias
-  'user_devices.revoke',
   'user_devices.write',
   'users.manage',              // platform-admin only (FE uses organizations.read)
   'users.read',
-  // Warehouse transfer action-scoped capabilities (surface uses
-  // warehouse.read|write roll-up).
-  'warehouse_transfers.dispatch',
+  // Warehouse transfer gates for the warehouse.read|write roll-up.
   'warehouse_transfers.read',
-  'warehouse_transfers.reconcile_destination',
-  'warehouse_transfers.scan_arrival',
-  'warehouse_transfers.scan_departure',
   'warehouse_transfers.write',
   'wallet.read',               // mobile-only (Field Ops app)
-  'webhooks.archive_source',   // command key is routed and gated by webhooks.write in Console V2
   'webhook_sources.read',      // surface uses webhooks.read
   'workflow_runs.read',        // FE surface gate is workflows.read
   'workflow_runs.write',       // FE surface gate is workflows.write
-  // Zone exception action-scoped capabilities consumed by mobile + RPC bodies.
-  'wrong_zone_exceptions.request_zone_override',
-  'wrong_zone_exceptions.resolve_reassign',
 ]));
 
 // ---------------------------------------------------------------------------
 // Extraction
 // ---------------------------------------------------------------------------
+
+function readLists() {
+  if (!LISTS_PATH) return { ALIAS_MAP, FE_ONLY_PENDING, BACKEND_ONLY_ACCEPTED };
+
+  const lists = JSON.parse(readFileSync(resolve(LISTS_PATH), 'utf8'));
+  const aliases = lists?.ALIAS_MAP;
+  const pending = lists?.FE_ONLY_PENDING;
+  const accepted = lists?.BACKEND_ONLY_ACCEPTED;
+  const isKey = (value) => typeof value === 'string' && value.trim().length > 0;
+  const isKeyList = (value) => Array.isArray(value) && value.every(isKey);
+  if (!aliases || typeof aliases !== 'object' || Array.isArray(aliases) ||
+      !Object.entries(aliases).every(([alias, canonical]) => isKey(alias) && isKey(canonical)) ||
+      !isKeyList(pending) || !isKeyList(accepted)) {
+    throw new Error('LINT_CAPABILITIES_LISTS_PATH requires an ALIAS_MAP object and FE_ONLY_PENDING and BACKEND_ONLY_ACCEPTED arrays of keys');
+  }
+  return {
+    ALIAS_MAP: aliases,
+    FE_ONLY_PENDING: new Set(pending),
+    BACKEND_ONLY_ACCEPTED: new Set(accepted),
+  };
+}
 
 /** Parse the FE `capabilities = [ '...', '...' ]` literal. */
 function extractFrontendCapabilities() {
@@ -381,56 +349,259 @@ function extractFrontendCapabilities() {
   return out;
 }
 
-/**
- * Parse canonical backend capability/permission DECLARATIONS from migrations.
- *
- * We treat the following patterns as authoritative declarations:
- *   1. `"key":"foo.bar"` — JSON entries inside the access_control_policy seed.
- *   2. `jsonb_build_object('key', 'foo.bar', ...)` — wave-extension capability
- *      additions to the same global policy.
- *   3. `VALUES ('foo.bar', '<label>', ...)` rows in files that mention
- *      `'rbac_permission'` (the lookup_values seed for the permissions
- *      registry consumed by user_has_permission_v1).
- *   4. `TEXT[] := ARRAY['foo.bar', 'baz.qux', ...]` — Phase B5+ pattern where
- *      caps are batch-registered by iterating an array literal and emitting
- *      `jsonb_build_object('key', v_new_cap, ...)` per entry. The literal
- *      strings inside the ARRAY[...] are the canonical declarations.
- *      Constrained to files that mention `access_control_policy` (the SSOT
- *      seed) to avoid catching unrelated array literals.
- */
+const CAPABILITY_KEY = /^[a-z][a-z_]*\.[a-z][a-z_]*$/;
+
+function addCapability(out, key) {
+  if (typeof key === 'string' && CAPABILITY_KEY.test(key)) out.add(key);
+}
+
+function addJsonCapabilities(out, entries) {
+  if (!Array.isArray(entries)) return;
+  for (const entry of entries) addCapability(out, entry?.key);
+}
+
+function sqlStatements(sql) {
+  return splitTopLevelSqlStatements(lexSqlForIsolation(sql)).map(({ tokens }) => tokens);
+}
+
+function argumentList(tokens, open, closing = tokens[open].value === '(' ? ')' : ']') {
+  const args = [];
+  let depth = 0;
+  let start = open + 1;
+  for (let i = start; i < tokens.length; i++) {
+    const { value } = tokens[i];
+    if (depth === 0 && (value === ',' || value === closing)) {
+      args.push(tokens.slice(start, i));
+      start = i + 1;
+      if (value === closing) return { args, end: i };
+    } else if (value === '(' || value === '[') {
+      depth++;
+    } else if (value === ')' || value === ']') {
+      depth--;
+    }
+  }
+  return { args: [], end: open };
+}
+
+function selectsCategory(tokens, category) {
+  return tokens.some(({ value }, i) =>
+    value === 'category' && tokens[i + 1]?.value === '=' && tokens[i + 2]?.literal === category);
+}
+
+function policyRegistry(tokens) {
+  if (!tokens.some(({ literal }) => literal === 'access_control_policy')) return false;
+  const words = tokens.map(({ value }) => value).join(' ');
+  return /\b(?:(?:insert into|update) (?:public \. )?settings(?:_versions)?\b|upsert_settings_value_v1 \()/.test(words);
+}
+
+function policySeeds(tokens, writesPolicy, out) {
+  for (const [i, token] of tokens.entries()) {
+    // A policy CTE can declare the document without persisting a settings row.
+    const policyCte = i >= 5 &&
+      tokens.slice(i - 5, i).map(({ value }) => value).join(' ') === 'with policy as ( select';
+    if ((writesPolicy || policyCte) && /^\s*\{[\s\S]*"capabilities"\s*:\s*\[/.test(token.literal ?? '')) {
+      addJsonCapabilities(out, JSON.parse(token.literal).capabilities);
+    }
+  }
+}
+
+function policyValues(tokens) {
+  const values = [];
+  for (const [i, token] of tokens.entries()) {
+    if (tokens[i + 1]?.value !== '(') continue;
+    if (token.value === 'jsonb_set') {
+      const { args } = argumentList(tokens, i + 1);
+      if (args[1]?.[0]?.literal === '{capabilities}' && args[2]) values.push(args[2]);
+    }
+    if (token.value === 'jsonb_build_object') {
+      const { args } = argumentList(tokens, i + 1);
+      for (let j = 0; j + 1 < args.length; j += 2) {
+        if (args[j][0]?.literal === 'capabilities') values.push(args[j + 1]);
+      }
+    }
+  }
+  return values;
+}
+
+function policyInputs(statements) {
+  const assignments = new Map();
+  const loops = [];
+  const activeLoops = [];
+  for (const tokens of statements) {
+    for (const [i, token] of tokens.entries()) {
+      if (token.value === ':' && tokens[i + 1]?.value === '=') {
+        const type = tokens[i - 1]?.value;
+        const textArray = type === ']' && tokens[i - 2]?.value === '[' && tokens[i - 3]?.value === 'text';
+        const name = tokens[i - (textArray ? 4 : type === 'jsonb' ? 2 : 1)]?.value;
+        if (!assignments.has(name)) assignments.set(name, []);
+        assignments.get(name).push({ expression: tokens.slice(i + 2), textArray });
+      }
+      if (token.value !== 'loop') continue;
+      if (tokens[i - 1]?.value === 'end') {
+        const loop = activeLoops.pop();
+        if (loop?.source) loops.push({ ...loop, end: token.start });
+        continue;
+      }
+      const header = tokens.findLastIndex(({ value }, j) =>
+        j < i && (value === 'for' || value === 'foreach') && tokens[j + 2]?.value === 'in');
+      const source = header < 0 ? [] : tokens.slice(header + 3, i);
+      const each = tokens[header]?.value === 'foreach' && source[0]?.value === 'array';
+      const elements = source.findIndex(({ value }, j) =>
+        value === 'jsonb_array_elements' && source[j + 1]?.value === '(');
+      activeLoops.push({
+        start: token.start,
+        name: tokens[header + 1]?.value,
+        source: each ? source.slice(1) : elements >= 0 ? argumentList(source, elements + 1).args[0] : undefined,
+      });
+    }
+  }
+  return { assignments, loops };
+}
+
+function collectPolicyUpdates(statements, values, out) {
+  if (values.length === 0) return;
+  // Follow only values feeding the capability field, including loop inputs.
+  const { assignments, loops } = policyInputs(statements);
+  const seen = new Set();
+  const seenKeys = new Set();
+
+  function visit(tokens, key = false, textArray = false) {
+    const visited = key ? seenKeys : seen;
+    if (visited.has(tokens)) return;
+    visited.add(tokens);
+    if (key && tokens.length === 1) addCapability(out, tokens[0].literal);
+    if (key && textArray && tokens[0]?.value === 'array' && tokens[1]?.value === '[') {
+      for (const entry of argumentList(tokens, 1).args) {
+        if (entry.length === 1) addCapability(out, entry[0].literal);
+      }
+      return;
+    }
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      if (!key && /^\s*\[\s*\{/.test(token.literal ?? '')) {
+        addJsonCapabilities(out, JSON.parse(token.literal));
+      }
+      if (!key && token.value === 'jsonb_build_object' && tokens[i + 1]?.value === '(') {
+        const { args, end } = argumentList(tokens, i + 1);
+        if (args[0]?.[0]?.literal === 'key' && args[1]) visit(args[1], true);
+        i = end;
+        continue;
+      }
+      if (token.type !== 'identifier' || (key && tokens.length !== 1) ||
+          ['.', '-', '#', '('].includes(tokens[i + 1]?.value) ||
+          tokens[i - 1]?.value === '.') continue;
+      const loop = loops.find(({ name, start, end }) =>
+        name === token.value && start < token.start && token.start < end);
+      if (loop) visit(loop.source, key);
+      const definition = assignments.get(token.value)?.findLast(({ expression }) =>
+        expression.at(-1)?.end <= token.start);
+      if (definition) visit(definition.expression, key, definition.textArray);
+    }
+  }
+
+  for (const value of values) visit(value);
+}
+
+function collectPermissionRows(statements, out) {
+  const permissionDefinitions = new Set();
+  for (const tokens of statements) {
+    const words = tokens.map(({ value }) => value).join(' ');
+    const lookupId = words.match(/\bselect (?:\w+ \. )?id into (\w+) from (?:public \. )?lookup_definitions\b/);
+    if (lookupId) {
+      if (selectsCategory(tokens, 'rbac_permission')) permissionDefinitions.add(lookupId[1]);
+      else permissionDefinitions.delete(lookupId[1]);
+    }
+    const target = tokens.findIndex(({ value }, i) => value === 'lookup_values' &&
+      (tokens[i - 1]?.value === 'into' && tokens[i - 2]?.value === 'insert' ||
+       tokens[i - 1]?.value === '.' && tokens[i - 2]?.value === 'public' &&
+       tokens[i - 3]?.value === 'into' && tokens[i - 4]?.value === 'insert'));
+    if (target < 0 || tokens[target + 1]?.value !== '(') continue;
+
+    const { args: columns, end: columnEnd } = argumentList(tokens, target + 1);
+    const valueColumn = columns.findIndex(([token]) => token?.value === 'value');
+    const definitionColumn = columns.findIndex(([token]) => token?.value === 'lookup_definition_id');
+    if (valueColumn < 0 || definitionColumn < 0) continue;
+
+    const source = columnEnd + 1;
+    const query = tokens[source]?.value;
+    const select = query === 'select' ? argumentList(tokens, source, 'from') : undefined;
+    const projection = select?.args[valueColumn];
+    if (projection?.length === 1 && projection[0].type === 'string') {
+      // Follow the SELECT's source so a different registry in the WITH clause
+      // cannot make an unrelated row look like a permission declaration.
+      const relation = tokens[select.end + 1]?.value;
+      const cte = tokens.findIndex(({ value }, i) => i < target && value === relation &&
+        tokens[i + 1]?.value === 'as' && tokens[i + 2]?.value === '(');
+      const definition = cte < 0
+        ? tokens.slice(select.end)
+        : tokens.slice(cte + 3, argumentList(tokens, cte + 2).end);
+      const definitionSql = definition.map(({ value }) => value).join(' ');
+      if (/\bfrom (?:public \. )?lookup_definitions\b/.test(definitionSql) &&
+          selectsCategory(definition, 'rbac_permission')) {
+        out.add(projection[0].literal);
+      }
+      continue;
+    }
+
+    const fromRegistry = words.includes('lookup_definitions') && selectsCategory(tokens, 'rbac_permission');
+    const localProjection = select?.args[definitionColumn];
+    const readsLocalId = localProjection?.length === 1 && permissionDefinitions.has(localProjection[0].value);
+    if (query !== 'values' && !fromRegistry && !readsLocalId) continue;
+
+    for (const [i, token] of tokens.entries()) {
+      if (token.value !== 'values') continue;
+      for (let row = i + 1; tokens[row]?.value === '(';) {
+        const { args, end } = argumentList(tokens, row);
+        const key = args[i === source ? valueColumn : 0];
+        const scoped = i === source
+          ? permissionDefinitions.has(args[definitionColumn]?.[0]?.value)
+          : fromRegistry || readsLocalId;
+        if (scoped && key?.length === 1 && key[0].type === 'string') out.add(key[0].literal);
+        if (tokens[end + 1]?.value !== ',') break;
+        row = end + 2;
+      }
+    }
+  }
+}
+
+/** Read capability fields and their inputs within each SQL statement or routine. */
 function extractBackendDeclarations() {
   const out = new Set();
-  const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql'));
-  const reJsonKey = /"key"\s*:\s*"([a-z][a-z_]*\.[a-z][a-z_]*)"/g;
-  const reBuildObj = /jsonb_build_object\(\s*'key'\s*,\s*'([a-z][a-z_]*\.[a-z][a-z_]*)'/g;
-  // For rbac_permission seed rows: each row in a multi-row VALUES block looks
-  // like `('foo.bar', '<label>', ...)`. The first row is preceded by `VALUES`,
-  // subsequent rows by a comma. We match either. Constrained to files that
-  // declare `rbac_permission` to avoid catching unrelated tuple literals.
-  const reLookupVals = /(?:VALUES|,)\s*\(\s*'([a-z][a-z_]*\.[a-z][a-z_]*)'\s*,\s*'/g;
-  // Phase B5+ pattern — TEXT[] := ARRAY[...] of capability strings used to
-  // batch-register caps into access_control_policy.
-  const reTargetCapsArray = /TEXT\[\]\s*:=\s*ARRAY\[([\s\S]*?)\]/g;
-  const reCapInArray = /'([a-z][a-z_]*\.[a-z][a-z_]*)'/g;
-  for (const filename of files) {
-    const text = readFileSync(join(MIGRATIONS_DIR, filename), 'utf8');
-    let m;
-    reJsonKey.lastIndex = 0;
-    while ((m = reJsonKey.exec(text)) !== null) out.add(m[1]);
-    reBuildObj.lastIndex = 0;
-    while ((m = reBuildObj.exec(text)) !== null) out.add(m[1]);
-    if (text.includes('rbac_permission')) {
-      reLookupVals.lastIndex = 0;
-      while ((m = reLookupVals.exec(text)) !== null) out.add(m[1]);
-    }
-    if (text.includes('access_control_policy')) {
-      reTargetCapsArray.lastIndex = 0;
-      while ((m = reTargetCapsArray.exec(text)) !== null) {
-        const body = m[1];
-        let cm;
-        reCapInArray.lastIndex = 0;
-        while ((cm = reCapInArray.exec(body)) !== null) out.add(cm[1]);
+  for (const filename of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql'))) {
+    const sql = readFileSync(join(MIGRATIONS_DIR, filename), 'utf8');
+    if (!/access_control_policy|rbac_permission|"capabilities"/.test(sql)) continue;
+    const statements = sqlStatements(sql);
+    collectPermissionRows(statements, out);
+
+    const routines = [];
+    const policyStatements = [];
+    for (const tokens of statements) {
+      const header = tokens.map(({ value }) => value).join(' ');
+      const name = header.match(/^create (?:or replace )?function (?:\w+ \. )?(\w+) \(/)?.[1];
+      const body = tokens.find(({ type }) => type === 'dollar_body')?.body;
+      if (body && (tokens[0]?.value === 'do' || name)) {
+        const inner = sqlStatements(body);
+        const bodyTokens = inner.flat();
+        collectPermissionRows(inner, out);
+        const ownsPolicy = policyRegistry(bodyTokens);
+        if (ownsPolicy) policyStatements.push(bodyTokens);
+        routines.push({ name, inner, bodyTokens, ownsPolicy });
+      } else {
+        const ownsPolicy = policyRegistry(tokens);
+        policySeeds(tokens, ownsPolicy, out);
+        if (ownsPolicy) {
+          policyStatements.push(tokens);
+          collectPolicyUpdates([tokens], policyValues(tokens), out);
+        }
       }
+    }
+
+    for (const { name, inner, bodyTokens, ownsPolicy } of routines) {
+      const usedByPolicy = name && policyStatements.some((tokens) =>
+        tokens.some(({ value }, i) => value === name && tokens[i + 1]?.value === '('));
+      if (!ownsPolicy && !usedByPolicy) continue;
+      policySeeds(bodyTokens, ownsPolicy, out);
+      collectPolicyUpdates(inner, policyValues(bodyTokens), out);
     }
   }
   return out;
@@ -440,7 +611,14 @@ function extractBackendDeclarations() {
 // Drift computation
 // ---------------------------------------------------------------------------
 
-function computeDrift(fe, backend) {
+function computeDrift(fe, backend, { ALIAS_MAP, FE_ONLY_PENDING, BACKEND_ONLY_ACCEPTED }) {
+  const staleEntries = [
+    ['ALIAS_MAP', Object.keys(ALIAS_MAP), (alias) => fe.has(alias) && backend.has(ALIAS_MAP[alias])],
+    ['FE_ONLY_PENDING', FE_ONLY_PENDING, (cap) => fe.has(cap)],
+    ['BACKEND_ONLY_ACCEPTED', BACKEND_ONLY_ACCEPTED, (cap) => backend.has(cap)],
+  ].flatMap(([list, entries, matches]) =>
+    [...entries].filter((entry) => !matches(entry)).map((entry) => ({ list, entry })));
+
   // Drift up: FE strings unaccounted-for in backend.
   // A string is accounted-for if it is:
   //   - present in backend, OR
@@ -477,7 +655,7 @@ function computeDrift(fe, backend) {
     driftDown.push(cap);
   }
 
-  return { driftUp: driftUp.sort(), driftDown: driftDown.sort(), aliasFailures };
+  return { driftUp: driftUp.sort(), driftDown: driftDown.sort(), aliasFailures, staleEntries };
 }
 
 // ---------------------------------------------------------------------------
@@ -485,8 +663,9 @@ function computeDrift(fe, backend) {
 // ---------------------------------------------------------------------------
 
 function main() {
-  let fe, backend;
+  let fe, backend, lists;
   try {
+    lists = readLists();
     fe = extractFrontendCapabilities();
     backend = extractBackendDeclarations();
   } catch (err) {
@@ -494,14 +673,14 @@ function main() {
     process.exit(1);
   }
 
-  const { driftUp, driftDown, aliasFailures } = computeDrift(fe, backend);
+  const { driftUp, driftDown, aliasFailures, staleEntries } = computeDrift(fe, backend, lists);
 
-  const failed = driftUp.length > 0 || driftDown.length > 0 || aliasFailures.length > 0;
+  const failed = [driftUp, driftDown, aliasFailures, staleEntries].some((entries) => entries.length > 0);
   if (!failed) {
     console.log(
       `All capabilities aligned (${fe.size} FE, ${backend.size} backend, ` +
-      `${Object.keys(ALIAS_MAP).length} aliases, ${FE_ONLY_PENDING.size} FE-pending, ` +
-      `${BACKEND_ONLY_ACCEPTED.size} backend-only-accepted).`
+      `${Object.keys(lists.ALIAS_MAP).length} aliases, ${lists.FE_ONLY_PENDING.size} FE-pending, ` +
+      `${lists.BACKEND_ONLY_ACCEPTED.size} backend-only-accepted).`
     );
     process.exit(0);
   }
@@ -532,6 +711,9 @@ function main() {
     for (const { alias, canonical } of aliasFailures) {
       console.error(`    - ${alias} -> ${canonical}  (canonical missing from backend declarations)`);
     }
+  }
+  for (const { list, entry } of staleEntries) {
+    console.error(`  Stale ${list} entry: ${entry}`);
   }
   process.exit(1);
 }

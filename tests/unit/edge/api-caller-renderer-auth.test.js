@@ -69,7 +69,7 @@ const { outputText } = ts.transpileModule(`${source}\nmodule.exports = { execute
 
 function loadWorker({ stale = false, responseStatus = 200 } = {}) {
   const calls = [];
-  const logError = jest.fn();
+  const logStructured = jest.fn();
   const spec = { url: endpoint, method: 'POST', body: {}, headers: {}, renderer_credential_ref: crypto.randomUUID() };
   const rpc = async (name, args) => {
     calls.push({ name, args });
@@ -95,7 +95,7 @@ function loadWorker({ stale = false, responseStatus = 200 } = {}) {
       calls.push({ name: 'send', args });
       return { status: responseStatus, completed: true, headers: {}, body: {}, latency_ms: 1 };
     } },
-    './_shared/mod.mjs': { readEnv: (key) => ({
+    './_shared/mod.mjs': { logStructured, readEnv: (key) => ({
       EDGE_SUPABASE_URL: new URL(endpoint).origin,
       EDGE_SUPABASE_ANON_KEY: publicKeys.anon,
       API_CALLER_DB_JWT: apiCallerJwt,
@@ -105,10 +105,10 @@ function loadWorker({ stale = false, responseStatus = 200 } = {}) {
   };
   runInNewContext(outputText, {
     module: edgeModule, exports: edgeModule.exports, Error, URL, Headers, TextEncoder, fetch,
-    console: { ...console, error: logError },
+    console,
     require: (name) => deps[name], Deno: { serve: () => {} },
   });
-  return { calls, execute: edgeModule.exports.executeClaimedJobById, spec, logError };
+  return { calls, execute: edgeModule.exports.executeClaimedJobById, spec, logStructured };
 }
 
 test('resolves under the lease, renews ownership, and uses the token only for transport', async () => {
@@ -135,7 +135,7 @@ test('stale spec lease stops before token minting, fetch, or finalization', asyn
 });
 
 test.each([401, 403])('settles renderer gateway %d as a single terminal failure', async (responseStatus) => {
-  const { calls, execute, logError } = loadWorker({ responseStatus });
+  const { calls, execute, logStructured } = loadWorker({ responseStatus });
   const jobId = crypto.randomUUID();
   const lease = crypto.randomUUID();
   await expect(execute(jobId, lease)).resolves.toMatchObject({
@@ -148,5 +148,7 @@ test.each([401, 403])('settles renderer gateway %d as a single terminal failure'
   expect(calls.at(-1).args).toMatchObject({
     p_job_id: jobId, p_lease_token: lease, p_status_code: responseStatus, p_error: 'renderer_gateway_rejected',
   });
-  expect(logError.mock.calls).toEqual([['[api-caller] renderer_gateway_rejected']]);
+  expect(logStructured.mock.calls).toEqual([['error', 'api_caller.renderer_gateway_rejected', {
+    service: 'api-caller', code: 'renderer_gateway_rejected', job_id: jobId, status: responseStatus,
+  }]]);
 });

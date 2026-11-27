@@ -5,7 +5,7 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { CustomerMigrationModule } from '@/modules/integrations/customer-migration';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/integrations-customer-migration';
+import ar from '@/lib/seed-raw/i18n/areas/ar/integrations-customer-migration';
 
 function lookup(catalog: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], catalog);

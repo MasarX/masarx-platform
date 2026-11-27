@@ -413,7 +413,7 @@ describe('Waybill layout goldens (MasarX, latest)', () => {
         const goldens = JSON.parse(fs.readFileSync(goldensPath, 'utf8'));
         expect(goldens.template_key).toBe('waybill_v1');
         expect(goldens.template_version).toBe(templateVersion);
-        expect(goldens.cases).toEqual(fingerprints);
+        expect(fingerprints).toEqual(goldens.cases);
       }
     } finally {
       await client.end();

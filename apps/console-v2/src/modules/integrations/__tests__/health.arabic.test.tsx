@@ -5,7 +5,7 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { HealthModule } from '@/modules/integrations/health';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/integrations-health';
+import ar from '@/lib/seed-raw/i18n/areas/ar/integrations-health';
 
 function lookup(catalog: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], catalog);

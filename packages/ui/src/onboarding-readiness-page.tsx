@@ -22,6 +22,11 @@ type OnboardingReadinessPageProps = {
 };
 
 type JsonRecord = Record<string, unknown>;
+type Translate = ReturnType<typeof createUiTranslator>;
+
+const SETTINGS_CAPABILITY = "settings.read";
+const WORKFLOWS_CAPABILITY = "workflow_runs.read";
+const PLUGINS_CAPABILITY = "integration_plugins.read";
 
 function firstValue(value: string | string[] | undefined) {
   if (Array.isArray(value)) return value[0];
@@ -57,14 +62,14 @@ function toneForStatus(value: string | null) {
   return "neutral" as const;
 }
 
-function formatStatusLabel(value: string | null) {
-  if (!value) return "Unknown";
+function formatStatusLabel(t: Translate, value: string | null) {
+  if (!value) return t("summary.unknown");
   return value.replace(/_/g, " ");
 }
 
-function countLabel(current: number, total: number) {
-  if (total <= 0) return "No required defaults";
-  return `${current}/${total} ready`;
+function countLabel(t: Translate, current: number, total: number) {
+  if (total <= 0) return t("summary.noRequiredDefaults");
+  return t("summary.readyCount", { current, total });
 }
 
 export async function OnboardingReadinessPage({
@@ -75,6 +80,7 @@ export async function OnboardingReadinessPage({
   visibility = "full",
   searchParams,
 }: OnboardingReadinessPageProps) {
+  const t = createUiTranslator("ui.onboardingReadiness");
   const ui = createUiServerClient();
 
   let meError: string | null = null;
@@ -90,23 +96,23 @@ export async function OnboardingReadinessPage({
     requestedScopeType ||= me?.access_scope?.scope_type ?? null;
     requestedScopeId ||= me?.access_scope?.scope_id ?? null;
   } catch (error) {
-    meError = formatUiError(error, "Unable to load current scope.");
+    meError = formatUiError(error, t("errors.loadScope"));
   }
 
   const capabilitySet = resolveCapabilitySet(capabilities);
-  const canReadSettings = hasCapability(capabilitySet, "settings.read");
-  const canReadWorkflows = hasCapability(capabilitySet, "workflow_runs.read");
-  const canReadPlugins = hasCapability(capabilitySet, "integration_plugins.read");
+  const canReadSettings = hasCapability(capabilitySet, SETTINGS_CAPABILITY);
+  const canReadWorkflows = hasCapability(capabilitySet, WORKFLOWS_CAPABILITY);
+  const canReadPlugins = hasCapability(capabilitySet, PLUGINS_CAPABILITY);
   const canReadAny = canReadSettings || canReadWorkflows || canReadPlugins;
 
   if (requestedScopeType && canReadAny) {
     try {
       readiness = await ui.onboardingReadiness(requestedScopeType, requestedScopeId);
     } catch (error) {
-      readinessError = formatUiError(error, "Unable to load onboarding readiness.");
+      readinessError = formatUiError(error, t("errors.loadReadiness"));
     }
   } else if (!meError) {
-    readinessError = "No scope could be resolved for the current user.";
+    readinessError = t("errors.noScope");
   }
 
   const settings = recordValue(readiness?.settings_defaults ?? null);
@@ -134,13 +140,13 @@ export async function OnboardingReadinessPage({
     : [
         {
           href: `${appBasePath}/workflows/bindings`,
-          label: "Workflow bindings",
+          label: t("summary.workflowBindings"),
         },
         ...(appKey === "console"
           ? [
               {
                 href: `${appBasePath}/integrations/plugins`,
-                label: "Integration plugins",
+                label: t("summary.integrationPlugins"),
               },
             ]
           : []),
@@ -149,39 +155,39 @@ export async function OnboardingReadinessPage({
   return (
     <PageContainer className="space-y-6">
       <PageHeader
-        title="Onboarding readiness"
-        eyebrow={appKey === "console" ? "Console" : "Portal"}
-        description="Review the resolved onboarding defaults for the current scope, including required settings, cloned workflow bindings, and baseline integration plugin health."
+        title={t("page.title")}
+        eyebrow={appKey === "console" ? t("page.eyebrowConsole") : t("page.eyebrowPortal")}
+        description={t("page.description")}
       />
 
       <Section
-        title="Resolved scope"
-        description="The readiness snapshot is evaluated against the currently requested scope. Approval-required onboarding still depends on governance, but this page removes the need for manual SQL inspection."
+        title={t("scope.title")}
+        description={t("scope.description")}
       >
         <div className="grid gap-3 text-sm sm:grid-cols-4" data-testid={`${testIdPrefix}-scope`}>
           <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4">
-            <div className="text-xs uppercase tracking-wide text-ui-muted">Scope type</div>
+            <div className="text-xs uppercase tracking-wide text-ui-muted">{t("scope.scopeType")}</div>
             <div className="mt-1 font-medium text-ui-ink">
-              {requestedScopeType ?? "Not available"}
+              {requestedScopeType ?? t("scope.notAvailable")}
             </div>
           </div>
           <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4">
-            <div className="text-xs uppercase tracking-wide text-ui-muted">Scope id</div>
+            <div className="text-xs uppercase tracking-wide text-ui-muted">{t("scope.scopeId")}</div>
             <div className="mt-1 break-all font-medium text-ui-ink">
-              {requestedScopeId ?? "Not available"}
+              {requestedScopeId ?? t("scope.notAvailable")}
             </div>
           </div>
           <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4">
-            <div className="text-xs uppercase tracking-wide text-ui-muted">Capabilities</div>
+            <div className="text-xs uppercase tracking-wide text-ui-muted">{t("scope.capabilities")}</div>
             <div className="mt-1 flex flex-wrap gap-2">
               <Badge tone={canReadSettings ? "success" : "neutral"}>
-                {canReadSettings ? "settings.read" : "settings missing"}
+                {canReadSettings ? SETTINGS_CAPABILITY : t("scope.settingsMissing")}
               </Badge>
               <Badge tone={canReadWorkflows ? "success" : "neutral"}>
-                {canReadWorkflows ? "workflow_runs.read" : "workflow missing"}
+                {canReadWorkflows ? WORKFLOWS_CAPABILITY : t("scope.workflowMissing")}
               </Badge>
               <Badge tone={canReadPlugins ? "success" : "neutral"}>
-                {canReadPlugins ? "integration_plugins.read" : "plugins missing"}
+                {canReadPlugins ? PLUGINS_CAPABILITY : t("scope.pluginsMissing")}
               </Badge>
             </div>
           </div>
@@ -189,7 +195,7 @@ export async function OnboardingReadinessPage({
             className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4"
             data-testid={`${testIdPrefix}-read-at`}
           >
-            <div className="text-xs uppercase tracking-wide text-ui-muted">Snapshot read</div>
+            <div className="text-xs uppercase tracking-wide text-ui-muted">{t("scope.snapshotRead")}</div>
             <div className="mt-1 break-all font-medium text-ui-ink">{readAtIso}</div>
           </div>
         </div>
@@ -197,15 +203,15 @@ export async function OnboardingReadinessPage({
       </Section>
 
       <Section
-        title="Status"
-        description="A green status means the required defaults for this scope are present and healthy. Pending credentials means the baseline was installed automatically but still needs an operator-managed credential handoff."
+        title={t("summary.title")}
+        description={t("summary.description")}
       >
         {!canReadAny ? (
           <div
             className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4 text-sm text-ui-muted"
             data-testid={blockedTestId}
           >
-            This surface requires at least one of `settings.read`, `workflow_runs.read`, or `integration_plugins.read`.
+            {t("summary.readRequired")}
           </div>
         ) : readinessError ? (
           <div
@@ -219,7 +225,7 @@ export async function OnboardingReadinessPage({
             className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4 text-sm text-ui-muted"
             data-testid={blockedTestId}
           >
-            No readiness snapshot is available for this scope yet.
+            {t("summary.noSnapshot")}
           </div>
         ) : (
           <div className="space-y-4" data-testid={readyTestId}>
@@ -228,12 +234,12 @@ export async function OnboardingReadinessPage({
               data-testid={`${testIdPrefix}-overall`}
             >
               <Badge tone={toneForStatus(overallStatus)}>
-                {formatStatusLabel(overallStatus)}
+                {formatStatusLabel(t, overallStatus)}
               </Badge>
               <div className="text-sm text-ui-muted">
                 {booleanValue(readiness.healthy)
-                  ? "All required onboarding defaults for this scope are currently ready."
-                  : "The scope still has blocking drift or pending operator work."}
+                  ? t("summary.healthy")
+                  : t("summary.notHealthy")}
               </div>
               <div className="ml-auto flex flex-wrap gap-3 text-xs">
                 {quickLinks.map((link) => (
@@ -252,16 +258,17 @@ export async function OnboardingReadinessPage({
               <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-xs uppercase tracking-wide text-ui-muted">Settings defaults</div>
+                    <div className="text-xs uppercase tracking-wide text-ui-muted">{t("summary.settingsDefaults")}</div>
                     <div className="mt-1 text-sm text-ui-muted">
                       {countLabel(
+                        t,
                         numberValue(settings?.present_count),
                         numberValue(settings?.required_count),
                       )}
                     </div>
                   </div>
                   <Badge tone={toneForStatus(stringValue(settings?.status))}>
-                    {formatStatusLabel(stringValue(settings?.status))}
+                    {formatStatusLabel(t, stringValue(settings?.status))}
                   </Badge>
                 </div>
               </div>
@@ -269,21 +276,22 @@ export async function OnboardingReadinessPage({
               <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-xs uppercase tracking-wide text-ui-muted">Workflow bindings</div>
+                    <div className="text-xs uppercase tracking-wide text-ui-muted">{t("summary.workflowBindings")}</div>
                     <div className="mt-1 text-sm text-ui-muted">
                       {countLabel(
+                        t,
                         numberValue(workflows?.present_count),
                         numberValue(workflows?.required_count),
                       )}
                     </div>
                     {stringValue(workflows?.baseline_profile) ? (
                       <div className="mt-1 text-xs text-ui-muted">
-                        Baseline profile: {stringValue(workflows?.baseline_profile)}
+                        {t("summary.baselineProfile", { profile: stringValue(workflows?.baseline_profile) ?? "" })}
                       </div>
                     ) : null}
                   </div>
                   <Badge tone={toneForStatus(stringValue(workflows?.status))}>
-                    {formatStatusLabel(stringValue(workflows?.status))}
+                    {formatStatusLabel(t, stringValue(workflows?.status))}
                   </Badge>
                 </div>
               </div>
@@ -291,9 +299,10 @@ export async function OnboardingReadinessPage({
               <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-xs uppercase tracking-wide text-ui-muted">Integration plugins</div>
+                    <div className="text-xs uppercase tracking-wide text-ui-muted">{t("summary.integrationPlugins")}</div>
                     <div className="mt-1 text-sm text-ui-muted">
                       {countLabel(
+                        t,
                         numberValue(plugins?.healthy_count) +
                           numberValue(plugins?.pending_credentials_count),
                         numberValue(plugins?.required_count),
@@ -301,12 +310,12 @@ export async function OnboardingReadinessPage({
                     </div>
                     {stringValue(plugins?.baseline_profile) ? (
                       <div className="mt-1 text-xs text-ui-muted">
-                        Baseline profile: {stringValue(plugins?.baseline_profile)}
+                        {t("summary.baselineProfile", { profile: stringValue(plugins?.baseline_profile) ?? "" })}
                       </div>
                     ) : null}
                   </div>
                   <Badge tone={toneForStatus(stringValue(plugins?.status))}>
-                    {formatStatusLabel(stringValue(plugins?.status))}
+                    {formatStatusLabel(t, stringValue(plugins?.status))}
                   </Badge>
                 </div>
               </div>
@@ -338,24 +347,24 @@ export async function OnboardingReadinessPage({
       </Section>
 
       <Section
-        title="Blocking findings"
+        title={t("findings.title")}
         description={
           clientSafeVisibility
-            ? "Portal exposes only a safe readiness summary. Detailed findings remain operator-facing."
-            : "Every finding below is fail-closed evidence for why this scope is not fully ready."
+            ? t("findings.descriptionClientSafe")
+            : t("findings.descriptionFull")
         }
         testId={`${testIdPrefix}-findings-section`}
       >
         {blockingFindings.length === 0 ? (
           <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4 text-sm text-ui-muted">
-            No blocking findings were reported for the current scope.
+            {t("findings.empty")}
           </div>
         ) : clientSafeVisibility ? (
           <div
             className="rounded-xl border border-[rgb(var(--ui-warning)/0.24)] bg-[rgb(var(--ui-warning)/0.08)] p-4 text-sm text-ui-muted"
             data-testid={`${testIdPrefix}-findings-summary`}
           >
-            {blockingFindings.length} onboarding readiness blocker(s) remain for this scope. Contact your operator if baseline credentials, workflow defaults, or approval follow-up is still pending.
+            {t("findings.clientSafeSummary", { count: blockingFindings.length })}
           </div>
         ) : (
           <div className="space-y-3" data-testid={`${testIdPrefix}-findings`}>
@@ -365,13 +374,13 @@ export async function OnboardingReadinessPage({
                 className="rounded-xl border border-[rgb(var(--ui-danger)/0.2)] bg-[rgb(var(--ui-danger)/0.06)] p-4"
               >
                 <div className="flex items-center gap-2">
-                  <Badge tone="danger">{stringValue(finding.code) ?? "blocking"}</Badge>
+                  <Badge tone="danger">{stringValue(finding.code) ?? t("findings.fallbackCode")}</Badge>
                   <div className="text-xs uppercase tracking-wide text-ui-muted">
-                    {stringValue(finding.component) ?? "onboarding"}
+                    {stringValue(finding.component) ?? t("findings.fallbackComponent")}
                   </div>
                 </div>
                 <p className="mt-2 text-sm text-ui-ink">
-                  {stringValue(finding.message) ?? "A blocking onboarding readiness issue was reported."}
+                  {stringValue(finding.message) ?? t("findings.fallbackMessage")}
                 </p>
               </div>
             ))}
@@ -380,11 +389,11 @@ export async function OnboardingReadinessPage({
       </Section>
 
       <Section
-        title="Plugin baseline"
+        title={t("plugins.title")}
         description={
           clientSafeVisibility
-            ? "Portal shows only the client-safe baseline summary. Detailed plugin inventory remains operator-facing."
-            : "Baseline plugins are installed automatically during onboarding. `auto_activate` items must be live before day-1 operations; pending-credential items stay visible until an operator finishes the credential handoff."
+            ? t("plugins.descriptionClientSafe")
+            : t("plugins.descriptionFull")
         }
         collapsible
         collapseKey="onboarding-readiness.plugins"
@@ -392,7 +401,7 @@ export async function OnboardingReadinessPage({
       >
         {pluginItems.length === 0 ? (
           <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4 text-sm text-ui-muted">
-            No baseline plugins are configured for this scope.
+            {t("plugins.empty")}
           </div>
         ) : clientSafeVisibility ? (
           <div
@@ -401,14 +410,17 @@ export async function OnboardingReadinessPage({
           >
             <div className="font-medium text-ui-ink">
               {countLabel(
+                t,
                 numberValue(plugins?.healthy_count) +
                   numberValue(plugins?.pending_credentials_count),
                 numberValue(plugins?.required_count),
               )}
             </div>
             <div className="mt-2">
-              Healthy plugins: {numberValue(plugins?.healthy_count)}. Pending credential handoffs:{" "}
-              {numberValue(plugins?.pending_credentials_count)}.
+              {t("plugins.clientSafeCounts", {
+                healthy: numberValue(plugins?.healthy_count),
+                pending: numberValue(plugins?.pending_credentials_count),
+              })}
             </div>
           </div>
         ) : (
@@ -416,12 +428,12 @@ export async function OnboardingReadinessPage({
             <table className="min-w-full text-start text-sm" data-testid={`${testIdPrefix}-plugins-table`}>
               <thead className="text-xs uppercase tracking-wide text-ui-muted">
                 <tr className="border-b border-ui-border/60">
-                  <th className="px-3 py-3">Plugin</th>
-                  <th className="px-3 py-3">Mode</th>
-                  <th className="px-3 py-3">Status</th>
-                  <th className="px-3 py-3">Version</th>
-                  <th className="px-3 py-3">Bindings</th>
-                  <th className="px-3 py-3">Tasks</th>
+                  <th className="px-3 py-3">{t("plugins.columns.plugin")}</th>
+                  <th className="px-3 py-3">{t("plugins.columns.mode")}</th>
+                  <th className="px-3 py-3">{t("plugins.columns.status")}</th>
+                  <th className="px-3 py-3">{t("plugins.columns.version")}</th>
+                  <th className="px-3 py-3">{t("plugins.columns.bindings")}</th>
+                  <th className="px-3 py-3">{t("plugins.columns.tasks")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -432,28 +444,28 @@ export async function OnboardingReadinessPage({
                   >
                     <td className="px-3 py-4">
                       <div className="font-medium text-ui-ink">
-                        {stringValue(item.plugin_name) ?? stringValue(item.plugin_key) ?? "Unknown plugin"}
+                        {stringValue(item.plugin_name) ?? stringValue(item.plugin_key) ?? t("plugins.unknownPlugin")}
                       </div>
-                      <div className="text-xs text-ui-muted">{stringValue(item.plugin_key) ?? "unknown"}</div>
+                      <div className="text-xs text-ui-muted">{stringValue(item.plugin_key) ?? t("plugins.unknownKey")}</div>
                     </td>
                     <td className="px-3 py-4">
                       <Badge tone="neutral">
-                        {formatStatusLabel(stringValue(item.activation_mode))}
+                        {formatStatusLabel(t, stringValue(item.activation_mode))}
                       </Badge>
                     </td>
                     <td className="px-3 py-4">
                       <Badge tone={toneForStatus(stringValue(item.status))}>
-                        {formatStatusLabel(stringValue(item.status))}
+                        {formatStatusLabel(t, stringValue(item.status))}
                       </Badge>
                     </td>
                     <td className="px-3 py-4 text-ui-muted">
-                      {stringValue(item.effective_version_status) ?? "missing"}
+                      {stringValue(item.effective_version_status) ?? t("plugins.versionMissing")}
                     </td>
                     <td className="px-3 py-4 text-ui-muted">
                       {numberValue(item.binding_count)}
                     </td>
                     <td className="px-3 py-4 text-ui-muted">
-                      {booleanValue(item.pending_task_exists) ? "Task open" : "No task"}
+                      {booleanValue(item.pending_task_exists) ? t("plugins.taskOpen") : t("plugins.noTask")}
                     </td>
                   </tr>
                 ))}
@@ -465,7 +477,7 @@ export async function OnboardingReadinessPage({
 
       <div className="text-xs text-ui-muted">
         <a href={baseHref} className="underline-offset-4 hover:underline">
-          Refresh this readiness snapshot
+          {t("page.refresh")}
         </a>
       </div>
     </PageContainer>

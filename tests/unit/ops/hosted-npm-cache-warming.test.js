@@ -5,7 +5,7 @@ const yaml = require('yaml');
 const root = path.resolve(__dirname, '../../..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('warms the hosted CI npm cache on trusted main pushes', () => {
+test('warms the hosted CI npm cache from main on push, schedule, and dispatch', () => {
   const warmFile = '.github/workflows/warm-ci-npm-cache.yml';
   expect(fs.existsSync(path.join(root, warmFile))).toBe(true);
   const workflow = yaml.parse(read(warmFile));
@@ -17,8 +17,13 @@ test('warms the hosted CI npm cache on trusted main pushes', () => {
   const restore = reader.steps.find(step => step.name === 'Restore npm cache');
   const install = writer.steps.find(step => step.name === 'Populate the npm cache');
 
-  expect(workflow.on).toEqual({ push: { branches: ['main'], paths: ['package-lock.json', warmFile] } });
+  expect(workflow.on).toEqual({
+    push: { branches: ['main'], paths: ['package-lock.json', warmFile] },
+    schedule: [{ cron: '17 5 * * *' }],
+    workflow_dispatch: null,
+  });
   expect(workflow.permissions).toEqual({ contents: 'read' });
+  expect(writer.if).toBe("github.ref == 'refs/heads/main'");
   expect(writer['runs-on']).toBe(reader['runs-on']);
   expect(writerSetup.uses).toBe(readerSetup.uses);
   expect(read(writerSetup.with['node-version-file']).trim()).toBe(readerSetup.with['node-version']);

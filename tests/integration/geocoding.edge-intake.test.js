@@ -83,7 +83,7 @@ async function insertTestAddress(
         $5::text,
         $6::text,
         $7::text,
-        'unvalidated',
+        'pending',
         $8::text,
         now(),
         now()

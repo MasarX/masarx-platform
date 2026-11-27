@@ -1,6 +1,6 @@
 param(
   [string]$ParentEnvFile = "config/env/.env.cloud",
-  [string]$IsolateEnvFile = "config/env/.env.cloud.mrygqllvagndaehkllxp",
+  [Parameter(Mandatory = $true, HelpMessage = 'Pass the path to the isolate environment file.')][string]$IsolateEnvFile,
   [int]$MaxMinutes = 30
 )
 
