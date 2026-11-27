@@ -846,6 +846,46 @@ SELECT ok(EXISTS(SELECT 1 FROM public.ui_rpc_executor_privilege_plan_v1()
     WHERE object_kind='function' AND object_id='pg_temp.executor_definer_private_fn()'::regprocedure),
   'definer views stop relation grants but retain querying-user function grants');
 
+-- Add children after the initial privilege plan snapshot.
+CREATE TEMP TABLE executor_partition_parent(id INT) PARTITION BY RANGE (id);
+CREATE TEMP TABLE executor_partition_child PARTITION OF pg_temp.executor_partition_parent FOR VALUES FROM (0) TO (10);
+CREATE TEMP TABLE executor_partition_direct_child PARTITION OF pg_temp.executor_partition_parent FOR VALUES FROM (10) TO (20);
+CREATE TEMP TABLE executor_inheritance_parent(id INT);
+CREATE TEMP TABLE executor_inheritance_child() INHERITS (pg_temp.executor_inheritance_parent);
+CREATE TEMP TABLE executor_partition_audit(id INT);
+CREATE FUNCTION pg_temp.executor_partition_audit_write() RETURNS trigger LANGUAGE plpgsql AS $audit$
+BEGIN INSERT INTO pg_temp.executor_partition_audit VALUES (NEW.id); RETURN NEW; END;
+$audit$;
+CREATE TRIGGER executor_partition_audit AFTER INSERT ON pg_temp.executor_partition_child
+  FOR EACH ROW EXECUTE FUNCTION pg_temp.executor_partition_audit_write();
+CREATE FUNCTION pg_temp.executor_partition_write() RETURNS trigger LANGUAGE plpgsql AS $partition$
+BEGIN
+  INSERT INTO pg_temp.executor_partition_parent VALUES (1);
+  INSERT INTO pg_temp.executor_partition_direct_child VALUES (11);
+  UPDATE pg_temp.executor_inheritance_parent SET id=1;
+  RETURN NEW;
+END;
+$partition$;
+CREATE TRIGGER executor_partition_write BEFORE UPDATE ON pg_temp.executor_trigger_target
+  FOR EACH ROW EXECUTE FUNCTION pg_temp.executor_partition_write();
+
+WITH plan AS MATERIALIZED (
+  SELECT object_id, privilege FROM public.ui_rpc_executor_privilege_plan_v1()
+  WHERE object_kind='relation'
+)
+SELECT ok(EXISTS(SELECT 1 FROM plan WHERE object_id='pg_temp.executor_partition_parent'::regclass AND privilege='SELECT')
+  AND NOT EXISTS(SELECT 1 FROM plan WHERE object_id='pg_temp.executor_partition_child'::regclass AND privilege='SELECT'),
+  'parent write plans SELECT on the partitioned parent and omits the routed child')
+UNION ALL
+SELECT ok(EXISTS(SELECT 1 FROM plan WHERE object_id='pg_temp.executor_inheritance_child'::regclass AND privilege='SELECT'),
+  'parent write still plans SELECT on a legacy inheritance child')
+UNION ALL
+SELECT ok(EXISTS(SELECT 1 FROM plan WHERE object_id='pg_temp.executor_partition_direct_child'::regclass AND privilege='SELECT'),
+  'direct partition write still plans SELECT on the partition')
+UNION ALL
+SELECT ok(EXISTS(SELECT 1 FROM plan WHERE object_id='pg_temp.executor_partition_audit'::regclass AND privilege='INSERT'),
+  'parent write still plans dependencies of a trigger defined on the routed child');
+
 CREATE FUNCTION pg_temp.test_executor_definer_view_v1() RETURNS SETOF TEXT LANGUAGE plpgsql AS $view_test$
 DECLARE v_id UUID; v_actor UUID; rec RECORD;
 BEGIN

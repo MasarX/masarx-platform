@@ -706,6 +706,8 @@ jobs:
           fi
           rm -f "$deploy_temp/db-push.log" "$deploy_temp/edge-secret-metadata.json"; rmdir "$deploy_temp"' EXIT
           export NO_COLOR=1
+          : > "$deploy_temp/db-push.log"
+          bash scripts/deploy/prepare-executor-plan.sh
           "$cli" db push --linked --yes 2>&1 | tee "$deploy_temp/db-push.log" ||
             bash scripts/deploy/supabase-db-push.sh "$cli" "$deploy_temp/db-push.log" "${PIPESTATUS[@]}" 2>&1 | tee -a "$deploy_temp/db-push.log"
           apply_status=0
