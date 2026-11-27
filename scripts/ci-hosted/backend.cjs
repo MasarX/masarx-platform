@@ -621,15 +621,22 @@ async function qualify(diagnostic) {
     }
     diagnostic.stage = 'stack-status';
     const status = JSON.parse(await checked(cli, ['status', '--workdir', temp, '-o', 'json'], cliEnv, undefined, { quiet: true }));
-    if (!status.DB_URL) throw new Error('Local stack did not provide DB_URL');
+    if (!status.DB_URL?.trim()) throw new Error('Local stack did not provide DB_URL for DATABASE_URL');
     if (new URL(status.DB_URL).port !== String(dbPort)) throw new Error('Local stack reported an unexpected database port');
     Object.assign(env, { DATABASE_URL: status.DB_URL, DATABASE_URL_DIRECT: status.DB_URL,
       SUPABASE_URL: status.API_URL || '', SUPABASE_ANON_KEY: status.ANON_KEY || '',
       SUPABASE_SERVICE_ROLE_KEY: status.SERVICE_ROLE_KEY || '', WORKSPACE_NAME: project });
     local.assertLoopbackOnly(env, 'local stack');
-    if (edge && (!env.SUPABASE_URL || new URL(env.SUPABASE_URL).port !== String(apiPort)
-      || !env.SUPABASE_ANON_KEY || !isJwtSignedWithSecret(env.SUPABASE_SERVICE_ROLE_KEY, edge.jwtSecret))) {
-      throw new Error('The integration stack did not report its local API and job-local signing key');
+    if (edge) {
+      const missing = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY']
+        .filter(name => !env[name].trim());
+      if (missing.length) throw new Error(`Local integration stack did not provide ${missing.join(', ')}`);
+      if (new URL(env.SUPABASE_URL).port !== String(apiPort)) {
+        throw new Error('Local integration stack reported an unexpected SUPABASE_URL port');
+      }
+      if (!isJwtSignedWithSecret(env.SUPABASE_SERVICE_ROLE_KEY, edge.jwtSecret)) {
+        throw new Error('Local integration stack reported a SUPABASE_SERVICE_ROLE_KEY with the wrong signing key');
+      }
     }
     diagnostic.stage = 'database-connect';
     const { Client } = require('pg');

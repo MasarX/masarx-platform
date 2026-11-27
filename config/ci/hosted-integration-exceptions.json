@@ -195,39 +195,7 @@
     "maxSkipped": 2
   },
   {
-    "file": "tests/integration/workflows/ui-create-shipment.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Onboarding defaults collide with fixture setup or teardown",
-    "issue": "#570",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/identity-contract-repairs.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Onboarding defaults collide with fixture setup or teardown",
-    "issue": "#570",
-    "expires": "2026-12-08"
-  },
-  {
     "file": "tests/integration/workspace/f244-native-city-district.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Onboarding defaults collide with fixture setup or teardown",
-    "issue": "#570",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/workflows/create-from-reservation.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Onboarding defaults collide with fixture setup or teardown",
-    "issue": "#570",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/workflows/recurring-shipment-schedule.test.js",
     "kind": "known-failure",
     "runner": "Hosted integration",
     "reason": "Onboarding defaults collide with fixture setup or teardown",
@@ -368,14 +336,6 @@
     "runner": "Hosted integration",
     "reason": "Fixture SQL or data does not match the migrated schema and settings",
     "issue": "#574",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/workflows/dispatch-stop-exceptions.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Hosted results differ from the current integration assertions",
-    "issue": "#575",
     "expires": "2026-12-08"
   },
   {
