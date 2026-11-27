@@ -12,7 +12,7 @@ import { useIdentity } from '@/lib/identity';
 import { useResolveSettings } from '@/lib/queries';
 import { getSupabaseClient, isRealtimeEnabled } from '@/lib/supabase';
 
-export type LiveState = 'syncing' | 'live' | 'reconnecting' | 'offline' | 'polling';
+export type LiveState = 'syncing' | 'live' | 'reconnecting' | 'offline' | 'polling' | 'not-configured';
 const LIVE_RESOURCES = {
   routes: [
     'route_runs', 'route_stops', 'route_run_directory', 'route_run_assignments',
@@ -139,6 +139,7 @@ export function useLiveConnection({
   const [attempt, setAttempt] = useState(0);
   const [, setTick] = useState(0);
   const catchUpOnPoll = useRef(!online);
+  const refreshOnRetry = useRef(false);
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -158,8 +159,11 @@ export function useLiveConnection({
 
   const polling = !realtime || (maxReconnects !== undefined && failures >= maxReconnects);
   useEffect(() => {
-    if (!enabled || !online || pollMs === undefined || refetchMs === undefined) return undefined;
-    const interval = refetchMs;
+    if (!enabled || !online) return undefined;
+    const manual = refreshOnRetry.current;
+    if (pollMs === undefined && !manual) return undefined;
+    refreshOnRetry.current = false;
+    const interval = refetchMs ?? 0;
     let active = true;
     let queued = false;
     let catchUpQueued = false;
@@ -222,10 +226,12 @@ export function useLiveConnection({
     let unsubscribeHeartbeat: (() => void) | undefined;
     let channel: ReturnType<LiveClient['channel']> | undefined;
     const channelName = `console-live:${orgId}:${topic}`;
-    if (polling) {
-      if (catchUp) requestRefresh('catch-up');
+    if (manual || (pollMs !== undefined && polling && (catchUp || realtime))) {
+      requestRefresh('catch-up');
+    }
+    if (pollMs !== undefined && polling) {
       pollTimer = window.setInterval(() => requestRefresh('poll'), pollMs);
-    } else if (client) {
+    } else if (pollMs !== undefined && client) {
       const join = () => {
         if (!active) return;
         channel = client.channel(channelName, { config: { private: true } });
@@ -271,7 +277,7 @@ export function useLiveConnection({
         if (removals.get(channelName) === removal) removals.delete(channelName);
       });
     };
-  }, [enabled, polling, client, online, orgId, topic, attempt, pollMs, refetchMs, queryClient]);
+  }, [enabled, polling, realtime, client, online, orgId, topic, attempt, pollMs, refetchMs, queryClient]);
 
   const state = config ? deriveLiveState({
     online,
@@ -283,7 +289,7 @@ export function useLiveConnection({
     catchingUp: refresh === 'pending',
     refreshFailed: refresh === 'failed',
     now: Date.now(),
-  }, config) : !online ? 'offline' : policy.isPending ? 'syncing' : 'reconnecting';
+  }, config) : policy.isPending ? 'syncing' : 'not-configured';
 
   // Re-derive when the no-heartbeat window turns reconnecting into offline.
   useEffect(() => {
@@ -301,15 +307,11 @@ export function useLiveConnection({
   useEffect(() => () => publish(null), []);
 
   const retry = useCallback(() => {
-    if (pollMs === undefined) {
-      if (online) void policy.refetch();
-      return;
-    }
-    catchUpOnPoll.current = true;
+    refreshOnRetry.current = true;
     setFailures(0);
     setChannel('connecting');
     setAttempt((a) => a + 1);
-  }, [online, pollMs, policy.refetch]);
+  }, []);
 
   return { state, syncedAt: dataUpdatedAt, pollMs: pollMs ?? null, retry };
 }

@@ -6,6 +6,7 @@ const messages = {
       reconnecting: 'Reconnecting',
       offline: 'Offline',
       polling: 'Auto-refresh',
+      'not-configured': 'Live refresh not configured',
     },
     statusbar: {
       syncing: 'Realtime syncing',
@@ -15,6 +16,7 @@ const messages = {
       polling: 'Auto-refresh',
     },
     connectedTitle: 'Connected. Last change {age} ago.',
+    missingPolicyTitle: 'Missing or invalid setting {key}',
     detailSeparator: '·',
     lastUpdate: 'last update {age} ago',
     dataFrom: 'data from {time}',

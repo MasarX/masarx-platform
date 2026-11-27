@@ -21,6 +21,7 @@ const LIVE_TONE: Record<LiveState, string | undefined> = {
   reconnecting: 'warn',
   offline: 'danger',
   polling: undefined,
+  'not-configured': 'danger',
 };
 
 // SCHEMA-DRIFT NOTE (Wave 11 / W11-5 — see __audit__/SCHEMA-DRIFT/INSIGHTS.md §6):
@@ -407,7 +408,11 @@ export function Statusbar({
         // aria-hidden: the page's LiveChip is the only connection live region.
         <span className="status-seg" aria-hidden="true" data-testid="statusbar-realtime">
           <span className="status-seg__dot" data-tone={LIVE_TONE[liveStatus.state]} />
-          <span className="status-seg__value">{t(`live.statusbar.${liveStatus.state}`)}</span>
+          <span className="status-seg__value">
+            {liveStatus.state === 'not-configured'
+              ? t('live.state.not-configured')
+              : t(`live.statusbar.${liveStatus.state}`)}
+          </span>
         </span>
       ) : null}
 
