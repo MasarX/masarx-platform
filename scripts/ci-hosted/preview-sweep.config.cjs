@@ -44,7 +44,11 @@ module.exports = defineConfig({
     server('node scripts/ci-hosted/deny-egress.cjs', ports.proxy),
     server('npm run dev --workspace @masarx/console -- --hostname ' + loopback, ports.console, nextEnv),
     {
-      ...server('npm run dev --workspace @masarx/portal -- --hostname ' + loopback, ports.portal, nextEnv),
+      ...server(
+        'npm run build --workspace @masarx/portal && npm run start --workspace @masarx/portal -- --hostname ' + loopback,
+        ports.portal, nextEnv,
+      ),
+      timeout: 180_000,
       stdout: 'pipe', stderr: 'pipe',
     },
     server('npm run dev --workspace @masarx/console-v2 -- --host ' + loopback + ' --strictPort', ports['console-v2'], {

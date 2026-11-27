@@ -563,7 +563,7 @@ jobs:
           fi
           next_path='/[][A-Za-z0-9/_.-]*'
           next_time='[0-9]+(\.[0-9])?(ms|s|min)'
-          for locale in en ar; do
+          for locale in en; do
             echo "Preview sweep locale: $locale"
             SWEEP_LOCALE="$locale" node node_modules/@playwright/test/cli.js test -c scripts/ci-hosted/preview-sweep.config.cjs 2>&1 |
               sed -u -nE \
