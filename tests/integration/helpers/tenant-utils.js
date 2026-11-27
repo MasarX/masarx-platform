@@ -1088,6 +1088,12 @@ async function cleanupAutoOnboardingArtifacts(client, organizationId) {
         AND managed_by = 'integration_plugin'`,
     [organizationId]
   );
+  await client.query(
+    `DELETE FROM public.providers
+      WHERE organization_id = $1::uuid
+        AND metadata ? 'onboarding'`,
+    [organizationId]
+  );
 }
 
 async function createWorkflowContext(client, params = {}) {
