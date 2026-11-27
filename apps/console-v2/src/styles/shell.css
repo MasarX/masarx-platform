@@ -789,3 +789,30 @@
 .tenant-picker__item--active { background: var(--accent-soft); color: var(--accent-ink); }
 .tenant-picker__item-name { font-weight: 500; }
 .tenant-picker__item-id { font-size: 10.5px; opacity: 0.65; margin-inline-start: 12px; }
+
+/* ---------- Phone width: one column; the pinned sidenav becomes an overlay drawer ---------- */
+/* 720px matches the page-header breakpoint in components.css and PHONE_QUERY in AppShell.tsx. */
+.topbar .topbar__nav-toggle { display: none; }
+@media (max-width: 720px) {
+  .app-shell[data-nav-pinned][data-notifs-pinned] {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "topbar"
+      "main"
+      "rail";
+  }
+  .app-shell[data-notifs-pinned="true"] .main { padding-right: 0; } /* physical: resets the right-side notifications panel offset on phones */
+  .topbar .topbar__nav-toggle { display: inline-flex; }
+  .app-shell .sidenav { display: none; }
+  .app-shell[data-nav-pinned="true"] .sidenav {
+    display: block;
+    grid-area: auto;
+    position: fixed;
+    top: var(--topbar-h);
+    bottom: var(--evidence-h);
+    inset-inline-start: 0;
+    width: min(var(--sidenav-w), 85vw);
+    z-index: var(--z-drawer);
+    box-shadow: var(--shadow-pop);
+  }
+}

@@ -38,6 +38,7 @@ const messages: CatalogShape<typeof English> = {
       daysAgo: 'قبل {n} يوم',
     },
     topbar: {
+      navigation: 'التنقل',
       activeTenant: 'المستأجر النشط',
       platformScope: 'نطاق المنصة',
       senderScope: 'نطاق المرسل',

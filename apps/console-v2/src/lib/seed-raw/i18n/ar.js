@@ -70,13 +70,21 @@ export const ar = {
     exceptions: { eyebrow: 'التشغيل', accent: 'الاستثناءات', plain: '(NDR)' },
     returnedToBranch: { eyebrow: 'التشغيل', accent: 'الإرجاع', plain: 'إلى الفرع' },
     pickups: {
-      eyebrow: 'التشغيل', accent: 'الالتقاط', plain: '— الميل الأول',
+      eyebrow: 'التشغيل', accent: 'الاستلام', plain: '— الميل الأول',
       invalidWindowTime: 'أدخل وقت بداية ووقت نهاية صالحين بالتوقيت المحلي.',
     },
     trackingMap: { eyebrow: 'التشغيل', accent: 'خريطة', plain: 'التتبّع' },
     hubs: { eyebrow: 'الشبكة', accent: 'المراكز', plain: 'والمناطق' },
     partners: { eyebrow: 'الشبكة', accent: 'الشركاء', plain: '— شركاء السوق' },
-    geocoding: { eyebrow: 'الشبكة', accent: 'الترميز', plain: 'الجغرافي والعناوين' },
+    geocoding: {
+      eyebrow: 'الشبكة', accent: 'الترميز', plain: 'الجغرافي والعناوين',
+      scopeTypes: {
+        loading: 'جارٍ تحميل أنواع النطاق…',
+        error: 'تعذّر تحميل أنواع النطاق.',
+        emptyTitle: 'لا توجد أنواع نطاق مسجّلة',
+        emptyHint: 'سجل أنواع النطاق لا يحتوي على أي صفوف، لذا لا يمكن ضبط سياسات الترميز الجغرافي على أي نطاق. اطلب من مسؤول المنصة تسجيل أنواع النطاق.',
+      },
+    },
     clients: { eyebrow: 'العملاء', accent: 'العملاء', plain: '— الرتبة 2 في السلّم' },
     senders: { eyebrow: 'العملاء', accent: 'المُرسلون', plain: '— الرتبة 3 في السلّم' },
     recipients: { eyebrow: 'العملاء', accent: 'المُستلمون', plain: '' },

@@ -38,6 +38,7 @@ const messages = {
       daysAgo: '{n} d ago',
     },
     topbar: {
+      navigation: 'Navigation',
       activeTenant: 'Active tenant',
       platformScope: 'Platform scope',
       senderScope: 'Sender scope',
