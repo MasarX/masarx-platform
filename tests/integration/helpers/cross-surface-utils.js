@@ -337,6 +337,12 @@ async function createShipmentViaTabularImport(client, input) {
             enabled: true,
           },
           { source_column: 'Country', target_field: 'destination_address.country', enabled: true },
+          {
+            target_field: 'destination_address.validation_status',
+            value_mode: 'fixed',
+            fixed_value: 'pending',
+            enabled: true,
+          },
         ],
         rows: [
           {
@@ -356,7 +362,8 @@ async function createShipmentViaTabularImport(client, input) {
 
   const preparedRun = parseRpcResult(prepareRows[0]?.run, 'tabular_import_prepare_v1');
   if (Number(preparedRun?.blocked_count || 0) > 0) {
-    throw new Error(`tabular_import_prepare_v1 blocked cross-surface shipment import for ${trackingNumber}`);
+    const reasonCodes = preparedRun.rows?.[0]?.reason_codes ?? [];
+    throw new Error(`tabular_import_prepare_v1 blocked cross-surface shipment import for ${trackingNumber}: ${reasonCodes.join(', ')}`);
   }
 
   await setServiceContext(client, input.organizationId, input.userId);
@@ -391,15 +398,16 @@ async function createShipmentViaTabularImport(client, input) {
     [preparedRun.run_id],
   );
 
+  const importedRow = processedRun.rows?.find(row => row.target_record_id === shipmentId);
   return {
     shipmentId,
-    workflowRunId: null,
-    correlationId: null,
+    workflowRunId: importedRow?.workflow_run_id,
+    correlationId: importedRow?.primary_result?.metadata?.correlation_id,
     trackingNumber,
     clientReferenceNumber: shipmentRows[0]?.client_reference_number || clientReferenceNumber,
     importRunId: preparedRun.run_id,
     reportId: importRunRows[0]?.report_id ?? null,
-    result: processedRun,
+    result: importedRow?.primary_result,
   };
 }
 
@@ -539,6 +547,17 @@ async function createShipmentViaWebhookIntake(client, input) {
       service_type: input.serviceType || 'delivery',
       source: 'integration.cross-surface-delivery',
       source_origin: 'webhook',
+      recipient: {
+        name: 'Cross Surface Webhook Recipient',
+        phone_number: '+12025550123',
+        address: {
+          line1: '742 Example Street',
+          city: 'Riyadh',
+          province: 'Riyadh',
+          postal_code: '11564',
+          country: 'SA',
+        },
+      },
     },
   };
   const headers = {

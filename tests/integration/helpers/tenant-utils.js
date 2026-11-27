@@ -1063,6 +1063,11 @@ async function cleanupAutoOnboardingArtifacts(client, organizationId) {
     [organizationId]
   );
   await client.query(
+    `DELETE FROM public.api_gateway_requests
+      WHERE organization_id = $1::uuid`,
+    [organizationId]
+  );
+  await client.query(
     `DELETE FROM public.webhook_sources
       WHERE organization_id = $1::uuid`,
     [organizationId]
@@ -1082,16 +1087,31 @@ async function cleanupAutoOnboardingArtifacts(client, organizationId) {
       WHERE organization_id = $1::uuid`,
     [organizationId]
   );
+  // Remove connections before provider deletion can null their provider and credential references.
+  await client.query(
+    `DELETE FROM public.integration_connections
+      WHERE organization_id = $1::uuid`,
+    [organizationId]
+  );
+  for (const table of ['api_routes', 'circuit_breaker_state', 'comms_attempts', 'provider_usage_tracking']) {
+    await client.query(
+      `DELETE FROM public.${table} AS dependent
+        USING public.providers AS provider
+        WHERE dependent.provider_id = provider.id
+          AND provider.organization_id = $1::uuid`,
+      [organizationId]
+    );
+  }
+  // Cascading provider deletion removes operation templates that reference the mappings.
+  await client.query(
+    `DELETE FROM public.providers
+      WHERE organization_id = $1::uuid`,
+    [organizationId]
+  );
   await client.query(
     `DELETE FROM public.mapping_configs
       WHERE organization_id = $1::uuid
         AND managed_by = 'integration_plugin'`,
-    [organizationId]
-  );
-  await client.query(
-    `DELETE FROM public.providers
-      WHERE organization_id = $1::uuid
-        AND metadata ? 'onboarding'`,
     [organizationId]
   );
 }
