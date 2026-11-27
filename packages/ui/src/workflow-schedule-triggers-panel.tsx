@@ -24,7 +24,7 @@ import {
 import { navigateTo } from "./navigate";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
 import { useToast } from "./use-toast";
-import { formatUiError } from "./utils";
+import { formatUiError, UiMessageError } from "./utils";
 import { formatResourceValue } from "./resource-utils";
 import { resolveWorkflowRunDestination } from "./workflow-run-navigation";
 import type { WorkflowScheduleTemplateGuide } from "./workflow-schedule-template-guide";
@@ -1101,13 +1101,13 @@ export function WorkflowScheduleTriggersPanel({
       if (editor.scheduleType === "daily") {
         const time = parseTimeInput(editor.dailyTime);
         if (!time) {
-          throw new Error(t("triggers.schedules.toast.invalidTime"));
+          throw new UiMessageError(t("triggers.schedules.toast.invalidTime"));
         }
         schedule = { type: "daily", at_time: toTimeInputValue(time.hour, time.minute), timezone };
       } else if (editor.scheduleType === "weekly") {
         const time = parseTimeInput(editor.weeklyTime);
         if (!time) {
-          throw new Error(t("triggers.schedules.toast.invalidTime"));
+          throw new UiMessageError(t("triggers.schedules.toast.invalidTime"));
         }
         const selected = editor.weeklyDays
           .map((value) => Number(value))
@@ -1115,7 +1115,7 @@ export function WorkflowScheduleTriggersPanel({
           .map((value) => Math.trunc(value))
           .filter((value) => value >= 0 && value <= 6);
         const unique = Array.from(new Set(selected)).sort((a, b) => a - b);
-        if (unique.length === 0) throw new Error(t("triggers.schedules.toast.invalidWeekday"));
+        if (unique.length === 0) throw new UiMessageError(t("triggers.schedules.toast.invalidWeekday"));
         schedule = {
           type: "weekly",
           days_of_week: unique,
@@ -1125,7 +1125,7 @@ export function WorkflowScheduleTriggersPanel({
       } else {
         const value = Number(editor.intervalValue);
         if (!Number.isFinite(value) || value <= 0) {
-          throw new Error(t("triggers.schedules.toast.invalidInterval"));
+          throw new UiMessageError(t("triggers.schedules.toast.invalidInterval"));
         }
         const multiplier =
           editor.intervalUnit === "hours"
@@ -1135,14 +1135,14 @@ export function WorkflowScheduleTriggersPanel({
               : 1;
         const seconds = Math.trunc(value * multiplier);
         if (!Number.isFinite(seconds) || seconds <= 0) {
-          throw new Error(t("triggers.schedules.toast.invalidInterval"));
+          throw new UiMessageError(t("triggers.schedules.toast.invalidInterval"));
         }
         schedule = { type: "interval", interval_seconds: seconds, timezone };
       }
 
       const contextPatch = contextPatchState.value;
       if (!contextPatch) {
-        throw new Error(t("triggers.schedules.toast.invalidContextPatch"));
+        throw new UiMessageError(t("triggers.schedules.toast.invalidContextPatch"));
       }
 
       const ui = createUiClient();

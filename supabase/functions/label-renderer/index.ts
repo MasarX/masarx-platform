@@ -34,13 +34,41 @@ const ensureRendererDeps = (): Promise<void> => {
   }
   return rendererDepsPromise;
 };
-import { readEnv } from "./_shared/mod.mjs";
+import { classifyError, logStructured, readEnv } from "./_shared/mod.mjs";
 import { resolveCorsPolicy } from "./_shared/cors.mjs";
 import { authorizeLabelRendererRequest, resolveLabelRendererOperation, verifyLabelRendererToken } from "./auth.mjs";
 import { BARCODE_MAX_CHARS, canonicalBarcodeType, encodeAdditionalBarcode, rotateBarcodePoint } from "./barcode.ts";
+import { RendererConfigurationError, rendererError, rendererInternalErrorBody } from "./error-response.mjs";
 import { executeHotpathRpc, hotpathModeEnabled } from "../_shared/db-hotpath.ts";
 import { projectSignedStorageUrlForResponse } from "../_shared/label-storage-url.ts";
 import { AssetCache } from "../_shared/asset-cache.ts";
+
+const logRenderer = (
+  level: "warn" | "error",
+  event: string,
+  { error, ...context }: Record<string, unknown> = {},
+) => {
+  logStructured(level, `label_renderer.${event}`, {
+    service: "label-renderer",
+    ...context,
+    ...(error == null ? {} : { error_type: classifyError(error) }),
+  });
+};
+
+const classifyRendererFailure = (code: string, error: unknown, level: "warn" | "error" = "error") => {
+  try {
+    logRenderer(level, code, { error });
+  } catch {
+    // Logging must not prevent the classified response.
+  }
+  return rendererError(code, error);
+};
+
+// Keep string error fields used by job completion and workflow consumers.
+const rendererFailure = (code: string, error: unknown) => {
+  const failure = classifyRendererFailure(code, error);
+  return { error: failure.code, error_class: failure.class };
+};
 
 interface LeaseRequest {
   organization_id?: string;
@@ -421,12 +449,10 @@ const defaultLabelTypeForTargetType = (targetType: string | null): string => {
 };
 
 if (!SUPABASE_URL || (!SUPABASE_SERVICE_OR_EDGE_KEY && !(SUPABASE_ANON_KEY && EDGE_DB_JWT))) {
-  console.error("Missing Supabase configuration for label renderer.");
+  logRenderer("error", "supabase_config_missing");
 }
 if (!SUPABASE_URL || STORAGE_AUTH_CANDIDATES.length === 0) {
-  console.error(
-    "Missing storage Supabase configuration for label renderer. Provide LABEL_RENDERER_DB_JWT+SUPABASE_ANON_KEY (preferred) or LABEL_RENDERER_STORAGE_TOKEN/EDGE_SUPABASE_SERVICE_ROLE_KEY.",
-  );
+  logRenderer("error", "storage_config_missing");
 }
 
 let supabase = null as ReturnType<typeof createClient> | null;
@@ -438,7 +464,7 @@ if (SUPABASE_URL) {
       global: { headers: { Authorization: `Bearer ${EDGE_DB_JWT}` } },
     });
   } else if (!EDGE_REQUIRE_DB_JWT && SUPABASE_SERVICE_OR_EDGE_KEY) {
-    console.warn("[label-renderer] EDGE_REQUIRE_DB_JWT not enforced; using LABEL_RENDERER_TOKEN/service-role fallback.");
+    logRenderer("warn", "database_jwt_fallback");
     supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_OR_EDGE_KEY, {
       auth: { persistSession: false },
       db: { schema: "api" },
@@ -455,10 +481,10 @@ if (SUPABASE_URL && SUPABASE_SERVICE_OR_EDGE_KEY) {
 }
 
 if (!supabase && EDGE_REQUIRE_DB_JWT) {
-  console.error("label-renderer missing LABEL_RENDERER_DB_JWT while EDGE_REQUIRE_DB_JWT=1");
+  logRenderer("error", "required_database_jwt_missing");
 }
 if (!STORAGE_API_BASE || STORAGE_AUTH_CANDIDATES.length === 0) {
-  console.error("label-renderer missing storage service key (LABEL_RENDERER_STORAGE_TOKEN / service role)");
+  logRenderer("error", "storage_service_key_missing");
 }
 
 type IntegrationContext =
@@ -490,7 +516,7 @@ const BUCKET_HEALTH_TTL_ERROR = 60 * 1000;
 
 const ensureSupabase = () => {
   if (!supabase) {
-    throw new Error(
+    throw new RendererConfigurationError(
       EDGE_REQUIRE_DB_JWT
         ? "Supabase client not initialised. Provide SUPABASE_URL + SUPABASE_ANON_KEY + LABEL_RENDERER_DB_JWT (EDGE_REQUIRE_DB_JWT=1)."
         : "Supabase client not initialised. Provide LABEL_RENDERER_DB_JWT (preferred) or LABEL_RENDERER_TOKEN/service role key.",
@@ -817,7 +843,7 @@ const storageCreateSignedUrl = async (
 
 const createUserClient = (token: string) => {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    throw new Error("Supabase anon credentials missing");
+    throw new RendererConfigurationError("Supabase anon credentials missing");
   }
   return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -910,7 +936,7 @@ const emitMetric = async (
   }
 
   if (lastError) {
-    console.warn(`metrics_webhook_events insert skipped (${payload.metric}): ${lastError}`);
+    logRenderer("warn", "metric_insert_failed", { metric: payload.metric, error: lastError });
   }
 };
 
@@ -925,7 +951,7 @@ const runBestEffortBackgroundTask = (
     return;
   }
   promise.catch((error) => {
-    console.warn(`${label} background task failed`, error);
+    logRenderer("warn", "background_task_failed", { task: label, error });
   });
 };
 
@@ -965,14 +991,14 @@ const fetchAsset = async (path: string, refresh = false): Promise<Uint8Array | n
   try {
     const { data, error } = await storageDownloadObject(ASSET_BUCKET, path);
     if (error || !data) {
-      console.warn(`Asset download failed for ${path}: ${error?.message}`);
+      logRenderer("warn", "template_asset_download_failed", { error });
       return null;
     }
     const bytes = new Uint8Array(await data.arrayBuffer());
     assetCache.set(path, bytes);
     return bytes;
   } catch (err) {
-    console.warn(`Asset download exception for ${path}:`, err);
+    logRenderer("warn", "template_asset_download_failed", { error: err });
     return null;
   }
 };
@@ -1121,7 +1147,7 @@ const resolveArtifactReturn = async (
         expiresSeconds,
       );
       if (signedError) {
-        console.warn("createSignedUrl failed for bundle artifact", signedError.message);
+        logRenderer("warn", "artifact_url_signing_failed", { error: signedError });
       } else if (signedData) {
         const signedRecord = signedData as Record<string, unknown>;
         signedUrl =
@@ -1140,7 +1166,7 @@ const resolveArtifactReturn = async (
           null;
       }
     } catch (err) {
-      console.warn("Signed URL generation error", err);
+      logRenderer("warn", "artifact_url_signing_failed", { error: err });
     }
     signedMs = performance.now() - signedStart;
     if (!expiresAt && expiresSeconds > 0) {
@@ -1269,10 +1295,11 @@ const deliverWorkflowStepResult = async (
     p_max_steps: workflowProgress.maxSteps,
   });
   if (error) {
-    console.warn(`progress_workflow_run_step_result_v1 failed for ${logLabel} callback`, {
-      workflowRunId: workflowProgress.workflowRunId,
-      workflowRunStepId: workflowProgress.workflowRunStepId,
-      error: error.message,
+    logRenderer("warn", "workflow_progress_failed", {
+      operation: logLabel,
+      workflow_run_id: workflowProgress.workflowRunId,
+      workflow_run_step_id: workflowProgress.workflowRunStepId,
+      error,
     });
     return null;
   }
@@ -1610,36 +1637,31 @@ const toBidiVisualOrder = (value: string, direction?: string): string => {
 const resolveEdgeDbMode = (value: unknown): "rest_rpc" | "direct_pooler" =>
   hotpathModeEnabled(value) ? "direct_pooler" : "rest_rpc";
 
-const wrapRpcError = (error: unknown): Error =>
-  error instanceof Error ? error : new Error(typeof error === "string" ? error : "rpc failed");
-
 const callRendererRpc = async <T>(
   client: ReturnType<typeof ensureSupabase>,
   functionName: string,
   args: Record<string, unknown>,
   edgeDbMode: "rest_rpc" | "direct_pooler" = "rest_rpc",
-): Promise<{ data: T | null; error: Error | null; transport: "rest_rpc" | "direct_pooler" }> => {
+): Promise<{ data: T | null; error: unknown; transport: "rest_rpc" | "direct_pooler" }> => {
   if (edgeDbMode === "direct_pooler") {
     const directResult = await executeHotpathRpc<T>(edgeDbMode, functionName, args);
     if (!directResult.error) {
       return directResult;
     }
-    console.warn(
-      `[label-renderer] direct hotpath fallback ${functionName}: ${directResult.error.message}`,
-    );
+    logRenderer("warn", "direct_rpc_fallback", { rpc: functionName, error: directResult.error });
   }
 
   try {
     const { data, error } = await client.rpc(functionName, args);
     return {
       data: (data as T | null) ?? null,
-      error: error ? new Error(error.message) : null,
+      error,
       transport: "rest_rpc",
     };
   } catch (error) {
     return {
       data: null,
-      error: wrapRpcError(error),
+      error: error ?? new Error("rpc failed"),
       transport: "rest_rpc",
     };
   }
@@ -2391,7 +2413,7 @@ const renderTemplateBlocksToPage = async (
     const resolver = (async () => {
       const bytes = await fetchAsset(key);
       if (!bytes) {
-        console.warn(`[label-renderer] Font asset missing: ${key}`);
+        logRenderer("warn", "font_asset_missing");
         return null;
       }
       ensureFontkitRegistered();
@@ -3049,7 +3071,7 @@ const completeProcessedLabelJobs = async (
     p_results: payload,
   });
   if (error) {
-    throw new Error(`complete_label_jobs failed: ${error.message}`);
+    throw error;
   }
 };
 
@@ -3060,6 +3082,7 @@ type LabelJobProcessResult = {
   file_size_bytes: number | null;
   metadata: Record<string, unknown> | null;
   error: string | null;
+  error_class?: string;
 };
 
 type ProcessLabelJobOptions = {
@@ -3099,24 +3122,22 @@ const renderAndUploadLabelFromComposedPayload = async (
     if (canUseTemplate && templateSnapshot) {
       renderResult = await renderTemplatePdf(payloadBody, typedJob, templateSnapshot);
     } else {
-      console.warn(
-        `Template snapshot unavailable or incomplete for job ${typedJob.id}; using fallback renderer.`,
-      );
+      logRenderer("warn", "template_snapshot_fallback", { job_id: typedJob.id });
       renderResult = await buildFallbackPdf(payloadBody, typedJob, templateSnapshot, integration);
     }
     renderMs = performance.now() - renderStart;
   } catch (renderErr) {
     if (renderErr instanceof TemplateError) {
+      const failure = rendererFailure(renderErr.code, renderErr);
       const totalMs = Math.max(0, performance.now() - overallStart) + Math.max(0, composeMs);
       const errorMetadata = {
         correlation_id: correlationId,
         stage: "render",
         template_id: templateSnapshot?.template_id ?? typedJob.template_id,
         template_version: templateSnapshot?.template_version ?? typedJob.template_version,
-        error: renderErr.message,
+        ...failure,
         settings_resolution: settingsResolution,
         timings: { compose_ms: composeMs, render_ms: renderMs, total_ms: totalMs },
-        ...renderErr.metadata,
       };
       return {
         status: "failed",
@@ -3124,7 +3145,7 @@ const renderAndUploadLabelFromComposedPayload = async (
         file_url: null,
         file_size_bytes: null,
         metadata: errorMetadata,
-        error: renderErr.code,
+        ...failure,
       };
     }
     throw renderErr;
@@ -3142,11 +3163,12 @@ const renderAndUploadLabelFromComposedPayload = async (
   const uploadMs = performance.now() - uploadStart;
 
   if (uploadError) {
+    const failure = rendererFailure("upload_failed", uploadError);
     const totalMs = Math.max(0, performance.now() - overallStart) + Math.max(0, composeMs);
     const errorMetadata = {
       correlation_id: correlationId,
       stage: "upload",
-      error: uploadError.message,
+      ...failure,
       settings_resolution: settingsResolution,
       timings: { compose_ms: composeMs, render_ms: renderMs, upload_ms: uploadMs, total_ms: totalMs },
     };
@@ -3155,14 +3177,14 @@ const renderAndUploadLabelFromComposedPayload = async (
       client: typedJob.client_id ?? null,
       integration: integration.kind,
       bucket: LABEL_BUCKET,
-    }, { error: uploadError.message });
+    }, failure);
     return {
       status: "failed",
       job_id: typedJob.id,
       file_url: null,
       file_size_bytes: null,
       metadata: errorMetadata,
-      error: uploadError.message,
+      ...failure,
     };
   }
 
@@ -3229,24 +3251,12 @@ const handleDesignerPreview = async (
     };
   }
 
-  let userClient;
-  try {
-    userClient = createUserClient(userJwt);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Preview configuration missing";
-    return { statusCode: 500, body: { ok: false, error: { code: "config_missing", message } } };
-  }
+  const userClient = createUserClient(userJwt);
 
   const { data: who, error: whoErr } = await userClient.rpc("label_designer_whoami").single();
   if (whoErr || !who || (who as any).ok !== true) {
-    const message =
-      (who as any)?.error?.message ??
-      whoErr?.message ??
-      "Authentication required";
-    return {
-      statusCode: 403,
-      body: { ok: false, error: { code: "auth_required", message } },
-    };
+    const error = classifyRendererFailure("auth_required", whoErr ?? (who as any)?.error, "warn");
+    return { statusCode: 403, body: { ok: false, error } };
   }
   const orgId = normalizeString((who as any).organization_id);
   if (!orgId) {
@@ -3262,10 +3272,8 @@ const handleDesignerPreview = async (
     .eq("id", draftId)
     .single();
   if (draftErr || !draft) {
-    return {
-      statusCode: 404,
-      body: { ok: false, error: { code: "draft_not_found", message: draftErr?.message ?? "Draft not found" } },
-    };
+    const error = classifyRendererFailure("draft_not_found", draftErr, "warn");
+    return { statusCode: 404, body: { ok: false, error } };
   }
 
   const draftValue = asRecord((draft as any).draft_value);
@@ -3284,7 +3292,7 @@ const handleDesignerPreview = async (
     .rpc("label_designer_validate_label_design_draft", { p_draft_id: draftId })
     .single();
   const validation = validationErr
-    ? { ok: false, error: { code: "validation_failed", message: validationErr.message } }
+    ? { ok: false, error: classifyRendererFailure("validation_failed", validationErr) }
     : validationData ?? null;
 
   const { data: sampleData, error: sampleErr } = await userClient
@@ -3294,15 +3302,12 @@ const handleDesignerPreview = async (
     })
     .single();
   if (sampleErr || !sampleData || (sampleData as any).ok !== true) {
-    const message =
-      (sampleData as any)?.error?.message ??
-      sampleErr?.message ??
-      "Sample payload not available";
+    const error = classifyRendererFailure("payload_missing", sampleErr ?? (sampleData as any)?.error, "warn");
     return {
       statusCode: 400,
       body: {
         ok: false,
-        error: { code: "payload_missing", message },
+        error,
         validation,
       },
     };
@@ -3343,12 +3348,12 @@ const handleDesignerPreview = async (
     };
   } catch (err) {
     const code = err instanceof TemplateError ? err.code : "render_failure";
-    const message = err instanceof Error ? err.message : "Preview render failed";
+    const error = classifyRendererFailure(code, err);
     return {
       statusCode: 200,
       body: {
         ok: false,
-        error: { code, message },
+        error,
         renderer_metadata: {
           assets_missing_refs: assetsMissingRefs,
           assets_unknown_refs: assetsUnknownRefs,
@@ -3376,12 +3381,15 @@ const processLabelJob = async (
     const composeMs = performance.now() - composeStart;
 
     if (payloadError || !payloadData) {
-      const reason = payloadError?.message ?? "compose_label_payload returned no data";
+      const failure = rendererFailure(
+        payloadError ? "compose_label_payload_failed" : "compose_label_payload returned no data",
+        payloadError,
+      );
       const totalMs = performance.now() - startedAt;
       const errorMetadata = {
         correlation_id: correlationId,
         stage: "compose_payload",
-        error: reason,
+        ...failure,
         timings: { compose_ms: composeMs, total_ms: totalMs },
       };
       if (completeInDb) {
@@ -3391,7 +3399,7 @@ const processLabelJob = async (
           file_url: null,
           file_size_bytes: null,
           metadata: errorMetadata,
-          error: reason,
+          ...failure,
         }]);
       }
       return {
@@ -3400,7 +3408,7 @@ const processLabelJob = async (
         file_url: null,
         file_size_bytes: null,
         metadata: errorMetadata,
-        error: reason,
+        ...failure,
       };
     }
 
@@ -3457,14 +3465,10 @@ const processLabelJob = async (
       file_size_bytes: null,
       metadata,
       error: errorReason,
+      error_class: renderResult.error_class,
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    try {
-      await logLabelRenderFailure(typedJob, correlationId, "unhandled_error", { stage: "unhandled", error: message });
-    } catch (_err) {
-      // ignore
-    }
+    const failure = rendererFailure("label_render_failed", err);
     if (completeInDb) {
       try {
         await completeProcessedLabelJobs(client, [{
@@ -3472,8 +3476,8 @@ const processLabelJob = async (
           job_id: typedJob.id,
           file_url: null,
           file_size_bytes: null,
-          metadata: { stage: "unhandled", error: message },
-          error: message,
+          metadata: { stage: "unhandled", ...failure },
+          ...failure,
         }]);
       } catch (_err) {
         // ignore
@@ -3485,7 +3489,7 @@ const processLabelJob = async (
       file_url: null,
       file_size_bytes: null,
       metadata: null,
-      error: message,
+      ...failure,
     };
   }
 };
@@ -3504,7 +3508,7 @@ const collectBundleTargets = async (bundle: BundleRequest): Promise<BundleTarget
       },
     );
     if (error) {
-      console.warn("resolve_label_bundle_targets_for_file_urls failed for bundle:", error);
+      logRenderer("warn", "bundle_target_lookup_failed", { error });
       directUrls.forEach(() =>
         targets.push({ labelId: null, shipmentId: null, shipmentBoxId: null, fileUrl: null })
       );
@@ -3559,7 +3563,7 @@ const collectBundleTargets = async (bundle: BundleRequest): Promise<BundleTarget
   );
 
   if (error) {
-    console.warn("resolve_label_files_for_bundle failed:", error);
+    logRenderer("warn", "bundle_file_lookup_failed", { error });
     return targets;
   }
 
@@ -3583,7 +3587,7 @@ const downloadLabelPdf = async (filePath: string | null | undefined): Promise<Ui
   if (!filePath) return null;
   const { data, error } = await storageDownloadObject(LABEL_BUCKET, filePath);
   if (error || !data) {
-    console.warn(`Unable to download label asset: ${filePath}`, error?.message);
+    logRenderer("warn", "label_asset_download_failed", { error });
     return null;
   }
   return new Uint8Array(await data.arrayBuffer());
@@ -3596,12 +3600,12 @@ const downloadLabelPdfViaSignedUrl = async (
   try {
     const response = await fetch(signedUrl);
     if (!response.ok) {
-      console.warn(`Signed URL download failed for label asset: ${filePath}`, response.status);
+      logRenderer("warn", "signed_label_download_failed", { status: response.status });
       return null;
     }
     return new Uint8Array(await response.arrayBuffer());
   } catch (err) {
-    console.warn(`Signed URL download exception for label asset: ${filePath}`, err);
+    logRenderer("warn", "signed_label_download_failed", { error: err });
     return null;
   }
 };
@@ -3617,7 +3621,7 @@ const createSignedUrlsForBundle = async (
   try {
     const { data, error } = await storageCreateSignedUrls(LABEL_BUCKET, deduped, expiresSeconds);
     if (error) {
-      console.warn("createSignedUrls failed for bundle chunk", error.message);
+      logRenderer("warn", "bundle_chunk_url_signing_failed", { error });
       return resolved;
     }
     if (!Array.isArray(data)) return resolved;
@@ -3642,7 +3646,7 @@ const createSignedUrlsForBundle = async (
       }
     }
   } catch (err) {
-    console.warn("createSignedUrls exception for bundle chunk", err);
+    logRenderer("warn", "bundle_chunk_url_signing_failed", { error: err });
   }
 
   return resolved;
@@ -3750,7 +3754,7 @@ const buildBundleDocument = async (
           bundled.push(target);
           continue;
         } catch (err) {
-          console.warn("Failed to merge label PDF", target.fileUrl, err);
+          logRenderer("warn", "label_pdf_merge_failed", { error: err });
         }
       }
 
@@ -3855,8 +3859,18 @@ const logDecisionBestEffort = async (
 ) => {
   const { error } = await callRpcWithPublicFallback<unknown>("log_decision", payload);
   if (error) {
-    console.warn(`${context}: ${error}`);
+    logRenderer("warn", "decision_log_failed", { operation: context, error });
   }
+};
+
+type CompactComposeFallback = {
+  compact_compose_fallback_reason: string;
+  compact_compose_fallback_reason_class?: string;
+};
+
+const classifyCompactComposeFailure = (error: unknown): CompactComposeFallback => {
+  const failure = classifyRendererFailure("compact_compose_failed", error, "warn");
+  return { compact_compose_fallback_reason: failure.code, compact_compose_fallback_reason_class: failure.class };
 };
 
 const handlePrintRequest = async (
@@ -4095,7 +4109,7 @@ const handlePrintRequest = async (
           edgeDbMode,
         );
         if (error) {
-          throw new Error(`${enqueueRpc} failed: ${error.message}`);
+          throw error;
         }
         const jobId = typeof data === "string" ? data : typeof (data as any)?.job_id === "string" ? (data as any).job_id : null;
         if (!jobId) {
@@ -4131,7 +4145,7 @@ const handlePrintRequest = async (
         edgeDbMode,
       );
       if (error) {
-        throw new Error(`${enqueueRpc} failed: ${error.message}`);
+        throw error;
       }
       const jobIdValues = Array.isArray((data as any)?.job_ids)
         ? (data as any).job_ids
@@ -4150,9 +4164,9 @@ const handlePrintRequest = async (
       });
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to enqueue label jobs";
-    recordStep("enqueue_label_jobs", enqueueStart, { ok: false, error: message });
-    return await returnPrintResponse(500, { status: "error", error: message, steps });
+    const failure = rendererFailure("enqueue_label_jobs_failed", err);
+    recordStep("enqueue_label_jobs", enqueueStart, { ok: false, ...failure });
+    return await returnPrintResponse(500, { status: "error", ...failure, steps });
   }
 
   const uniqueJobIds = Array.from(new Set(jobIds));
@@ -4194,11 +4208,11 @@ const handlePrintRequest = async (
     try {
       await assertLabelBucketAvailable();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Label bucket unavailable";
-      recordStep("render_label_jobs", renderStart, { ok: false, error: message });
+      const failure = rendererFailure("label_bucket_unavailable", err);
+      recordStep("render_label_jobs", renderStart, { ok: false, ...failure });
       return await returnPrintResponse(503, {
         status: "error",
-        error: message,
+        ...failure,
         artifact_kind: "bundle",
         steps,
       });
@@ -4218,7 +4232,7 @@ const handlePrintRequest = async (
       let signedMs = 0;
       let completeMs = 0;
       let compactComposeUsed = false;
-      let compactComposeFallbackReason: string | null = null;
+      let compactComposeFallback: CompactComposeFallback | undefined;
       const passthroughStart = Date.now();
       try {
         let leasedJob: LabelJob | null = null;
@@ -4292,13 +4306,17 @@ const handlePrintRequest = async (
             composeMs = resolvedComposeMs;
             compactComposeUsed = true;
           } else {
-            compactComposeFallbackReason = "lease_and_compose_label_payloads_compact missing composed payload";
+            compactComposeFallback = {
+              compact_compose_fallback_reason: "lease_and_compose_label_payloads_compact missing composed payload",
+            };
           }
         } else if (compactError) {
-          compactComposeFallbackReason = `lease_and_compose_label_payloads_compact failed: ${compactError.message}`;
+          compactComposeFallback = classifyCompactComposeFailure(compactError);
         } else {
           const count = Array.isArray(compactRows) ? compactRows.length : 0;
-          compactComposeFallbackReason = `lease_and_compose_label_payloads_compact returned ${count}/1 rows`;
+          compactComposeFallback = {
+            compact_compose_fallback_reason: `lease_and_compose_label_payloads_compact returned ${count}/1 rows`,
+          };
         }
 
         if (!compactComposeUsed) {
@@ -4315,7 +4333,7 @@ const handlePrintRequest = async (
           );
           leaseMs = performance.now() - leaseStart;
           if (leaseError) {
-            throw new Error(`lease_label_jobs_by_ids failed: ${leaseError.message}`);
+            throw leaseError;
           }
           leasedJob = Array.isArray(leasedRows) && leasedRows.length > 0
             ? (leasedRows[0] as LabelJob)
@@ -4335,7 +4353,7 @@ const handlePrintRequest = async (
           );
           composeMs = performance.now() - composeStart;
           if (composeError) {
-            throw new Error(`compose_label_payloads failed: ${composeError.message}`);
+            throw composeError;
           }
           const composedRow = Array.isArray(composedRows)
             ? (composedRows as any[]).find((row) => normalizeString(row?.job_id) === singleJobId) ??
@@ -4381,7 +4399,7 @@ const handlePrintRequest = async (
             edgeDbMode,
           );
           if (completeFailError) {
-            console.warn(`complete_label_jobs failed after single-file render failure: ${completeFailError.message}`);
+            logRenderer("warn", "complete_failed_label_job_failed", { error: completeFailError });
           }
           throw new Error(rendered.error ?? "single-file passthrough render failed");
         }
@@ -4437,7 +4455,7 @@ const handlePrintRequest = async (
         );
         completeMs = performance.now() - completeStart;
         if (completeError) {
-          throw new Error(`complete_label_jobs failed: ${completeError.message}`);
+          throw completeError;
         }
 
         recordStep("render_label_jobs", renderStart, {
@@ -4459,7 +4477,7 @@ const handlePrintRequest = async (
               complete_ms: jobCompletionPending ? null : Math.round(completeMs),
               strategy: "single_file_passthrough",
               compact_compose_used: compactComposeUsed,
-              compact_compose_fallback_reason: compactComposeFallbackReason ?? undefined,
+              ...compactComposeFallback,
             },
           ],
           bundle_strategy: "direct",
@@ -4577,7 +4595,7 @@ const handlePrintRequest = async (
           bundle: bundleBody,
         });
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const failure = classifyRendererFailure("single_file_passthrough_failed", err, "warn");
         renderCalls.push({
           call_index: renderCalls.length + 1,
           leased: 1,
@@ -4588,8 +4606,9 @@ const handlePrintRequest = async (
           complete_ms: Math.round(completeMs),
           strategy: "single_file_passthrough",
           compact_compose_used: compactComposeUsed,
-          compact_compose_fallback_reason: compactComposeFallbackReason ?? undefined,
-          fallback_reason: message,
+          ...compactComposeFallback,
+          fallback_reason: failure.code,
+          fallback_reason_class: failure.class,
         });
       }
     }
@@ -4634,7 +4653,7 @@ const handlePrintRequest = async (
       let leaseRecoveryMs = 0;
       let leaseWarning: string | null = null;
       let compactComposeUsed = false;
-      let compactComposeFallbackReason: string | null = null;
+      let compactComposeFallback: CompactComposeFallback | undefined;
       let rows: any[] = [];
 
       if (printSyncCompactEnabled) {
@@ -4655,10 +4674,12 @@ const handlePrintRequest = async (
           composeBatchMs = compactMs;
           rows = compactRows as any[];
         } else if (compactError) {
-          compactComposeFallbackReason = compactError.message;
+          compactComposeFallback = classifyCompactComposeFailure(compactError);
         } else {
           const count = Array.isArray(compactRows) ? compactRows.length : 0;
-          compactComposeFallbackReason = `lease_and_compose_label_payloads_compact returned ${count}/${batchIds.length} rows`;
+          compactComposeFallback = {
+            compact_compose_fallback_reason: `lease_and_compose_label_payloads_compact returned ${count}/${batchIds.length} rows`,
+          };
         }
       }
 
@@ -4683,14 +4704,11 @@ const handlePrintRequest = async (
           : [];
         let legacyLeaseRecovered = 0;
         if (leaseError) {
-        recordStep("render_label_jobs", renderStart, {
-          ok: false,
-          error: `lease_label_jobs_by_ids_compact failed: ${leaseError.message}`,
-          calls: renderCalls,
-        });
+          const failure = rendererFailure("lease_label_jobs_by_ids_compact_failed", leaseError);
+          recordStep("render_label_jobs", renderStart, { ok: false, ...failure, calls: renderCalls });
           return await returnPrintResponse(500, {
             status: "error",
-            error: `lease_label_jobs_by_ids_compact failed: ${leaseError.message}`,
+            ...failure,
             artifact_kind: "bundle",
             steps,
           });
@@ -4699,7 +4717,7 @@ const handlePrintRequest = async (
         if (leasedIds.length !== batchIds.length) {
           let recoveryAttempts = 0;
           let stillMissing: string[] = [];
-          let recoveryStatusError: string | null = null;
+          let recoveryStatusError: ReturnType<typeof rendererError> | null = null;
           let statusProbeMs = 0;
           const compactLeasedSet = new Set(leasedIds);
           const initiallyMissing = batchIds.filter((id) => !compactLeasedSet.has(id));
@@ -4717,7 +4735,7 @@ const handlePrintRequest = async (
             );
             leaseRecoveryMs += performance.now() - legacyLeaseStart;
             if (legacyLeaseError) {
-              recoveryStatusError = legacyLeaseError.message;
+              recoveryStatusError = classifyRendererFailure("lease_label_jobs_by_ids_failed", legacyLeaseError, "warn");
             } else {
               const legacyLeasedIds = Array.isArray(legacyRows)
                 ? (legacyRows as any[])
@@ -4748,7 +4766,7 @@ const handlePrintRequest = async (
             );
             statusProbeMs += performance.now() - statusStart;
             if (statusError) {
-              recoveryStatusError = statusError.message;
+              recoveryStatusError = classifyRendererFailure("get_label_jobs_status_failed", statusError, "warn");
             }
 
             const nowMs = Date.now();
@@ -4798,7 +4816,7 @@ const handlePrintRequest = async (
             );
             leaseRecoveryMs += performance.now() - recoveryStart;
             if (retryLeaseError) {
-              recoveryStatusError = retryLeaseError.message;
+              recoveryStatusError = classifyRendererFailure("lease_label_jobs_by_ids_compact_failed", retryLeaseError, "warn");
             }
             const retryLeasedIds = Array.isArray(retryRows)
               ? (retryRows as any[])
@@ -4820,7 +4838,8 @@ const handlePrintRequest = async (
               missing_jobs: stillMissing.slice(0, 20),
               missing_jobs_count: stillMissing.length,
               lease_recovery_attempts: clampedLeaseRecoveryMaxAttempts,
-              lease_recovery_status_error: recoveryStatusError,
+              lease_recovery_status_error: recoveryStatusError?.code ?? null,
+              lease_recovery_status_error_class: recoveryStatusError?.class,
               lease_recovery_status_probe_ms: Math.round(statusProbeMs),
               calls: renderCalls,
             });
@@ -4850,14 +4869,15 @@ const handlePrintRequest = async (
         composeBatchMs = performance.now() - composeBatchStart;
 
         if (composeError) {
+          const failure = rendererFailure("compose_label_payloads_failed", composeError);
           recordStep("render_label_jobs", renderStart, {
             ok: false,
-            error: `compose_label_payloads failed: ${composeError.message}`,
+            ...failure,
             calls: renderCalls,
           });
           return await returnPrintResponse(500, {
             status: "error",
-            error: `compose_label_payloads failed: ${composeError.message}`,
+            ...failure,
             artifact_kind: "bundle",
             steps,
           });
@@ -4885,7 +4905,7 @@ const handlePrintRequest = async (
           error: "compose_label_payloads missing rows",
           missing_jobs: missingComposed.slice(0, 20),
           missing_jobs_count: missingComposed.length,
-          compact_compose_fallback_reason: compactComposeFallbackReason ?? undefined,
+          ...compactComposeFallback,
           calls: renderCalls,
         });
         return await returnPrintResponse(500, {
@@ -4919,7 +4939,7 @@ const handlePrintRequest = async (
             templateSnapshot.renderer_config.blocks.length > 0
           );
           if (!templateSnapshot || !canUseTemplate) {
-            throw new Error(`Template snapshot unavailable or incomplete for job ${typedJob.id}`);
+            throw new TemplateError("template_missing", "Template snapshot unavailable or incomplete");
           }
 
           const rendererConfig = templateSnapshot.renderer_config ?? {};
@@ -5012,15 +5032,16 @@ const handlePrintRequest = async (
           });
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof TemplateError ? err.code : "render_failure";
+        const failure = rendererFailure(code, err);
         recordStep("render_label_jobs", renderStart, {
           ok: false,
-          error: message,
+          ...failure,
           calls: renderCalls,
         });
         return await returnPrintResponse(500, {
           status: "error",
-          error: message,
+          ...failure,
           artifact_kind: "bundle",
           steps,
         });
@@ -5036,7 +5057,7 @@ const handlePrintRequest = async (
         lease_warning: leaseWarning ?? undefined,
         compose_ms: Math.round(composeBatchMs),
         compact_compose_used: compactComposeUsed,
-        compact_compose_fallback_reason: compactComposeFallbackReason ?? undefined,
+        ...compactComposeFallback,
         render_ms: Math.round(renderBatchMs),
         pending_after: orderedIds.length - pageIndex,
       });
@@ -5083,8 +5104,7 @@ const handlePrintRequest = async (
         returnMode: bundleReturnMode,
       });
     } catch (uploadError) {
-      const uploadMessage =
-        uploadError instanceof Error ? uploadError.message : "bundle_upload_failed";
+      const failure = rendererFailure("bundle_upload_failed", uploadError);
       try {
         if (!workflowManagedPrint) {
           await client.rpc("log_decision", {
@@ -5097,7 +5117,7 @@ const handlePrintRequest = async (
             p_performed_by_system: "label_renderer",
             p_correlation_id: correlationId,
             p_decision_inputs: {
-              error: uploadMessage,
+              ...failure,
               bucket: LABEL_BUCKET,
               client_id: incomingClientId ?? null,
               sender_id: incomingSenderId ?? null,
@@ -5109,10 +5129,10 @@ const handlePrintRequest = async (
       } catch (_err) {
         // ignore
       }
-      recordStep("bundle_labels", bundleStart, { ok: false, error: uploadMessage });
+      recordStep("bundle_labels", bundleStart, { ok: false, ...failure });
       return await returnPrintResponse(500, {
         status: "error",
-        error: uploadMessage,
+        ...failure,
         artifact_kind: "bundle",
         steps,
       });
@@ -5168,10 +5188,11 @@ const handlePrintRequest = async (
     );
     completeMs = performance.now() - completeStart;
     if (completeError) {
-      recordStep("bundle_labels", bundleStart, { ok: false, error: `complete_label_jobs failed: ${completeError.message}` });
+      const failure = rendererFailure("complete_label_jobs_failed", completeError);
+      recordStep("bundle_labels", bundleStart, { ok: false, ...failure });
       return await returnPrintResponse(500, {
         status: "error",
-        error: `complete_label_jobs failed: ${completeError.message}`,
+        ...failure,
         artifact_kind: "bundle",
         steps,
       });
@@ -5308,15 +5329,16 @@ const handlePrintRequest = async (
 
     const leased = Array.isArray(leasedJobs) ? (leasedJobs as LabelJob[]) : [];
     if (leaseError) {
+      const failure = rendererFailure("lease_label_jobs_by_ids_failed", leaseError);
       recordStep("render_label_jobs", renderStart, {
         ok: false,
-        error: `lease_label_jobs_by_ids failed: ${leaseError.message}`,
+        ...failure,
         calls: renderCalls,
         results: renderResults,
       });
       return await returnPrintResponse(500, {
         status: "error",
-        error: `lease_label_jobs_by_ids failed: ${leaseError.message}`,
+        ...failure,
         artifact_kind: "bundle",
         steps,
       });
@@ -5361,15 +5383,16 @@ const handlePrintRequest = async (
     const composeMsFallback = leasedJobIds.length > 0 ? composeBatchMs / leasedJobIds.length : 0;
 
     if (composeError) {
+      const failure = rendererFailure("compose_label_payloads_failed", composeError);
       recordStep("render_label_jobs", renderStart, {
         ok: false,
-        error: `compose_label_payloads failed: ${composeError.message}`,
+        ...failure,
         calls: renderCalls,
         results: renderResults,
       });
       return await returnPrintResponse(500, {
         status: "error",
-        error: `compose_label_payloads failed: ${composeError.message}`,
+        ...failure,
         artifact_kind: "bundle",
         steps,
       });
@@ -5449,15 +5472,16 @@ const handlePrintRequest = async (
     completeMs = performance.now() - completeStart;
 
     if (completeError) {
+      const failure = rendererFailure("complete_label_jobs_failed", completeError);
       recordStep("render_label_jobs", renderStart, {
         ok: false,
-        error: `complete_label_jobs failed: ${completeError.message}`,
+        ...failure,
         calls: renderCalls,
         results: renderResults,
       });
       return await returnPrintResponse(500, {
         status: "error",
-        error: `complete_label_jobs failed: ${completeError.message}`,
+        ...failure,
         artifact_kind: "bundle",
         steps,
       });
@@ -5470,6 +5494,7 @@ const handlePrintRequest = async (
         status: result.status,
         file_url: result.file_url ?? null,
         reason: result.error ?? null,
+        error_class: result.error_class,
       });
       if (result.status !== "ok") failedJobs += 1;
     });
@@ -5628,7 +5653,8 @@ const handleBundleRequest = async (
       bucket: LABEL_BUCKET,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Label bucket unavailable";
+    const reason = "label_bucket_unavailable";
+    const failure = rendererFailure(reason, err);
     scheduleMetricEmit("label_bundle.bucket_missing", {
       org: effectiveOrgId,
       client: effectiveClientId ?? null,
@@ -5636,7 +5662,7 @@ const handleBundleRequest = async (
       integration: integration.kind,
       bucket: LABEL_BUCKET,
     });
-    const responseBody = { status: "failed", error: message, reason: "label_bucket_unavailable" };
+    const responseBody = { status: "failed", ...failure, reason };
     return returnBundleResponse(503, responseBody);
   }
 
@@ -5736,7 +5762,7 @@ const handleBundleRequest = async (
         p_decision_reason: null,
       });
     } catch (err) {
-      console.warn("Unable to log passthrough label bundle decision", err);
+      logRenderer("warn", "passthrough_bundle_decision_log_failed", { error: err });
     }
     scheduleMetricEmit(
       "label_bundle.completed",
@@ -5828,8 +5854,8 @@ const handleBundleRequest = async (
       returnMode: bundleReturnMode,
     });
   } catch (uploadError) {
-    const uploadMessage =
-      uploadError instanceof Error ? uploadError.message : "upload_failed";
+    const reason = "upload_failed";
+    const failure = { error: reason, error_class: rendererError(reason, uploadError).class };
     await logDecisionBestEffort(
       {
         p_organization_id: bundleInput.organization_id,
@@ -5841,24 +5867,24 @@ const handleBundleRequest = async (
         p_performed_by_system: "label_renderer",
         p_correlation_id: null,
         p_decision_inputs: {
-          error: uploadMessage,
+          ...failure,
           bucket: LABEL_BUCKET,
           client_id: bundleInput.client_id ?? null,
           sender_id: bundleInput.sender_id ?? null,
         },
-        p_decision_reason: "upload_failed",
+        p_decision_reason: reason,
       },
       "Unable to log bundle failure decision",
     );
-    console.error("Failed to upload bundle PDF:", uploadMessage);
+    logRenderer("error", "bundle_pdf_upload_failed", { error: uploadError });
     scheduleMetricEmit("label_bundle.upload_failed", {
       org: bundleInput.organization_id,
       client: bundleInput.client_id ?? null,
       sender: bundleInput.sender_id ?? null,
       integration: integration.kind,
       bucket: LABEL_BUCKET,
-    }, { error: uploadMessage });
-    const responseBody = { status: "failed", error: uploadMessage, reason: "upload_failed" };
+    }, failure);
+    const responseBody = { status: "failed", ...failure, reason };
     return returnBundleResponse(500, responseBody);
   }
   const signedUrl: string | null = artifactReturn.signed_url;
@@ -5980,26 +6006,28 @@ const withCors = (res: Response, corsHeaders: Record<string, string>) => {
     headers.set(key, value);
   });
   headers.set("x-masarx-edge-function", "label-renderer");
+  headers.set("x-masarx-renderer-transport", "1");
   return new Response(res.body, { status: res.status, headers });
 };
 
 Deno.serve(async (req: Request): Promise<Response> => {
-  const { headers: corsHeaders } = resolveCorsPolicy(req, {
-    hostedAllowedOrigins: readEnv("LABEL_RENDERER_CORS_ALLOW_ORIGINS"),
-    localAllowedOrigins: readEnv("PUBLIC_INGRESS_LOCAL_CORS_ALLOW_ORIGINS"),
-    allowedMethods: "POST, OPTIONS",
-  });
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: corsHeaders });
-  }
-  // Optional smoke-test bypass: only when explicitly enabled by env
-  const smokeAllow = Deno.env.get("EDGE_SMOKE_ALLOW");
-  const smokeHeader = req.headers.get("x-smoke-test");
-  if (smokeAllow === "1" && smokeHeader === "edge-allow") {
-    // Return 204 to indicate idle/successful no-op
-    return withCors(new Response(null, { status: 204 }), corsHeaders);
-  }
+  let corsHeaders: Record<string, string> = {};
   try {
+    ({ headers: corsHeaders } = resolveCorsPolicy(req, {
+      hostedAllowedOrigins: readEnv("LABEL_RENDERER_CORS_ALLOW_ORIGINS"),
+      localAllowedOrigins: readEnv("PUBLIC_INGRESS_LOCAL_CORS_ALLOW_ORIGINS"),
+      allowedMethods: "POST, OPTIONS",
+    }));
+    if (req.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders });
+    }
+    // Optional smoke-test bypass: only when explicitly enabled by env
+    const smokeAllow = Deno.env.get("EDGE_SMOKE_ALLOW");
+    const smokeHeader = req.headers.get("x-smoke-test");
+    if (smokeAllow === "1" && smokeHeader === "edge-allow") {
+      // Return 204 to indicate idle/successful no-op
+      return withCors(new Response(null, { status: 204 }), corsHeaders);
+    }
     const payload = await parseRequest(req);
     if (
       payload &&
@@ -6105,7 +6133,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         p_max_jobs: Math.min(maxJobs, targetedJobIds.length),
       });
       if (targetedError) {
-        throw new Error(`lease_label_jobs_by_ids failed: ${targetedError.message}`);
+        throw targetedError;
       }
       if (Array.isArray(targetedJobs)) {
         targetedJobs.forEach((job) => {
@@ -6122,7 +6150,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           p_max_jobs: maxJobs,
         });
         if (batchError) {
-          console.warn("lease_label_jobs failed; falling back to lease_label_job", batchError.message);
+          logRenderer("warn", "batch_lease_fallback", { error: batchError });
         } else if (Array.isArray(batchJobs)) {
           batchJobs.forEach((job) => {
             if (job && typeof job === "object" && (job as Record<string, unknown>)?.["id"]) {
@@ -6131,7 +6159,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           });
         }
       } catch (err) {
-        console.warn("lease_label_jobs exception; falling back to lease_label_job", err);
+        logRenderer("warn", "batch_lease_fallback", { error: err });
       }
     }
 
@@ -6139,7 +6167,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       for (let i = 0; i < maxJobs; i += 1) {
         const { data: job, error: leaseError } = await client.rpc("lease_label_job", leaseParams).single();
         if (leaseError) {
-          throw new Error(`Failed to lease label job: ${leaseError.message}`);
+          throw leaseError;
         }
         if (!job || !(job as Record<string, unknown>)?.["id"]) {
           break;
@@ -6172,14 +6200,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
         }), corsHeaders);
       }
 
-      const message = typeof (result.metadata as any)?.error === "string"
-        ? String((result.metadata as any).error)
-        : result.error ?? "label_render_failed";
       return withCors(new Response(JSON.stringify({
         status: "failed",
         job_id: result.job_id,
         reason: result.error ?? "label_render_failed",
-        message,
+        error_class: result.error_class,
       }), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -6234,10 +6259,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
       headers: { "content-type": "application/json" },
     }), corsHeaders);
   } catch (err) {
-    console.error("Label renderer failure:", err);
-    return withCors(new Response(JSON.stringify({
-      error: err instanceof Error ? err.message : "Unknown error",
-    }), {
+    try {
+      logRenderer("error", "request_failed", { error: err });
+    } catch {
+      // Logging must not prevent the classified response.
+    }
+    return withCors(new Response(JSON.stringify(rendererInternalErrorBody(err)), {
       status: 500,
       headers: { "content-type": "application/json" },
     }), corsHeaders);

@@ -12,7 +12,7 @@ import {
   mergeServerDispatch,
   validateInvocationPayload,
 } from "./invocation.mjs";
-import { readEnv, normaliseHeaders, toResponseBody } from "./_shared/mod.mjs";
+import { logStructured, readEnv, normaliseHeaders, toResponseBody } from "./_shared/mod.mjs";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -90,7 +90,7 @@ const EDGE_DB_JWT = RAW_EDGE_DB_JWT && RAW_EDGE_DB_JWT.split(".").length === 3
   ? RAW_EDGE_DB_JWT
   : "";
 if (RAW_EDGE_DB_JWT && !EDGE_DB_JWT) {
-  console.warn("[api-caller] ignoring invalid API_CALLER_DB_JWT shape; expected JWT with 3 segments");
+  logStructured("warn", "api_caller.invalid_database_jwt_shape", { service: "api-caller" });
 }
 const EDGE_REQUIRE_DB_JWT = readEnv("EDGE_REQUIRE_DB_JWT", []) === "1";
 const GUARDED_EGRESS_PROXY_ENV = {
@@ -103,20 +103,21 @@ const GUARDED_EGRESS_PROXY_USERNAME = readEnv(GUARDED_EGRESS_PROXY_ENV.username,
 const GUARDED_EGRESS_PROXY_PASSWORD = readEnv(GUARDED_EGRESS_PROXY_ENV.password, []);
 const ALLOW_DEV_DIRECT_EGRESS = Deno.env?.get("EDGE_ENVIRONMENT") === "dev" &&
   Object.values(GUARDED_EGRESS_PROXY_ENV).every((key) => Deno.env.get(key) === undefined);
-let supabase = null as ReturnType<typeof createClient> | null;
-if (SUPABASE_URL && SUPABASE_ANON_KEY && EDGE_DB_JWT) {
-  supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+const RENDERER_TRANSPORT_HEADER = "x-masarx-renderer-transport";
+const createWorkerClient = (headers: Record<string, string>) =>
+  createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false },
     db: { schema: "api" },
-    global: { headers: { Authorization: `Bearer ${EDGE_DB_JWT}` } },
+    global: { headers: { ...headers, Authorization: `Bearer ${EDGE_DB_JWT}` } },
   });
-}
+const supabase = SUPABASE_URL && SUPABASE_ANON_KEY && EDGE_DB_JWT
+  ? createWorkerClient({ [RENDERER_TRANSPORT_HEADER]: "1" })
+  : null;
 if (!supabase) {
-  console.error(
-    EDGE_REQUIRE_DB_JWT
-      ? "api-caller missing API_CALLER_DB_JWT while EDGE_REQUIRE_DB_JWT=1"
-      : "api-caller missing API_CALLER_DB_JWT; DB JWT is required for edge DB access",
-  );
+  logStructured("error", "api_caller.database_jwt_missing", {
+    service: "api-caller",
+    enforcement_enabled: EDGE_REQUIRE_DB_JWT,
+  });
 }
 
 const parseRequest = async (req: Request): Promise<unknown> => {
@@ -450,14 +451,46 @@ const executeClaimedJob = async (
     };
   }
 
-  if (isRenderer && (callResult.status === 401 || callResult.status === 403)) {
-    callResult = { ...callResult, error: "renderer_gateway_rejected" };
-    console.error("[api-caller] renderer_gateway_rejected");
-  }
-
   // Refresh again after the bounded network operation so even a near-600-second
   // call has a full ownership window for compare-and-swap finalization.
   await renewClaimedLease(client, jobId, leaseToken);
+
+  // v0.1.0 rejects the gateway role before it can render or print.
+  if (
+    isRenderer && callResult.status === 403 &&
+    callResult.headers["x-masarx-edge-function"] === "label-renderer" &&
+    callResult.headers[RENDERER_TRANSPORT_HEADER] === undefined &&
+    JSON.stringify(callResult.body) === '{"error":"Unauthorized role"}'
+  ) {
+    // Omitting the version asks the database to release this lease through the rollout gate.
+    const { data, error } = await createWorkerClient({}).rpc("get_claimed_edge_job_call_spec_v1", {
+      p_job_id: jobId,
+      p_lease_token: leaseToken,
+    });
+    if (error || data !== null) {
+      throw new Error(`Could not defer renderer transport for job ${jobId}`);
+    }
+    logStructured("warn", "api_caller.renderer_transport_deferred", {
+      service: "api-caller",
+      code: "renderer_transport_deferred",
+      job_id: jobId,
+    });
+    return {
+      job_id: jobId,
+      success: false,
+      result: { ...callResult, status: 503, completed: false, error: "renderer_transport_deferred" },
+    };
+  }
+
+  if (isRenderer && (callResult.status === 401 || callResult.status === 403)) {
+    callResult = { ...callResult, error: "renderer_gateway_rejected" };
+    logStructured("error", "api_caller.renderer_gateway_rejected", {
+      service: "api-caller",
+      code: "renderer_gateway_rejected",
+      job_id: jobId,
+      status: callResult.status,
+    });
+  }
 
   const isSuccess = callResult.status >= 200 && callResult.status < 300;
 

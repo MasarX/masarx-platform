@@ -251,16 +251,6 @@ export function summarizeReview(review: MappingStudioReview | null | undefined) 
   };
 }
 
-export function deriveSourceTypeLabel(sourceType: string) {
-  const normalized = sourceType.trim().toLowerCase();
-  if (normalized === "webhook_sample") return "JSON payload";
-  if (normalized === "curl") return "cURL";
-  if (normalized === "openapi") return "OpenAPI";
-  if (normalized === "csv") return "CSV";
-  if (normalized === "xlsx") return "XLSX";
-  return sourceType || "Manual";
-}
-
 export function buildReportFilename(report: MappingOperationReport | null | undefined) {
   const reportId = report?.id?.trim() || "mapping-operation-report";
   return `${reportId}.json`;

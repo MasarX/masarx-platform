@@ -1,0 +1,99 @@
+[
+  {
+    "name": "Hosted Console V2 accessibility checks",
+    "reason": "The hosted CI browser job owns the seed-mode Vite server, egress guard and axe report.",
+    "covered_by": "Console V2 axe in .github/workflows/public-ci.yml.",
+    "suites": [
+      "scripts/ci-hosted/playwright.console-a11y.config.cjs"
+    ]
+  },
+  {
+    "name": "Hosted Console V2 seed browser configuration",
+    "reason": "The hosted browser job owns its seed-mode Vite server and egress guard. Nightly runs the same seed specs through the Console V2 workspace command.",
+    "covered_by": "Console V2 seed-mode E2E in .github/workflows/public-ci.yml.",
+    "suites": [
+      "scripts/ci-hosted/playwright.console-seed.config.cjs"
+    ]
+  },
+  {
+    "name": "Hosted application speed checks",
+    "reason": "The hosted CI build jobs own the production builds, synthetic fixture and browser measurement.",
+    "covered_by": "Build (console) and Build (portal and landing) in .github/workflows/public-ci.yml.",
+    "suites": [
+      "scripts/ci-hosted/playwright.app-speed.config.cjs"
+    ]
+  },
+  {
+    "name": "Deployed full-app browser tests",
+    "reason": "Requires deployed application endpoints and environment-specific test identities.",
+    "covered_by": "Post-deploy browser work tracked in #130.",
+    "suites": ["playwright.dev-report.config.ts"]
+  },
+  {
+    "name": "Deployed API and Edge tests",
+    "reason": "Requires deployed function endpoints and environment-specific test identities.",
+    "covered_by": "Post-deploy API work tracked in #133.",
+    "suites": ["test:integration:cloud", "test:edge-smoke:cloud", "test:pgtap:cloud"]
+  },
+  {
+    "name": "Live third-party logistics adapter tests",
+    "reason": "Requires real logistics provider endpoints and credentials.",
+    "covered_by": "Opt-in provider tests in tests/integration.",
+    "flags": ["RUN_LIVE_3PL_TESTS"],
+    "files": ["tests/integration/providers/importer-auto-gen.test.js", "tests/integration/providers/importer-explicit.test.js", "tests/integration/workflow-logestechs.test.js", "tests/integration/workflows/outbound-3pl.test.js"]
+  },
+  {
+    "name": "Live geocoding adapter tests",
+    "reason": "Requires real geocoding endpoints and credentials.",
+    "covered_by": "Opt-in geocoding tests in tests/integration.",
+    "flags": ["RUN_LIVE_GEOCODING_TESTS"],
+    "files": ["tests/integration/geocoding.auto-learn.test.js", "tests/integration/geocoding/providers-here.test.js", "tests/integration/workflows/geocoding.test.js"]
+  },
+  {
+    "name": "Live communications adapter tests",
+    "reason": "Requires real communications provider endpoints and credentials.",
+    "covered_by": "Opt-in communications tests in tests/integration.",
+    "flags": ["RUN_LIVE_COMMS_TESTS"],
+    "files": ["tests/integration/workflows/communications.test.js", "tests/integration/workflows/communications-reply-intent.test.js"]
+  },
+  {
+    "name": "Live webhook acceptance tests",
+    "reason": "Requires a deployed webhook endpoint.",
+    "covered_by": "Opt-in webhook acceptance tests in tests/integration.",
+    "flags": ["RUN_LIVE_WEBHOOK_TESTS"],
+    "files": ["tests/integration/webhook-ingest-default-accepted.test.js"]
+  },
+  {
+    "name": "Deployed pitch smoke tests",
+    "reason": "Requires a deployed demo target and test identities.",
+    "covered_by": "Opt-in pitch smoke tests in tests/integration/pitch.",
+    "flags": ["RUN_LIVE_PITCH_TESTS"],
+    "files": ["tests/integration/pitch/pitch-demo-live.test.js"]
+  },
+  {
+    "name": "Tenant invite security qualification",
+    "reason": "Requires the separately admitted security qualification stack and its fixtures.",
+    "covered_by": "Dedicated tenant invite security qualification.",
+    "suites": ["playwright.tenant-invite.config.ts", "test:e2e:tenant-invite"]
+  },
+  {
+    "name": "QA case campaigns",
+    "reason": "Needs an admitted campaign and its fixture inventory.",
+    "covered_by": "Explicit QA cases runs.",
+    "suites": ["test:qa:cases", "test:qa:cases:cloud"]
+  },
+  {
+    "name": "Load tests and cloud print benchmarks",
+    "reason": "Needs a dedicated workload target and performance run budget.",
+    "covered_by": "Separate performance qualification.",
+    "flags": ["RUN_SHIPMENTS_PRINT_BENCHMARK_TEST"],
+    "files": ["tests/integration/label/shipments-print-cloud-benchmark.test.js"],
+    "suites": ["test:load", "test:load:cloud"]
+  },
+  {
+    "name": "Watch, coverage and snapshot maintenance commands",
+    "reason": "Interactive, diagnostic or artifact-changing commands.",
+    "covered_by": "Console V2 nightly unit and visual verification.",
+    "suites": ["test:watch", "test:coverage", "test:visual:update"]
+  }
+]
