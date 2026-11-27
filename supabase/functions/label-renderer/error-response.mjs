@@ -20,14 +20,18 @@ export const isRendererErrorClass = (value) =>
 /** @param {unknown} error */
 export function rendererInternalErrorBody(error) {
   let errorClass = unknown;
-  if (error instanceof RendererConfigurationError) {
-    errorClass = configMissing;
-  } else if (
-    error && typeof error === "object" && "code" in error &&
-    ("severity" in error || ("details" in error && "hint" in error)) &&
-    isSqlState(error.code)
-  ) {
-    errorClass = error.code;
+  try {
+    if (error instanceof RendererConfigurationError) {
+      errorClass = configMissing;
+    } else if (
+      error && typeof error === "object" && "code" in error &&
+      ("severity" in error || ("details" in error && "hint" in error))
+    ) {
+      const code = error.code;
+      if (isSqlState(code)) errorClass = code;
+    }
+  } catch {
+    // A thrown value can have getters that throw during classification.
   }
   return { error: { code: rendererInternalCode, class: errorClass } };
 }
