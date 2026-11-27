@@ -56,6 +56,9 @@ function reportWorkerError(container, responseMessage) {
   const detail = [responseMessage, logs.stdout, logs.stderr].filter(Boolean).join('\n');
   const errorClass = detail.match(/\b(TypeError|ReferenceError|SyntaxError|RangeError|AggregateError|WorkerRequestCancelled|InvalidWorkerCreation|Error):/)?.[1]
     ?? 'unavailable';
+  const clean = detail.replace(/\x1b\[[0-9;]*m/g, '');
+  const identifier = clean.match(/\bReferenceError:\s*([$A-Za-z_][$\w]{0,79}) is not defined\b/)?.[1];
+  if (identifier) console.error('LABEL_RENDERER_EDGE_IDENTIFIER name=%s', identifier);
   const message = safeMessages.find(([pattern]) => pattern.test(detail))?.[1] ?? 'redacted';
   const frames = [...new Set(Array.from(
     detail.matchAll(/\b(renderer|gateway)\/(index\.ts):(\d{1,6}):(\d{1,8})\b/g),
