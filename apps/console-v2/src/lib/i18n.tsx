@@ -5,7 +5,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { useIdentity } from './identity';
 import { useResolveSettings } from './queries';
 import { reportError } from './telemetry';
-import { englishT, getConsoleCatalog, loadConsoleCatalog, readConsoleLocale, translateCatalog, type Locale, type Translate } from './i18n-catalog';
+import { englishT, fill, getConsoleCatalog, loadConsoleCatalog, readConsoleLocale, translateCatalog, type Locale, type Translate } from './i18n-catalog';
 
 export { englishT, fill, type Translate } from './i18n-catalog';
 
@@ -22,6 +22,7 @@ interface I18nCtx {
   fmtTime: (iso: string | number | Date) => string;
   fmtCurrency: (amount: number, currency?: string) => string;
   fmtNumber: (n: number, opts?: Intl.NumberFormatOptions) => string;
+  tCount: (path: string, count: number) => string;
   /** Time from now in the app locale, such as "5m ago" or "in 2h", in the largest whole unit up to days. */
   fmtRelative: (iso: string | number | Date | null | undefined, now?: number) => string;
 }
@@ -125,6 +126,13 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     [intlLocale]
   );
 
+  const tCount = useCallback(
+    (path: string, count: number) => {
+      const category = new Intl.PluralRules(intlLocale).select(count);
+      return fill(t(`${path}.${category}`, t(`${path}.other`)), { count: fmtNumber(count) });
+    },
+    [intlLocale, t, fmtNumber]
+  );
   const fmtRelative = useCallback(
     (iso: string | number | Date | null | undefined, now = Date.now()) => {
       if (iso == null || iso === '') return '—';
@@ -168,8 +176,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       fmtCurrency,
       fmtNumber,
       fmtRelative,
+      tCount,
     }),
-    [locale, dir, setLocale, t, timeZone, fmtDateTime, fmtTime, fmtCurrency, fmtNumber, fmtRelative]
+    [locale, dir, setLocale, t, timeZone, fmtDateTime, fmtTime, fmtCurrency, fmtNumber, fmtRelative, tCount]
   );
 
   // After every hook, so the hook order is the same on every render.
