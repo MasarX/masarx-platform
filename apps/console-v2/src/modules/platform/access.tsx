@@ -58,7 +58,7 @@ import {
 import { pushToast } from '@/components/toastStore';
 import { CapabilityEvalDrilldown } from '@/components/CapabilityEvalDrilldown';
 import { readAuthorizedConsoleScopeOverride } from '@/lib/scope-url';
-import { fill, useI18n, useT, type Translate } from '@/lib/i18n';
+import { fill, fillNodes, useI18n, useT, type Translate } from '@/lib/i18n';
 
 interface PolicyCapability {
   key: string;
@@ -75,9 +75,9 @@ interface AccessControlPolicyBody {
   resource_map?: Record<string, PolicyResourceMapEntry>;
 }
 
-function accessResourceLabel(value: string): string {
+function accessResourceLabel(value: string, t: Translate): string {
   const raw = String(value ?? '').trim();
-  if (!raw) return 'Resource';
+  if (!raw) return t('platformAccess.accessModule.resourceFallback');
   return raw
     .replace(/^v_/, '')
     .replace(/[._-]+/g, ' ')
@@ -86,13 +86,13 @@ function accessResourceLabel(value: string): string {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-function accessScopeLabel(value: string | null | undefined): string {
-  return accessResourceLabel(value ?? 'global');
+function accessScopeLabel(value: string | null | undefined, t: Translate): string {
+  return accessResourceLabel(value ?? 'global', t);
 }
 
-function accessScopeReferenceLabel(scopeType: string | null | undefined, scopeId: string | null | undefined): string {
-  if (!scopeId) return 'Global default';
-  return `${accessScopeLabel(scopeType)} scope`;
+function accessScopeReferenceLabel(scopeType: string | null | undefined, scopeId: string | null | undefined, t: Translate): ReactNode {
+  if (!scopeId) return t('platformAccess.accessModule.globalDefault');
+  return fillNodes(t('platformAccess.accessModule.scopeReference'), { scope: <bdi>{accessScopeLabel(scopeType, t)}</bdi> });
 }
 
 function accessQueryErrorHint(error: unknown, fallback: string): string {
@@ -641,17 +641,17 @@ export function AccessModule() {
     !rolesQuery.error &&
     grantableRoleOptions.length > 0;
   const grantRoleBlockedReason = usersQuery.error
-    ? accessQueryErrorHint(usersQuery.error, 'Could not load users for role grants.')
+    ? accessQueryErrorHint(usersQuery.error, t('platformAccess.accessModule.couldNotLoadUsersForRoleGrants'))
     : rolesQuery.error
-      ? accessQueryErrorHint(rolesQuery.error, 'Could not load roles for role grants.')
+      ? accessQueryErrorHint(rolesQuery.error, t('platformAccess.accessModule.couldNotLoadRolesForRoleGrants'))
       : !tenantId
-        ? 'Select a tenant before granting tenant RBAC roles.'
+        ? t('platformAccess.accessModule.selectTenantBeforeGranting')
         : usersQuery.isLoading || rolesQuery.isLoading
-        ? 'Loading users and roles before role grants can be started.'
+        ? t('platformAccess.accessModule.loadingUsersAndRolesForGrants')
         : userOptions.length === 0
-          ? 'No users are available to grant a role in this scope.'
+          ? t('platformAccess.accessModule.noUsersToGrantInScope')
           : grantableRoleOptions.length === 0
-            ? 'No active roles are available to grant in this scope.'
+            ? t('platformAccess.accessModule.noActiveRolesToGrantInScope')
             : null;
   // W-Cycle-E2 (P1 #2) — Scope <select> options for the capability-grant
   // request modal derive from canonical `scope_type_registry` (rank-sorted
@@ -720,7 +720,7 @@ export function AccessModule() {
   );
   const tenantMutationBlockedReason = tenantId
     ? null
-    : 'Select a tenant before changing tenant RBAC roles.';
+    : t('platformAccess.accessModule.selectTenantBeforeChanging');
 
   const refetchRbacSurface = async () => {
     await Promise.all([
@@ -896,7 +896,7 @@ export function AccessModule() {
         }
         await refetchRbacSurface();
         setAccessRequestReviewEvidence(readback);
-        pushToast(fill(t('platformAccess.accessModule.accessRequest'), { decision: String(decision), capability_key: String(request.capability_key) }), 'good');
+        pushToast(fill(t(approving ? 'platformAccess.accessModule.accessRequestApproved' : 'platformAccess.accessModule.accessRequestDenied'), { capability_key: String(request.capability_key) }), 'good');
         modal.close();
       } catch (err) {
         submitted = false;
@@ -970,15 +970,15 @@ export function AccessModule() {
   const grantedCount = wildcardGranted ? policyCaps.length : policyCaps.filter((c) => myCaps.has(c)).length;
   const totalCount = policyCaps.length;
   const policyPillLabel = !accessRead
-    ? 'Policy denied'
+    ? t('platformAccess.accessModule.policyDenied')
     : access.error || (!access.isLoading && !access.data)
-      ? 'Policy unavailable'
+      ? t('platformAccess.accessModule.policyUnavailable')
       : access.isLoading
-        ? 'Policy loading'
-        : 'Policy enforced';
+        ? t('platformAccess.accessModule.policyLoading')
+        : t('platformAccess.accessModule.policyEnforced');
   const roleCountPillLabel = rolesQuery.error
-    ? 'roles unavailable'
-    : `${rolesQuery.data?.rows?.length ?? 0} roles`;
+    ? t('platformAccess.accessModule.rolesUnavailable')
+    : fill(t('platformAccess.accessModule.roleCount'), { count: rolesQuery.data?.rows?.length ?? 0 });
 
   const scopePath = access.data?.scope_path ?? [];
   const winningScopeType = access.data?.scope_type ?? 'global';
@@ -1196,7 +1196,7 @@ export function AccessModule() {
                       correlationId:
                         typeof result.correlation_id === 'string' ? result.correlation_id : null,
                     });
-                    pushToast(fill(t('platformAccess.accessModule.roleGranted'), { value: String(selectedUser ? userPickerLabel(selectedUser) : 'selected user') }), 'good');
+                    pushToast(fill(t('platformAccess.accessModule.roleGranted'), { value: String(selectedUser ? userPickerLabel(selectedUser) : t('platformAccess.accessModule.selectedUser')) }), 'good');
                     modal.close();
                   },
                   onError: () => pushToast(t('platformAccess.accessModule.roleGrantCouldNot'), 'danger'),
@@ -1401,7 +1401,7 @@ export function AccessModule() {
             ) : null}
             {roleTier ? (
               <Chip
-                label={fill(t('platformAccess.accessModule.tier'), { roleTier: String(roleTier) })}
+                label={fillNodes(t('platformAccess.accessModule.tier'), { roleTier: <bdi>{String(roleTier)}</bdi> })}
                 kind="neutral"
                 size="xs"
                 data-testid="rbac-role-drawer-tier"
@@ -1417,7 +1417,7 @@ export function AccessModule() {
             ) : null}
             {lastAssignedAt ? (
               <Chip
-                label={fill(t('platformAccess.accessModule.lastAssigned'), { value: String(lastAssignedAt.slice(0, 10)) })}
+                label={fillNodes(t('platformAccess.accessModule.lastAssigned'), { value: <bdi>{String(lastAssignedAt.slice(0, 10))}</bdi> })}
                 kind="neutral"
                 size="xs"
                 data-testid="rbac-role-drawer-last-assigned"
@@ -1768,7 +1768,7 @@ export function AccessModule() {
                 title={t('platformAccess.accessModule.accessPolicyUnavailable')}
                 hint={accessQueryErrorHint(
                   access.error,
-                  'Could not load the access policy.',
+                  t('platformAccess.accessModule.couldNotLoadAccessPolicy'),
                 )}
               />
             </div>
@@ -1790,7 +1790,7 @@ export function AccessModule() {
             </div>
           ) : (
             <>
-          <div className="section-eyebrow">{fill(t('platformAccess.accessModule.currentUserRole'), { name: String(user.name), role: String(user.role) })}</div>
+          <div className="section-eyebrow">{fillNodes(t('platformAccess.accessModule.currentUserRole'), { name: <bdi>{String(user.name)}</bdi>, role: <bdi>{String(user.role)}</bdi> })}</div>
           <div className="section-eyebrow">{t('platformAccess.accessModule.accessResolutionLadder')}</div>
           <div className="ladder" data-testid="access-ladder" style={{ padding: '0 16px 8px' }}>
             {scopePath.map((step, i) => {
@@ -1805,8 +1805,8 @@ export function AccessModule() {
                   data-testid={`access-ladder-step-${step.scope_type}`}
                 >
                   <span className="ladder__rank">{String(i + 1)}</span>
-                  <span className="ladder__level">{accessScopeLabel(step.scope_type)}</span>
-                  <span className="ladder__id">{accessScopeReferenceLabel(step.scope_type, step.scope_id)}</span>
+                  <span className="ladder__level"><bdi>{accessScopeLabel(step.scope_type, t)}</bdi></span>
+                  <span className="ladder__id">{accessScopeReferenceLabel(step.scope_type, step.scope_id, t)}</span>
                   <span className="ladder__value">{isMatch ? t('platformAccess.accessModule.resolved') : t('platformAccess.accessModule.inherit')}</span>
                 </div>
               );
@@ -1889,7 +1889,7 @@ export function AccessModule() {
                   const wOk = w ? wildcardGranted || myCaps.has(w) : false;
                   return (
                     <tr key={key} data-testid={`access-resource-${key}`}>
-                      <td>{accessResourceLabel(key)}</td>
+                      <td><bdi>{accessResourceLabel(key, t)}</bdi></td>
                       <td>
                         <Chip
                           label={r ? formatCapabilityLabel(r, { titleCase: true }, t) : t('platformAccess.accessModule.notAvailable')}
@@ -1947,7 +1947,7 @@ export function AccessModule() {
                 ) : null}
                 {accessRequestEvidence.scope_type ? (
                   <Chip
-                    label={fill(t('platformAccess.accessModule.scope2'), { scope_type: String(accessRequestEvidence.scope_type) })}
+                    label={fillNodes(t('platformAccess.accessModule.scope2'), { scope_type: <bdi>{String(accessRequestEvidence.scope_type)}</bdi> })}
                     kind="neutral"
                     size="xs"
                     className="mono"
@@ -1955,7 +1955,7 @@ export function AccessModule() {
                 ) : null}
                 {accessRequestEvidence.capability_grant_request_id ? (
                   <Chip
-                    label={fill(t('platformAccess.accessModule.request2'), { capability_grant_request_id: String(accessRequestEvidence.capability_grant_request_id) })}
+                    label={fillNodes(t('platformAccess.accessModule.request2'), { capability_grant_request_id: <bdi>{String(accessRequestEvidence.capability_grant_request_id)}</bdi> })}
                     kind="neutral"
                     size="xs"
                     className="mono"
@@ -2007,7 +2007,7 @@ export function AccessModule() {
               title={t('platformAccess.accessModule.accessRolesUnavailable')}
               hint={accessQueryErrorHint(
                 rolesQuery.error,
-                'Could not load access roles.',
+                t('platformAccess.accessModule.couldNotLoadAccessRoles'),
               )}
             />
           ) : rolesQuery.isLoading ? (
@@ -2032,7 +2032,7 @@ export function AccessModule() {
                   kind: 'danger',
                   capability: CAP.ACCESS_POLICY_APPROVE,
                   disabled: (role) => !role.is_active,
-                  disabledReason: 'Role is already inactive.',
+                  disabledReason: t('platformAccess.accessModule.roleIsAlreadyInactive'),
                   onClick: openRoleDelete,
                 },
               ]}
@@ -2075,7 +2075,7 @@ export function AccessModule() {
               title={t('platformAccess.accessModule.userRoleAssignmentsUnavailable')}
               hint={accessQueryErrorHint(
                 assignmentsQuery.error,
-                'Could not load user role assignments.',
+                t('platformAccess.accessModule.couldNotLoadAssignments'),
               )}
             />
           ) : assignmentsQuery.isLoading ? (
@@ -2093,7 +2093,7 @@ export function AccessModule() {
                   kind: 'danger',
                   capability: CAP.ACCESS_POLICY_APPROVE,
                   disabled: (assignment) => Boolean(assignment.revoked_at),
-                  disabledReason: 'Assignment is already revoked.',
+                  disabledReason: t('platformAccess.accessModule.assignmentIsAlreadyRevoked'),
                   onClick: openRevokeAssignment,
                 },
               ]}
@@ -2124,20 +2124,20 @@ export function AccessModule() {
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                 <Chip
-                  label={fill(t('platformAccess.accessModule.user2'), { userLabel: String(assignmentMutationEvidence.userLabel) })}
+                  label={fillNodes(t('platformAccess.accessModule.user2'), { userLabel: <bdi>{String(assignmentMutationEvidence.userLabel)}</bdi> })}
                   kind="neutral"
                   size="xs"
                   className="mono"
                 />
                 <Chip
-                  label={fill(t('platformAccess.accessModule.role2'), { roleLabel: String(assignmentMutationEvidence.roleLabel) })}
+                  label={fillNodes(t('platformAccess.accessModule.role2'), { roleLabel: <bdi>{String(assignmentMutationEvidence.roleLabel)}</bdi> })}
                   kind="neutral"
                   size="xs"
                   className="mono"
                 />
                 {assignmentMutationEvidence.assignmentId ? (
                   <Chip
-                    label={fill(t('platformAccess.accessModule.assignment'), { assignmentId: String(assignmentMutationEvidence.assignmentId) })}
+                    label={fillNodes(t('platformAccess.accessModule.assignment'), { assignmentId: <bdi>{String(assignmentMutationEvidence.assignmentId)}</bdi> })}
                     kind="neutral"
                     size="xs"
                     className="mono"
@@ -2183,7 +2183,7 @@ export function AccessModule() {
               title={t('platformAccess.accessModule.roleTemplatesUnavailable')}
               hint={accessQueryErrorHint(
                 templatesQuery.error,
-                'Could not load role templates.',
+                t('platformAccess.accessModule.couldNotLoadRoleTemplates'),
               )}
             />
           ) : templatesQuery.isLoading ? (
@@ -2309,7 +2309,7 @@ export function AccessModule() {
               title={t('platformAccess.accessModule.accessRequestsUnavailable')}
               hint={accessQueryErrorHint(
                 grantRequestsQuery.error,
-                'Could not load access requests.',
+                t('platformAccess.accessModule.couldNotLoadAccessRequests'),
               )}
             />
           ) : grantRequestsQuery.isLoading ? (
@@ -2333,7 +2333,7 @@ export function AccessModule() {
                   kind: 'primary',
                   capability: CAP.ACCESS_POLICY_APPROVE,
                   disabled: (request) => request.status !== 'pending',
-                  disabledReason: 'Request is already reviewed.',
+                  disabledReason: t('platformAccess.accessModule.requestIsAlreadyReviewed'),
                   onClick: (request) => openReviewAccessRequest(request, 'approved'),
                 },
                 {
@@ -2342,7 +2342,7 @@ export function AccessModule() {
                   kind: 'danger',
                   capability: CAP.ACCESS_POLICY_APPROVE,
                   disabled: (request) => request.status !== 'pending',
-                  disabledReason: 'Request is already reviewed.',
+                  disabledReason: t('platformAccess.accessModule.requestIsAlreadyReviewed'),
                   onClick: (request) => openReviewAccessRequest(request, 'denied'),
                 },
               ]}
@@ -2383,7 +2383,7 @@ export function AccessModule() {
                 ) : null}
                 {accessRequestReviewEvidence.capability_grant_request_id ? (
                   <Chip
-                    label={fill(t('platformAccess.accessModule.request2'), { capability_grant_request_id: String(accessRequestReviewEvidence.capability_grant_request_id) })}
+                    label={fillNodes(t('platformAccess.accessModule.request2'), { capability_grant_request_id: <bdi>{String(accessRequestReviewEvidence.capability_grant_request_id)}</bdi> })}
                     kind="neutral"
                     size="xs"
                     className="mono"
@@ -2391,7 +2391,7 @@ export function AccessModule() {
                 ) : null}
                 {accessRequestReviewEvidence.rbac_role_id ? (
                   <Chip
-                    label={fill(t('platformAccess.accessModule.role3'), { rbac_role_id: String(accessRequestReviewEvidence.rbac_role_id) })}
+                    label={fillNodes(t('platformAccess.accessModule.role3'), { rbac_role_id: <bdi>{String(accessRequestReviewEvidence.rbac_role_id)}</bdi> })}
                     kind="neutral"
                     size="xs"
                     className="mono"
@@ -2399,7 +2399,7 @@ export function AccessModule() {
                 ) : null}
                 {accessRequestReviewEvidence.rbac_user_role_assignment_id ? (
                   <Chip
-                    label={fill(t('platformAccess.accessModule.assignment2'), { rbac_user_role_assignment_id: String(accessRequestReviewEvidence.rbac_user_role_assignment_id) })}
+                    label={fillNodes(t('platformAccess.accessModule.assignment2'), { rbac_user_role_assignment_id: <bdi>{String(accessRequestReviewEvidence.rbac_user_role_assignment_id)}</bdi> })}
                     kind="neutral"
                     size="xs"
                     className="mono"

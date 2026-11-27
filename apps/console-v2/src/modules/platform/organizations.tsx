@@ -36,7 +36,7 @@ import { pushToast } from '@/components/toastStore';
 import { getLookups, getSettingsCategories, lookupRow } from '@/lib/api';
 import { readUrlParam } from '@/lib/url-params';
 import { useConsoleNavigator } from '@/lib/useConsoleNavigator';
-import { fill, useI18n, type Translate } from '@/lib/i18n';
+import { fill, fillNodes, useI18n, type Translate } from '@/lib/i18n';
 
 // W10-5 schema-drift remediation (PLATFORM §6) — applies the SCHEMA-DRIFT
 // inventory verdict for `public.organizations`:
@@ -265,7 +265,8 @@ function parseJsonObject(raw: string): Record<string, unknown> {
   if (!trimmed) return {};
   const parsed = JSON.parse(trimmed) as unknown;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Organization defaults must be a JSON object.');
+    // Callers show the translated message; this code only stops the save.
+    throw new Error('organization_defaults_not_object');
   }
   return parsed as Record<string, unknown>;
 }
@@ -300,6 +301,7 @@ function normalizeSettingsCategoryOption(row: Record<string, unknown>): OrgDefau
 function orgDefaultKeyOptions(
   defaultsPatch: string,
   settingsCategoryRows: Array<Record<string, unknown>>,
+  t: Translate,
 ): OrgDefaultKeyOption[] {
   const merged = new Map<string, OrgDefaultKeyOption>();
   let current: Record<string, unknown> = {};
@@ -316,7 +318,7 @@ function orgDefaultKeyOptions(
       merged.set(key, {
         value: key,
         label: labelFromSettingsCategory(key),
-        domain: 'Current defaults',
+        domain: t('platformOrganizations.orgProfileForm.currentDefaults'),
       });
     });
 
@@ -594,8 +596,8 @@ function OrgProfileForm({
     const rows = liveRows.length > 0
       ? liveRows
       : ((getSettingsCategories() as Array<Record<string, unknown>>) || []);
-    return orgDefaultKeyOptions(draft.default_settings_patch, rows);
-  }, [draft.default_settings_patch, settingsCategoriesQuery.data]);
+    return orgDefaultKeyOptions(draft.default_settings_patch, rows, t);
+  }, [draft.default_settings_patch, settingsCategoriesQuery.data, t]);
 
   useEffect(() => {
     setDraft(orgProfileDraftFromRow(row));
@@ -762,8 +764,8 @@ function OrgProfileForm({
               let current: Record<string, unknown>;
               try {
                 current = parseJsonObject(draft.default_settings_patch);
-              } catch (err) {
-                setSettingsError((err as Error).message);
+              } catch {
+                setSettingsError(t('platformOrganizations.orgProfileForm.organizationDefaultsMustBe'));
                 return;
               }
               const next = {
@@ -831,8 +833,8 @@ function OrgProfileForm({
             let defaultSettingsPatch: Record<string, unknown>;
             try {
               defaultSettingsPatch = parseJsonObject(draft.default_settings_patch);
-            } catch (err) {
-              setSettingsError((err as Error).message);
+            } catch {
+              setSettingsError(t('platformOrganizations.orgProfileForm.organizationDefaultsMustBe'));
               return;
             }
             defaultSettingsPatch = {
@@ -875,16 +877,16 @@ function KvRow({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function intakeContextLabel(key: string): string {
+function intakeContextLabel(key: string, t: Translate): string {
   const overrides: Record<string, string> = {
-    utm_source: 'Campaign source',
-    utm_campaign: 'Campaign',
-    utm_medium: 'Channel',
-    referrer: 'Referrer',
-    source: 'Source',
-    locale: 'Locale',
-    ip: 'IP address',
-    user_agent: 'Browser',
+    utm_source: t('platformOrganizations.signupDrawerBody.campaignSource'),
+    utm_campaign: t('platformOrganizations.signupDrawerBody.campaign'),
+    utm_medium: t('platformOrganizations.signupDrawerBody.channel'),
+    referrer: t('platformOrganizations.signupDrawerBody.referrer'),
+    source: t('platformOrganizations.signupDrawerBody.source'),
+    locale: t('platformOrganizations.signupDrawerBody.intakeLocale'),
+    ip: t('platformOrganizations.signupDrawerBody.ipAddress'),
+    user_agent: t('platformOrganizations.signupDrawerBody.browser'),
   };
   return overrides[key] ?? key
     .replace(/[_-]+/g, ' ')
@@ -892,29 +894,38 @@ function intakeContextLabel(key: string): string {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-function intakeContextValue(value: unknown): string {
-  if (value == null || value === '') return 'Not provided';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+function intakeContextValue(value: unknown, t: Translate): string {
+  if (value == null || value === '') return t('platformOrganizations.signupDrawerBody.notProvided');
+  if (typeof value === 'boolean') return value ? t('platformOrganizations.signupDrawerBody.yes') : t('platformOrganizations.signupDrawerBody.no');
   if (typeof value === 'number') return String(value);
   if (typeof value === 'string') return value.replace(/[_-]+/g, ' ');
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+  if (Array.isArray(value)) {
+    return fill(t(value.length === 1 ? 'platformOrganizations.signupDrawerBody.itemOne' : 'platformOrganizations.signupDrawerBody.itemOther'), { count: value.length });
+  }
   if (typeof value === 'object') {
     const size = Object.keys(value as Record<string, unknown>).length;
-    return `${size} detail${size === 1 ? '' : 's'} captured`;
+    return fill(t(size === 1 ? 'platformOrganizations.signupDrawerBody.detailOne' : 'platformOrganizations.signupDrawerBody.detailOther'), { count: size });
   }
   return String(value);
 }
 
-function provisionedReference(value: unknown, kind: 'organization' | 'user'): string {
+function provisionedReference(value: unknown, kind: 'organization' | 'user', t: Translate): string {
   const token = String(value ?? '').trim();
-  if (!token) return 'Not recorded';
+  if (!token) return t('platformOrganizations.signupDrawerBody.notRecorded');
   const short = token.replace(/-/g, '').slice(-6).toUpperCase();
-  return `${kind === 'organization' ? 'Organization' : 'User'} ready${short ? ` · Ref ${short}` : ''}`;
+  if (kind === 'organization') {
+    return short
+      ? fill(t('platformOrganizations.signupDrawerBody.organizationReadyRef'), { ref: short })
+      : t('platformOrganizations.signupDrawerBody.organizationReady');
+  }
+  return short
+    ? fill(t('platformOrganizations.signupDrawerBody.provisionedUserReadyRef'), { ref: short })
+    : t('platformOrganizations.signupDrawerBody.provisionedUserReady');
 }
 
-function compactStatusDetail(value: unknown): string {
+function compactStatusDetail(value: unknown, t: Translate): string {
   const text = String(value ?? '').trim();
-  if (!text) return 'Not recorded';
+  if (!text) return t('platformOrganizations.signupDrawerBody.notRecorded');
   return text;
 }
 
@@ -970,6 +981,7 @@ function IntakeContextGrid({
   emptyText: string;
   testId: string;
 }) {
+  const { t } = useI18n();
   const entries = Object.entries(values).filter(([, value]) => value != null && value !== '');
   if (entries.length === 0) {
     return <div className="state__hint" data-testid={testId}>{emptyText}</div>;
@@ -977,8 +989,8 @@ function IntakeContextGrid({
   return (
     <div className="kvgrid" data-testid={testId}>
       {entries.map(([key, value]) => (
-        <KvRow key={key} label={intakeContextLabel(key)}>
-          <span>{intakeContextValue(value)}</span>
+        <KvRow key={key} label={intakeContextLabel(key, t)}>
+          <span>{intakeContextValue(value, t)}</span>
         </KvRow>
       ))}
     </div>
@@ -1186,7 +1198,7 @@ function SignupDrawerBody({
             <Chip
               size="xs"
               kind="neutral"
-              label={fill(t('platformOrganizations.signupDrawerBody.reviewer'), { reviewer_label: String(summary.reviewer_label) })}
+              label={fillNodes(t('platformOrganizations.signupDrawerBody.reviewer'), { reviewer_label: <bdi>{String(summary.reviewer_label)}</bdi> })}
               data-testid="org-signup-summary-reviewer-label"
             />
           ) : null}
@@ -1194,7 +1206,7 @@ function SignupDrawerBody({
             <Chip
               size="xs"
               kind="good"
-              label={fill(t('platformOrganizations.signupDrawerBody.provisioned'), { approved_organization_label: String(summary.approved_organization_label) })}
+              label={fillNodes(t('platformOrganizations.signupDrawerBody.provisioned'), { approved_organization_label: <bdi>{String(summary.approved_organization_label)}</bdi> })}
               data-testid="org-signup-summary-approved-org-label"
             />
           ) : null}
@@ -1245,7 +1257,7 @@ function SignupDrawerBody({
             </KvRow>
             {approvedOrgId ? (
               <KvRow label={t('platformOrganizations.signupDrawerBody.provisionedOrg')}>
-                <span>{provisionedReference(approvedOrgId, 'organization')}</span>
+                <span>{provisionedReference(approvedOrgId, 'organization', t)}</span>
               </KvRow>
             ) : null}
             {approvedUserId ? (
@@ -1253,7 +1265,7 @@ function SignupDrawerBody({
                 <span>
                   {summary?.approved_user_email
                     ? fill(t('platformOrganizations.signupDrawerBody.userReady'), { approved_user_email: String(summary.approved_user_email) })
-                    : provisionedReference(approvedUserId, 'user')}
+                    : provisionedReference(approvedUserId, 'user', t)}
                 </span>
               </KvRow>
             ) : null}
@@ -1281,7 +1293,7 @@ function SignupDrawerBody({
               {lastErrorMessage ? (
                 <Chip size="xs" kind="danger" label={t('platformOrganizations.signupDrawerBody.inviteFailed')} />
               ) : inviteEmailSentAt ? (
-                <span className="mono">{fill(t('platformOrganizations.signupDrawerBody.sent'), { inviteEmailSentAt: String(inviteEmailSentAt) })}</span>
+                <span className="mono">{fillNodes(t('platformOrganizations.signupDrawerBody.sent'), { inviteEmailSentAt: <bdi>{String(inviteEmailSentAt)}</bdi> })}</span>
               ) : approvedAuthUserId ? (
                 <Chip size="xs" kind="info" label={t('platformOrganizations.signupDrawerBody.authUserReady')} />
               ) : (
@@ -1289,10 +1301,10 @@ function SignupDrawerBody({
               )}
             </KvRow>
             <KvRow label={t('platformOrganizations.signupDrawerBody.inviteRedirect')}>
-              <span className="mono">{compactStatusDetail(inviteRedirectTo)}</span>
+              <span className="mono">{compactStatusDetail(inviteRedirectTo, t)}</span>
             </KvRow>
             <KvRow label={t('platformOrganizations.signupDrawerBody.authUser')}>
-              <span>{provisionedReference(approvedAuthUserId, 'user')}</span>
+              <span>{provisionedReference(approvedAuthUserId, 'user', t)}</span>
             </KvRow>
             {lastErrorMessage ? (
               <KvRow label={t('platformOrganizations.signupDrawerBody.lastInviteError')}>
@@ -1516,10 +1528,13 @@ export function OrganizationsModule() {
     failed: number,
     alreadyProcessed: number,
   ): string {
-    if (alreadyProcessed > 0) {
-      return `Signup requests refreshed · ${alreadyProcessed} already reviewed · ${ok}/${total}${failed ? ` · ${failed} failed` : ''}`;
-    }
-    return `Signup requests ${decision} · ${ok}/${total}${failed ? ` · ${failed} failed` : ''}`;
+    // One whole sentence per outcome, so each language words it naturally.
+    const key = alreadyProcessed > 0
+      ? (failed ? 'platformOrganizations.organizationsModule.signupRefreshedFailedToast' : 'platformOrganizations.organizationsModule.signupRefreshedToast')
+      : decision === 'approved'
+        ? (failed ? 'platformOrganizations.organizationsModule.signupApprovedFailedToast' : 'platformOrganizations.organizationsModule.signupApprovedToast')
+        : (failed ? 'platformOrganizations.organizationsModule.signupRejectedFailedToast' : 'platformOrganizations.organizationsModule.signupRejectedToast');
+    return fill(t(key), { ok, total, failed, alreadyProcessed });
   }
 
   function reviewedSignupRow(
@@ -1788,7 +1803,7 @@ export function OrganizationsModule() {
     }
     void applyDecision(rs, 'approved', undefined, options).then(({ ok, failed, alreadyProcessed, results, failures }) => {
       pushToast(
-        `tenant-signup-review - ${signupReviewToast('approved', ok, rs.length, failed, alreadyProcessed)}`,
+        signupReviewToast('approved', ok, rs.length, failed, alreadyProcessed),
         failed === 0 && alreadyProcessed === 0 ? 'good' : 'warn',
       );
       if (failed === 0) {
@@ -1832,7 +1847,7 @@ export function OrganizationsModule() {
           onSubmit={async (reason) => {
             const { ok, failed, alreadyProcessed, results, failures } = await applyDecision(rs, 'rejected', reason);
             pushToast(
-              `tenant-signup-review - ${signupReviewToast('rejected', ok, rs.length, failed, alreadyProcessed)}`,
+              signupReviewToast('rejected', ok, rs.length, failed, alreadyProcessed),
               failed === 0 ? 'warn' : 'danger',
             );
             if (failed === 0) {
@@ -2023,7 +2038,7 @@ export function OrganizationsModule() {
         <StateView
           kind="error"
           title={t('platformOrganizations.organizationsModule.tenantRegistryFailed')}
-          hint={queryErrorHint(orgsQuery.error, 'Tenant registry could not be loaded')}
+          hint={queryErrorHint(orgsQuery.error, t('platformOrganizations.organizationsModule.tenantRegistryCouldNotLoad'))}
         />
       ) : organizationRowsOutOfScope.length > 0 ? (
         <StateView
@@ -2066,7 +2081,7 @@ export function OrganizationsModule() {
         <StateView
           kind="error"
           title={t('platformOrganizations.organizationsModule.signupRequestsFailed')}
-          hint={queryErrorHint(requestsQuery.error, 'Signup requests could not be loaded')}
+          hint={queryErrorHint(requestsQuery.error, t('platformOrganizations.organizationsModule.signupRequestsCouldNotLoad'))}
         />
       ) : statusFilters.length <= 1 ? (
         <StateView
@@ -2081,7 +2096,7 @@ export function OrganizationsModule() {
               title={t('platformOrganizations.organizationsModule.signupSummaryProjectionFailed')}
               hint={queryErrorHint(
                 requestSummaryQuery.error,
-                'Signup request summary could not be loaded',
+                t('platformOrganizations.organizationsModule.signupSummaryCouldNotLoad'),
               )}
             />
           ) : null}

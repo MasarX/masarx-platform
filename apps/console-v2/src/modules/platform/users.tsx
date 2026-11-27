@@ -68,7 +68,7 @@ import type { UserSecurityActionRow } from '@/lib/api';
 import { hostedInviteRedirect } from '@/lib/hosted-redirect';
 import { readAuthorizedTenantOrganizationOverride } from '@/lib/scope-url';
 import { readUrlParam } from '@/lib/url-params';
-import { fill, useI18n, type Translate } from '@/lib/i18n';
+import { fill, fillNodes, useI18n, type Translate } from '@/lib/i18n';
 
 // Canonical user projection — mirrors public.users column shape (only the
 // columns surfaced to the operator UI; the production projection includes
@@ -220,33 +220,33 @@ function scopeReferenceMatchesSearch(option: ScopeReferenceOption, search: strin
   return `${option.label} ${option.id}`.toLowerCase().includes(normalized);
 }
 
-function clientScopeReferenceOptions(rows: InviteClientReferenceRow[] | undefined): ScopeReferenceOption[] {
+function clientScopeReferenceOptions(rows: InviteClientReferenceRow[] | undefined, t: Translate): ScopeReferenceOption[] {
   return (rows ?? [])
     .map((row) => {
       const id = String(row.client_id ?? row.id ?? '').trim();
       if (!id) return null;
-      const label = String(row.name ?? row.slug ?? id).trim() || 'Unnamed client';
+      const label = String(row.name ?? row.slug ?? id).trim() || t('platformUsers.inviteUserForm.unnamedClient');
       const status = String(row.status ?? '').trim();
       return {
         id,
-        label: [label, status ? `status=${status}` : ''].filter(Boolean).join(' - '),
+        label: [label, status ? fill(t('platformUsers.inviteUserForm.statusTag'), { status }) : ''].filter(Boolean).join(' - '),
       };
     })
     .filter((row): row is ScopeReferenceOption => row !== null)
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-function senderScopeReferenceOptions(rows: InviteSenderReferenceRow[] | undefined): ScopeReferenceOption[] {
+function senderScopeReferenceOptions(rows: InviteSenderReferenceRow[] | undefined, t: Translate): ScopeReferenceOption[] {
   return (rows ?? [])
     .map((row) => {
       const id = String(row.sender_id ?? row.id ?? '').trim();
       if (!id) return null;
-      const label = String(row.name ?? row.brand_name ?? id).trim() || 'Unnamed sender';
+      const label = String(row.name ?? row.brand_name ?? id).trim() || t('platformUsers.inviteUserForm.unnamedSender');
       const client = String(row.client_label ?? '').trim();
       const status = String(row.status ?? '').trim();
       return {
         id,
-        label: [label, client ? `client=${client}` : '', status ? `status=${status}` : '']
+        label: [label, client ? fill(t('platformUsers.inviteUserForm.clientTag'), { client }) : '', status ? fill(t('platformUsers.inviteUserForm.statusTag'), { status }) : '']
           .filter(Boolean)
           .join(' - '),
       };
@@ -318,14 +318,14 @@ function accessScopeOptionsFromRows(rows: LookupValueRow[] | undefined): AccessS
     .filter((row) => row.value.length > 0);
 }
 
-function usersReadErrorMessage(reason: unknown): string {
+function usersReadErrorMessage(reason: unknown, t: Translate): string {
   return reason instanceof Error && reason.message
     ? reason.message
-    : 'The user list could not be loaded.';
+    : t('platformUsers.usersModule.userListCouldNotLoad');
 }
 
-function formatSecurityActionTimestamp(value: string | null | undefined): string {
-  if (!value) return 'Pending timestamp';
+function formatSecurityActionTimestamp(value: string | null | undefined, t: Translate): string {
+  if (!value) return t('platformUsers.userSecurityActions.pendingTimestamp');
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
@@ -511,7 +511,7 @@ function UserSecurityActions({ user }: { user: UserRow }) {
         <StateView
           kind="error"
           title={t('platformUsers.userSecurityActions.securityActionCouldNot')}
-          hint={usersReadErrorMessage(actionsQuery.error)}
+          hint={usersReadErrorMessage(actionsQuery.error, t)}
         />
       ) : rows.length === 0 ? (
         <StateView
@@ -617,7 +617,7 @@ function UserSecurityActions({ user }: { user: UserRow }) {
                     size="xs"
                   />
                   <span className="mono" style={{ color: 'var(--ink-3)', fontSize: 11 }}>
-                    {formatSecurityActionTimestamp(row.timestamp)}
+                    {formatSecurityActionTimestamp(row.timestamp, t)}
                   </span>
                 </div>
                 <div className="state__hint" style={{ fontSize: 11.5 }}>
@@ -1311,6 +1311,7 @@ function InviteUserModalBody({
   onCancel,
   onSubmit,
 }: InviteUserModalBodyProps) {
+  const { t } = useI18n();
   const roleCatalogQuery = useTenantInvitableRoles({ organization_id: organizationId ?? null });
   const roleOptions = useMemo(
     () => roleOptionsFromRows(roleCatalogQuery.data?.rows as RoleCatalogRow[] | undefined),
@@ -1342,12 +1343,12 @@ function InviteUserModalBody({
     { enabled: Boolean(organizationId) },
   );
   const clientScopeOptions = useMemo(
-    () => clientScopeReferenceOptions(clientReferenceQuery.data?.rows),
-    [clientReferenceQuery.data],
+    () => clientScopeReferenceOptions(clientReferenceQuery.data?.rows, t),
+    [clientReferenceQuery.data, t],
   );
   const senderScopeOptions = useMemo(
-    () => senderScopeReferenceOptions(senderReferenceQuery.data?.rows),
-    [senderReferenceQuery.data],
+    () => senderScopeReferenceOptions(senderReferenceQuery.data?.rows, t),
+    [senderReferenceQuery.data, t],
   );
 
   return (
@@ -1395,7 +1396,7 @@ interface UsersDrawerBodyProps {
   onGrant: (roleKey: string) => void;
   onRevoke: (roleKey: string) => void;
   pending: boolean;
-  lifecycleReadback?: string | null;
+  lifecycleReadback?: ReactNode;
 }
 
 function UsersDrawerBody({
@@ -1582,7 +1583,7 @@ export function UsersModule() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [selectedUserEmail, setSelectedUserEmail] = useState<string | null>(null);
   const [openedUrlFocus, setOpenedUrlFocus] = useState<string | null>(null);
-  const [lifecycleReadbackByUserId, setLifecycleReadbackByUserId] = useState<Record<string, string>>({});
+  const [lifecycleReadbackByUserId, setLifecycleReadbackByUserId] = useState<Record<string, ReactNode>>({});
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   // W50 — Resolve filter chips from canonical `user_status` lookup (no
@@ -1715,7 +1716,7 @@ export function UsersModule() {
       { target_user_id: user.id, role_key: roleKey },
       {
         onSuccess: () =>
-          pushToast(`grant_user_role_v1 - ${user.email} - ${roleKey}`, 'good'),
+          pushToast(fill(t('platformUsers.usersModule.roleGrantedToast'), { email: user.email, role: roleKey }), 'good'),
         onError: (err: Error) =>
           pushToast(t('platformUsers.usersModule.roleGrantCouldNot'), 'danger'),
       },
@@ -1727,7 +1728,7 @@ export function UsersModule() {
       { target_user_id: user.id, role_key: roleKey },
       {
         onSuccess: () =>
-          pushToast(`revoke_user_role_v1 - ${user.email} - ${roleKey}`, 'warn'),
+          pushToast(fill(t('platformUsers.usersModule.roleRevokedToast'), { email: user.email, role: roleKey }), 'warn'),
         onError: (err: Error) =>
           pushToast(t('platformUsers.usersModule.roleRevokeCouldNot'), 'danger'),
       },
@@ -1772,7 +1773,7 @@ export function UsersModule() {
                       setSelectedUserId(user.id);
                       setLifecycleReadbackByUserId((previous) => ({
                         ...previous,
-                        [user.id]: `Saved data confirms ${user.email} is suspended in this drawer.`,
+                        [user.id]: fillNodes(t('platformUsers.usersModule.savedDataConfirmsSuspended'), { email: <bdi>{user.email}</bdi> }),
                       }));
                       pushToast(fill(t('platformUsers.suspendUserConfirm.userSuspended'), { email: String(user.email) }), 'warn');
                     },
@@ -1800,7 +1801,7 @@ export function UsersModule() {
           setSelectedUserId(user.id);
           setLifecycleReadbackByUserId((previous) => ({
             ...previous,
-            [user.id]: `Saved data confirms ${user.email} is active in this drawer.`,
+            [user.id]: fillNodes(t('platformUsers.usersModule.savedDataConfirmsActive'), { email: <bdi>{user.email}</bdi> }),
           }));
           pushToast(fill(t('platformUsers.usersModule.userReactivated'), { email: String(user.email) }), 'good');
         },
@@ -1902,7 +1903,7 @@ export function UsersModule() {
       setSelectedUserEmail(user.email.toLowerCase());
       setLifecycleReadbackByUserId((previous) => ({
         ...previous,
-        [user.id]: `Invite resend was saved for ${user.email}.`,
+        [user.id]: fillNodes(t('platformUsers.usersModule.inviteResendSaved'), { email: <bdi>{user.email}</bdi> }),
       }));
       const sent = result.invite_email_sent === true || result.invite_email_sent === 'true';
       pushToast(
@@ -1942,7 +1943,7 @@ export function UsersModule() {
           }
         });
         const succeeded = results.length - failed.length;
-        if (succeeded > 0) pushToast(`${succeeded}/${rows.length} user(s) suspended`, 'warn');
+        if (succeeded > 0) pushToast(fill(t('platformUsers.usersModule.usersSuspendedCount'), { succeeded, total: rows.length }), 'warn');
         if (failed.length > 0) pushToast(fill(t('platformUsers.usersModule.userSWereNot'), { length: String(failed.length), length2: String(rows.length) }), 'danger');
       },
     );
@@ -1964,7 +1965,7 @@ export function UsersModule() {
           }
         });
         const succeeded = results.length - failed.length;
-        if (succeeded > 0) pushToast(`${succeeded}/${rows.length} user(s) reactivated`, 'good');
+        if (succeeded > 0) pushToast(fill(t('platformUsers.usersModule.usersReactivatedCount'), { succeeded, total: rows.length }), 'good');
         if (failed.length > 0) pushToast(fill(t('platformUsers.usersModule.userSWereNot2'), { length: String(failed.length), length2: String(rows.length) }), 'danger');
       },
     );
@@ -1998,9 +1999,9 @@ export function UsersModule() {
               setLifecycleReadbackByUserId((previous) => ({
                 ...previous,
                 ...(invitedUserId
-                  ? { [invitedUserId]: `Invite decision was saved for ${args.email}.` }
+                  ? { [invitedUserId]: fillNodes(t('platformUsers.usersModule.inviteDecisionSaved'), { email: <bdi>{args.email}</bdi> }) }
                   : {}),
-                [invitedEmail]: `Invite decision was saved for ${args.email}.`,
+                [invitedEmail]: fillNodes(t('platformUsers.usersModule.inviteDecisionSaved'), { email: <bdi>{args.email}</bdi> }),
               }));
               pushToast(fill(t('platformUsers.inviteBody.inviteSentTo'), { email: String(args.email) }), 'good');
             } catch (err) {
@@ -2083,7 +2084,7 @@ export function UsersModule() {
         <StateView
           kind="error"
           title={t('platformUsers.usersModule.usersReadFailed')}
-          hint={usersReadErrorMessage(usersReadError)}
+          hint={usersReadErrorMessage(usersReadError, t)}
         />
       ) : statusFilters.length <= 1 ? (
         <StateView

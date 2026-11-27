@@ -1,6 +1,6 @@
 // i18n.tsx — EN + AR with RTL logic flip. Uses dot-paths into the catalog;
 // missing keys return the path so they're easy to spot in screenshots.
-import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NextIntlClientProvider } from 'next-intl';
 import { useIdentity } from './identity';
 import { useResolveSettings } from './queries';
@@ -8,6 +8,13 @@ import { reportError } from './telemetry';
 import { englishT, getConsoleCatalog, loadConsoleCatalog, readConsoleLocale, translateCatalog, type Locale, type Translate } from './i18n-catalog';
 
 export { englishT, fill, type Translate } from './i18n-catalog';
+
+/** Like `fill`, but each value stays a node, so callers can isolate data such as IDs and emails in `<bdi>`. */
+export function fillNodes(template: string, values: Record<string, ReactNode>): ReactNode[] {
+  return template.split(/\{(\w+)\}/).map((part, index) =>
+    index % 2 === 0 ? part : <Fragment key={index}>{part in values ? values[part] : `{${part}}`}</Fragment>,
+  );
+}
 
 interface I18nCtx {
   locale: Locale;
