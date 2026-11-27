@@ -17,7 +17,6 @@ apps/console-v2/src/components/TimelineLog.tsx 2
 apps/console-v2/src/components/expiryDescriptor.ts 7
 apps/console-v2/src/lib/auth.ts 1
 apps/console-v2/src/lib/data-source.ts 25
-apps/console-v2/src/lib/route-meta.ts 1
 apps/console-v2/src/modules/auth/AuthCallbackModule.tsx 5
 apps/console-v2/src/modules/auth/LoginModule.tsx 14
 apps/console-v2/src/modules/catalog/lookups.tsx 72
