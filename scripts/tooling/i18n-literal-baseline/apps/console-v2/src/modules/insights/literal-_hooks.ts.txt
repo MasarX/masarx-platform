@@ -1,0 +1,1 @@
+apps/console-v2/src/modules/insights/_hooks.ts 1

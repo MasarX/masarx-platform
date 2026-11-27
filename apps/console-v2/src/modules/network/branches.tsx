@@ -59,7 +59,7 @@ import {
   useResolveSettings,
 } from '@/lib/queries';
 import { useIdentity, useCapability } from '@/lib/identity';
-import { useI18n } from '@/lib/i18n';
+import { englishT, fill, useI18n, useT, type Translate } from '@/lib/i18n';
 import { CAP } from '@/lib/capabilities';
 import { useDrawer, useModal } from '@/hooks/useOverlay';
 import { pushToast } from '@/components/toastStore';
@@ -228,20 +228,21 @@ function coordinateText(value: number | null): string {
 function parseCoordinateDraft(
   latitudeText: string,
   longitudeText: string,
+  t: Translate = englishT,
 ): { ok: true; coordinates: { lat: number; lng: number } | null } | { ok: false; message: string } {
   const latRaw = latitudeText.trim();
   const lngRaw = longitudeText.trim();
   if (!latRaw && !lngRaw) return { ok: true, coordinates: null };
   if (!latRaw || !lngRaw) {
-    return { ok: false, message: 'Latitude and longitude are both required.' };
+    return { ok: false, message: t('branches.coords.bothRequired') };
   }
   const lat = Number(latRaw);
   const lng = Number(lngRaw);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return { ok: false, message: 'Latitude and longitude must be numbers.' };
+    return { ok: false, message: t('branches.coords.notNumbers') };
   }
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-    return { ok: false, message: 'Latitude or longitude is outside valid map bounds.' };
+    return { ok: false, message: t('branches.coords.outOfBounds') };
   }
   return { ok: true, coordinates: { lat, lng } };
 }
@@ -400,12 +401,12 @@ function userDirectoryIdOf(row: UserDirectoryRow | undefined | null): string {
   return '';
 }
 
-function userDirectoryLabelOf(row: UserDirectoryRow | undefined | null): string {
+function userDirectoryLabelOf(row: UserDirectoryRow | undefined | null, t: Translate = englishT): string {
   if (!row) return '';
   const name = typeof row.full_name === 'string' ? row.full_name : '';
   const email = typeof row.email === 'string' ? row.email : '';
   if (name && email) return `${name} (${email})`;
-  return name || email || 'User account';
+  return name || email || t('branches.userAccount');
 }
 
 function userDirectoryIsSelectable(row: UserDirectoryRow | undefined | null): boolean {
@@ -501,18 +502,19 @@ function closeAtOf(c: BranchCoverageRow | undefined | null): string | undefined 
   return undefined;
 }
 
-function coverageReasonLabel(reason?: string | null): string {
-  if (!reason) return 'Manual window update';
+function coverageReasonLabel(reason?: string | null, t: Translate = englishT): string {
+  if (!reason) return t('branches.window.manualUpdate');
   return reason
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-const WEEKDAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const WEEKDAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
-function weekdayLabel(dayIndex: number): string {
-  return WEEKDAY_LABELS[dayIndex] ?? `Day ${dayIndex + 1}`;
+function weekdayLabel(dayIndex: number, t: Translate = englishT): string {
+  const key = WEEKDAY_KEYS[dayIndex];
+  return key ? t(`branches.weekday.${key}`) : fill(t('branches.dayN'), { n: dayIndex + 1 });
 }
 
 interface ZoneRow extends Record<string, unknown> {
@@ -547,6 +549,7 @@ function vehicleTypeOf(v: VehicleRow): string {
 }
 
 function BranchVehiclesTable({ branchId }: { branchId: string }) {
+  const t = useT();
   const vehiclesQuery = useResourceListsByFilters<VehicleRow>(
     'vehicle_directory',
     [{ current_branch_id: branchId }, { branch_id: branchId }],
@@ -557,7 +560,7 @@ function BranchVehiclesTable({ branchId }: { branchId: string }) {
   const cols: Array<DataTableColumn<VehicleRow>> = [
     {
       key: 'plate_number',
-      label: 'Plate',
+      label: t('branches.vehicles.plate'),
       mono: true,
       sortable: true,
       filterable: true,
@@ -565,21 +568,21 @@ function BranchVehiclesTable({ branchId }: { branchId: string }) {
     },
     {
       key: 'vehicle_type_label',
-      label: 'Type',
+      label: t('branches.field.type'),
       sortable: true,
       filterable: true,
       render: (_raw, row) => vehicleTypeOf(row),
     },
     {
       key: 'status',
-      label: 'Status',
+      label: t('branches.field.status'),
       sortable: true,
       filterable: true,
       lookup: 'vehicle_status',
     },
     {
       key: 'fuel_level',
-      label: 'Fuel',
+      label: t('branches.vehicles.fuel'),
       align: 'right',
       format: 'percent',
       sortable: true,
@@ -587,14 +590,14 @@ function BranchVehiclesTable({ branchId }: { branchId: string }) {
   ];
 
   if (vehiclesQuery.isLoading) {
-    return <StateView kind="loading" hint="Loading vehicles assigned to this branch." />;
+    return <StateView kind="loading" hint={t('branches.vehicles.loading')} />;
   }
   if (vehiclesQuery.isError) {
     return (
       <StateView
         kind="error"
-        title="Branch vehicles failed"
-        hint={vehiclesQuery.error?.message ?? 'Vehicle directory read failed for this branch.'}
+        title={t('branches.vehicles.failedTitle')}
+        hint={vehiclesQuery.error?.message ?? t('branches.vehicles.failedHint')}
       />
     );
   }
@@ -604,7 +607,7 @@ function BranchVehiclesTable({ branchId }: { branchId: string }) {
     return (
       <StateView
         kind="empty"
-        hint="No vehicles currently posted to this branch."
+        hint={t('branches.vehicles.empty')}
       />
     );
   }
@@ -647,11 +650,12 @@ function CanonicalChip({
   value: string;
   className?: string;
 }) {
+  const t = useT();
   const row = lookupRow(category, value);
   if (!row) {
     return (
       <Chip
-        label={`${category}/${value} (missing)`}
+        label={fill(t('branches.missingLookup'), { token: `${category}/${value}` })}
         kind="danger"
         size="xs"
         className={className}
@@ -669,13 +673,13 @@ function CanonicalChip({
 }
 
 const DRAWER_TABS = [
-  { key: 'profile', label: 'Profile' },
-  { key: 'coverage', label: 'Coverage' },
-  { key: 'capacity', label: 'Capacity' },
-  { key: 'zones', label: 'Zones' },
-  { key: 'staff', label: 'Staff' },
-  { key: 'vehicles', label: 'Vehicles' },
-  { key: 'routes', label: 'Routes' },
+  { key: 'profile', labelKey: 'branches.tabs.profile' },
+  { key: 'coverage', labelKey: 'branches.tabs.coverage' },
+  { key: 'capacity', labelKey: 'branches.tabs.capacity' },
+  { key: 'zones', labelKey: 'branches.tabs.zones' },
+  { key: 'staff', labelKey: 'branches.tabs.staff' },
+  { key: 'vehicles', labelKey: 'branches.tabs.vehicles' },
+  { key: 'routes', labelKey: 'branches.tabs.routes' },
 ] as const;
 
 type DrawerTabKey = typeof DRAWER_TABS[number]['key'];
@@ -685,7 +689,7 @@ type DrawerTabKey = typeof DRAWER_TABS[number]['key'];
 export function BranchesModule() {
   const { scope, currentTenantId } = useIdentity();
   const go = useConsoleNavigator();
-  const { fmtNumber, fmtDateTime } = useI18n();
+  const { t, fmtNumber, fmtDateTime } = useI18n();
   const drawer = useDrawer();
   const modal = useModal();
   const canRead = useCapability(CAP.BRANCHES_READ);
@@ -982,8 +986,8 @@ export function BranchesModule() {
   // literal `=== 'hub' / 'depot' / 'dropoff_point'` filters.
   function countByKpiKey(kpiKey: string): number {
     return visibleBranches.filter((b) => {
-      const t = branchTypeOf(b);
-      const meta = lookupRow('branch_type', t)?.metadata as { kpi_card_key?: string } | undefined;
+      const typeKey = branchTypeOf(b);
+      const meta = lookupRow('branch_type', typeKey)?.metadata as { kpi_card_key?: string } | undefined;
       return meta?.kpi_card_key === kpiKey;
     }).length;
   }
@@ -1059,7 +1063,7 @@ export function BranchesModule() {
   }
 
   function branchMemberDisplayLabel(member: BranchMember, index: number): string {
-    return userDirectoryLabelOf(userById.get(member.user_id)) || `Staff member ${index + 1}`;
+    return userDirectoryLabelOf(userById.get(member.user_id), t) || fill(t('branches.staff.memberN'), { n: index + 1 });
   }
 
   function openCreateBranchForm() {
@@ -1083,15 +1087,15 @@ export function BranchesModule() {
         const branchType = draft.branch_type.trim();
         const status = draft.status.trim();
         if (!name) {
-          pushToast('Branch name is required.', 'warn');
+          pushToast(t('branches.create.nameRequired'), 'warn');
           return;
         }
         if (!branchType) {
-          pushToast('Branch type is required.', 'warn');
+          pushToast(t('branches.create.typeRequired'), 'warn');
           return;
         }
         if (!status) {
-          pushToast('Branch status is required.', 'warn');
+          pushToast(t('branches.create.statusRequired'), 'warn');
           return;
         }
 
@@ -1111,7 +1115,7 @@ export function BranchesModule() {
         if (addressLine) address.formatted = addressLine;
         if (Object.keys(address).length > 0) payload.address = address;
 
-        const coordinatesResult = parseCoordinateDraft(draft.latitude, draft.longitude);
+        const coordinatesResult = parseCoordinateDraft(draft.latitude, draft.longitude, t);
         if (!coordinatesResult.ok) {
           pushToast(coordinatesResult.message, 'warn');
           return;
@@ -1128,7 +1132,7 @@ export function BranchesModule() {
         if (capacityText) {
           const capacity = Number(capacityText);
           if (!Number.isFinite(capacity) || capacity < 0) {
-            pushToast('Capacity must be zero or a positive number.', 'warn');
+            pushToast(t('branches.create.capacityInvalid'), 'warn');
             return;
           }
           metadata.initial_capacity_per_day = capacity;
@@ -1141,12 +1145,12 @@ export function BranchesModule() {
           const res = await createBranchMut.mutateAsync(payload);
           const id = (res as { branch_id?: string }).branch_id ?? '';
           modal.close();
-          pushToast(id ? `Created ${name} (${id}).` : `Created ${name}.`, 'good');
+          pushToast(id ? fill(t('branches.create.createdWithId'), { name, id }) : fill(t('branches.create.created'), { name }), 'good');
           if (id) {
             go(`/network/branches?focus=${encodeURIComponent(id)}`);
           }
         } catch {
-          pushToast('Create branch failed - see audit log.', 'danger');
+          pushToast(t('branches.create.failed'), 'danger');
         }
       }
 
@@ -1161,7 +1165,7 @@ export function BranchesModule() {
               padding: '0 4px',
             }}
           >
-            <label className="mono" htmlFor="new-branch-name">Name</label>
+            <label className="mono" htmlFor="new-branch-name">{t('branches.field.name')}</label>
             <input
               id="new-branch-name"
               className="dt-inline-input"
@@ -1169,14 +1173,14 @@ export function BranchesModule() {
               onChange={(e) => setDraft((s) => ({ ...s, name: e.target.value }))}
               autoFocus
             />
-            <label className="mono" htmlFor="new-branch-code">Code</label>
+            <label className="mono" htmlFor="new-branch-code">{t('branches.field.code')}</label>
             <input
               id="new-branch-code"
               className="dt-inline-input"
               value={draft.code}
               onChange={(e) => setDraft((s) => ({ ...s, code: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-branch-type">Type</label>
+            <label className="mono" htmlFor="new-branch-type">{t('branches.field.type')}</label>
             {branchTypeOptions.length > 0 ? (
               <select
                 id="new-branch-type"
@@ -1184,7 +1188,7 @@ export function BranchesModule() {
                 value={draft.branch_type}
                 onChange={(e) => setDraft((s) => ({ ...s, branch_type: e.target.value }))}
               >
-                <option value="">Select branch type</option>
+                <option value="">{t('branches.create.selectType')}</option>
                 {branchTypeOptions.map((row) => (
                   <option key={row.value} value={row.value}>{row.label}</option>
                 ))}
@@ -1197,21 +1201,21 @@ export function BranchesModule() {
                 onChange={(e) => setDraft((s) => ({ ...s, branch_type: e.target.value }))}
               />
             )}
-            <label className="mono" htmlFor="new-branch-city">City</label>
+            <label className="mono" htmlFor="new-branch-city">{t('branches.field.city')}</label>
             <input
               id="new-branch-city"
               className="dt-inline-input"
               value={draft.city}
               onChange={(e) => setDraft((s) => ({ ...s, city: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-branch-address">Address</label>
+            <label className="mono" htmlFor="new-branch-address">{t('branches.field.address')}</label>
             <input
               id="new-branch-address"
               className="dt-inline-input"
               value={draft.address}
               onChange={(e) => setDraft((s) => ({ ...s, address: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-branch-latitude">Latitude</label>
+            <label className="mono" htmlFor="new-branch-latitude">{t('branches.field.latitude')}</label>
             <input
               id="new-branch-latitude"
               className="dt-inline-input"
@@ -1222,7 +1226,7 @@ export function BranchesModule() {
               value={draft.latitude}
               onChange={(e) => setDraft((s) => ({ ...s, latitude: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-branch-longitude">Longitude</label>
+            <label className="mono" htmlFor="new-branch-longitude">{t('branches.field.longitude')}</label>
             <input
               id="new-branch-longitude"
               className="dt-inline-input"
@@ -1233,7 +1237,7 @@ export function BranchesModule() {
               value={draft.longitude}
               onChange={(e) => setDraft((s) => ({ ...s, longitude: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-branch-capacity">Daily capacity</label>
+            <label className="mono" htmlFor="new-branch-capacity">{t('branches.field.dailyCapacity')}</label>
             <input
               id="new-branch-capacity"
               className="dt-inline-input"
@@ -1242,7 +1246,7 @@ export function BranchesModule() {
               value={draft.capacity_per_day}
               onChange={(e) => setDraft((s) => ({ ...s, capacity_per_day: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-branch-cutoff">Cutoff time</label>
+            <label className="mono" htmlFor="new-branch-cutoff">{t('branches.field.cutoffTime')}</label>
             <input
               id="new-branch-cutoff"
               className="dt-inline-input"
@@ -1250,7 +1254,7 @@ export function BranchesModule() {
               value={draft.cutoff_time}
               onChange={(e) => setDraft((s) => ({ ...s, cutoff_time: e.target.value }))}
             />
-            <label className="mono" htmlFor="new-branch-status">Status</label>
+            <label className="mono" htmlFor="new-branch-status">{t('branches.field.status')}</label>
             {branchStatusOptions.length > 0 ? (
               <select
                 id="new-branch-status"
@@ -1258,7 +1262,7 @@ export function BranchesModule() {
                 value={draft.status}
                 onChange={(e) => setDraft((s) => ({ ...s, status: e.target.value }))}
               >
-                <option value="">Select status</option>
+                <option value="">{t('branches.create.selectStatus')}</option>
                 {branchStatusOptions.map((row) => (
                   <option key={row.value} value={row.value}>{row.label}</option>
                 ))}
@@ -1273,9 +1277,9 @@ export function BranchesModule() {
             )}
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label={createBranchMut.isPending ? 'Creating...' : 'Create branch'}
+              label={createBranchMut.isPending ? t('branches.create.creating') : t('branches.create.submit')}
               kind="primary"
               capability={CAP.BRANCHES_WRITE}
               disabled={createBranchMut.isPending}
@@ -1286,7 +1290,7 @@ export function BranchesModule() {
       );
     }
 
-    modal.open({ title: 'New branch', body: <NewBranchForm /> });
+    modal.open({ title: t('branches.create.title'), body: <NewBranchForm /> });
   }
 
   function openBranchCoordinatesForm(branch: BranchRow) {
@@ -1300,13 +1304,13 @@ export function BranchesModule() {
 
       async function submit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
-        const coordinatesResult = parseCoordinateDraft(draft.latitude, draft.longitude);
+        const coordinatesResult = parseCoordinateDraft(draft.latitude, draft.longitude, t);
         if (!coordinatesResult.ok) {
           pushToast(coordinatesResult.message, 'warn');
           return;
         }
         if (!coordinatesResult.coordinates) {
-          pushToast('Latitude and longitude are required for map markers.', 'warn');
+          pushToast(t('branches.coords.requiredForMap'), 'warn');
           return;
         }
 
@@ -1325,9 +1329,9 @@ export function BranchesModule() {
           };
           modal.close();
           openBranchDrawer(patchedBranch, 'profile');
-          pushToast(`Updated map coordinates for ${branch.name}.`, 'good');
+          pushToast(fill(t('branches.coords.updated'), { name: branch.name }), 'good');
         } catch {
-          pushToast('Update branch coordinates failed - see audit log.', 'danger');
+          pushToast(t('branches.coords.failed'), 'danger');
         }
       }
 
@@ -1342,7 +1346,7 @@ export function BranchesModule() {
               padding: '0 4px',
             }}
           >
-            <label className="mono" htmlFor="branch-coordinate-latitude">Latitude</label>
+            <label className="mono" htmlFor="branch-coordinate-latitude">{t('branches.field.latitude')}</label>
             <input
               id="branch-coordinate-latitude"
               className="dt-inline-input"
@@ -1354,7 +1358,7 @@ export function BranchesModule() {
               onChange={(e) => setDraft((s) => ({ ...s, latitude: e.target.value }))}
               autoFocus
             />
-            <label className="mono" htmlFor="branch-coordinate-longitude">Longitude</label>
+            <label className="mono" htmlFor="branch-coordinate-longitude">{t('branches.field.longitude')}</label>
             <input
               id="branch-coordinate-longitude"
               className="dt-inline-input"
@@ -1367,9 +1371,9 @@ export function BranchesModule() {
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label={updateBranchMut.isPending ? 'Saving...' : 'Save coordinates'}
+              label={updateBranchMut.isPending ? t('branches.coords.saving') : t('branches.coords.save')}
               kind="primary"
               capability={CAP.BRANCHES_WRITE}
               disabled={updateBranchMut.isPending}
@@ -1380,7 +1384,7 @@ export function BranchesModule() {
       );
     }
 
-    modal.open({ title: `Map coordinates - ${branch.name}`, body: <BranchCoordinatesForm /> });
+    modal.open({ title: fill(t('branches.coords.dialogTitle'), { name: branch.name }), body: <BranchCoordinatesForm /> });
   }
 
   function openAddStaffForm(branch: BranchRow) {
@@ -1390,17 +1394,17 @@ export function BranchesModule() {
       async function submit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (selectableUsers.length === 0) {
-          pushToast('User directory is required to add staff.', 'warn');
+          pushToast(t('branches.addStaff.directoryRequired'), 'warn');
           return;
         }
         const userId = draft.user_id.trim();
         const roleKey = draft.role_key.trim();
         if (!userId) {
-          pushToast('User is required.', 'warn');
+          pushToast(t('branches.addStaff.userRequired'), 'warn');
           return;
         }
         if (!roleKey) {
-          pushToast('Role is required.', 'warn');
+          pushToast(t('branches.addStaff.roleRequired'), 'warn');
           return;
         }
         try {
@@ -1410,9 +1414,9 @@ export function BranchesModule() {
             role_key: roleKey,
           });
           modal.close();
-          pushToast(`Added staff to ${branch.name}.`, 'good');
+          pushToast(fill(t('branches.addStaff.added'), { name: branch.name }), 'good');
         } catch {
-          pushToast('Add staff failed - see audit log.', 'danger');
+          pushToast(t('branches.addStaff.failed'), 'danger');
         }
       }
 
@@ -1427,7 +1431,7 @@ export function BranchesModule() {
               padding: '0 4px',
             }}
           >
-            <label className="mono" htmlFor="add-branch-staff-user">User</label>
+            <label className="mono" htmlFor="add-branch-staff-user">{t('branches.field.user')}</label>
             {selectableUsers.length > 0 ? (
               <select
                 id="add-branch-staff-user"
@@ -1435,11 +1439,11 @@ export function BranchesModule() {
                 value={draft.user_id}
                 onChange={(e) => setDraft((s) => ({ ...s, user_id: e.target.value }))}
               >
-                <option value="">Select user</option>
+                <option value="">{t('branches.addStaff.selectUser')}</option>
                 {selectableUsers.map((row) => {
                   const id = userDirectoryIdOf(row);
                   return (
-                    <option key={id} value={id}>{userDirectoryLabelOf(row)}</option>
+                    <option key={id} value={id}>{userDirectoryLabelOf(row, t)}</option>
                   );
                 })}
               </select>
@@ -1450,10 +1454,10 @@ export function BranchesModule() {
                 value=""
                 disabled
               >
-                <option value="">User directory unavailable</option>
+                <option value="">{t('branches.addStaff.directoryUnavailable')}</option>
               </select>
             )}
-            <label className="mono" htmlFor="add-branch-staff-role">Role</label>
+            <label className="mono" htmlFor="add-branch-staff-role">{t('branches.field.role')}</label>
             {branchMemberRoleOptions.length > 0 ? (
               <select
                 id="add-branch-staff-role"
@@ -1461,7 +1465,7 @@ export function BranchesModule() {
                 value={draft.role_key}
                 onChange={(e) => setDraft((s) => ({ ...s, role_key: e.target.value }))}
               >
-                <option value="">Select role</option>
+                <option value="">{t('branches.addStaff.selectRole')}</option>
                 {branchMemberRoleOptions.map((row) => (
                   <option key={row.value} value={row.value}>{row.label}</option>
                 ))}
@@ -1476,9 +1480,9 @@ export function BranchesModule() {
             )}
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label={addMemberMut.isPending ? 'Adding...' : 'Add staff'}
+              label={addMemberMut.isPending ? t('branches.addStaff.adding') : t('branches.addStaff.submit')}
               kind="primary"
               capability={CAP.BRANCHES_WRITE}
               disabled={addMemberMut.isPending || selectableUsers.length === 0}
@@ -1489,13 +1493,13 @@ export function BranchesModule() {
       );
     }
 
-    modal.open({ title: `Add staff - ${branch.name}`, body: <AddStaffForm /> });
+    modal.open({ title: fill(t('branches.addStaff.dialogTitle'), { name: branch.name }), body: <AddStaffForm /> });
   }
 
   function openRemoveStaffForm(branch: BranchRow, staff: BranchMember[]) {
     const activeStaff = staff.filter((member) => member.is_active !== false);
     if (activeStaff.length === 0) {
-      pushToast('No active staff to remove.', 'info');
+      pushToast(t('branches.removeStaff.noneActive'), 'info');
       return;
     }
 
@@ -1506,15 +1510,15 @@ export function BranchesModule() {
       async function submit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (!selected) {
-          pushToast('Select a staff membership to remove.', 'warn');
+          pushToast(t('branches.removeStaff.selectRequired'), 'warn');
           return;
         }
         try {
           await removeMemberMut.mutateAsync({ membership_id: selected.id });
           modal.close();
-          pushToast('Removed staff member.', 'warn');
+          pushToast(t('branches.removeStaff.removed'), 'warn');
         } catch {
-          pushToast('Remove staff failed - see audit log.', 'danger');
+          pushToast(t('branches.removeStaff.failed'), 'danger');
         }
       }
 
@@ -1529,14 +1533,14 @@ export function BranchesModule() {
               padding: '0 4px',
             }}
           >
-            <label className="mono" htmlFor="remove-branch-staff-membership">Staff</label>
+            <label className="mono" htmlFor="remove-branch-staff-membership">{t('branches.field.staff')}</label>
             <select
               id="remove-branch-staff-membership"
               className="dt-inline-input"
               value={membershipId}
               onChange={(e) => setMembershipId(e.target.value)}
             >
-              <option value="">Select staff</option>
+              <option value="">{t('branches.removeStaff.selectStaff')}</option>
               {activeStaff.map((member, index) => {
                 const userLabel = branchMemberDisplayLabel(member, index);
                 const roleLabel = branchMemberRoleLabel(memberRoleOf(member));
@@ -1549,9 +1553,9 @@ export function BranchesModule() {
             </select>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label={removeMemberMut.isPending ? 'Removing...' : 'Remove staff'}
+              label={removeMemberMut.isPending ? t('branches.removeStaff.removing') : t('branches.removeStaff.submit')}
               kind="danger"
               capability={CAP.BRANCHES_WRITE}
               disabled={removeMemberMut.isPending}
@@ -1562,17 +1566,17 @@ export function BranchesModule() {
       );
     }
 
-    modal.open({ title: `Remove staff - ${branch.name}`, body: <RemoveStaffForm /> });
+    modal.open({ title: fill(t('branches.removeStaff.dialogTitle'), { name: branch.name }), body: <RemoveStaffForm /> });
   }
 
   function openMarkBranchOutOfServiceForm(branch: BranchRow) {
     if (!isActiveOf(branch)) {
-      pushToast(`${branch.name} is already out-of-service.`, 'info');
+      pushToast(fill(t('branches.oos.already'), { name: branch.name }), 'info');
       return;
     }
 
     function MarkBranchOutOfServiceForm() {
-      const [reason, setReason] = useState('Operator marked branch out-of-service');
+      const [reason, setReason] = useState(t('branches.oos.defaultReason'));
 
       async function submit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -1581,17 +1585,17 @@ export function BranchesModule() {
             branch_ids: [branch.id],
             reason: 'branch_profile_oos',
             metadata: {
-              operator_reason: reason.trim() || 'Operator marked branch out-of-service',
+              operator_reason: reason.trim() || t('branches.oos.defaultReason'),
               source: 'console_v2_branch_profile',
             },
           });
           modal.close();
           pushToast(
-            `Marked ${(res as { affected?: number }).affected ?? 1} branch out-of-service.`,
+            fill(t('branches.oos.marked'), { n: (res as { affected?: number }).affected ?? 1 }),
             'warn',
           );
         } catch {
-          pushToast('Mark out-of-service failed - see audit log.', 'danger');
+          pushToast(t('branches.oos.failed'), 'danger');
         }
       }
 
@@ -1599,9 +1603,9 @@ export function BranchesModule() {
         <form onSubmit={submit}>
           <div style={{ display: 'grid', gap: '10px', padding: '0 4px' }}>
             <p style={{ margin: 0, color: 'var(--ink-2)' }}>
-              Mark {branch.name} out-of-service. This affects only this branch.
+              {t('branches.oos.bodyBefore')} <bdi>{branch.name}</bdi> {t('branches.oos.bodyAfter')}
             </p>
-            <label className="mono" htmlFor="mark-branch-oos-reason">Reason</label>
+            <label className="mono" htmlFor="mark-branch-oos-reason">{t('branches.field.reason')}</label>
             <input
               id="mark-branch-oos-reason"
               className="dt-inline-input"
@@ -1610,9 +1614,9 @@ export function BranchesModule() {
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label={markOosMut.isPending ? 'Marking...' : 'Confirm out-of-service'}
+              label={markOosMut.isPending ? t('branches.oos.marking') : t('branches.oos.confirm')}
               kind="danger"
               capability={CAP.BRANCHES_WRITE}
               disabled={markOosMut.isPending}
@@ -1624,7 +1628,7 @@ export function BranchesModule() {
     }
 
     modal.open({
-      title: `Mark out-of-service - ${branch.name}`,
+      title: fill(t('branches.oos.dialogTitle'), { name: branch.name }),
       body: <MarkBranchOutOfServiceForm />,
     });
   }
@@ -1645,7 +1649,7 @@ export function BranchesModule() {
     }
 
     function zoneLabel(zoneId?: string | null): string {
-      if (!zoneId) return 'Select zone';
+      if (!zoneId) return t('branches.window.selectZone');
       return zoneById.get(zoneId)?.name ?? zoneId;
     }
 
@@ -1659,7 +1663,7 @@ export function BranchesModule() {
         effective_from: coverageRowsForBranch[0] ? toDateTimeLocal(openAtOf(coverageRowsForBranch[0])) : nowLocal,
         effective_to: coverageRowsForBranch[0] ? toDateTimeLocal(closeAtOf(coverageRowsForBranch[0])) : '',
         priority: String(coverageRowsForBranch[0]?.priority ?? 0),
-        reason: coverageRowsForBranch[0]?.reason ?? 'Manual window update',
+        reason: coverageRowsForBranch[0]?.reason ?? t('branches.window.manualUpdate'),
       });
 
       async function submit(event: FormEvent<HTMLFormElement>) {
@@ -1667,11 +1671,11 @@ export function BranchesModule() {
         const isUpdate = draft.coverage_window_id !== 'new';
         const zoneId = draft.zone_id.trim();
         if (!draft.effective_from) {
-          pushToast('Start time is required.', 'warn');
+          pushToast(t('branches.window.startRequired'), 'warn');
           return;
         }
         if (!isUpdate && !zoneId) {
-          pushToast('Zone is required for a new coverage window.', 'warn');
+          pushToast(t('branches.window.zoneRequired'), 'warn');
           return;
         }
         const priority = Number(draft.priority);
@@ -1683,15 +1687,15 @@ export function BranchesModule() {
             effective_from: new Date(draft.effective_from).toISOString(),
             effective_to: draft.effective_to ? new Date(draft.effective_to).toISOString() : undefined,
             priority: Number.isFinite(priority) ? priority : 0,
-            reason: draft.reason.trim() || 'Manual window update',
+            reason: draft.reason.trim() || t('branches.window.manualUpdate'),
             metadata: {
               source: 'console_v2_branch_coverage_form',
             },
           });
           modal.close();
-          pushToast(`Coverage window updated for ${branch.name}.`, 'good');
+          pushToast(fill(t('branches.window.updated'), { name: branch.name }), 'good');
         } catch {
-          pushToast('Coverage window update failed - see audit log.', 'danger');
+          pushToast(t('branches.window.failed'), 'danger');
         }
       }
 
@@ -1706,7 +1710,7 @@ export function BranchesModule() {
               padding: '0 4px',
             }}
           >
-            <label className="mono" htmlFor="coverage-window-id">Coverage window</label>
+            <label className="mono" htmlFor="coverage-window-id">{t('branches.window.field')}</label>
             <select
               id="coverage-window-id"
               className="dt-inline-input"
@@ -1721,25 +1725,25 @@ export function BranchesModule() {
                   effective_from: selectedWindow ? toDateTimeLocal(openAtOf(selectedWindow)) : nowLocal,
                   effective_to: selectedWindow ? toDateTimeLocal(closeAtOf(selectedWindow)) : '',
                   priority: String(selectedWindow?.priority ?? 0),
-                  reason: selectedWindow?.reason ?? 'Manual window update',
+                  reason: selectedWindow?.reason ?? t('branches.window.manualUpdate'),
                 }));
               }}
             >
               {coverageRowsForBranch.map((row) => (
                 <option key={row.id} value={row.id}>
-                  {zoneLabel(row.zone_id)} · {openAtOf(row) ? fmtDateTime(openAtOf(row)!) : 'scheduled window'}
+                  {zoneLabel(row.zone_id)} · {openAtOf(row) ? fmtDateTime(openAtOf(row)!) : t('branches.window.scheduled')}
                 </option>
               ))}
-              <option value="new">New coverage window</option>
+              <option value="new">{t('branches.window.newWindow')}</option>
             </select>
-            <label className="mono" htmlFor="coverage-window-zone">Zone</label>
+            <label className="mono" htmlFor="coverage-window-zone">{t('branches.field.zone')}</label>
             <select
               id="coverage-window-zone"
               className="dt-inline-input"
               value={draft.zone_id}
               onChange={(e) => setDraft((s) => ({ ...s, zone_id: e.target.value }))}
             >
-              <option value="">Select zone</option>
+              <option value="">{t('branches.window.selectZone')}</option>
               {zoneOptions.map((zone) => (
                 <option key={zone.id} value={zone.id}>{zone.name}</option>
               ))}
@@ -1747,7 +1751,7 @@ export function BranchesModule() {
                 <option value={draft.zone_id}>{zoneLabel(draft.zone_id)}</option>
               ) : null}
             </select>
-            <label className="mono" htmlFor="coverage-window-start">Starts</label>
+            <label className="mono" htmlFor="coverage-window-start">{t('branches.field.starts')}</label>
             <input
               id="coverage-window-start"
               className="dt-inline-input"
@@ -1755,7 +1759,7 @@ export function BranchesModule() {
               value={draft.effective_from}
               onChange={(e) => setDraft((s) => ({ ...s, effective_from: e.target.value }))}
             />
-            <label className="mono" htmlFor="coverage-window-end">Ends</label>
+            <label className="mono" htmlFor="coverage-window-end">{t('branches.field.ends')}</label>
             <input
               id="coverage-window-end"
               className="dt-inline-input"
@@ -1763,7 +1767,7 @@ export function BranchesModule() {
               value={draft.effective_to}
               onChange={(e) => setDraft((s) => ({ ...s, effective_to: e.target.value }))}
             />
-            <label className="mono" htmlFor="coverage-window-priority">Priority</label>
+            <label className="mono" htmlFor="coverage-window-priority">{t('branches.field.priority')}</label>
             <input
               id="coverage-window-priority"
               className="dt-inline-input"
@@ -1772,7 +1776,7 @@ export function BranchesModule() {
               value={draft.priority}
               onChange={(e) => setDraft((s) => ({ ...s, priority: e.target.value }))}
             />
-            <label className="mono" htmlFor="coverage-window-reason">Reason</label>
+            <label className="mono" htmlFor="coverage-window-reason">{t('branches.field.reason')}</label>
             <input
               id="coverage-window-reason"
               className="dt-inline-input"
@@ -1781,9 +1785,9 @@ export function BranchesModule() {
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label={upsertCoverageMut.isPending ? 'Saving...' : 'Save window'}
+              label={upsertCoverageMut.isPending ? t('branches.window.saving') : t('branches.window.save')}
               kind="primary"
               capability={CAP.BRANCHES_WRITE}
               disabled={upsertCoverageMut.isPending}
@@ -1794,7 +1798,7 @@ export function BranchesModule() {
       );
     }
 
-    modal.open({ title: `Coverage window - ${branch.name}`, body: <CoverageWindowForm /> });
+    modal.open({ title: fill(t('branches.window.dialogTitle'), { name: branch.name }), body: <CoverageWindowForm /> });
   }
 
   // ---------- Drawer logic ----------
@@ -1809,7 +1813,7 @@ export function BranchesModule() {
     activeDrawerRef.current = nextDrawer;
     setSelectedId(branch.id);
     drawer.open({
-      title: `Branch · ${branch.name}`,
+      title: fill(t('branches.drawer.title'), { name: branch.name }),
       size: 'lg',
         deepLink: `/network/branches?focus=${encodeURIComponent(branch.id)}`,
       body: renderDrawerBody(branch, tab),
@@ -1824,7 +1828,7 @@ export function BranchesModule() {
     const nextDrawer = { branchId: branch.id, tab: next };
     activeDrawerRef.current = nextDrawer;
     drawer.open({
-      title: `Branch · ${branch.name}`,
+      title: fill(t('branches.drawer.title'), { name: branch.name }),
       size: 'lg',
         deepLink: `/network/branches?focus=${encodeURIComponent(branch.id)}`,
       body: renderDrawerBody(branch, next),
@@ -1854,7 +1858,7 @@ export function BranchesModule() {
     const branch = visibleBranches.find((row) => row.id === currentDrawer.branchId);
     if (!branch) return;
     drawer.open({
-      title: `Branch · ${branch.name}`,
+      title: fill(t('branches.drawer.title'), { name: branch.name }),
       size: 'lg',
       deepLink: `/network/branches?focus=${encodeURIComponent(branch.id)}`,
       body: renderDrawerBody(branch, currentDrawer.tab),
@@ -1898,7 +1902,7 @@ export function BranchesModule() {
           />
           {summaryFor(branch).cutoff_time ? (
             <Chip
-              label={`Cutoff ${summaryFor(branch).cutoff_time}`}
+              label={fill(t('branches.drawer.cutoff'), { time: String(summaryFor(branch).cutoff_time) })}
               kind="info"
               size="xs"
               className="mono"
@@ -1910,19 +1914,19 @@ export function BranchesModule() {
         <div
           className="tabs"
           role="tablist"
-          aria-label="Branch drawer tabs"
+          aria-label={t('branches.drawer.tabsLabel')}
           style={{ margin: '0 14px 6px' }}
         >
-          {DRAWER_TABS.map((t) => (
+          {DRAWER_TABS.map((tabDef) => (
             <button
-              key={t.key}
+              key={tabDef.key}
               type="button"
               role="tab"
-              aria-selected={tab === t.key}
-              className={`tabs__tab ${tab === t.key ? 'is-active' : ''}`}
-              onClick={() => switchTab(branch, t.key)}
+              aria-selected={tab === tabDef.key}
+              className={`tabs__tab ${tab === tabDef.key ? 'is-active' : ''}`}
+              onClick={() => switchTab(branch, tabDef.key)}
             >
-              {t.label}
+              {t(tabDef.labelKey)}
             </button>
           ))}
         </div>
@@ -1952,50 +1956,50 @@ export function BranchesModule() {
     // keys remain in the row interface for back-compat but are not
     // surfaced as separate KvGrid rows (they would be redundant).
     const rows: KvRow[] = [
-      { key: 'name', label: 'Name', value: branch.name },
-      { key: 'code', label: 'Code', value: slugOf(branch) || '—', mono: true },
+      { key: 'name', label: t('branches.field.name'), value: branch.name },
+      { key: 'code', label: t('branches.field.code'), value: slugOf(branch) || '—', mono: true },
       {
         key: 'branch_type',
-        label: 'Type',
+        label: t('branches.field.type'),
         value: branchTypeOf(branch),
         lookup: 'branch_type',
         capability: CAP.BRANCHES_WRITE,
       },
-      { key: 'address', label: 'Address', value: branchAddressTextOf(branch) || '—' },
-      { key: 'city', label: 'City', value: branchCityTextOf(branch) || '—' },
-      { key: 'latitude', label: 'Latitude', value: coordinates?.lat ?? '-', mono: true, editable: false },
-      { key: 'longitude', label: 'Longitude', value: coordinates?.lng ?? '-', mono: true, editable: false },
+      { key: 'address', label: t('branches.field.address'), value: branchAddressTextOf(branch) || '—' },
+      { key: 'city', label: t('branches.field.city'), value: branchCityTextOf(branch) || '—' },
+      { key: 'latitude', label: t('branches.field.latitude'), value: coordinates?.lat ?? '-', mono: true, editable: false },
+      { key: 'longitude', label: t('branches.field.longitude'), value: coordinates?.lng ?? '-', mono: true, editable: false },
       // Cutoff time and capacity_per_day come from v_branch_summary (W11-2);
       // both are read-only here. Capacity is mutated via the Capacity tab
       // (canonical RPC: branch_capacity_window_set_v1).
-      { key: 'cutoff_time', label: 'Cutoff time', value: summary.cutoff_time ?? '—', mono: true },
+      { key: 'cutoff_time', label: t('branches.field.cutoffTime'), value: summary.cutoff_time ?? '—', mono: true },
       {
         key: 'capacity_per_day',
-        label: 'Capacity / day',
+        label: t('branches.field.capacityPerDay'),
         value: summary.capacity_per_day != null ? fmtNumber(Number(summary.capacity_per_day)) : '—',
         mono: true,
       },
       {
         key: 'status',
-        label: 'Status',
+        label: t('branches.field.status'),
         value: branchStatusOf(branch),
         lookup: 'branch_status',
         capability: CAP.BRANCHES_WRITE,
       },
       {
         key: 'updated_at',
-        label: 'Updated',
+        label: t('branches.field.updated'),
         value: branch.updated_at ? fmtDateTime(branch.updated_at) : '—',
       },
     ];
     return (
       <div>
         <div className="section-eyebrow" style={{ padding: '0 0 6px' }}>
-          Posture
+          {t('branches.profile.posture')}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-start', gap: '8px', padding: '0 14px 8px' }}>
           <Button
-            label={isActiveOf(branch) ? 'Mark branch out-of-service' : 'Already out-of-service'}
+            label={isActiveOf(branch) ? t('branches.oos.action') : t('branches.oos.alreadyAction')}
             iconName="alert"
             kind="ghost"
             capability={CAP.BRANCHES_WRITE}
@@ -2003,7 +2007,7 @@ export function BranchesModule() {
             onClick={() => openMarkBranchOutOfServiceForm(branch)}
           />
           <Button
-            label="Edit coordinates"
+            label={t('branches.coords.edit')}
             iconName="pin"
             kind="ghost"
             capability={CAP.BRANCHES_WRITE}
@@ -2021,14 +2025,14 @@ export function BranchesModule() {
                 branch_id: branch.id,
                 patch: { [String(key)]: nextValue ?? null },
               });
-              pushToast(`Updated ${key} on ${branch.name}.`, 'good');
+              pushToast(fill(t('branches.profile.fieldUpdated'), { key: String(key), name: branch.name }), 'good');
             } catch {
-              pushToast(`Update "${key}" failed — see audit log.`, 'danger');
+              pushToast(fill(t('branches.profile.fieldFailed'), { key: String(key) }), 'danger');
             }
           }}
         />
 
-        <div className="section-eyebrow">Snapshot</div>
+        <div className="section-eyebrow">{t('branches.profile.snapshot')}</div>
         <div
           style={{
             display: 'grid',
@@ -2042,21 +2046,21 @@ export function BranchesModule() {
             used={Number(summary.booked_today) || 0}
             total={Number(summary.capacity_per_day) || 1}
             size="md"
-            label="Today"
+            label={t('branches.profile.today')}
           />
           <div style={{ display: 'grid', gap: '4px' }}>
             <Chip
-              label={`${fmtNumber(linked.length)} zones served`}
+              label={fill(t('branches.profile.zonesServed'), { n: fmtNumber(linked.length) })}
               kind="info"
               size="xs"
             />
             <Chip
-              label={`${fmtNumber(staff.length)} staff on roster`}
+              label={fill(t('branches.profile.staffOnRoster'), { n: fmtNumber(staff.length) })}
               kind="neutral"
               size="xs"
             />
             <Chip
-              label={`${fmtNumber(summary.active_vehicles ?? 0)} vehicles · ${fmtNumber(summary.active_routes ?? 0)} routes`}
+              label={fill(t('branches.card.vehiclesRoutes'), { vehicles: fmtNumber(summary.active_vehicles ?? 0), routes: fmtNumber(summary.active_routes ?? 0) })}
               kind="neutral"
               size="xs"
               className="mono"
@@ -2064,7 +2068,7 @@ export function BranchesModule() {
           </div>
         </div>
 
-        <div className="section-eyebrow">Quick links</div>
+        <div className="section-eyebrow">{t('branches.profile.quickLinks')}</div>
         <div
           style={{
             display: 'flex',
@@ -2074,7 +2078,7 @@ export function BranchesModule() {
           }}
         >
           <Button
-            label="Route plans"
+            label={t('branches.profile.routePlans')}
             iconName="layers"
             kind="ghost"
             onClick={() => {
@@ -2084,7 +2088,7 @@ export function BranchesModule() {
             }}
           />
           <Button
-            label="Dispatch"
+            label={t('branches.profile.dispatch')}
             iconName="right"
             kind="ghost"
             onClick={() => {
@@ -2092,7 +2096,7 @@ export function BranchesModule() {
             }}
           />
           <Button
-            label="Vehicles"
+            label={t('branches.tabs.vehicles')}
             iconName="truck"
             kind="ghost"
             onClick={() => {
@@ -2116,7 +2120,7 @@ export function BranchesModule() {
     const coverageRows = coverageByBranch.get(branch.id) ?? [];
     const coverageEditAction = canWrite ? (
       <Button
-        label="Edit window"
+        label={t('branches.window.edit')}
         kind="ghost"
         iconName="edit"
         capability={CAP.BRANCHES_WRITE}
@@ -2138,13 +2142,13 @@ export function BranchesModule() {
             }}
           >
             <span className="section-eyebrow" style={{ padding: 0 }}>
-              Coverage windows · {fmtNumber(coverageRows.length)}
+              {fill(t('branches.coverage.windowsCount'), { n: fmtNumber(coverageRows.length) })}
             </span>
             {coverageEditAction}
           </div>
           <StateView
             kind="empty"
-            hint={`No capacity windows seeded for ${branch.name}. Set hourly capacity to drive the heatmap.`}
+            hint={fill(t('branches.coverage.noWindowsHeatmap'), { name: branch.name })}
           />
         </div>
       );
@@ -2163,11 +2167,10 @@ export function BranchesModule() {
     return (
       <div>
         <div className="section-eyebrow" style={{ padding: '0 0 6px' }}>
-          Coverage heatmap · 7 × 24
+          {t('branches.coverage.heatmapTitle')}
         </div>
         <p className="state__hint" style={{ margin: '0 0 6px' }}>
-          Cell intensity = booked / capacity for the last published demand
-          forecast. Click a cell to inspect the matching capacity row.
+          {t('branches.coverage.heatmapHint')}
         </p>
         <CoverageHeatmap
           cells={cells}
@@ -2178,7 +2181,7 @@ export function BranchesModule() {
             // live counter ships; render "—" instead of "null" in that case.
             const booked = row.booked_units == null ? '—' : String(row.booked_units);
             pushToast(
-              `${branch.name} · ${weekdayLabel(d)} · ${String(h).padStart(2, '0')}:00 → ${booked}/${row.capacity_units}`,
+              `${branch.name} · ${weekdayLabel(d, t)} · ${String(h).padStart(2, '0')}:00 → ${booked}/${row.capacity_units}`,
               'info',
             );
           }}
@@ -2195,7 +2198,7 @@ export function BranchesModule() {
         {coverageRows.length > 0 ? (
           <div style={{ paddingTop: '8px' }}>
             <div className="section-eyebrow" style={{ padding: '0 0 4px' }}>
-              Coverage windows · {fmtNumber(coverageRows.length)}
+              {fill(t('branches.coverage.windowsCount'), { n: fmtNumber(coverageRows.length) })}
             </div>
             <ul
               role="list"
@@ -2226,9 +2229,9 @@ export function BranchesModule() {
                   >
                     <span>{from ? fmtDateTime(from) : '—'}</span>
                     <span>→</span>
-                    <span>{to ? fmtDateTime(to) : 'open-ended'}</span>
+                    <span>{to ? fmtDateTime(to) : t('branches.coverage.openEnded')}</span>
                     {row.reason ? (
-                      <Chip label={coverageReasonLabel(row.reason)} kind="info" size="xs" />
+                      <Chip label={coverageReasonLabel(row.reason, t)} kind="info" size="xs" />
                     ) : null}
                   </li>
                 );
@@ -2244,11 +2247,11 @@ export function BranchesModule() {
   function renderCapacityTab(branch: BranchRow): ReactNode {
     const cap = capacityByBranch.get(branch.id) ?? [];
     const cols: Array<DataTableColumn<BranchCapacityRow>> = [
-      { key: 'weekday', label: 'Day', mono: true, sortable: true, type: 'number', align: 'right' },
-      { key: 'hour', label: 'Hour', mono: true, sortable: true, type: 'number', align: 'right' },
+      { key: 'weekday', label: t('branches.capacity.day'), mono: true, sortable: true, type: 'number', align: 'right' },
+      { key: 'hour', label: t('branches.capacity.hour'), mono: true, sortable: true, type: 'number', align: 'right' },
       {
         key: 'capacity_units',
-        label: 'Capacity',
+        label: t('branches.tabs.capacity'),
         mono: true,
         sortable: true,
         type: 'number',
@@ -2257,7 +2260,7 @@ export function BranchesModule() {
       },
       {
         key: 'booked_units',
-        label: 'Booked',
+        label: t('branches.capacity.booked'),
         mono: true,
         sortable: true,
         type: 'number',
@@ -2268,7 +2271,7 @@ export function BranchesModule() {
       return (
         <StateView
           kind="empty"
-          hint={`No capacity windows seeded for ${branch.name}.`}
+          hint={fill(t('branches.capacity.noWindows'), { name: branch.name })}
         />
       );
     }
@@ -2295,10 +2298,10 @@ export function BranchesModule() {
               capacity_window_id: targetId,
               capacity_units: Number(newValue ?? row.capacity_units ?? 0),
             });
-            pushToast(`Updated capacity for window ${targetId}.`, 'good');
+            pushToast(fill(t('branches.capacity.updated'), { id: String(targetId) }), 'good');
             return { ok: true };
           } catch (err) {
-            pushToast('Capacity edit failed — see audit log.', 'danger');
+            pushToast(t('branches.capacity.failed'), 'danger');
             return { ok: false, error: (err as Error)?.message ?? 'capacity_edit_failed' };
           }
         }}
@@ -2320,10 +2323,10 @@ export function BranchesModule() {
           }}
         >
           <span className="section-eyebrow" style={{ padding: 0 }}>
-            Zones served · {fmtNumber(linked.length)}
+            {fill(t('branches.zones.served'), { n: fmtNumber(linked.length) })}
           </span>
           <Button
-            label="Assign zone"
+            label={t('branches.zones.assign')}
             iconName="plus"
             kind="ghost"
             capability={CAP.BRANCHES_WRITE}
@@ -2342,7 +2345,7 @@ export function BranchesModule() {
         {linked.length === 0 ? (
           <StateView
             kind="empty"
-            hint="No zones mapped. Assign one to start routing through this branch."
+            hint={t('branches.zones.empty')}
           />
         ) : (
           <div
@@ -2382,7 +2385,7 @@ export function BranchesModule() {
                       )}`);
                     }, 0);
                   }}
-                  title={`Open zone ${zoneLabel}`}
+                  title={fill(t('branches.zones.open'), { name: zoneLabel })}
                 >
                   <span className="mono">{zoneLabel}</span>
                   <CanonicalChip
@@ -2418,14 +2421,14 @@ export function BranchesModule() {
       // / filters continue to address the FE alias key.
       {
         key: 'user_id',
-        label: 'Staff member',
+        label: t('branches.staff.member'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => branchMemberDisplayLabel(row, 0),
       },
       {
         key: 'role',
-        label: 'Role',
+        label: t('branches.field.role'),
         sortable: true,
         filterable: true,
         lookup: 'branch_member_role',
@@ -2433,7 +2436,7 @@ export function BranchesModule() {
       },
       {
         key: 'joined_at',
-        label: 'Joined',
+        label: t('branches.staff.joined'),
         format: 'datetime',
         sortable: true,
         render: (_raw, row) => {
@@ -2441,7 +2444,7 @@ export function BranchesModule() {
           return v ? fmtDateTime(v) : '—';
         },
       },
-      { key: 'is_active', label: 'Active', sortable: true, filterable: true },
+      { key: 'is_active', label: t('branches.staff.active'), sortable: true, filterable: true },
     ];
     return (
       <div>
@@ -2454,18 +2457,18 @@ export function BranchesModule() {
           }}
         >
           <span className="section-eyebrow" style={{ padding: 0 }}>
-            Staff · {fmtNumber(staff.length)}
+            {fill(t('branches.staff.count'), { n: fmtNumber(staff.length) })}
           </span>
           <div style={{ display: 'flex', gap: '6px' }}>
             <Button
-              label="Add staff"
+              label={t('branches.addStaff.submit')}
               iconName="plus"
               kind="ghost"
               capability={CAP.BRANCHES_WRITE}
               onClick={() => openAddStaffForm(branch)}
             />
             <Button
-              label="Remove staff"
+              label={t('branches.removeStaff.submit')}
               iconName="trash"
               kind="ghost"
               capability={CAP.BRANCHES_WRITE}
@@ -2476,7 +2479,7 @@ export function BranchesModule() {
         {staff.length === 0 ? (
           <StateView
             kind="empty"
-            hint="No staff assigned. Use Add staff to attach an operator."
+            hint={t('branches.staff.empty')}
           />
         ) : (
           <DataTable<BranchMember>
@@ -2499,20 +2502,20 @@ export function BranchesModule() {
   function renderRoutesTab(branch: BranchRow): ReactNode {
     const list = runsByBranch.get(branch.id) ?? [];
     const cols: Array<DataTableColumn<RouteRunRow>> = [
-      { key: 'run_id', label: 'Run', mono: true, sortable: true, filterable: true },
-      { key: 'driver', label: 'Driver', sortable: true, filterable: true },
-      { key: 'vehicle', label: 'Vehicle', mono: true, sortable: true, filterable: true },
+      { key: 'run_id', label: t('branches.routes.run'), mono: true, sortable: true, filterable: true },
+      { key: 'driver', label: t('branches.routes.driver'), sortable: true, filterable: true },
+      { key: 'vehicle', label: t('branches.routes.vehicle'), mono: true, sortable: true, filterable: true },
       {
         key: 'status',
-        label: 'Status',
+        label: t('branches.field.status'),
         sortable: true,
         filterable: true,
         lookup: 'route_run_status',
       },
-      { key: 'stops', label: 'Stops', align: 'right', mono: true, sortable: true, type: 'number' },
+      { key: 'stops', label: t('branches.routes.stops'), align: 'right', mono: true, sortable: true, type: 'number' },
       {
         key: 'completed',
-        label: 'Done',
+        label: t('branches.routes.done'),
         align: 'right',
         mono: true,
         sortable: true,
@@ -2523,7 +2526,7 @@ export function BranchesModule() {
       return (
         <StateView
           kind="empty"
-          hint="No active routes anchored to this branch."
+          hint={t('branches.routes.empty')}
         />
       );
     }
@@ -2544,14 +2547,14 @@ export function BranchesModule() {
       <div className="page">
         <PageHeader
           moduleKey="branches"
-          eyebrow="Network"
-          titleAccent="Branches"
-          titlePlain="— operational footprint"
+          eyebrow={t('nav.network')}
+          titleAccent={t('branches.title')}
+          titlePlain={t('branches.titlePlain')}
         />
         <StateView
           kind="denied"
           capability={CAP.BRANCHES_READ}
-          hint="You do not have permission to view branches."
+          hint={t('branches.denied')}
         />
       </div>
     );
@@ -2561,14 +2564,14 @@ export function BranchesModule() {
     <div className="page">
       <PageHeader
         moduleKey="branches"
-        eyebrow="Network"
-        titleAccent="Branches"
-        titlePlain="— operational footprint"
+        eyebrow={t('nav.network')}
+        titleAccent={t('branches.title')}
+        titlePlain={t('branches.titlePlain')}
         pills={[
           <ScopePill key="scope" scopeType="tenant" scopeId={tenantId} />,
           <Chip
             key="src"
-            label="Network profile, zones, staff, and windows"
+            label={t('branches.sourceChip')}
             kind="neutral"
             size="xs"
           />,
@@ -2576,7 +2579,7 @@ export function BranchesModule() {
         actions={[
           <Button
             key="new"
-            label="New branch"
+            label={t('branches.create.title')}
             iconName="plus"
             kind="primary"
             capability={CAP.BRANCHES_WRITE}
@@ -2588,10 +2591,10 @@ export function BranchesModule() {
       {isError ? (
         <StateView
           kind="error"
-          hint={(readError as Error | null)?.message ?? 'Could not load the branches catalog.'}
+          hint={(readError as Error | null)?.message ?? t('branches.loadError')}
         />
       ) : isLoading ? (
-        <StateView kind="loading" hint="Loading branches & windows…" />
+        <StateView kind="loading" hint={t('branches.loading')} />
       ) : (
         <>
           {/* E2 closure (P1 #3 / P1 #4) — KPI tones resolve from canonical
@@ -2604,33 +2607,33 @@ export function BranchesModule() {
             extending the canonical lookup row metadata; no FE edit. */}
           <div className="kpi-strip">
             <KPICard
-              label="Branches"
+              label={t('branches.title')}
               value={fmtNumber(totalBranches)}
-              delta={`${fmtNumber(coverageByBranch.size)} with coverage`}
+              delta={fill(t('branches.kpi.withCoverage'), { n: fmtNumber(coverageByBranch.size) })}
               tone="info"
             />
             <KPICard
-              label="Hubs"
+              label={t('modules.hubs.accent')}
               value={fmtNumber(hubsCount)}
-              delta="dispatch anchors"
+              delta={t('branches.kpi.hubsDelta')}
               tone={(lookupRow('branch_type', 'hub')?.metadata?.['kpi_card_tone'] as 'good' | 'warn' | 'danger' | 'info' | 'neutral' | undefined) ?? 'neutral'}
             />
             <KPICard
-              label="Depots"
+              label={t('branches.kpi.depots')}
               value={fmtNumber(depotsCount)}
-              delta="staging + sortation"
+              delta={t('branches.kpi.depotsDelta')}
               tone={(lookupRow('branch_type', 'depot')?.metadata?.['kpi_card_tone'] as 'good' | 'warn' | 'danger' | 'info' | 'neutral' | undefined) ?? 'neutral'}
             />
             <KPICard
-              label="Drop-off"
+              label={t('branches.kpi.dropoff')}
               value={fmtNumber(dropoffsCount)}
-              delta="self-service points"
+              delta={t('branches.kpi.dropoffDelta')}
               tone={(lookupRow('branch_type', 'dropoff_point')?.metadata?.['kpi_card_tone'] as 'good' | 'warn' | 'danger' | 'info' | 'neutral' | undefined) ?? 'neutral'}
             />
             <KPICard
-              label="Capacity utilization"
+              label={t('branches.kpi.utilization')}
               value={utilization == null ? '—' : `${utilization}%`}
-              delta="today vs daily capacity"
+              delta={t('branches.kpi.utilizationDelta')}
               tone={utilizationTone}
             />
           </div>
@@ -2645,7 +2648,7 @@ export function BranchesModule() {
               padding: '12px 16px',
             }}
             role="list"
-            aria-label="Branches"
+            aria-label={t('branches.title')}
           >
             {visibleBranches.map((b) => {
               const linked = linksByBranch.get(b.id) ?? [];
@@ -2744,14 +2747,16 @@ export function BranchesModule() {
                       }}
                     >
                       <span className="mono">
-                        {fmtNumber(usedDay)} / {fmtNumber(totalDay)} stops
+                        {fill(t('branches.card.stops'), { used: fmtNumber(usedDay), total: fmtNumber(totalDay) })}
                       </span>
                       <span className="mono" style={{ color: 'var(--ink-3)' }}>
-                        {fmtNumber(cardSummary.active_vehicles ?? 0)} vehicles ·{' '}
-                        {fmtNumber(cardSummary.active_routes ?? 0)} routes
+                        {fill(t('branches.card.vehiclesRoutes'), {
+                          vehicles: fmtNumber(cardSummary.active_vehicles ?? 0),
+                          routes: fmtNumber(cardSummary.active_routes ?? 0),
+                        })}
                       </span>
                       <span className="mono" style={{ color: 'var(--ink-3)' }}>
-                        {fmtNumber(linked.length)} zones
+                        {fill(t('branches.card.zones'), { n: fmtNumber(linked.length) })}
                       </span>
                     </div>
                   </div>
@@ -2769,14 +2774,14 @@ export function BranchesModule() {
       {zonePickerFor ? (
         <ReferencePicker
           open
-          title="Assign zone"
+          title={t('branches.zones.assign')}
           source={{
             kind: 'reference',
             items: zones,
             display: (z) => (z as ZoneRow).name ?? (z as ZoneRow).id,
             value: (z) => (z as ZoneRow).id,
             sub: (z) => (z as ZoneRow).hub_code,
-            section: 'Zones',
+            section: t('branches.tabs.zones'),
           }}
           onClose={() => setZonePickerFor(null)}
           onPick={(value, item) => {
@@ -2793,11 +2798,11 @@ export function BranchesModule() {
               })
               .then(() =>
                 pushToast(
-                  `Linked ${String((item?.raw as ZoneRow | undefined)?.name ?? value)} to ${branch.name}.`,
+                  fill(t('branches.zones.linked'), { zone: String((item?.raw as ZoneRow | undefined)?.name ?? value), name: branch.name }),
                   'good',
                 ),
               )
-              .catch(() => pushToast('Assign zone failed — see audit log.', 'danger'));
+              .catch(() => pushToast(t('branches.zones.assignFailed'), 'danger'));
           }}
         />
       ) : null}

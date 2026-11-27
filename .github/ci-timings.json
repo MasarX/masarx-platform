@@ -1,0 +1,207 @@
+{
+  "measured_at": "2026-11-27",
+  "workflow": ".github/workflows/public-ci.yml",
+  "runs": 25,
+  "first_run": 46041801700,
+  "last_run": 46065118081,
+  "basis": "First-attempt successful main merge-group runs. Public CI has no successful main-branch runs. Use GitHub Actions job completion minus start, the slowest successful leg per matrix per run, and nearest-rank p95.",
+  "pull_request_sample": {
+    "runs": 32,
+    "first_run": 46042073833,
+    "last_run": 46067693391,
+    "basis": "First-attempt successful PR runs. Supplement UI with runs that captured signed-in previews, and measure PR-only dependency review."
+  },
+  "jobs": {
+    "database-build": {
+      "runs": 25,
+      "p95_minutes": 5.066667,
+      "max_minutes": 5.316667
+    },
+    "database-pgtap": {
+      "runs": 25,
+      "p95_minutes": 15.833333,
+      "max_minutes": 15.9
+    },
+    "database": {
+      "runs": 25,
+      "p95_minutes": 0.316667,
+      "max_minutes": 0.383333
+    },
+    "append-only": {
+      "runs": 25,
+      "p95_minutes": 0.35,
+      "max_minutes": 0.383333
+    },
+    "lint": {
+      "runs": 25,
+      "p95_minutes": 1.233333,
+      "max_minutes": 1.466667
+    },
+    "typecheck": {
+      "runs": 25,
+      "p95_minutes": 2.116667,
+      "max_minutes": 2.266667
+    },
+    "unit": {
+      "runs": 25,
+      "p95_minutes": 4.4,
+      "max_minutes": 4.616667
+    },
+    "ui": {
+      "runs": 56,
+      "p95_minutes": 12.55,
+      "max_minutes": 12.733333
+    },
+    "build-console": {
+      "runs": 25,
+      "p95_minutes": 4.366667,
+      "max_minutes": 4.5
+    },
+    "build-portal-landing": {
+      "runs": 25,
+      "p95_minutes": 2.116667,
+      "max_minutes": 2.133333
+    },
+    "e2e": {
+      "runs": 25,
+      "p95_minutes": 6.183333,
+      "max_minutes": 6.266667
+    },
+    "visual-baselines": {
+      "runs": 0,
+      "status": "unsampled",
+      "reason": "no successful run yet, #297"
+    },
+    "dependency-review": {
+      "runs": 32,
+      "p95_minutes": 0.1,
+      "max_minutes": 0.1
+    },
+    "ci-gate": {
+      "runs": 25,
+      "p95_minutes": 0.15,
+      "max_minutes": 0.183333
+    }
+  },
+  "exceptions": [
+    {
+      "jobs": [
+        "database-build",
+        "database-pgtap"
+      ],
+      "source": "https://github.com/MasarX/masarx-platform/issues/297#issuecomment-7163079024",
+      "current_decision": "https://github.com/MasarX/masarx-platform/issues/297#issuecomment-7228169275"
+    }
+  ],
+  "deploy": {
+    "workflow": ".github/workflows/deploy.yml",
+    "runs": 10,
+    "first_run": 45390654040,
+    "last_run": 45415424541,
+    "source": "https://github.com/MasarX/masarx-platform/issues/297#issuecomment-7163326969",
+    "basis": "First-attempt successful DEV main pushes that applied the database. No staging or first full database apply was represented.",
+    "jobs": {
+      "api-schemas": {
+        "runs": 0,
+        "status": "unsampled",
+        "reason": "This manual mode does not run on main pushes."
+      },
+      "database": {
+        "runs": 10,
+        "p95_minutes": 5.516667,
+        "max_minutes": 5.516667,
+        "reason": "The sample measures routine DEV deploys. The existing deadline covers a first full apply."
+      },
+      "label-render-probe": {
+        "runs": 0,
+        "status": "unsampled",
+        "reason": "Job was added after the historical sample. See follow-up."
+      },
+      "database-dry-run": {
+        "runs": 0,
+        "status": "unsampled",
+        "reason": "This manual mode does not run on main pushes."
+      },
+      "console": {
+        "runs": 10,
+        "p95_minutes": 2.233333,
+        "max_minutes": 2.233333
+      },
+      "portal": {
+        "runs": 10,
+        "p95_minutes": 2.133333,
+        "max_minutes": 2.133333
+      },
+      "e2e-report": {
+        "runs": 10,
+        "p95_minutes": 0.25,
+        "max_minutes": 0.25,
+        "reason": "Preview access was checked, but browser specs were skipped in every sampled run."
+      },
+      "landing": {
+        "runs": 10,
+        "p95_minutes": 1.233333,
+        "max_minutes": 1.233333
+      },
+      "ingress": {
+        "runs": 10,
+        "p95_minutes": 0.483333,
+        "max_minutes": 0.483333
+      },
+      "summary": {
+        "runs": 10,
+        "p95_minutes": 0.083333,
+        "max_minutes": 0.083333
+      }
+    },
+    "follow_up": {
+      "runs": 16,
+      "first_run": 46054881799,
+      "last_run": 46066935077,
+      "basis": "First-attempt successful DEV main pushes after the workflow became reusable in #861. The follow-up checks the historical limits against current DEV runs and measures the label probe.",
+      "jobs": {
+        "database": {
+          "runs": 16,
+          "p95_minutes": 6.45,
+          "max_minutes": 6.45
+        },
+        "label-render-probe": {
+          "runs": 16,
+          "p95_minutes": 2.283333,
+          "max_minutes": 2.283333,
+          "reason": "Fewer than 20 first-attempt successful DEV main deployments since the workflow became reusable."
+        },
+        "console": {
+          "runs": 16,
+          "p95_minutes": 2.083333,
+          "max_minutes": 2.083333
+        },
+        "portal": {
+          "runs": 16,
+          "p95_minutes": 1.933333,
+          "max_minutes": 1.933333
+        },
+        "e2e-report": {
+          "runs": 16,
+          "p95_minutes": 0.283333,
+          "max_minutes": 0.283333
+        },
+        "landing": {
+          "runs": 16,
+          "p95_minutes": 1.166667,
+          "max_minutes": 1.166667
+        },
+        "ingress": {
+          "runs": 16,
+          "p95_minutes": 0.433333,
+          "max_minutes": 0.433333
+        },
+        "summary": {
+          "runs": 16,
+          "p95_minutes": 0.083333,
+          "max_minutes": 0.083333
+        }
+      }
+    }
+  }
+}

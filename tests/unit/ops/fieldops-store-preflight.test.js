@@ -535,7 +535,7 @@ describe('fieldops-store-preflight', () => {
       distribution: 'internal',
       ios: { simulator: true },
     });
-    expect(fieldopsManifest.dependencies['expo-dev-client']).toBe('~55.0.37');
+    expect(fieldopsManifest.dependencies['expo-dev-client']).toBe('~55.0.41');
   });
 
   test('runFieldopsStorePreflight fails strict mode when the legacy preview profile returns', () => {
