@@ -337,13 +337,5 @@
     "reason": "Hosted results differ from the current integration assertions",
     "issue": "#575",
     "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/label/waybill-layout-goldens.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Hosted waybill rendering fingerprint differs from the golden",
-    "issue": "#576",
-    "expires": "2026-12-08"
   }
 ]
