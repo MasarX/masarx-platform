@@ -35,6 +35,12 @@ describe.each(['en', 'ar'] as const)('LiveChip (%s)', (locale) => {
     const retry = within(chip).queryByRole('button', { name: RETRY[locale] });
     if (state === 'reconnecting' || state === 'offline') expect(retry).toBeInTheDocument();
     else expect(retry).toBeNull();
+    if (state === 'live') {
+      const label = chip.querySelector('[title]');
+      expect(label).toHaveAttribute('title', expect.stringMatching(locale === 'ar' ? /^متصل\. آخر تغيير قبل / : /^Connected\. Last change /));
+      expect(label?.getAttribute('title')).not.toContain('{age}');
+      expect(label?.querySelector('bdi')).toBeInTheDocument();
+    }
   });
 
   it('offline shows the data time in an isolated bdi and retries on click', async () => {

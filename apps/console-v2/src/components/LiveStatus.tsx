@@ -4,7 +4,7 @@
 // live regions, and the ticking age sits outside the region.
 import { createContext, useContext, useEffect, useId, useState, type ReactNode } from 'react';
 import { useI18n } from '@/lib/i18n';
-import { scopeT } from '@/lib/i18n-catalog';
+import { fill, scopeT } from '@/lib/i18n-catalog';
 import type { LiveConnection, LiveState } from '@/lib/live-connection';
 import { Button } from './Button';
 
@@ -27,7 +27,7 @@ function isStale(state: LiveState) {
   return state === 'reconnecting' || state === 'offline';
 }
 
-function fill(message: string, key: string, value: string): ReactNode {
+function fillIsolated(message: string, key: string, value: string): ReactNode {
   const [before, after = ''] = message.split(`{${key}}`);
   return (
     <>
@@ -68,22 +68,22 @@ export function LiveChip({ live }: { live: LiveConnection }) {
   const detail =
     state === 'live'
       ? <bdi>{age}</bdi>
-      : state === 'reconnecting'
-        ? fill(liveT('lastUpdate'), 'age', age)
-        : state === 'offline'
-          ? fill(liveT('dataFrom'), 'time', fmtTime(syncedAt))
-          : state === 'polling'
+      : state === 'reconnecting' && syncedAt > 0
+        ? fillIsolated(liveT('lastUpdate'), 'age', age)
+        : state === 'offline' && syncedAt > 0
+          ? fillIsolated(liveT('dataFrom'), 'time', fmtTime(syncedAt))
+          : state === 'polling' && live.pollMs !== null
             ? <bdi>{fmtAge(live.pollMs)}</bdi>
             : null;
   return (
     <span className="live-chip" data-testid="live-chip" data-state={state}>
       <span
         className={`chip chip--${CHIP_KIND[state]}`}
-        title={state === 'live' ? liveT('connectedTitle').replace('{age}', age) : undefined}
+        title={state === 'live' ? fill(liveT('connectedTitle'), { age }) : undefined}
       >
         <span className={DOT_CLASS[state]} aria-hidden="true" />
         <span role="status">{liveT(`state.${state}`)}</span>
-        {detail ? <span>· {detail}</span> : null}
+        {detail ? <span>{liveT('detailSeparator')} {detail}</span> : null}
       </span>
       {isStale(state) ? <Button kind="ghost" label={t('common.retry')} onClick={live.retry} /> : null}
     </span>
@@ -92,19 +92,19 @@ export function LiveChip({ live }: { live: LiveConnection }) {
 
 export function StaleBanner({ live }: { live: LiveConnection }) {
   const { t, fmtTime } = useI18n();
-  if (!isStale(live.state)) return null;
+  if (!isStale(live.state) || live.syncedAt === 0) return null;
   const offline = live.state === 'offline';
   return (
     <div className={`stale-banner${offline ? ' stale-banner--danger' : ''}`} data-testid="stale-banner">
-      {fill(t(offline ? 'live.offlineBanner' : 'live.pausedBanner'), 'time', fmtTime(live.syncedAt))}
+      {fillIsolated(t(offline ? 'live.offlineBanner' : 'live.pausedBanner'), 'time', fmtTime(live.syncedAt))}
     </div>
   );
 }
 
 export function StaleLabel({ live }: { live: LiveConnection }) {
   const { t, fmtTime } = useI18n();
-  if (!isStale(live.state)) return null;
-  return <div className="stale-label">{fill(t('live.dataFromLabel'), 'time', fmtTime(live.syncedAt))}</div>;
+  if (!isStale(live.state) || live.syncedAt === 0) return null;
+  return <div className="stale-label">{fillIsolated(t('live.dataFromLabel'), 'time', fmtTime(live.syncedAt))}</div>;
 }
 
 /** "N new runs · Show". The status span stays mounted so the count is announced when it appears. */

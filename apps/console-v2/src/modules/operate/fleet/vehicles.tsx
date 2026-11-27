@@ -73,6 +73,7 @@ import {
   ui_list_resource_complete,
 } from '@/lib/api';
 import { readUrlParam } from '@/lib/url-params';
+import { englishT, fill, useT, type Translate } from '@/lib/i18n';
 
 // ─── Domain types (mirror canonical columns) ──────────────────────────────
 //
@@ -333,6 +334,7 @@ interface BranchChoiceRow extends Record<string, unknown> {
 
 // ─── Page-level module ────────────────────────────────────────────────────
 export function VehiclesModule() {
+  const t = useT();
   const { scope, currentTenantId } = useIdentity();
   const canRead = useCapability(CAP.FLEET_READ);
   const drawer = useDrawer();
@@ -437,13 +439,13 @@ export function VehiclesModule() {
   const branchScopeLabel = useMemo(() => {
     if (!branchScopeId) return null;
     const branch = branches.find((row) => row.id === branchScopeId || row.code === branchScopeId);
-    if (!branch) return 'selected branch';
+    if (!branch) return t('fleetVehicles.scope.selectedBranch');
     return branch.code ? `${branch.name} (${branch.code})` : branch.name;
-  }, [branchScopeId, branches]);
+  }, [branchScopeId, branches, t]);
 
   function openCreateVehicleModal() {
     modal.open({
-      title: 'New vehicle',
+      title: t('fleetVehicles.newVehicle'),
       body: (
         <CreateVehicleBody
           types={(typesQ.data?.rows ?? []) as VehicleTypeRow[]}
@@ -467,8 +469,8 @@ export function VehiclesModule() {
   function openMarkVehicleOosModal(rows: VehicleRow[]) {
     modal.open({
       title: rows.length === 1
-        ? `Mark out-of-service · ${rows[0]?.plate ?? rows[0]?.plate_number}`
-        : `Mark ${rows.length} vehicles out-of-service`,
+        ? fill(t('fleetVehicles.oos.titleOne'), { plate: rows[0]?.plate ?? rows[0]?.plate_number ?? '' })
+        : fill(t('fleetVehicles.oos.titleMany'), { n: rows.length }),
       body: (
         <MarkVehicleOosBody
           vehicles={rows}
@@ -548,41 +550,41 @@ export function VehiclesModule() {
         current_driver_label:
           v.current_driver_label
           ?? (v.current_driver_user_id
-              ? (driverNameById.get(v.current_driver_user_id) ?? 'Assigned driver')
+              ? (driverNameById.get(v.current_driver_user_id) ?? t('fleetVehicles.assignedDriver'))
               : '—'),
         current_branch_label:
           v.branch_label
           ?? (v.current_branch_id
-              ? (branchLabelById.get(v.current_branch_id) ?? 'Selected branch')
+              ? (branchLabelById.get(v.current_branch_id) ?? t('fleet.selectedBranch'))
               : '—'),
       })),
-    [scopedVehicles, driverNameById, branchLabelById],
+    [scopedVehicles, driverNameById, branchLabelById, t],
   );
 
   const columns: Array<DataTableColumn<VehicleRow>> = useMemo(
     () => [
-      { key: 'plate', label: 'Plate', mono: true, sortable: true, filterable: true },
-      { key: 'vin', label: 'VIN', mono: true, filterable: true, width: '180px' },
-      { key: 'type_name', label: 'Type', sortable: true, filterable: true },
-      { key: 'current_driver_label', label: 'Driver', filterable: true, sortable: true },
-      { key: 'current_branch_label', label: 'Branch', sortable: true, filterable: true },
-      { key: 'status', label: 'Status', sortable: true, filterable: true, lookup: 'vehicle_status' },
+      { key: 'plate', label: t('fleetVehicles.field.plate'), mono: true, sortable: true, filterable: true },
+      { key: 'vin', label: t('fleetVehicles.field.vin'), mono: true, filterable: true, width: '180px' },
+      { key: 'type_name', label: t('fleet.type'), sortable: true, filterable: true },
+      { key: 'current_driver_label', label: t('fleet.driver'), filterable: true, sortable: true },
+      { key: 'current_branch_label', label: t('fleet.branch'), sortable: true, filterable: true },
+      { key: 'status', label: t('fleet.status'), sortable: true, filterable: true, lookup: 'vehicle_status' },
       {
         key: 'fuel_level',
-        label: 'Fuel',
+        label: t('fleetVehicles.field.fuel'),
         align: 'right',
         sortable: true,
         render: (raw) => <FuelGauge value={typeof raw === 'number' ? raw : 0} />,
       },
-      { key: 'odometer_km', label: 'Odometer (km)', align: 'right', mono: true, sortable: true, type: 'number' },
+      { key: 'odometer_km', label: t('fleetVehicles.field.odometer'), align: 'right', mono: true, sortable: true, type: 'number' },
       {
         key: 'last_telemetry_at',
-        label: 'Last ping',
+        label: t('fleetVehicles.field.lastPing'),
         sortable: true,
         render: (raw) => <RelativeTime iso={typeof raw === 'string' ? raw : null} />,
       },
     ],
-    [],
+    [t],
   );
 
   function openVehicleDrawer(v: VehicleRow) {
@@ -638,14 +640,14 @@ export function VehiclesModule() {
     return (
       <div className="page">
         <PageHeader
-          eyebrow="Operate · Fleet"
-          titleAccent="Vehicles"
-          titlePlain="— roster, assignments, maintenance, telemetry"
+          eyebrow={t('fleet.eyebrow')}
+          titleAccent={t('fleetVehicles.header.accent')}
+          titlePlain={t('fleetVehicles.header.plain')}
         />
         <StateView
           kind="denied"
           capability={CAP.FLEET_READ}
-          hint="You do not have permission to view fleet vehicles."
+          hint={t('fleetVehicles.denied')}
         />
       </div>
     );
@@ -656,16 +658,16 @@ export function VehiclesModule() {
     return (
       <div className="page">
         <PageHeader
-          eyebrow="Operate · Fleet"
-          titleAccent="Vehicles"
-          titlePlain="— roster, assignments, maintenance, telemetry"
+          eyebrow={t('fleet.eyebrow')}
+          titleAccent={t('fleetVehicles.header.accent')}
+          titlePlain={t('fleetVehicles.header.plain')}
         />
         <StateView
           kind="error"
-          title={vehiclesQ.isError ? 'Vehicle roster failed' : 'Branch directory failed'}
+          title={vehiclesQ.isError ? t('fleetVehicles.error.roster') : t('fleetVehicles.error.branches')}
           hint={
             (vehiclesQ.error ?? branchesQ.error)?.message ??
-            'Fleet vehicle directory could not be loaded.'
+            t('fleetVehicles.error.hint')
           }
         />
       </div>
@@ -675,9 +677,9 @@ export function VehiclesModule() {
   return (
     <div className="page">
       <PageHeader
-        eyebrow="Operate · Fleet"
-        titleAccent="Vehicles"
-        titlePlain="— roster, assignments, maintenance, telemetry"
+        eyebrow={t('fleet.eyebrow')}
+        titleAccent={t('fleetVehicles.header.accent')}
+        titlePlain={t('fleetVehicles.header.plain')}
         pills={[
           // W56-C closure — `scopeType="tenant"` is the canonical resource-tier
           // literal (vehicles scope via current_user_org_id()). `scopeId` is
@@ -689,16 +691,16 @@ export function VehiclesModule() {
                   key="branch-scope"
                   size="xs"
                   kind="info"
-                  label={<span>Filtered by branch {branchScopeLabel}</span>}
+                  label={<span>{fill(t('fleetVehicles.scope.filteredBy'), { branch: branchScopeLabel ?? '' })}</span>}
                 />,
               ]
             : []),
-          <Chip key="src" size="xs" label={<span>Fleet inventory policy</span>} />,
+          <Chip key="src" size="xs" label={<span>{t('fleetVehicles.scope.policy')}</span>} />,
         ]}
         actions={[
           <Button
             key="new-vehicle"
-            label="New vehicle"
+            label={t('fleetVehicles.newVehicle')}
             iconName="plus"
             kind="primary"
             capability={CAP.FLEET_WRITE}
@@ -718,10 +720,10 @@ export function VehiclesModule() {
           padding: '8px 0 12px',
         }}
       >
-        <KPICard label="Total fleet" value={kpis.total} tone="neutral" />
-        <KPICard label="On shift" value={kpis.onShift} tone="good" />
-        <KPICard label="In maintenance" value={kpis.inMaintenance} tone="warn" />
-        <KPICard label="Out of service" value={kpis.oos} tone="danger" />
+        <KPICard label={t('fleetVehicles.kpi.total')} value={kpis.total} tone="neutral" />
+        <KPICard label={t('fleet.onShift')} value={kpis.onShift} tone="good" />
+        <KPICard label={t('fleetVehicles.kpi.inMaintenance')} value={kpis.inMaintenance} tone="warn" />
+        <KPICard label={t('fleet.outOfService')} value={kpis.oos} tone="danger" />
         <div
           className="card"
           style={{
@@ -730,17 +732,17 @@ export function VehiclesModule() {
             gap: '12px',
             padding: '8px 14px',
           }}
-          aria-label="Fleet utilisation"
+          aria-label={t('fleetVehicles.utilisation.aria')}
         >
           <CapacityGauge
             used={kpis.onShift}
             total={kpis.total || 1}
             size="sm"
-            label="Utilisation"
+            label={t('fleetVehicles.utilisation.label')}
           />
           <div style={{ fontSize: '11px', lineHeight: 1.45, color: 'var(--ink-3)' }}>
-            <div>Vehicles ready for dispatch</div>
-            <div>{kpis.onShift} active of {kpis.total} total</div>
+            <div>{t('fleetVehicles.utilisation.ready')}</div>
+            <div>{fill(t('fleetVehicles.utilisation.activeOfTotal'), { active: kpis.onShift, total: kpis.total })}</div>
           </div>
         </div>
       </div>
@@ -755,19 +757,19 @@ export function VehiclesModule() {
           rowDeepLink={(row) => `/operate/fleet/vehicles?focus=${encodeURIComponent(row.id)}`}
           rowActions={[
             {
-              label: 'Open profile',
+              label: t('fleet.openProfile'),
               icon: 'eye',
               onClick: openVehicleDrawer,
             },
             {
-              label: 'Mark out-of-service',
+              label: t('fleetVehicles.oos.action'),
               icon: 'alert',
               kind: 'danger',
               capability: CAP.FLEET_WRITE,
               onClick: (r) => openMarkVehicleOosModal([r]),
             },
             {
-              label: 'Restore in-service',
+              label: t('fleetVehicles.restore.action'),
               icon: 'rotate',
               capability: CAP.FLEET_WRITE,
               onClick: async (r) => {
@@ -776,16 +778,16 @@ export function VehiclesModule() {
                     organization_id: orgId,
                     vehicle_id: r.id,
                   });
-                  pushToast(`Vehicle restored in-service - ${r.plate}`, 'good');
+                  pushToast(fill(t('fleetVehicles.restore.done'), { plate: r.plate }), 'good');
                 } catch {
-                  pushToast('Vehicle could not be restored. Try again.', 'danger');
+                  pushToast(t('fleetVehicles.restore.failed'), 'danger');
                 }
               },
             },
           ]}
           bulkActions={[
             {
-              label: 'Mark out-of-service',
+              label: t('fleetVehicles.oos.action'),
               icon: 'alert',
               kind: 'danger',
               capability: CAP.FLEET_WRITE,
@@ -803,13 +805,13 @@ export function VehiclesModule() {
 
 // ─── Drawer body (6 tabs) ────────────────────────────────────────────────
 type TabId = 'profile' | 'assignments' | 'maintenance' | 'events' | 'documents' | 'telemetry';
-const TABS: ReadonlyArray<{ id: TabId; label: string }> = [
-  { id: 'profile', label: 'Profile' },
-  { id: 'assignments', label: 'Assignments' },
-  { id: 'maintenance', label: 'Maintenance' },
-  { id: 'events', label: 'Events' },
-  { id: 'documents', label: 'Documents' },
-  { id: 'telemetry', label: 'Telemetry' },
+const TABS: ReadonlyArray<{ id: TabId; labelKey: string }> = [
+  { id: 'profile', labelKey: 'fleet.profile' },
+  { id: 'assignments', labelKey: 'fleetVehicles.tabs.assignments' },
+  { id: 'maintenance', labelKey: 'fleetVehicles.tabs.maintenance' },
+  { id: 'events', labelKey: 'fleetVehicles.tabs.events' },
+  { id: 'documents', labelKey: 'fleet.documents' },
+  { id: 'telemetry', labelKey: 'fleetVehicles.tabs.telemetry' },
 ];
 
 function VehicleDrawerBody({
@@ -837,6 +839,7 @@ function VehicleDrawerBody({
   onChanged: () => void;
   modal: ReturnType<typeof useModal>;
 }) {
+  const t = useT();
   const [tab, setTab] = useState<TabId>('profile');
   const vehicleQ = useResource<VehicleRow>('vehicle_directory', vehicle.id);
   const currentVehicle = vehicleQ.data ?? vehicle;
@@ -876,7 +879,7 @@ function VehicleDrawerBody({
   const myEvents = eventRows.filter((e) => e.vehicle_id === currentVehicle.id);
   const myDocuments = documentRows.filter((d) => d.vehicle_id === currentVehicle.id);
   const myMaintenance = maintenanceRows.filter((m) => m.vehicle_id === currentVehicle.id);
-  const type = types.find((t) => t.id === currentVehicle.type_id) ?? null;
+  const type = types.find((vt) => vt.id === currentVehicle.type_id) ?? null;
   const handleChanged = () => {
     void vehicleQ.refetch();
     void drawerAssignmentsQ.refetch();
@@ -888,18 +891,18 @@ function VehicleDrawerBody({
 
   return (
     <div>
-      <div className="tabs" role="tablist" aria-label="Vehicle drawer tabs">
-        {TABS.map((t) => (
+      <div className="tabs" role="tablist" aria-label={t('fleetVehicles.tabs.aria')}>
+        {TABS.map((tabDef) => (
           <button
-            key={t.id}
+            key={tabDef.id}
             role="tab"
-            aria-selected={tab === t.id}
+            aria-selected={tab === tabDef.id}
             type="button"
-            className={`tabs__tab ${tab === t.id ? 'is-active' : ''}`}
-            onClick={() => setTab(t.id)}
-            data-key={t.id}
+            className={`tabs__tab ${tab === tabDef.id ? 'is-active' : ''}`}
+            onClick={() => setTab(tabDef.id)}
+            data-key={tabDef.id}
           >
-            {t.label}
+            {t(tabDef.labelKey)}
           </button>
         ))}
       </div>
@@ -961,6 +964,7 @@ function ProfileTab({
   drivers: DriverRow[];
   branches: BranchChoiceRow[];
 }) {
+  const t = useT();
   const driver = vehicle.current_driver_user_id
     ? drivers.find((d) => (d.user_id ?? d.id) === vehicle.current_driver_user_id)
     : null;
@@ -969,32 +973,32 @@ function ProfileTab({
     : null;
 
   const rows: KvRow[] = [
-    { key: 'plate', label: 'Plate', value: vehiclePlateLabel(vehicle), mono: true },
-    { key: 'vin', label: 'VIN', value: vehicle.vin, mono: true },
-    { key: 'type', label: 'Type', value: type?.name ?? vehicle.type_name },
+    { key: 'plate', label: t('fleetVehicles.field.plate'), value: vehiclePlateLabel(vehicle), mono: true },
+    { key: 'vin', label: t('fleetVehicles.field.vin'), value: vehicle.vin, mono: true },
+    { key: 'type', label: t('fleet.type'), value: type?.name ?? vehicle.type_name },
     // W13-3 — `kind` rendered from canonical `key` column (W11-4 added the
     // `key` alias seed-side; legacy `kind` kept as fallback for saved views).
-    { key: 'kind', label: 'Kind', value: type?.key ?? type?.kind ?? '—', lookup: 'vehicle_kind' },
-    { key: 'capacity_kg', label: 'Capacity (kg)', value: type ? `${type.capacity_kg}` : '—', mono: true },
-    { key: 'capacity_m3', label: 'Capacity (m³)', value: type ? `${type.capacity_m3}` : '—', mono: true },
-    { key: 'axles', label: 'Axles', value: type?.axles ?? '—', mono: true },
-    { key: 'max_speed_kph', label: 'Max speed (kph)', value: type?.max_speed_kph ?? '—', mono: true },
-    { key: 'fuel_type', label: 'Fuel type', value: type?.fuel_type ?? '—', lookup: 'vehicle_fuel_type' },
-    { key: 'status', label: 'Status', value: vehicle.status, lookup: 'vehicle_status' },
-    { key: 'driver', label: 'Current driver', value: driver?.user_full_name ?? driver?.name ?? '—' },
+    { key: 'kind', label: t('fleetVehicles.field.kind'), value: type?.key ?? type?.kind ?? '—', lookup: 'vehicle_kind' },
+    { key: 'capacity_kg', label: t('fleetVehicles.profile.capacityKg'), value: type ? `${type.capacity_kg}` : '—', mono: true },
+    { key: 'capacity_m3', label: t('fleetVehicles.profile.capacityM3'), value: type ? `${type.capacity_m3}` : '—', mono: true },
+    { key: 'axles', label: t('fleetVehicles.profile.axles'), value: type?.axles ?? '—', mono: true },
+    { key: 'max_speed_kph', label: t('fleetVehicles.profile.maxSpeed'), value: type?.max_speed_kph ?? '—', mono: true },
+    { key: 'fuel_type', label: t('fleetVehicles.profile.fuelType'), value: type?.fuel_type ?? '—', lookup: 'vehicle_fuel_type' },
+    { key: 'status', label: t('fleet.status'), value: vehicle.status, lookup: 'vehicle_status' },
+    { key: 'driver', label: t('fleetVehicles.profile.currentDriver'), value: driver?.user_full_name ?? driver?.name ?? '—' },
     // W10-2 D4 closure: dropped `Driver shift` row (fictional field not on canonical
     // schema; would need to resolve via driver_hours_of_service projection).
-    { key: 'branch', label: 'Branch', value: hub ? `${hub.code} · ${hub.name}` : '—' },
+    { key: 'branch', label: t('fleet.branch'), value: hub ? `${hub.code} · ${hub.name}` : '—' },
     {
       key: 'fuel_level',
-      label: 'Fuel level',
+      label: t('fleetVehicles.field.fuelLevel'),
       value: `${Math.round(vehicle.fuel_level * 100)}%`,
       mono: true,
     },
-    { key: 'odometer', label: 'Odometer (km)', value: Number(vehicle.odometer_km ?? 0).toLocaleString(), mono: true },
+    { key: 'odometer', label: t('fleetVehicles.field.odometer'), value: Number(vehicle.odometer_km ?? 0).toLocaleString(), mono: true },
     {
       key: 'last_telemetry',
-      label: 'Last telemetry',
+      label: t('fleetVehicles.field.lastTelemetry'),
       value: vehicle.last_telemetry_at ?? '—',
       mono: true,
     },
@@ -1002,12 +1006,12 @@ function ProfileTab({
 
   return (
     <div>
-      <h4 className="eyebrow">Vehicle profile</h4>
+      <h4 className="eyebrow">{t('fleetVehicles.profile.heading')}</h4>
       <div className="card">
         <KvGrid rows={rows} />
       </div>
       <p className="state__hint" style={{ marginTop: '10px' }}>
-        Profile fields source from the fleet roster and vehicle type catalog.
+        {t('fleetVehicles.profile.hint')}
       </p>
     </div>
   );
@@ -1027,6 +1031,7 @@ function CreateVehicleBody({
   createVehicleMutation: ReturnType<typeof useCreateVehicle>;
   onDone: () => void;
 }) {
+  const t = useT();
   const statusRows = getLookups('vehicle_status');
   const defaultStatus =
     statusRows.find((row) => (row as { is_default?: boolean }).is_default === true)?.value ??
@@ -1045,7 +1050,7 @@ function CreateVehicleBody({
 
   async function submit() {
     if (!plate.trim()) {
-      pushToast('Plate number is required before creating a vehicle.', 'danger');
+      pushToast(t('fleetVehicles.create.plateRequired'), 'danger');
       return;
     }
     setBusy(true);
@@ -1065,10 +1070,10 @@ function CreateVehicleBody({
           submitted_from: 'console_v2_vehicles',
         },
       });
-      pushToast(`vehicle created - ${plate.trim()}`, 'good');
+      pushToast(fill(t('fleetVehicles.create.done'), { plate: plate.trim() }), 'good');
       onDone();
     } catch {
-      pushToast('Vehicle could not be created. Check the form and try again.', 'danger');
+      pushToast(t('fleetVehicles.create.failed'), 'danger');
     } finally {
       setBusy(false);
     }
@@ -1078,8 +1083,8 @@ function CreateVehicleBody({
     return (
       <StateView
         kind="error"
-        title="Vehicle statuses missing"
-        hint="Configure vehicle statuses before creating vehicles."
+        title={t('fleetVehicles.create.statusesMissingTitle')}
+        hint={t('fleetVehicles.create.statusesMissingHint')}
       />
     );
   }
@@ -1087,10 +1092,10 @@ function CreateVehicleBody({
   return (
     <div>
       <p className="state__hint">
-        Creates a fleet asset in the vehicle roster.
+        {t('fleetVehicles.create.hint')}
       </p>
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Plate number</label>
+        <label className="field__label">{t('fleetVehicles.create.plateNumber')}</label>
         <input
           type="text"
           value={plate}
@@ -1100,9 +1105,9 @@ function CreateVehicleBody({
       </div>
       <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', marginTop: 12 }}>
         <div className="field">
-          <label className="field__label">Vehicle type</label>
+          <label className="field__label">{t('fleetVehicles.create.vehicleType')}</label>
           <select value={vehicleTypeId} onChange={(event) => setVehicleTypeId(event.target.value)}>
-            <option value="">Unassigned</option>
+            <option value="">{t('fleetVehicles.create.unassigned')}</option>
             {types.map((type) => (
               <option key={type.id} value={type.id}>
                 {type.name}
@@ -1111,9 +1116,9 @@ function CreateVehicleBody({
           </select>
         </div>
         <div className="field">
-          <label className="field__label">Branch</label>
+          <label className="field__label">{t('fleet.branch')}</label>
           <select value={branchId} onChange={(event) => setBranchId(event.target.value)}>
-            <option value="">Unassigned</option>
+            <option value="">{t('fleetVehicles.create.unassigned')}</option>
             {branches.map((branch) => (
               <option key={branch.id} value={branch.id}>
                 {branch.code} - {branch.name}
@@ -1122,7 +1127,7 @@ function CreateVehicleBody({
           </select>
         </div>
         <div className="field">
-          <label className="field__label">Status</label>
+          <label className="field__label">{t('fleet.status')}</label>
           <select value={status} onChange={(event) => setStatus(event.target.value)}>
             {statusRows.map((row) => (
               <option key={row.value} value={row.value}>
@@ -1132,7 +1137,7 @@ function CreateVehicleBody({
           </select>
         </div>
         <div className="field">
-          <label className="field__label">Model year</label>
+          <label className="field__label">{t('fleetVehicles.create.modelYear')}</label>
           <input
             type="number"
             value={modelYear}
@@ -1142,7 +1147,7 @@ function CreateVehicleBody({
         </div>
       </div>
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">VIN</label>
+        <label className="field__label">{t('fleetVehicles.field.vin')}</label>
         <input
           type="text"
           value={vin}
@@ -1152,22 +1157,22 @@ function CreateVehicleBody({
       </div>
       <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', marginTop: 12 }}>
         <div className="field">
-          <label className="field__label">Make</label>
+          <label className="field__label">{t('fleetVehicles.create.make')}</label>
           <input type="text" value={make} onChange={(event) => setMake(event.target.value)} />
         </div>
         <div className="field">
-          <label className="field__label">Model</label>
+          <label className="field__label">{t('fleetVehicles.create.model')}</label>
           <input type="text" value={model} onChange={(event) => setModel(event.target.value)} />
         </div>
         <div className="field">
-          <label className="field__label">Color</label>
+          <label className="field__label">{t('fleetVehicles.create.color')}</label>
           <input type="text" value={color} onChange={(event) => setColor(event.target.value)} />
         </div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onDone} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
         <Button
-          label="Create vehicle"
+          label={t('fleetVehicles.create.submit')}
           iconName="plus"
           kind="primary"
           capability={CAP.FLEET_WRITE}
@@ -1190,13 +1195,14 @@ function MarkVehicleOosBody({
   oosMutation: ReturnType<typeof useMarkVehicleOos>;
   onDone: () => void;
 }) {
+  const t = useT();
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const trimmedReason = reason.trim();
 
   async function submit() {
     if (!trimmedReason) {
-      pushToast('Reason is required before marking a vehicle out-of-service.', 'danger');
+      pushToast(t('fleetVehicles.oos.reasonRequired'), 'danger');
       return;
     }
     setBusy(true);
@@ -1212,13 +1218,13 @@ function MarkVehicleOosBody({
       }
       pushToast(
         vehicles.length === 1
-          ? `Vehicle marked out-of-service - ${vehicles[0]?.plate ?? vehicles[0]?.plate_number}`
-          : `Out-of-service update complete - ${okCount}/${vehicles.length} vehicles`,
+          ? fill(t('fleetVehicles.oos.doneOne'), { plate: vehicles[0]?.plate ?? vehicles[0]?.plate_number ?? '' })
+          : fill(t('fleetVehicles.oos.doneMany'), { ok: okCount, n: vehicles.length }),
         okCount === vehicles.length ? 'good' : 'warn',
       );
       onDone();
     } catch {
-      pushToast('Vehicle status could not be updated. Try again.', 'danger');
+      pushToast(t('fleetVehicles.oos.failed'), 'danger');
     } finally {
       setBusy(false);
     }
@@ -1227,12 +1233,12 @@ function MarkVehicleOosBody({
   return (
     <div>
       <p className="state__hint">
-        Provide the operational reason for removing {vehicles.length === 1 ? 'this vehicle' : 'these vehicles'} from service.
+        {vehicles.length === 1 ? t('fleetVehicles.oos.hintOne') : t('fleetVehicles.oos.hintMany')}
       </p>
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Out-of-service reason</label>
+        <label className="field__label">{t('fleetVehicles.oos.reasonLabel')}</label>
         <textarea
-          aria-label="Out-of-service reason"
+          aria-label={t('fleetVehicles.oos.reasonLabel')}
           value={reason}
           onChange={(event) => setReason(event.target.value)}
           rows={4}
@@ -1240,9 +1246,9 @@ function MarkVehicleOosBody({
         />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onDone} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
         <Button
-          label="Mark out-of-service"
+          label={t('fleetVehicles.oos.action')}
           iconName="alert"
           kind="danger"
           capability={CAP.FLEET_WRITE}
@@ -1267,6 +1273,7 @@ function AssignmentsTab({
   orgId: string | null;
   onChanged: () => void;
 }) {
+  const t = useT();
   const [pickerOpen, setPickerOpen] = useState(false);
   const allowedWrite = useCapability(CAP.FLEET_WRITE);
   // CLAIM-FLEET / Phase C6 — canonical RPC hooks for vehicle assignment
@@ -1281,20 +1288,20 @@ function AssignmentsTab({
     () =>
       myAssignments.map((a) => ({
         ...a,
-        duration: formatDuration(a.started_at, a.ended_at),
+        duration: formatDuration(a.started_at, a.ended_at, t),
         active: a.ended_at == null,
       })),
-    [myAssignments],
+    [myAssignments, t],
   );
 
   const columns: Array<DataTableColumn<AssignmentRow & { duration: string; active: boolean }>> = [
-    { key: 'driver_name', label: 'Driver', sortable: true, filterable: true },
-    { key: 'started_at', label: 'Started', format: 'datetime', sortable: true },
-    { key: 'ended_at', label: 'Ended', format: 'datetime', sortable: true },
-    { key: 'duration', label: 'Duration', mono: true, align: 'right' },
+    { key: 'driver_name', label: t('fleet.driver'), sortable: true, filterable: true },
+    { key: 'started_at', label: t('fleet.timeline.started'), format: 'datetime', sortable: true },
+    { key: 'ended_at', label: t('fleet.timeline.ended'), format: 'datetime', sortable: true },
+    { key: 'duration', label: t('fleet.timeline.duration'), mono: true, align: 'right' },
     {
       key: 'active',
-      label: 'Active',
+      label: t('fleet.active'),
       render: (raw) => {
         // W80 (Cycle F-R-20 P1) — assignment-state chip routes through
         // canonical `vehicle_assignment_state` lookup metadata; label
@@ -1305,7 +1312,7 @@ function AssignmentsTab({
         return (
           <Chip
             size="xs"
-            label={row?.label ?? `vehicle_assignment_state/${stateValue} (missing)`}
+            label={row?.label ?? fill(t('fleetVehicles.assign.stateMissing'), { state: stateValue })}
             kind={(row?.tone as ChipKind) ?? 'danger'}
           />
         );
@@ -1316,7 +1323,7 @@ function AssignmentsTab({
   async function endActiveAssignment() {
     const active = myAssignments.find((a) => a.ended_at == null);
     if (!active) {
-      pushToast('No active assignment to end', 'warn');
+      pushToast(t('fleetVehicles.assign.noActive'), 'warn');
       return;
     }
     try {
@@ -1325,10 +1332,10 @@ function AssignmentsTab({
         vehicle_id: vehicle.id,
         assignment_id: active.id,
       });
-      pushToast(`Driver unassigned - ${plateLabel}`, 'good');
+      pushToast(fill(t('fleetVehicles.assign.unassigned'), { plate: plateLabel }), 'good');
       onChanged();
     } catch {
-      pushToast('Driver could not be unassigned. Try again.', 'danger');
+      pushToast(t('fleetVehicles.assign.unassignFailed'), 'danger');
     }
   }
 
@@ -1339,27 +1346,27 @@ function AssignmentsTab({
         vehicle_id: vehicle.id,
         driver_user_id: driverId,
       });
-      pushToast(`Driver assigned - ${plateLabel}`, 'good');
+      pushToast(fill(t('fleetVehicles.assign.assigned'), { plate: plateLabel }), 'good');
       setPickerOpen(false);
       onChanged();
     } catch {
-      pushToast('Driver could not be assigned. Try again.', 'danger');
+      pushToast(t('fleetVehicles.assign.assignFailed'), 'danger');
     }
   }
 
   return (
     <div>
-      <h4 className="eyebrow">Assignments history</h4>
+      <h4 className="eyebrow">{t('fleetVehicles.assign.heading')}</h4>
       <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
         <Button
-          label="Assign new driver"
+          label={t('fleetVehicles.assign.assignNew')}
           iconName="user"
           kind="primary"
           capability={CAP.FLEET_WRITE}
           onClick={() => setPickerOpen(true)}
         />
         <Button
-          label="End assignment"
+          label={t('fleetVehicles.assign.end')}
           iconName="rotate"
           kind="ghost"
           capability={CAP.FLEET_WRITE}
@@ -1375,16 +1382,16 @@ function AssignmentsTab({
       />
       {!allowedWrite ? (
         <p className="state__hint" style={{ marginTop: '8px' }}>
-          Read-only · capability
+          {t('fleetVehicles.assign.readOnlyBefore')}
           {' '}
-          <span className="mono">fleet.write</span>
+          <span className="mono" dir="ltr">{CAP.FLEET_WRITE}</span>
           {' '}
-          required to mutate driver assignments.
+          {t('fleetVehicles.assign.readOnlyAfter')}
         </p>
       ) : null}
       <ReferencePicker
         open={pickerOpen}
-        title={`Assign driver · ${plateLabel}`}
+        title={fill(t('fleetVehicles.assign.pickerTitle'), { plate: plateLabel })}
         source={{
           kind: 'reference',
           items: drivers as unknown as Array<Record<string, unknown>>,
@@ -1399,10 +1406,10 @@ function AssignmentsTab({
           sub: (r) => {
             const d = r as DriverRow;
             return (d.current_vehicle_id ?? d.vehicle_id)
-              ? 'Currently assigned'
-              : 'Available for assignment';
+              ? t('fleetVehicles.assign.currentlyAssigned')
+              : t('fleetVehicles.assign.available');
           },
-          section: 'Drivers',
+          section: t('fleet.drivers'),
         }}
         onClose={() => setPickerOpen(false)}
         onPick={(val) => {
@@ -1438,6 +1445,7 @@ function MaintenanceTab({
   // FLEET REAUDIT D2 (W9-4) — wire the two orphan hooks consumed here. Both
   // gate on `fleet.write` server-side per Phase B2 migrations
   // (202604280035 complete / 202604280040 cancel).
+  const t = useT();
   const completeMutation = useCompleteMaintenance();
   const cancelMutation = useCancelMaintenance();
   const [backendReadbackRows, setBackendReadbackRows] = useState<MaintWindowRow[]>([]);
@@ -1504,7 +1512,7 @@ function MaintenanceTab({
         const tone = (row?.tone as MaintenanceTone | undefined) ?? null;
         const title = tone
           ? titleCase(kind)
-          : `${titleCase(kind)} - status needs setup`;
+          : fill(t('fleetVehicles.maint.statusNeedsSetup'), { kind: titleCase(kind) });
         return {
           id: m.id,
           title,
@@ -1513,12 +1521,12 @@ function MaintenanceTab({
           tone: tone ?? 'danger',
         };
       }),
-    [normalizedMaintenance],
+    [normalizedMaintenance, t],
   );
 
   function openSchedule() {
     modal.open({
-      title: `Schedule maintenance · ${vehiclePlateLabel(vehicle)}`,
+      title: fill(t('fleetVehicles.maint.modalTitle'), { plate: vehiclePlateLabel(vehicle) }),
       body: (
         <ScheduleMaintenanceForm
           vehicle={vehicle}
@@ -1526,7 +1534,7 @@ function MaintenanceTab({
           onScheduledReadback={async (windowId) => {
             const readback = await readMaintenanceWindowFromBackend(windowId);
             if (!readback || readback.vehicle_id !== vehicle.id) {
-              throw new Error('Scheduled maintenance window is not available yet.');
+              throw new Error(t('fleetVehicles.maint.scheduledUnavailable'));
             }
             reconcileMaintenanceWindowFromBackend(windowId, readback);
             onChanged();
@@ -1544,21 +1552,21 @@ function MaintenanceTab({
       await completeMutation.mutateAsync({ vehicle_maintenance_window_id: windowId });
       const readback = await readMaintenanceWindowFromBackend(windowId);
       if (!readback || !isCompletedReadback(readback)) {
-        throw new Error('Completed maintenance status is not available yet.');
+        throw new Error(t('fleetVehicles.maint.completedUnavailable'));
       }
       reconcileMaintenanceWindowFromBackend(windowId, readback);
-      pushToast('Maintenance marked complete', 'good');
+      pushToast(t('fleetVehicles.maint.completed'), 'good');
       onChanged();
     } catch (e) {
       const readback = await readMaintenanceWindowFromBackend(windowId).catch(() => null);
       if (readback && isCompletedReadback(readback)) {
         reconcileMaintenanceWindowFromBackend(windowId, readback);
-        pushToast('Maintenance marked complete', 'good');
+        pushToast(t('fleetVehicles.maint.completed'), 'good');
         onChanged();
         return;
       }
       pushToast(
-        `Maintenance completion failed - ${e instanceof Error ? e.message : String(e)}`,
+        fill(t('fleetVehicles.maint.completeFailed'), { error: e instanceof Error ? e.message : String(e) }),
         'warn',
       );
     }
@@ -1574,28 +1582,28 @@ function MaintenanceTab({
     }
     const defaultReason = cancelReasons[0]?.value;
     if (!defaultReason) {
-      pushToast('Maintenance cancellation reasons are not configured', 'danger');
+      pushToast(t('fleetVehicles.maint.cancelReasonsMissing'), 'danger');
       return;
     }
     try {
       await cancelMutation.mutateAsync({ vehicle_maintenance_window_id: windowId, reason: defaultReason });
       const readback = await readMaintenanceWindowFromBackend(windowId);
       if (!readback || !isCancelledReadback(readback)) {
-        throw new Error('Cancelled maintenance status is not available yet.');
+        throw new Error(t('fleetVehicles.maint.cancelledUnavailable'));
       }
       reconcileMaintenanceWindowFromBackend(windowId, readback);
-      pushToast('Maintenance cancelled', 'good');
+      pushToast(t('fleetVehicles.maint.cancelled'), 'good');
       onChanged();
     } catch (e) {
       const readback = await readMaintenanceWindowFromBackend(windowId).catch(() => null);
       if (readback && isCancelledReadback(readback)) {
         reconcileMaintenanceWindowFromBackend(windowId, readback);
-        pushToast('Maintenance cancelled', 'good');
+        pushToast(t('fleetVehicles.maint.cancelled'), 'good');
         onChanged();
         return;
       }
       pushToast(
-        `Maintenance cancellation failed - ${e instanceof Error ? e.message : String(e)}`,
+        fill(t('fleetVehicles.maint.cancelFailed'), { error: e instanceof Error ? e.message : String(e) }),
         'warn',
       );
     }
@@ -1625,10 +1633,10 @@ function MaintenanceTab({
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-        <h4 className="eyebrow" style={{ margin: 0 }}>Maintenance schedule</h4>
+        <h4 className="eyebrow" style={{ margin: 0 }}>{t('fleetVehicles.maint.heading')}</h4>
         <div style={{ flex: 1 }} />
         <Button
-          label="Schedule maintenance"
+          label={t('fleetVehicles.maint.schedule')}
           iconName="plus"
           kind="primary"
           capability={CAP.FLEET_WRITE}
@@ -1643,7 +1651,7 @@ function MaintenanceTab({
       {actionable.length > 0 ? (
         <div style={{ marginTop: '14px' }}>
           <h4 className="eyebrow" style={{ margin: '0 0 8px 0' }}>
-            Actionable windows · {actionable.length}
+            {fill(t('fleetVehicles.maint.actionable'), { n: actionable.length })}
           </h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {actionable.map((m) => (
@@ -1656,7 +1664,7 @@ function MaintenanceTab({
                   {`${titleCase(m.scheduled_kind)} · ${m.planned_start.slice(0, 10)} → ${m.planned_end.slice(0, 10)} · ${m.status}`}
                 </span>
                 <Button
-                  label="Mark complete"
+                  label={t('fleetVehicles.maint.markComplete')}
                   iconName="check"
                   kind="primary"
                   size="sm"
@@ -1665,7 +1673,7 @@ function MaintenanceTab({
                   onClick={() => handleComplete(m.id)}
                 />
                 <Button
-                  label="Cancel"
+                  label={t('common.cancel')}
                   iconName="close"
                   kind="ghost"
                   size="sm"
@@ -1680,8 +1688,7 @@ function MaintenanceTab({
       ) : null}
 
       <p className="state__hint" style={{ marginTop: '10px' }}>
-        Calendar windows show the vehicle maintenance plan and current lifecycle state.
-        Complete and cancel actions update the same operational maintenance record.
+        {t('fleetVehicles.maint.footnote')}
       </p>
     </div>
   );
@@ -1704,6 +1711,7 @@ function ScheduleMaintenanceForm({
   // W54-C — defaults resolved strictly from canonical
   // `vehicle_maintenance_default_window` settings policy. Replaces inline
   // `+86_400_000` / `'08:00'` / `'10:00'` literals.
+  const t = useT();
   const maintWindowPolicy = useResolveSettings('vehicle_maintenance_default_window', undefined);
   const maintWindowValue = maintWindowPolicy.data?.value as
     | { default_offset_hours?: number; default_window_start?: string; default_window_end?: string }
@@ -1780,10 +1788,10 @@ function ScheduleMaintenanceForm({
         throw new Error('schedule_maintenance_v1 did not return vehicle_maintenance_window_id');
       }
       await onScheduledReadback(windowId);
-      pushToast(`Maintenance scheduled - ${vehiclePlateLabel(vehicle)} - ${kind}`, 'good');
+      pushToast(fill(t('fleetVehicles.schedule.done'), { plate: vehiclePlateLabel(vehicle), kind }), 'good');
       onDone();
     } catch {
-      pushToast('Maintenance could not be scheduled. Try again.', 'danger');
+      pushToast(t('fleetVehicles.schedule.failed'), 'danger');
     } finally {
       setSubmitting(false);
     }
@@ -1798,8 +1806,8 @@ function ScheduleMaintenanceForm({
     return (
       <StateView
         kind="loading"
-        title="Maintenance policy loading"
-        hint="Loading maintenance window defaults before scheduling."
+        title={t('fleetVehicles.schedule.policy.loadingTitle')}
+        hint={t('fleetVehicles.schedule.policy.loadingHint')}
       />
     );
   }
@@ -1807,8 +1815,8 @@ function ScheduleMaintenanceForm({
     return (
       <StateView
         kind="error"
-        title="Maintenance policy unavailable"
-        hint={policyError ?? 'Resolve the default maintenance window policy before scheduling maintenance.'}
+        title={t('fleetVehicles.schedule.policy.unavailableTitle')}
+        hint={policyError ?? t('fleetVehicles.schedule.policy.unavailableHint')}
       />
     );
   }
@@ -1816,8 +1824,8 @@ function ScheduleMaintenanceForm({
     return (
       <StateView
         kind="error"
-        title="Maintenance policy missing"
-        hint="Configure the default maintenance window before scheduling maintenance."
+        title={t('fleetVehicles.schedule.policy.missingTitle')}
+        hint={t('fleetVehicles.schedule.policy.missingHint')}
       />
     );
   }
@@ -1825,8 +1833,8 @@ function ScheduleMaintenanceForm({
     return (
       <StateView
         kind="error"
-        title="Maintenance policy incomplete"
-        hint="Configure default_window_start and default_window_end before scheduling maintenance."
+        title={t('fleetVehicles.schedule.policy.incompleteTitle')}
+        hint={t('fleetVehicles.schedule.policy.incompleteHint')}
       />
     );
   }
@@ -1834,8 +1842,8 @@ function ScheduleMaintenanceForm({
     return (
       <StateView
         kind="error"
-        title="Maintenance reasons missing"
-        hint="Configure maintenance reasons before scheduling maintenance."
+        title={t('fleetVehicles.schedule.policy.reasonsMissingTitle')}
+        hint={t('fleetVehicles.schedule.policy.reasonsMissingHint')}
       />
     );
   }
@@ -1843,15 +1851,15 @@ function ScheduleMaintenanceForm({
   return (
     <div>
       <p className="state__hint">
-        Adds a planned maintenance window for this vehicle. The window starts in scheduled state.
+        {t('fleetVehicles.schedule.hint')}
       </p>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '12px' }}>
         <div className="field">
-          <label className="field__label">Date</label>
+          <label className="field__label">{t('fleetVehicles.schedule.date')}</label>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </div>
         <div className="field">
-          <label className="field__label">Kind</label>
+          <label className="field__label">{t('fleetVehicles.field.kind')}</label>
           <select value={kind} onChange={(e) => setKind(e.target.value)}>
             {maintKindRows.map((opt) => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -1859,18 +1867,18 @@ function ScheduleMaintenanceForm({
           </select>
         </div>
         <div className="field">
-          <label className="field__label">Start</label>
+          <label className="field__label">{t('fleetVehicles.schedule.start')}</label>
           <input type="time" value={start} onChange={(e) => setStart(e.target.value)} />
         </div>
         <div className="field">
-          <label className="field__label">End</label>
+          <label className="field__label">{t('fleetVehicles.schedule.end')}</label>
           <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} />
         </div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-        <Button label="Cancel" kind="ghost" onClick={onDone} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
         <Button
-          label={submitting ? 'Scheduling…' : 'Schedule'}
+          label={submitting ? t('fleetVehicles.schedule.submitting') : t('fleetVehicles.schedule.submit')}
           kind="primary"
           capability={CAP.FLEET_WRITE}
           disabled={!canSchedule}
@@ -1898,6 +1906,7 @@ function ScheduleMaintenanceForm({
 // a neutral default.
 
 function useVehicleEventReadbackRows(vehicleId: string, sourceEvents: VehicleEventRow[]) {
+  const t = useT();
   const [backendReadbackEvents, setBackendReadbackEvents] = useState<VehicleEventRow[]>(sourceEvents);
 
   useEffect(() => {
@@ -1914,7 +1923,7 @@ function useVehicleEventReadbackRows(vehicleId: string, sourceEvents: VehicleEve
   async function confirmRecordedEventReadback(eventId: string) {
     const readback = await readVehicleEventFromBackend(eventId);
     if (!readback || readback.vehicle_id !== vehicleId) {
-      throw new Error('Recorded vehicle event is not available yet.');
+      throw new Error(t('fleetVehicles.events.readbackMissing'));
     }
     setBackendReadbackEvents((rows) => reconcileRowById(rows, readback));
     return readback;
@@ -1934,6 +1943,7 @@ function EventsTab({
   modal: ReturnType<typeof useModal>;
   onChanged: () => void;
 }) {
+  const t = useT();
   const [filter, setFilter] = useState<string>('all');
   const [view, setView] = useState<'table' | 'timeline'>('table');
 
@@ -1944,10 +1954,10 @@ function EventsTab({
   const eventFilters = useMemo(() => {
     const rows = getLookups('vehicle_event_type') ?? [];
     return [
-      { value: 'all', label: 'All' },
+      { value: 'all', label: t('common.all') },
       ...rows.map((r) => ({ value: r.value, label: r.label })),
     ];
-  }, []);
+  }, [t]);
   const eventFiltersEmpty = eventFilters.length <= 1;
 
   // FLEET REAUDIT D2 (W9-4) — wire the orphan useRecordVehicleEvent hook so
@@ -1958,7 +1968,7 @@ function EventsTab({
 
   function openRecordEvent() {
     modal.open({
-      title: `Record vehicle event · ${vehiclePlateLabel(vehicle)}`,
+      title: fill(t('fleetVehicles.events.modalTitle'), { plate: vehiclePlateLabel(vehicle) }),
       body: (
         <RecordVehicleEventForm
           vehicle={vehicle}
@@ -1990,15 +2000,15 @@ function EventsTab({
   );
 
   const columns: Array<DataTableColumn<VehicleEventRow>> = [
-    { key: 'occurred_at', label: 'When', format: 'datetime', sortable: true },
-    { key: 'event_type', label: 'Type', sortable: true, filterable: true, lookup: 'vehicle_event_type' },
-    { key: 'actor_name', label: 'Actor', sortable: true, filterable: true },
+    { key: 'occurred_at', label: t('fleet.timeline.when'), format: 'datetime', sortable: true },
+    { key: 'event_type', label: t('fleet.type'), sortable: true, filterable: true, lookup: 'vehicle_event_type' },
+    { key: 'actor_name', label: t('fleet.timeline.actor'), sortable: true, filterable: true },
     {
       key: 'payload',
-      label: 'Detail',
+      label: t('fleet.timeline.detail'),
       render: (raw) => (
         <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-3)' }}>
-          {summarizePayload(raw as Record<string, unknown>)}
+          {summarizePayload(raw as Record<string, unknown>, t)}
         </span>
       ),
     },
@@ -2014,10 +2024,10 @@ function EventsTab({
         // silent neutral default.
         const row = lookupRow('vehicle_event_type', e.event_type);
         const tone = (row?.tone as TimelineTone | undefined) ?? null;
-        const eventLabel = row?.label ?? humanizeToken(e.event_type, 'Vehicle event');
+        const eventLabel = row?.label ?? humanizeToken(e.event_type, t('fleetVehicles.events.fallbackType'));
         const summary = tone
-          ? summarizePayload(e.payload)
-          : `Unconfigured event type: ${eventLabel} - ${summarizePayload(e.payload)}`;
+          ? summarizePayload(e.payload, t)
+          : fill(t('fleetVehicles.events.unconfigured'), { type: eventLabel, summary: summarizePayload(e.payload, t) });
         return {
           id: e.id,
           at: e.occurred_at,
@@ -2028,20 +2038,20 @@ function EventsTab({
           detail: <PayloadDetail payload={e.payload} />,
         };
       }),
-    [filtered],
+    [filtered, t],
   );
 
   // W61-Operate (P2-1) — fail loud when the canonical lookup row set is
   // empty. The operator sees the gap explicitly via StateView rather than
   // a silently-empty filter row.
   if (eventFiltersEmpty) {
-    return <StateView kind="error" hint="Vehicle event types are not configured." />;
+    return <StateView kind="error" hint={t('fleetVehicles.events.notConfigured')} />;
   }
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', gap: '4px' }} role="group" aria-label="Event type filter">
+        <div style={{ display: 'flex', gap: '4px' }} role="group" aria-label={t('fleetVehicles.events.filterAria')}>
           {eventFilters.map((f) => (
             <button
               key={f.value}
@@ -2056,14 +2066,14 @@ function EventsTab({
           ))}
         </div>
         <div style={{ flex: 1 }} />
-        <div style={{ display: 'flex', gap: '4px' }} role="group" aria-label="View toggle">
+        <div style={{ display: 'flex', gap: '4px' }} role="group" aria-label={t('fleetVehicles.events.viewAria')}>
           <button
             type="button"
             className={`btn btn--sm ${view === 'table' ? '' : 'btn--ghost'}`}
             onClick={() => setView('table')}
             aria-pressed={view === 'table'}
           >
-            Table
+            {t('fleetVehicles.events.table')}
           </button>
           <button
             type="button"
@@ -2071,13 +2081,13 @@ function EventsTab({
             onClick={() => setView('timeline')}
             aria-pressed={view === 'timeline'}
           >
-            Timeline
+            {t('fleetVehicles.events.timeline')}
           </button>
         </div>
         {/* FLEET REAUDIT D2 (W9-4) — Add button wired to record_vehicle_event_v1
             via useRecordVehicleEvent. */}
         <Button
-          label="Add event"
+          label={t('fleetVehicles.events.add')}
           iconName="plus"
           kind="primary"
           size="sm"
@@ -2117,6 +2127,7 @@ function RecordVehicleEventForm({
   // `vehicle_event_type` lookup_values. First row (rank-ordered) is the
   // FE default. Replaces inline `<option value="odometer|...">` literals
   // and inline `useState('odometer')` magic value.
+  const t = useT();
   const eventTypeRows = getLookups('vehicle_event_type');
   const [eventType, setEventType] = useState<string>(eventTypeRows[0]?.value ?? '');
   const [notes, setNotes] = useState<string>('');
@@ -2133,14 +2144,14 @@ function RecordVehicleEventForm({
       });
       const eventId = mutationResultId(result, ['vehicle_event_id', 'event_id', 'id']);
       if (!eventId) {
-        throw new Error('Vehicle event was recorded, but its reference was missing');
+        throw new Error(t('fleetVehicles.events.referenceMissing'));
       }
       await onRecordedReadback(eventId);
-      pushToast(`Vehicle event recorded - ${vehiclePlateLabel(vehicle)} - ${lookupRow('vehicle_event_type', eventType)?.label ?? humanizeToken(eventType, 'Vehicle event')}`, 'good');
+      pushToast(fill(t('fleetVehicles.events.recorded'), { plate: vehiclePlateLabel(vehicle), type: lookupRow('vehicle_event_type', eventType)?.label ?? humanizeToken(eventType, t('fleetVehicles.events.fallbackType')) }), 'good');
       onDone();
     } catch (e) {
       pushToast(
-        `Vehicle event failed - ${e instanceof Error ? e.message : String(e)}`,
+        fill(t('fleetVehicles.events.failed'), { error: e instanceof Error ? e.message : String(e) }),
         'warn',
       );
     } finally {
@@ -2151,10 +2162,10 @@ function RecordVehicleEventForm({
   return (
     <div>
       <p className="state__hint">
-        Logs a vehicle event with the selected event type and operator notes.
+        {t('fleetVehicles.events.hint')}
       </p>
       <div className="field" style={{ marginTop: '12px' }}>
-        <label className="field__label">Event type</label>
+        <label className="field__label">{t('fleet.timeline.eventType')}</label>
         <select value={eventType} onChange={(e) => setEventType(e.target.value)}>
           {eventTypeRows.map((opt) => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -2162,19 +2173,19 @@ function RecordVehicleEventForm({
         </select>
       </div>
       <div className="field" style={{ marginTop: '12px' }}>
-        <label className="field__label">Notes (optional)</label>
+        <label className="field__label">{t('fleet.notesOptional')}</label>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="Detail captured with this vehicle event"
+          placeholder={t('fleetVehicles.events.notesPlaceholder')}
           rows={3}
           style={{ width: '100%' }}
         />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-        <Button label="Cancel" kind="ghost" onClick={onDone} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
         <Button
-          label="Record event"
+          label={t('fleetVehicles.events.submit')}
           iconName="plus"
           kind="primary"
           capability={CAP.FLEET_WRITE}
@@ -2200,6 +2211,7 @@ function DocumentsTab({
   onChanged: () => void;
   modal: ReturnType<typeof useModal>;
 }) {
+  const t = useT();
   const uploadDocMutation = useUploadVehicleDocument();
   const plateLabel = vehiclePlateLabel(vehicle);
   const decoratedDocuments = useMemo(
@@ -2207,14 +2219,14 @@ function DocumentsTab({
       documents.map((doc) => ({
         ...doc,
         kind: doc.kind ?? doc.doc_type,
-        document_file_label: doc.artifact_id ? 'Registered document' : 'Pending document file',
+        document_file_label: doc.artifact_id ? t('fleet.doc.registered') : t('fleet.doc.pendingFile'),
       })),
-    [documents],
+    [documents, t],
   );
 
   function openAttachDocument() {
     modal.open({
-      title: `Attach document - ${plateLabel}`,
+      title: fill(t('fleetVehicles.docs.modalTitle'), { plate: plateLabel }),
       body: (
         <AttachVehicleDocumentBody
           vehicle={vehicle}
@@ -2233,7 +2245,7 @@ function DocumentsTab({
     () => [
       {
         key: 'kind',
-        label: 'Type',
+        label: t('fleet.doc.type'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => {
@@ -2248,22 +2260,22 @@ function DocumentsTab({
           );
         },
       },
-      { key: 'issuer', label: 'Issuer', sortable: true, filterable: true },
-      { key: 'issued_at', label: 'Issued', format: 'date', sortable: true },
-      { key: 'expires_at', label: 'Expires', format: 'date', sortable: true },
-      { key: 'document_file_label', label: 'File', sortable: true, filterable: true },
-      { key: 'status', label: 'Status', sortable: true, filterable: true, lookup: 'vehicle_document_status' },
+      { key: 'issuer', label: t('fleet.doc.issuer'), sortable: true, filterable: true },
+      { key: 'issued_at', label: t('fleet.doc.issued'), format: 'date', sortable: true },
+      { key: 'expires_at', label: t('fleet.doc.expires'), format: 'date', sortable: true },
+      { key: 'document_file_label', label: t('fleetVehicles.docs.file'), sortable: true, filterable: true },
+      { key: 'status', label: t('fleet.status'), sortable: true, filterable: true, lookup: 'vehicle_document_status' },
     ],
-    [],
+    [t],
   );
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-        <h4 className="eyebrow" style={{ margin: 0 }}>Documents</h4>
+        <h4 className="eyebrow" style={{ margin: 0 }}>{t('fleet.documents')}</h4>
         <div style={{ flex: 1 }} />
         <Button
-          label="Attach document"
+          label={t('fleet.doc.attach')}
           iconName="upload"
           kind="primary"
           capability={CAP.FLEET_WRITE}
@@ -2274,7 +2286,7 @@ function DocumentsTab({
       {decoratedDocuments.length === 0 ? (
         <StateView
           kind="empty"
-          hint="No documents on file. Attach a registered document file for this vehicle."
+          hint={t('fleetVehicles.docs.empty')}
         />
       ) : (
         <DataTable<VehicleDocumentRow>
@@ -2300,6 +2312,7 @@ function AttachVehicleDocumentBody({
   uploadDocMutation: ReturnType<typeof useUploadVehicleDocument>;
   onDone: () => void;
 }) {
+  const t = useT();
   const docTypeRows = getLookups('vehicle_document_kind');
   const defaultDocType =
     docTypeRows.find((row) => (row as { is_default?: boolean }).is_default === true)?.value ??
@@ -2314,15 +2327,15 @@ function AttachVehicleDocumentBody({
 
   async function submit() {
     if (!docType) {
-      pushToast('Select a vehicle document type before attaching the document.', 'danger');
+      pushToast(t('fleetVehicles.docs.typeRequired'), 'danger');
       return;
     }
     if (!artifactId.trim()) {
-      pushToast('Provide a registered document reference before attaching the document.', 'danger');
+      pushToast(t('fleet.doc.referenceRequired'), 'danger');
       return;
     }
     if (issuedAt && expiresAt && expiresAt < issuedAt) {
-      pushToast('Document expiry date must be on or after the issued date.', 'danger');
+      pushToast(t('fleet.doc.expiryBeforeIssued'), 'danger');
       return;
     }
 
@@ -2343,10 +2356,10 @@ function AttachVehicleDocumentBody({
           submitted_from: 'console_v2_vehicle_documents',
         },
       });
-      pushToast(`Vehicle document attached - ${vehiclePlateLabel(vehicle)}`, 'good');
+      pushToast(fill(t('fleetVehicles.docs.done'), { plate: vehiclePlateLabel(vehicle) }), 'good');
       onDone();
     } catch {
-      pushToast('Vehicle document could not be attached. Try again.', 'danger');
+      pushToast(t('fleetVehicles.docs.failed'), 'danger');
     } finally {
       setBusy(false);
     }
@@ -2356,8 +2369,8 @@ function AttachVehicleDocumentBody({
     return (
       <StateView
         kind="error"
-        title="Vehicle document types missing"
-        hint="Configure vehicle document types before attaching vehicle documents."
+        title={t('fleetVehicles.docs.typesMissingTitle')}
+        hint={t('fleetVehicles.docs.typesMissingHint')}
       />
     );
   }
@@ -2365,10 +2378,10 @@ function AttachVehicleDocumentBody({
   return (
     <div>
       <p className="state__hint">
-        Attach a registered document file to this vehicle profile.
+        {t('fleetVehicles.docs.hint')}
       </p>
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Document type</label>
+        <label className="field__label">{t('fleet.doc.type')}</label>
         <select value={docType} onChange={(event) => setDocType(event.target.value)}>
           {docTypeRows.map((row) => (
             <option key={row.value} value={row.value}>
@@ -2378,7 +2391,7 @@ function AttachVehicleDocumentBody({
         </select>
       </div>
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Issuer</label>
+        <label className="field__label">{t('fleet.doc.issuer')}</label>
         <input
           type="text"
           value={issuer}
@@ -2387,18 +2400,18 @@ function AttachVehicleDocumentBody({
         />
       </div>
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Document reference</label>
+        <label className="field__label">{t('fleet.doc.reference')}</label>
         <input
           type="text"
           value={artifactId}
           onChange={(event) => setArtifactId(event.target.value)}
-          placeholder="Registered file reference"
+          placeholder={t('fleetVehicles.docs.referencePlaceholder')}
           style={{ width: '100%' }}
         />
       </div>
       <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', marginTop: 12 }}>
         <div className="field">
-          <label className="field__label">Issued date</label>
+          <label className="field__label">{t('fleet.doc.issuedDate')}</label>
           <input
             type="date"
             value={issuedAt}
@@ -2407,7 +2420,7 @@ function AttachVehicleDocumentBody({
           />
         </div>
         <div className="field">
-          <label className="field__label">Expires date</label>
+          <label className="field__label">{t('fleet.doc.expiresDate')}</label>
           <input
             type="date"
             value={expiresAt}
@@ -2417,9 +2430,9 @@ function AttachVehicleDocumentBody({
         </div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onDone} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
         <Button
-          label="Attach document"
+          label={t('fleet.doc.attach')}
           iconName="upload"
           kind="primary"
           capability={CAP.FLEET_WRITE}
@@ -2443,12 +2456,13 @@ function TelemetryTab({
   modal: ReturnType<typeof useModal>;
   onChanged: () => void;
 }) {
+  const t = useT();
   const recordEventMutation = useRecordVehicleEvent();
   const { eventRows, confirmRecordedEventReadback } = useVehicleEventReadbackRows(vehicle.id, myEvents);
 
   function openRecordTelemetry() {
     modal.open({
-      title: `Record telemetry - ${vehiclePlateLabel(vehicle)}`,
+      title: fill(t('fleetVehicles.telemetry.modalTitle'), { plate: vehiclePlateLabel(vehicle) }),
       body: (
         <RecordTelemetryBody
           vehicle={vehicle}
@@ -2467,22 +2481,22 @@ function TelemetryTab({
 
   const columns: Array<DataTableColumn<VehicleEventRow>> = useMemo(
     () => [
-      { key: 'occurred_at', label: 'When', format: 'datetime', sortable: true },
-      { key: 'event_type', label: 'Type', sortable: true, filterable: true, lookup: 'vehicle_event_type' },
-      { key: 'odometer_km', label: 'Odometer (km)', align: 'right', mono: true, sortable: true, type: 'number' },
-      { key: 'fuel_liters', label: 'Fuel (L)', align: 'right', mono: true, sortable: true, type: 'number' },
-      { key: 'actor_name', label: 'Actor', sortable: true, filterable: true },
+      { key: 'occurred_at', label: t('fleet.timeline.when'), format: 'datetime', sortable: true },
+      { key: 'event_type', label: t('fleet.type'), sortable: true, filterable: true, lookup: 'vehicle_event_type' },
+      { key: 'odometer_km', label: t('fleetVehicles.field.odometer'), align: 'right', mono: true, sortable: true, type: 'number' },
+      { key: 'fuel_liters', label: t('fleetVehicles.telemetry.fuelLiters'), align: 'right', mono: true, sortable: true, type: 'number' },
+      { key: 'actor_name', label: t('fleet.timeline.actor'), sortable: true, filterable: true },
     ],
-    [],
+    [t],
   );
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-        <h4 className="eyebrow" style={{ margin: 0 }}>Telemetry</h4>
+        <h4 className="eyebrow" style={{ margin: 0 }}>{t('fleetVehicles.tabs.telemetry')}</h4>
         <div style={{ flex: 1 }} />
         <Button
-          label="Record telemetry"
+          label={t('fleetVehicles.telemetry.record')}
           iconName="plus"
           kind="primary"
           size="sm"
@@ -2494,17 +2508,17 @@ function TelemetryTab({
       <div className="card" style={{ padding: '12px' }}>
         <KvGrid
           rows={[
-            { key: 'last_telemetry', label: 'Last telemetry', value: vehicle.last_telemetry_at ?? '-', mono: true },
-            { key: 'last_event', label: 'Last event', value: vehicle.last_event_at ?? '-', mono: true },
-            { key: 'fuel_level', label: 'Fuel level', value: `${Math.round((vehicle.fuel_level ?? 0) * 100)}%`, mono: true },
-            { key: 'odometer', label: 'Odometer (km)', value: Number(vehicle.odometer_km ?? 0).toLocaleString(), mono: true },
-            { key: 'event_count_24h', label: 'Events 24h', value: vehicle.event_count_24h ?? 0, mono: true },
+            { key: 'last_telemetry', label: t('fleetVehicles.field.lastTelemetry'), value: vehicle.last_telemetry_at ?? '-', mono: true },
+            { key: 'last_event', label: t('fleetVehicles.telemetry.lastEvent'), value: vehicle.last_event_at ?? '-', mono: true },
+            { key: 'fuel_level', label: t('fleetVehicles.field.fuelLevel'), value: `${Math.round((vehicle.fuel_level ?? 0) * 100)}%`, mono: true },
+            { key: 'odometer', label: t('fleetVehicles.field.odometer'), value: Number(vehicle.odometer_km ?? 0).toLocaleString(), mono: true },
+            { key: 'event_count_24h', label: t('fleetVehicles.telemetry.events24h'), value: vehicle.event_count_24h ?? 0, mono: true },
           ]}
         />
       </div>
       <div style={{ marginTop: 10 }}>
         {eventRows.length === 0 ? (
-          <StateView kind="empty" hint="No vehicle event rows recorded yet." />
+          <StateView kind="empty" hint={t('fleetVehicles.telemetry.empty')} />
         ) : (
           <DataTable<VehicleEventRow>
             columns={columns}
@@ -2535,6 +2549,7 @@ function RecordTelemetryBody({
   onRecordedReadback: (eventId: string) => Promise<void>;
   onDone: () => void;
 }) {
+  const t = useT();
   const eventTypeRows = getLookups('vehicle_event_type');
   const defaultEventType =
     eventTypeRows.find((row) => (row as { is_default?: boolean }).is_default === true)?.value ??
@@ -2550,11 +2565,11 @@ function RecordTelemetryBody({
     const odometerValue = odometerKm.trim();
     const fuelValue = fuelLiters.trim();
     if (odometerValue && Number(odometerValue) < 0) {
-      pushToast('Odometer must be zero or greater.', 'danger');
+      pushToast(t('fleetVehicles.telemetry.odometerNegative'), 'danger');
       return;
     }
     if (fuelValue && Number(fuelValue) < 0) {
-      pushToast('Fuel amount must be zero or greater.', 'danger');
+      pushToast(t('fleetVehicles.telemetry.fuelNegative'), 'danger');
       return;
     }
     setBusy(true);
@@ -2571,13 +2586,13 @@ function RecordTelemetryBody({
       });
       const eventId = mutationResultId(result, ['vehicle_event_id', 'event_id', 'id']);
       if (!eventId) {
-        throw new Error('Vehicle telemetry was recorded, but its reference was missing');
+        throw new Error(t('fleetVehicles.telemetry.referenceMissing'));
       }
       await onRecordedReadback(eventId);
-      pushToast(`Vehicle telemetry recorded - ${vehiclePlateLabel(vehicle)} - ${lookupRow('vehicle_event_type', eventType)?.label ?? humanizeToken(eventType, 'Vehicle event')}`, 'good');
+      pushToast(fill(t('fleetVehicles.telemetry.done'), { plate: vehiclePlateLabel(vehicle), type: lookupRow('vehicle_event_type', eventType)?.label ?? humanizeToken(eventType, t('fleetVehicles.events.fallbackType')) }), 'good');
       onDone();
     } catch {
-      pushToast('Vehicle telemetry could not be recorded. Try again.', 'danger');
+      pushToast(t('fleetVehicles.telemetry.failed'), 'danger');
     } finally {
       setBusy(false);
     }
@@ -2587,8 +2602,8 @@ function RecordTelemetryBody({
     return (
       <StateView
         kind="error"
-        title="Vehicle telemetry types missing"
-        hint="Configure vehicle event types before recording telemetry."
+        title={t('fleetVehicles.telemetry.typesMissingTitle')}
+        hint={t('fleetVehicles.telemetry.typesMissingHint')}
       />
     );
   }
@@ -2596,10 +2611,10 @@ function RecordTelemetryBody({
   return (
     <div>
       <p className="state__hint">
-        Records odometer and fuel telemetry for this vehicle.
+        {t('fleetVehicles.telemetry.hint')}
       </p>
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Event type</label>
+        <label className="field__label">{t('fleet.timeline.eventType')}</label>
         <select value={eventType} onChange={(event) => setEventType(event.target.value)}>
           {eventTypeRows.map((row) => (
             <option key={row.value} value={row.value}>
@@ -2610,7 +2625,7 @@ function RecordTelemetryBody({
       </div>
       <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', marginTop: 12 }}>
         <div className="field">
-          <label className="field__label">Odometer (km)</label>
+          <label className="field__label">{t('fleetVehicles.field.odometer')}</label>
           <input
             type="number"
             min="0"
@@ -2620,7 +2635,7 @@ function RecordTelemetryBody({
           />
         </div>
         <div className="field">
-          <label className="field__label">Fuel (L)</label>
+          <label className="field__label">{t('fleetVehicles.telemetry.fuelLiters')}</label>
           <input
             type="number"
             min="0"
@@ -2632,7 +2647,7 @@ function RecordTelemetryBody({
         </div>
       </div>
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Notes</label>
+        <label className="field__label">{t('fleet.notes')}</label>
         <textarea
           value={notes}
           onChange={(event) => setNotes(event.target.value)}
@@ -2641,9 +2656,9 @@ function RecordTelemetryBody({
         />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onDone} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
         <Button
-          label="Record telemetry"
+          label={t('fleetVehicles.telemetry.record')}
           iconName="plus"
           kind="primary"
           capability={CAP.FLEET_WRITE}
@@ -2701,6 +2716,7 @@ function FuelGauge({ value }: { value: number }) {
 }
 
 function RelativeTime({ iso }: { iso: string | null }) {
+  const t = useT();
   if (!iso) return <span className="mono" style={{ color: 'var(--ink-3)' }}>—</span>;
   const ts = new Date(iso).getTime();
   if (Number.isNaN(ts)) {
@@ -2710,10 +2726,10 @@ function RelativeTime({ iso }: { iso: string | null }) {
   const diff = Math.max(0, now - ts);
   const minutes = Math.round(diff / 60_000);
   let label: string;
-  if (minutes < 1) label = 'just now';
-  else if (minutes < 60) label = `${minutes}m ago`;
-  else if (minutes < 1440) label = `${Math.round(minutes / 60)}h ago`;
-  else label = `${Math.round(minutes / 1440)}d ago`;
+  if (minutes < 1) label = t('fleetVehicles.time.justNow');
+  else if (minutes < 60) label = fill(t('fleetVehicles.time.minutesAgo'), { n: minutes });
+  else if (minutes < 1440) label = fill(t('fleetVehicles.time.hoursAgo'), { n: Math.round(minutes / 60) });
+  else label = fill(t('fleetVehicles.time.daysAgo'), { n: Math.round(minutes / 1440) });
   return (
     <span className="mono" style={{ fontSize: '11px' }} title={iso}>
       {label}
@@ -2721,15 +2737,15 @@ function RelativeTime({ iso }: { iso: string | null }) {
   );
 }
 
-function formatDuration(start: string, end: string | null): string {
+function formatDuration(start: string, end: string | null, t: Translate = englishT): string {
   const a = new Date(start).getTime();
   const b = end ? new Date(end).getTime() : Date.now();
   if (Number.isNaN(a) || Number.isNaN(b)) return '—';
   const days = Math.max(0, Math.round((b - a) / 86_400_000));
-  if (days < 1) return '<1d';
-  if (days < 30) return `${days}d`;
-  if (days < 365) return `${Math.round(days / 30)}mo`;
-  return `${(days / 365).toFixed(1)}y`;
+  if (days < 1) return t('fleetVehicles.duration.underDay');
+  if (days < 30) return fill(t('fleetVehicles.duration.days'), { n: days });
+  if (days < 365) return fill(t('fleetVehicles.duration.months'), { n: Math.round(days / 30) });
+  return fill(t('fleetVehicles.duration.years'), { n: (days / 365).toFixed(1) });
 }
 
 function titleCase(value: string): string {
@@ -2739,7 +2755,7 @@ function titleCase(value: string): string {
     .join(' ');
 }
 
-function summarizePayload(payload: Record<string, unknown> | null | undefined): string {
+function summarizePayload(payload: Record<string, unknown> | null | undefined, t: Translate = englishT): string {
   if (!payload) return '—';
   const keys = Object.keys(payload);
   if (keys.length === 0) return '—';
@@ -2747,8 +2763,8 @@ function summarizePayload(payload: Record<string, unknown> | null | undefined): 
     .slice(0, 3)
     .map((k) => {
       const raw = payload[k];
-      const v = payloadValueLabel(k, raw);
-      return `${humanizeToken(k, 'Payload')}=${v.length > 24 ? `${v.slice(0, 24)}…` : v}`;
+      const v = payloadValueLabel(k, raw, t);
+      return `${humanizeToken(k, t('fleetVehicles.payload.fallbackKey'))}=${v.length > 24 ? `${v.slice(0, 24)}…` : v}`;
     })
     .join(' · ');
   return summary;
@@ -2772,23 +2788,24 @@ function redactPayload(value: unknown): unknown {
   );
 }
 
-function payloadValueLabel(key: string, raw: unknown): string {
-  if (isSensitivePayloadKey(key)) return '[redacted]';
+function payloadValueLabel(key: string, raw: unknown, t: Translate = englishT): string {
+  if (isSensitivePayloadKey(key)) return t('fleetVehicles.payload.redacted');
   const redacted = redactPayload(raw);
   if (redacted == null) return '—';
-  if (Array.isArray(redacted)) return `${redacted.length} item${redacted.length === 1 ? '' : 's'}`;
+  if (Array.isArray(redacted)) return fill(t(redacted.length === 1 ? 'fleetVehicles.payload.itemOne' : 'fleetVehicles.payload.itemOther'), { n: redacted.length });
   if (typeof redacted === 'object') {
     const count = Object.keys(redacted as Record<string, unknown>).length;
-    return `${count} detail${count === 1 ? '' : 's'}`;
+    return fill(t(count === 1 ? 'fleetVehicles.payload.detailOne' : 'fleetVehicles.payload.detailOther'), { n: count });
   }
   return String(redacted);
 }
 
 function PayloadDetail({ payload }: { payload: Record<string, unknown> }) {
+  const t = useT();
   const redacted = redactPayload(payload) as Record<string, unknown>;
   const entries = Object.entries(redacted);
   if (entries.length === 0) {
-    return <span className="state__hint">No payload</span>;
+    return <span className="state__hint">{t('fleetVehicles.payload.none')}</span>;
   }
   return (
     <div style={{ display: 'grid', gap: 6 }}>
@@ -2802,14 +2819,14 @@ function PayloadDetail({ payload }: { payload: Record<string, unknown> }) {
             fontSize: 11,
           }}
         >
-          <span className="eyebrow">{humanizeToken(key, 'Detail')}</span>
+          <span className="eyebrow">{humanizeToken(key, t('fleet.timeline.detail'))}</span>
           <span className="mono" style={{ color: 'var(--ink-2)' }}>
-            {payloadValueLabel(key, value)}
+            {payloadValueLabel(key, value, t)}
           </span>
         </div>
       ))}
       {entries.length > 8 ? (
-        <span className="state__hint">{entries.length - 8} more details hidden</span>
+        <span className="state__hint">{fill(t('fleetVehicles.payload.moreHidden'), { n: entries.length - 8 })}</span>
       ) : null}
     </div>
   );
