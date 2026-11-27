@@ -452,6 +452,12 @@ export const settings_versions = [
   // reads them as primary hardcoded literals when not row-driven.
   { id: 'sv_360', category: 'ui_presentation_policy', scope_type: 'global', scope_id: 'global',
     value: {
+      live_refresh: {
+        poll_interval_ms: 30000,
+        offline_after_ms: 60000,
+        max_reconnects: 3,
+        refetch_interval_ms: 10000,
+      },
       toast: {
         duration_ms: 3200,
         icon_for_tone: { good: 'check', warn: 'bell', danger: 'warn', info: 'bell' },
