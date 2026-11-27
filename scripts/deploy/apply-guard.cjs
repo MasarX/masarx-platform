@@ -90,6 +90,9 @@ async function releaseRefAllowed(get, env, record, tip) {
   }
   record('G3: release candidate tag resolves to github.sha');
 
+  if (env.GITHUB_EVENT_NAME === 'workflow_dispatch' && !env.EXPECTED_SHA) {
+    return refuse('expected_sha is required for a tag dispatch');
+  }
   if (env.EXPECTED_SHA && env.EXPECTED_SHA !== sha) return refuse('expected_sha must equal github.sha');
   record(env.EXPECTED_SHA ? 'G3: expected_sha matched github.sha' : 'G3: expected_sha was not supplied');
 

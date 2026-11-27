@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/Button';
 import { StateView } from '@/components/StateView';
+import { useI18n } from '@/lib/i18n';
 
 interface ImportCancelReasonFormProps {
   jobId: string;
@@ -19,6 +20,7 @@ export function ImportCancelReasonForm({
   onClose,
   onSubmit,
 }: ImportCancelReasonFormProps) {
+  const { t } = useI18n();
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -26,7 +28,7 @@ export function ImportCancelReasonForm({
 
   async function submit() {
     if (!trimmedReason) {
-      setError('Enter the operator reason before cancelling this import job.');
+      setError(t('platformImportsCancel.importCancelReasonForm.enterTheOperatorReason'));
       return;
     }
     setSubmitting(true);
@@ -47,7 +49,7 @@ export function ImportCancelReasonForm({
       {error ? (
         <StateView
           kind="error"
-          title="Import cancellation failed"
+          title={t('platformImportsCancel.importCancelReasonForm.importCancellationFailed')}
           hint={error}
         />
       ) : null}
@@ -63,16 +65,16 @@ export function ImportCancelReasonForm({
       >
         <span className="mono">{entityLabel}</span>
         <span className="mono">{jobId}</span>
-        <span className="mono">Current status</span>
+        <span className="mono">{t('platformImportsCancel.importCancelReasonForm.currentStatus')}</span>
         <span>{jobStatus || '-'}</span>
-        <label className="mono" htmlFor="import-cancel-reason">Reason</label>
+        <label className="mono" htmlFor="import-cancel-reason">{t('platformImportsCancel.importCancelReasonForm.reason')}</label>
         <input
           id="import-cancel-reason"
           className="dt-inline-input"
-          aria-label="Cancellation reason"
+          aria-label={t('platformImportsCancel.importCancelReasonForm.cancellationReason')}
           value={reason}
           disabled={submitting}
-          placeholder="Why is this import being cancelled?"
+          placeholder={t('platformImportsCancel.importCancelReasonForm.whyIsThisImport')}
           onChange={(event) => {
             setReason(event.target.value);
             if (error) setError(null);
@@ -80,9 +82,9 @@ export function ImportCancelReasonForm({
         />
       </div>
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
-        <Button label="Close" kind="ghost" disabled={submitting} onClick={onClose} />
+        <Button label={t('platformImportsCancel.importCancelReasonForm.close')} kind="ghost" disabled={submitting} onClick={onClose} />
         <Button
-          label="Confirm cancellation"
+          label={t('platformImportsCancel.importCancelReasonForm.confirmCancellation')}
           iconName="close"
           kind="danger"
           disabled={!trimmedReason || submitting}
