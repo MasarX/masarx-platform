@@ -20,6 +20,7 @@ import {
   getMobileV2PickupFailureReasonLabel,
 } from "./mobile-v2-pickup-policy";
 import type { MobileV2Pickup } from "./mobile-v2-pickups-screen";
+import { getStrings, resolveLocaleCode } from "./i18n";
 import {
   MOBILE_V2_DIMENSIONS,
   MOBILE_V2_FONT_MONO,
@@ -43,6 +44,7 @@ export interface MobileV2PickupDetailScreenProps {
   readonly onAddManually?: () => void;
   readonly onConfirm?: () => void;
   readonly onFail?: () => void;
+  readonly locale?: string;
   readonly style?: StyleProp<ViewStyle>;
 }
 
@@ -90,12 +92,17 @@ export function MobileV2PickupDetailScreen(
   props: MobileV2PickupDetailScreenProps,
 ): React.ReactElement {
   const { theme, pickup } = props;
+  const strings = getStrings(resolveLocaleCode(props.locale));
+  const failureReasons: Readonly<Record<string, unknown>> = strings.pickupDetail.failureReasons;
   const pct = pickup.expectedQty > 0 ? Math.round((pickup.picked / pickup.expectedQty) * 100) : 0;
   const remaining = Math.max(0, pickup.expectedQty - pickup.picked);
   const canCapture = pickup.status === "pending";
   const canCommit = pickup.expectedQty > 0 && pickup.picked >= pickup.expectedQty && pickup.status === "pending";
+  const catalogReasonLabel = pickup.failureReason ? failureReasons[pickup.failureReason] : undefined;
   const failureReasonLabel = pickup.failureReason
-    ? getMobileV2PickupFailureReasonLabel(pickup.failureReason, MOBILE_V2_PICKUP_DEFAULT_FAILURE_REASONS)
+    ? typeof catalogReasonLabel === "string"
+      ? catalogReasonLabel
+      : getMobileV2PickupFailureReasonLabel(pickup.failureReason, MOBILE_V2_PICKUP_DEFAULT_FAILURE_REASONS)
     : null;
   // Circle math: r=26 -> circumference ≈ 163.36
   const circumference = 2 * Math.PI * 26;
@@ -131,7 +138,7 @@ export function MobileV2PickupDetailScreen(
                   fontFamily: MOBILE_V2_FONT_SANS,
                 }}
               >
-                Scanned
+                {strings.routeLoad.scanned}
               </Text>
               <View style={{ flexDirection: "row", alignItems: "baseline" }}>
                 <Text
@@ -166,7 +173,10 @@ export function MobileV2PickupDetailScreen(
                   fontFamily: MOBILE_V2_FONT_SANS,
                 }}
               >
-                {remaining} parcel{remaining === 1 ? "" : "s"} remaining
+                {(remaining === 1 ? strings.pickupDetail.parcelsRemainingOne : strings.pickupDetail.parcelsRemainingOther).replace(
+                  "{n}",
+                  () => String(remaining),
+                )}
               </Text>
             </FxCol>
 
@@ -233,11 +243,11 @@ export function MobileV2PickupDetailScreen(
           />
 
           <FxRow gap={MOBILE_V2_SPACING["3xl"]}>
-            <MetadataCell label="Waybill" value={pickup.wb} mono onChrome={theme.onChrome} />
-            <MetadataCell label="Area" value={pickup.area} mono={false} onChrome={theme.onChrome} />
+            <MetadataCell label={strings.pickupDetail.waybill} value={pickup.wb} mono onChrome={theme.onChrome} />
+            <MetadataCell label={strings.pickupDetail.area} value={pickup.area} mono={false} onChrome={theme.onChrome} />
             <MetadataCell
-              label="Seal"
-              value={pickup.sealRequired ? "Required" : "Optional"}
+              label={strings.pickupDetail.seal}
+              value={pickup.sealRequired ? strings.pickupDetail.sealRequired : strings.pickupDetail.sealOptional}
               mono
               onChrome={theme.onChrome}
             />
@@ -292,7 +302,7 @@ export function MobileV2PickupDetailScreen(
                 variant was yellow-tinted; with `soft` restored to the
                 design's neutral tokens this matches the canvas. */}
             <FxButton theme={theme} variant="soft" size="sm" icon="map" onPress={props.onGo}>
-              Go
+              {strings.pickupDetail.go}
             </FxButton>
           </FxRow>
 
@@ -300,14 +310,14 @@ export function MobileV2PickupDetailScreen(
 
           <FxRow gap={MOBILE_V2_SPACING.lg} style={{ paddingHorizontal: MOBILE_V2_SPACING["3xl"], paddingVertical: MOBILE_V2_SPACING.xl }}>
             <FxButton theme={theme} variant="ghost" size="sm" icon="phone" onPress={props.onCall}>
-              Call
+              {strings.detail.call}
             </FxButton>
             <FxButton theme={theme} variant="ghost" size="sm" icon="whatsapp" onPress={props.onWhatsApp}>
-              WhatsApp
+              {strings.stop.whatsapp}
             </FxButton>
             <View style={{ flex: 1 }} />
             <FxButton theme={theme} variant="ghost" size="sm" icon="message" onPress={props.onNote}>
-              Note
+              {strings.pickupDetail.note}
             </FxButton>
           </FxRow>
         </FxCard>
@@ -326,7 +336,7 @@ export function MobileV2PickupDetailScreen(
                     fontFamily: MOBILE_V2_FONT_SANS,
                   }}
                 >
-                  Pickup failure
+                  {strings.pickupDetail.pickupFailure}
                 </Text>
                 <Text
                   style={{
@@ -336,11 +346,11 @@ export function MobileV2PickupDetailScreen(
                     fontFamily: MOBILE_V2_FONT_SANS,
                   }}
                 >
-                  {failureReasonLabel ?? "Failure recorded"}
+                  {failureReasonLabel ?? strings.pickupDetail.failureRecorded}
                 </Text>
               </FxCol>
               <FxChip theme={theme} tone="danger" icon="alert" dense>
-                Failed
+                {strings.pickupDetail.failed}
               </FxChip>
             </FxRow>
             {pickup.failureNote ? (
@@ -375,7 +385,7 @@ export function MobileV2PickupDetailScreen(
                   fontFamily: MOBILE_V2_FONT_SANS,
                 }}
               >
-                Scan parcels
+                {strings.pickupDetail.scanParcels}
               </Text>
               <Text
                 style={{
@@ -385,11 +395,13 @@ export function MobileV2PickupDetailScreen(
                   fontFamily: MOBILE_V2_FONT_SANS,
                 }}
               >
-                Capture each parcel barcode at the merchant
+                {strings.pickupDetail.scanHint}
               </Text>
             </FxCol>
             <FxChip theme={theme} tone="neutral" dense mono>
-              {pickup.picked} of {pickup.expectedQty}
+              {strings.pickupDetail.pickedOfExpected
+                .replace("{picked}", () => String(pickup.picked))
+                .replace("{expected}", () => String(pickup.expectedQty))}
             </FxChip>
           </FxRow>
 
@@ -402,12 +414,12 @@ export function MobileV2PickupDetailScreen(
             onPress={props.onScanParcel}
             disabled={!canCapture}
           >
-            Scan parcel barcode
+            {strings.pickupDetail.scanParcelBarcode}
           </FxButton>
 
           <FxRow gap={MOBILE_V2_SPACING.md} style={{ marginTop: MOBILE_V2_SPACING.lg }} wrap>
             <FxChip theme={theme} icon="qr" dense>
-              Bulk · QR-on-bag
+              {strings.pickupDetail.bulkQr}
             </FxChip>
             <Pressable
               onPress={canCapture ? props.onAddManually : undefined}
@@ -417,7 +429,7 @@ export function MobileV2PickupDetailScreen(
               style={{ opacity: canCapture ? 1 : 0.45 }}
             >
               <FxChip theme={theme} icon="plus" dense>
-                Add manually
+                {strings.pickupDetail.addManually}
               </FxChip>
             </Pressable>
             <FxChip
@@ -426,7 +438,7 @@ export function MobileV2PickupDetailScreen(
               tone={pickup.picked > pickup.expectedQty ? "warning" : "neutral"}
               dense
             >
-              Mismatch
+              {strings.pickupDetail.mismatch}
             </FxChip>
           </FxRow>
         </FxCard>
@@ -443,13 +455,13 @@ export function MobileV2PickupDetailScreen(
               onPress={props.onConfirm}
               testID="mobile-action-tasks.complete"
             >
-              Pickup handoff
+              {strings.pickupDetail.pickupHandoff}
             </FxButton>
           ) : null}
 
           {pickup.status === "pending" && !canCommit ? (
             <FxButton theme={theme} variant="primary" full size="lg" icon="scan" onPress={props.onScanParcel}>
-              {`Continue scanning · ${remaining} left`}
+              {strings.pickupDetail.continueScanning.replace("{n}", () => String(remaining))}
             </FxButton>
           ) : null}
 
@@ -462,11 +474,11 @@ export function MobileV2PickupDetailScreen(
               onPress={props.onFail}
               testID="mobile-action-tasks.exception"
             >
-              Pickup failure
+              {strings.pickupDetail.pickupFailure}
             </FxButton>
           ) : (
             <FxButton theme={theme} variant="soft" full icon="check" onPress={props.onGo}>
-              Done · back to pickups
+              {strings.pickupDetail.doneBackToPickups}
             </FxButton>
           )}
         </FxCol>

@@ -49,7 +49,6 @@ coverage/
 # Supabase
 .supabase/
 supabase/.temp/*
-!supabase/.temp/cli-latest
 supabase/.branches/
 supabase/functions/*/_shared/
 

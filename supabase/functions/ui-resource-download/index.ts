@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.119.0";
-import { extractToken, parseRequestBody, readEnv } from "../_shared/mod.mjs";
+import { canonicalStorageKey, extractToken, isStorageBucketId, parseRequestBody, parseStorageObjectUrl, readEnv } from "../_shared/mod.mjs";
 import { buildCorsHeaders, withCorsJson } from "../_shared/cors.mjs";
 
 type JsonRecord = Record<string, unknown>;
@@ -17,10 +17,10 @@ type DownloadResult = {
 };
 
 type WorkflowOutputStatus = {
+  organization_id?: unknown;
   output_url?: unknown;
   output_file_path?: unknown;
   output_bucket?: unknown;
-  output_ready?: unknown;
   status_checked_at?: unknown;
 };
 
@@ -47,45 +47,15 @@ const parsePositiveInt = (value: number, fallback: number) => {
 const normalizeStoragePath = (
   rawPath: string,
   bucketFallback: string,
+  organizationId: unknown,
 ): DownloadResult | null => {
-  const trimmed = rawPath.trim();
-  if (!trimmed) return null;
-
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-    try {
-      const url = new URL(trimmed);
-      const patterns = [
-        "/storage/v1/object/public/",
-        "/storage/v1/object/sign/",
-        "/storage/v1/object/authenticated/",
-        "/storage/v1/object/",
-      ];
-      const matched = patterns.find((pattern) => url.pathname.startsWith(pattern));
-      if (matched) {
-        const rest = decodeURIComponent(url.pathname.slice(matched.length));
-        const parts = rest.split("/").filter(Boolean);
-        const bucket = parts.shift();
-        const path = parts.join("/");
-        if (bucket && path) {
-          return { bucket, path };
-        }
-      }
-    } catch (_err) {
-      // Malformed URLs and percent encodings are not storage keys.
-    }
-    return null;
-  }
-
-  const normalized = trimmed.startsWith("/") ? trimmed.slice(1) : trimmed;
-  if (bucketFallback && normalized.startsWith(`${bucketFallback}/`)) {
-    return {
-      bucket: bucketFallback,
-      path: normalized.slice(bucketFallback.length + 1),
-    };
-  }
-
-  if (!bucketFallback) return null;
-  return { bucket: bucketFallback, path: normalized };
+  const url = parseStorageObjectUrl(rawPath);
+  const bucket = url?.bucket ?? bucketFallback;
+  const normalized = rawPath.startsWith("/") ? rawPath.slice(1) : rawPath;
+  const prefix = `${bucketFallback}/`;
+  const key = url?.path ?? (bucketFallback && normalized.startsWith(prefix) ? normalized.slice(prefix.length) : normalized);
+  const path = canonicalStorageKey(key, organizationId);
+  return isStorageBucketId(bucket) && path ? { bucket, path } : null;
 };
 
 const ensureConfig = () => {
@@ -192,22 +162,24 @@ Deno.serve(async (req: Request) => {
       }, corsHeaders);
     }
 
-    const readyFilePath = getString(statusRecord?.output_file_path);
+    const rawPath = statusRecord?.output_file_path;
     const readyBucket = getString(statusRecord?.output_bucket) || DEFAULT_BUCKET;
-    const readyOutput =
-      Boolean(statusRecord?.output_ready) || Boolean(readyFilePath);
-    if (!readyOutput || !readyFilePath) {
+    if (!rawPath) {
       return withCorsJson(409, { error: "Workflow output is not ready." }, corsHeaders);
+    }
+    const readyFilePath = canonicalStorageKey(rawPath, statusRecord?.organization_id);
+    if (!isStorageBucketId(readyBucket) || !readyFilePath) {
+      return withCorsJson(500, { error: "Unable to resolve workflow storage path." }, corsHeaders);
     }
 
     const { data: signedData, error: signedError } = await serviceClient.storage
       .from(readyBucket)
-      .createSignedUrl(readyFilePath, expiresSeconds);
+      .createSignedUrls([readyFilePath], expiresSeconds);
     if (signedError) {
       return withCorsJson(502, { error: signedError.message }, corsHeaders);
     }
 
-    const signedRecord = asRecord(signedData);
+    const signedRecord = asRecord(signedData?.[0]);
     const signedUrl = getString(
       signedRecord?.signedUrl ?? signedRecord?.signedURL ?? signedRecord?.url,
     );
@@ -244,20 +216,27 @@ Deno.serve(async (req: Request) => {
 
     const podAssetRecord = asRecord(Array.isArray(podAssetDownload) ? podAssetDownload[0] : podAssetDownload);
     const podAssetBucket = getString(podAssetRecord?.storage_bucket);
-    const podAssetPath = getString(podAssetRecord?.storage_key);
-    if (!podAssetBucket || !podAssetPath) {
+    if (!isStorageBucketId(podAssetBucket) || !podAssetRecord?.storage_key) {
+      return withCorsJson(404, { error: "Shipment POD asset download path is unavailable." }, corsHeaders);
+    }
+    const { data: shipment, error: shipmentError } = await userClient.rpc("ui_get_resource_v1", {
+      p_resource: "shipments",
+      p_id: shipmentId,
+    });
+    const podAssetPath = canonicalStorageKey(podAssetRecord.storage_key, asRecord(shipment)?.organization_id);
+    if (shipmentError || !podAssetPath) {
       return withCorsJson(404, { error: "Shipment POD asset download path is unavailable." }, corsHeaders);
     }
 
     const { data: signedData, error: signedError } = await serviceClient.storage
       .from(podAssetBucket)
-      .createSignedUrl(podAssetPath, expiresSeconds);
+      .createSignedUrls([podAssetPath], expiresSeconds);
 
     if (signedError) {
       return withCorsJson(502, { error: signedError.message }, corsHeaders);
     }
 
-    const signedRecord = asRecord(signedData);
+    const signedRecord = asRecord(signedData?.[0]);
     const signedUrl = getString(
       signedRecord?.signedUrl ?? signedRecord?.signedURL ?? signedRecord?.url,
     );
@@ -315,13 +294,13 @@ Deno.serve(async (req: Request) => {
   }
 
   const recordData = asRecord(record);
-  const filePath = getString(recordData?.[pathColumn]);
-  if (!filePath) {
+  const filePath = recordData?.[pathColumn];
+  if (typeof filePath !== "string" || !filePath) {
     return withCorsJson(404, { error: "Download path missing." }, corsHeaders);
   }
 
   const bucket = getString(download?.bucket) || DEFAULT_BUCKET;
-  const normalized = normalizeStoragePath(filePath, bucket);
+  const normalized = normalizeStoragePath(filePath, bucket, recordData?.organization_id);
   if (!normalized) {
     return withCorsJson(500, { error: "Unable to resolve storage path." }, corsHeaders);
   }
@@ -334,13 +313,13 @@ Deno.serve(async (req: Request) => {
 
   const { data: signedData, error: signedError } = await serviceClient.storage
     .from(normalized.bucket)
-    .createSignedUrl(normalized.path, resourceExpiresSeconds);
+    .createSignedUrls([normalized.path], resourceExpiresSeconds);
 
   if (signedError) {
     return withCorsJson(502, { error: signedError.message }, corsHeaders);
   }
 
-  const signedRecord = asRecord(signedData);
+  const signedRecord = asRecord(signedData?.[0]);
   const urlValue = getString(
     signedRecord?.signedUrl ?? signedRecord?.signedURL ?? signedRecord?.url,
   );

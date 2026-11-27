@@ -1,0 +1,229 @@
+[
+  {
+    "file": "tests/integration/000_settings-global-defaults-schema.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/command-dashboard-kpi-backfill.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/edge/api-caller-native-jwt.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/edge/driver-application-document-return-e2e.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/edge/driver-signup-intake-e2e.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/edge/public-shipment-tracking-e2e.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/f148-policy-alignment.integration.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/fieldops/fieldops-self-kyc.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/fixture-geocoding-canonical-upsert.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/geocoding.webhook-intake.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/integrations/plugin-export-concurrency.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/integrations/studio-server-native.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/marketing/lead-duplicate-recovery.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/onboarding-readiness-fixtures.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/webhook-ingest.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/workflows/labels-print-webhook-edge.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/workflows/labels-print-webhook.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/workflows/labels-print-workflow.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486",
+    "maxSkipped": 1
+  },
+  {
+    "file": "tests/integration/workflows/recurring-shipment-template-convergence.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/workspace/landing-intake-readback.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing provisioning placeholder pending restoration",
+    "issue": "#486"
+  },
+  {
+    "file": "tests/integration/label/arabic-render.test.js",
+    "runner": "Hosted integration",
+    "reason": "Existing rendering placeholder pending a redistributable font fixture",
+    "issue": "#514"
+  },
+  {
+    "file": "tests/integration/workflows/communications.test.js",
+    "runner": "Live-provider certification",
+    "reason": "Sends a message through the provider sandbox",
+    "issue": "#134"
+  },
+  {
+    "file": "tests/integration/workflows/outbound-3pl.test.js",
+    "runner": "Live-provider certification",
+    "reason": "Creates a shipment through the provider sandbox",
+    "issue": "#134"
+  },
+  {
+    "file": "tests/integration/geocoding/providers-here.test.js",
+    "runner": "Live-provider certification",
+    "reason": "Exercises a live geocoding provider",
+    "issue": "#134"
+  },
+  {
+    "file": "tests/integration/workflows/geocoding.test.js",
+    "runner": "Live-provider certification",
+    "reason": "Exercises a live geocoding provider",
+    "issue": "#134"
+  },
+  {
+    "file": "tests/integration/providers/importer-explicit.test.js",
+    "runner": "Live-provider certification",
+    "reason": "Exercises a live carrier integration",
+    "issue": "#134"
+  },
+  {
+    "file": "tests/integration/providers/importer-auto-gen.test.js",
+    "runner": "Live-provider certification",
+    "reason": "Exercises a live carrier integration",
+    "issue": "#134"
+  },
+  {
+    "file": "tests/integration/workflow-logestechs.test.js",
+    "runner": "Live-provider certification",
+    "reason": "Exercises a live carrier integration",
+    "issue": "#134"
+  },
+  {
+    "file": "tests/integration/pitch/pitch-demo-live.test.js",
+    "runner": "Live-provider certification",
+    "reason": "Exercises live providers in the pitch scenario",
+    "issue": "#134"
+  },
+  {
+    "file": "tests/integration/workflows/communications-reply-intent.test.js",
+    "runner": "Live-provider certification",
+    "reason": "Sends a live communications sandbox message",
+    "issue": "#134",
+    "maxSkipped": 1
+  },
+  {
+    "file": "tests/integration/label/shipments-print-cloud-benchmark.test.js",
+    "runner": "Shipment print benchmark",
+    "reason": "Requires the dedicated benchmark opt-in",
+    "issue": "#577"
+  },
+  {
+    "file": "tests/integration/edge/api-caller-e2e.test.js",
+    "runner": "Deployed egress proof",
+    "reason": "Two assertions require the deployed egress proof target",
+    "issue": "#578",
+    "maxSkipped": 2
+  },
+  {
+    "file": "tests/integration/comms-notification-dispatch.test.js",
+    "kind": "known-failure",
+    "runner": "Hosted integration",
+    "reason": "Fixture SQL or data does not match the migrated schema and settings",
+    "issue": "#574",
+    "expires": "2026-12-08"
+  },
+  {
+    "file": "tests/integration/cross-surface-delivery.test.js",
+    "kind": "known-failure",
+    "runner": "Hosted integration",
+    "reason": "Hosted results differ from the current integration assertions",
+    "issue": "#575",
+    "expires": "2026-12-08"
+  },
+  {
+    "file": "tests/integration/workflows/shipment-amend-cancel.test.js",
+    "kind": "known-failure",
+    "runner": "Hosted integration",
+    "reason": "Hosted results differ from the current integration assertions",
+    "issue": "#575",
+    "expires": "2026-12-08"
+  },
+  {
+    "file": "tests/integration/mapping-studio-runtime-save.test.js",
+    "kind": "known-failure",
+    "runner": "Hosted integration",
+    "reason": "Hosted results differ from the current integration assertions",
+    "issue": "#575",
+    "expires": "2026-12-08"
+  }
+]

@@ -233,7 +233,7 @@ export function MapLibreBackdrop({
     let map: MapLibreMap | null = null;
 
     void Promise.all([
-      import('maplibre-gl'),
+      import('maplibre-gl').then(({ Map, setWorkerUrl }) => ({ Map, setWorkerUrl })),
       import('maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'),
     ])
       .then(([{ Map: MapCtor, setWorkerUrl }, { default: workerUrl }]) => {

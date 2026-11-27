@@ -7,7 +7,7 @@ import { findUntranslated } from '@/test/helpers/untranslated';
 import { BasketsModule } from '@/modules/operate/baskets';
 import { clearToasts } from '@/components/toastStore';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/operate-queues';
+import ar from '@/lib/seed-raw/i18n/areas/ar/operate-queues';
 
 function lookup(catalog: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], catalog);

@@ -14,7 +14,7 @@ import { Input } from "./input";
 import { Select } from "./select";
 import { useToast } from "./use-toast";
 import { resolveOrganizationDisplayLabel, resolveScopeDisplayLabel } from "./shipment-create-lookup-options";
-import { formatUiError } from "./utils";
+import { formatUiError, UiMessageError } from "./utils";
 import { resolveUiRpcTimeoutMs, withTimeout } from "./promise-timeout";
 import { useUnsavedChangesGuard } from "./use-unsaved-changes";
 import { resolveSafeAppBasePath, resolveSafeHref } from "./url-guard";
@@ -190,7 +190,7 @@ export function ShipmentManualCreateForm({
       const capture = normalizeShipmentAddressCapture(shortCode, latitude, longitude);
       const hasAddress = Boolean(capture || addressLine1.trim() || addressCity.trim());
       if (hasAddress && (!addressLine1.trim() || !addressCity.trim())) {
-        throw new Error("Destination address line 1 and city are required when entering an address.");
+        throw new UiMessageError("Destination address line 1 and city are required when entering an address.");
       }
       const destinationAddress = hasAddress ? {
         ...capture, line1: addressLine1.trim(), city: addressCity.trim(),
@@ -222,7 +222,7 @@ export function ShipmentManualCreateForm({
       const workflowStatus = String(result?.workflow_status ?? "").trim().toLowerCase();
       const resultStatus = String(result?.status ?? "").trim().toLowerCase();
       if ([workflowStatus, resultStatus].some((value) => ["failed", "error", "blocked", "cancelled", "canceled"].includes(value))) {
-        throw new Error("Shipment creation did not complete successfully.");
+        throw new UiMessageError("Shipment creation did not complete successfully.");
       }
       const completed = workflowStatus === "completed" ||
         (!workflowStatus && !result?.workflow_run_id && !destinationAddress && Boolean(shipmentId));
@@ -250,7 +250,7 @@ export function ShipmentManualCreateForm({
           p_correlation_id: result?.correlation_id ?? null,
         }), timeoutMs);
         if (readback?.visible !== true) {
-          throw new Error("Shipment was saved, but its persisted decision and audit readback is not yet available. Check again before continuing.");
+          throw new UiMessageError("Shipment was saved, but its persisted decision and audit readback is not yet available. Check again before continuing.");
         }
       }
 

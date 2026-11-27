@@ -106,18 +106,7 @@ describe('Geocoding benchmark harness (accuracy/timing)', () => {
 
   test('perfect plugin: high-confidence match under 3s', async () => {
     const ids = await selectOrgClientSender(client);
-    const { rows: perfectRows } = await client.query(
-      `
-        SELECT b.*
-        FROM benchmark_geocoding_samples b
-        JOIN canonical_cities c ON lower(c.name_canonical) = lower(b.city)
-        JOIN canonical_districts d ON d.city_id = c.id AND lower(d.name_canonical) = lower(b.district)
-        WHERE b.category = 'perfect'
-        ORDER BY b.created_at DESC
-        LIMIT 1
-      `,
-    );
-    const sample = perfectRows[0] || (await pickBenchmarkSample(client, 'perfect'));
+    const sample = { city: 'Riyadh', district: 'Al Amal Dist.', province: 'Riyadh', country: 'SA' };
     await applyGeocodingPolicy(
       client,
       'client',
@@ -196,7 +185,12 @@ describe('Geocoding benchmark harness (accuracy/timing)', () => {
 
   test('long_line plugin: detects noise and forces fallback under 4s', async () => {
     const ids = await selectOrgClientSender(client);
-    const sample = await pickBenchmarkSample(client, 'long_line');
+    const sample = {
+      city: 'Riyadh',
+      district: 'Al Olaya',
+      province: 'Riyadh',
+      line1: 'Very long noisy address with extra tokens 12345 near Al Olaya Riyadh lorem ipsum dolor sit amet',
+    };
     await applyGeocodingPolicy(
       client,
       'sender',

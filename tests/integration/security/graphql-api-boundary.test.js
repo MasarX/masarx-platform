@@ -1,11 +1,11 @@
-const { requireEnv } = require('../../utils/test-env');
+const { assertEnv } = require('../../utils/test-env');
 
 describe('GraphQL API boundary', () => {
-  const missing = requireEnv(['SUPABASE_URL', 'SUPABASE_ANON_KEY'], 'graphql api boundary');
+  assertEnv(['SUPABASE_URL', 'SUPABASE_ANON_KEY'], 'GraphQL API boundary');
 
-  (missing ? test.skip : test)('GraphQL endpoint is disabled', async () => {
-    const baseUrl = String(process.env.SUPABASE_URL || '').replace(/\/+$/g, '');
-    const anonKey = String(process.env.SUPABASE_ANON_KEY || '').trim();
+  test('GraphQL endpoint is disabled', async () => {
+    const baseUrl = process.env.SUPABASE_URL.trim().replace(/\/+$/g, '');
+    const anonKey = process.env.SUPABASE_ANON_KEY.trim();
 
     const res = await fetch(`${baseUrl}/graphql/v1`, {
       method: 'POST',

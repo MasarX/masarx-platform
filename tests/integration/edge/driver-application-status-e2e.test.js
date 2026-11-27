@@ -114,6 +114,7 @@ runIfEdge("driver-application-status edge (E2E)", () => {
           token: absentButValidToken,
           bodyKey: "status_token",
         }),
+      { status: 404, errorCode: "request_not_found" },
     );
 
     if (!allowedOrigin) {

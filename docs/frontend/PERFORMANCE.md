@@ -2,6 +2,17 @@
 
 ## Bundle Budgets
 
+### Console V2
+
+The [Console V2 bundle checker](../../apps/console-v2/scripts/check-bundle-size.mjs)
+checks the minified, uncompressed size of each JavaScript chunk and reports the
+exact byte counts. Feature chunks without an explicit prefix budget use the
+checker's default limit. The `supabase-auth-client-` prefix has a dedicated
+ceiling pinned to the measured live-build size. A chunk one byte above its
+ceiling fails.
+
+### Next.js Console and Portal
+
 Per-route JavaScript + CSS size limits are defined in
 `config/tooling/bundle-budgets.json`. Each route has a `maxBytes` ceiling
 (currently ~1.48--1.49 MB per route) and the file carries a `defaultMaxBytes`
