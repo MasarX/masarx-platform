@@ -5,7 +5,7 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { RoutePlansModule } from '@/modules/operate/route-plans';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/dispatch';
+import ar from '@/lib/seed-raw/i18n/areas/ar/dispatch';
 import * as ds from '@/lib/data-source';
 import * as supabase from '@/lib/supabase';
 import { routePlanningListResource } from './__tests__/route-plans.fixtures';

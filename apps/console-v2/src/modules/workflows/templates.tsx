@@ -47,6 +47,7 @@ import {
   useStartWorkflowRun,
 } from '@/lib/queries';
 import { useCapability, useIdentity } from '@/lib/identity';
+import { useT } from '@/lib/i18n';
 import * as api from '@/lib/api';
 import { lookupRow } from '@/lib/api';
 import {
@@ -1810,12 +1811,14 @@ function InputsTab({
                     key={it}
                     type="button"
                     className="wf-var-pill mono"
-                    title="Drag to an input field · click to copy expression"
+                    title="Click or drag to put this variable in the expression field"
                     draggable
                     onDragStart={(e) =>
                       e.dataTransfer.setData('text/plain', `{{ ${k}.${it} }}`)
                     }
+                    // WCAG 2.5.7: a click or Enter does what the drop does, and also copies.
                     onClick={() => {
+                      setFieldExpr(`{{ ${k}.${it} }}`);
                       navigator.clipboard
                         ?.writeText(`{{ ${k}.${it} }}`)
                         .catch(() => undefined);
@@ -2214,6 +2217,7 @@ function HistoryTab({
 type PaletteTab = 'templates' | 'operations' | 'snippets';
 
 export function TemplatesModule() {
+  const t = useT();
   const navigate = useNavigate();
   const drawer = useDrawer();
   const modal = useModal();
@@ -3111,6 +3115,8 @@ export function TemplatesModule() {
           name: activeStep.label,
         },
         'workflow template step',
+        undefined,
+        t,
       ),
     );
   }

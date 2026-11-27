@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import {
@@ -280,7 +280,7 @@ test("bulk download partial failures use warning toast tone", async () => {
 test.each([
   ["HTTP rejection", { ok: false, payload: { errors: [{ id: "1", error: "Access denied" }] } }],
   ["empty URLs", { ok: true, payload: { urls: [] } }],
-  ["207 business failure", { ok: true, payload: { urls: [], errors: [{ id: "1", error: "Access denied eyJsecret.payload.signature" }] }, expectedError: "Access denied [redacted]" }],
+  ["207 business failure", { ok: true, payload: { urls: [], errors: [{ id: "1", error: "Access denied eyJsecret.payload.signature" }] }, expectedError: "Unable to download labels. [requestId=server-request-id]" }],
   ["missing URLs", { ok: true, payload: {} }],
   ["unsafe returned URL", { ok: true, payload: { urls: ["javascript:alert(1)"] } }],
   ["mixed trusted and unsafe URLs", { ok: true, payload: { urls: ["/download/safe", "https://attacker.example/file"] } }],
@@ -312,8 +312,9 @@ test.each([
     });
     if (!fixture.anchorFailure) expect(clickSpy).not.toHaveBeenCalled();
     if (fixture.expectedError) {
-      expect(document.querySelector('[data-tone="error"]')).toHaveTextContent(fixture.expectedError);
+      expect(within(document.querySelector('[data-tone="error"]') as HTMLElement).getByText(fixture.expectedError)).toBeInTheDocument();
       expect(document.querySelector('[data-tone="error"]')).not.toHaveTextContent("eyJsecret.payload.signature");
+      expect(document.querySelector('[data-tone="error"]')).not.toHaveTextContent("Access denied");
     }
     if (!fixture.networkFailure && !fixture.anchorFailure) {
       expect(document.querySelector('[data-tone="error"]')).toHaveTextContent("requestId=server-request-id");

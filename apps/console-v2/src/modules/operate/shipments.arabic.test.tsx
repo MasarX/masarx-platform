@@ -6,7 +6,8 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { ShipmentsModule, compactReferenceToken, resolveShipmentListColumns } from '@/modules/operate/shipments';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/shipments';
+import { getConsoleCatalog, translateCatalog } from '@/lib/i18n-catalog';
+import ar from '@/lib/seed-raw/i18n/areas/ar/shipments';
 
 describe('ShipmentsModule in Arabic', () => {
   beforeEach(() => {
@@ -55,6 +56,9 @@ describe('ShipmentsModule in Arabic', () => {
   it('keeps English defaults for helpers called outside React', () => {
     expect(englishT('shipments.page.titlePlain')).toBe('operations workbench');
     expect(compactReferenceToken('cor_9817')).toBe('Reference #9817');
+    const arabic = getConsoleCatalog('ar');
+    expect(compactReferenceToken('cor_9817', undefined, (key) => translateCatalog(arabic, key)))
+      .toBe(`${ar.shipments.common.reference} #9817`);
     expect(resolveShipmentListColumns(undefined)[0]?.label).toBe('Tracking');
   });
 });

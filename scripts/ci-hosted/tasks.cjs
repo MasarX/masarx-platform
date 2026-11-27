@@ -6,6 +6,12 @@ const crypto = require('node:crypto');
 const { run: checked, retry } = require('./process.cjs');
 
 const root = process.cwd();
+const appSpeedConfig = 'scripts/ci-hosted/playwright.app-speed.config.cjs';
+const browserSuites = {
+  'landing-e2e': 'scripts/ci-hosted/playwright.landing.config.cjs',
+  'console-a11y': 'scripts/ci-hosted/playwright.console-a11y.config.cjs',
+  'console-seed': 'scripts/ci-hosted/playwright.console-seed.config.cjs',
+};
 const exists = file => fs.existsSync(path.join(root, file));
 const read = file => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
 const nextApps = () => !exists('apps') ? [] : fs.readdirSync('apps').filter(name => {
@@ -20,6 +26,11 @@ function npmScript(name, prefix) {
   const manifest = prefix ? read(`${prefix}/package.json`) : read('package.json');
   if (!manifest.scripts?.[name]) throw new Error(`Missing script ${prefix || '.'}:${name}`);
   run('npm', [...(prefix ? ['--prefix', prefix] : []), 'run', name]);
+}
+function appSpeed(app) {
+  process.env.SPEED_APP = app;
+  run(process.execPath, [require.resolve('@playwright/test/cli'), 'test',
+    '-c', appSpeedConfig]);
 }
 function detect(subject) {
   let present;
@@ -45,7 +56,7 @@ async function main() {
   if (command === 'detect') return detect(subject);
   if (command === 'install') return install(checked);
   if (command === 'lint') {
-    for (const name of ['lint:frontend', 'lint:commands', 'lint:structure', 'lint:ingress-worker']) {
+    for (const name of ['lint:docs:ssot', 'lint:frontend', 'lint:commands', 'lint:structure', 'lint:ingress-worker']) {
       npmScript(name);
     }
     if (exists('supabase/migrations')) {
@@ -58,6 +69,15 @@ async function main() {
   if (command === 'typecheck') {
     if (!subject) throw new Error('Typecheck app is required');
     if (subject === 'apps/fieldops') return npmScript('typecheck:fieldops');
+    // Console V2 is a Vite app, so it has its own tsc script rather than the Next typegen path.
+    if (subject === 'apps/console-v2') {
+      // src/routeTree.gen.ts is gitignored and written by the Vite router plugin, so generate it before tsc.
+      // The plugin options in vite.config.ts are the generator defaults, so getConfig({}) matches them.
+      const appRoot = path.resolve(subject);
+      const { Generator, getConfig } = require(require.resolve('@tanstack/router-generator', { paths: [appRoot] }));
+      await new Generator({ config: getConfig({}, appRoot), root: appRoot }).run();
+      return npmScript('typecheck', subject);
+    }
     if (!nextApps().some(app => `apps/${app}` === subject)) throw new Error('Typecheck subject must be a Next app');
     for (const app of nextApps().filter(app => `apps/${app}` === subject)) {
       const dir = `apps/${app}`;
@@ -75,12 +95,23 @@ async function main() {
   if (command === 'build') {
     if (subject === 'landing') return npmScript('build:landing');
     if (!nextApps().some(app => `apps/${app}` === subject)) throw new Error('Build subject must be a Next app');
+    const measurePortal = subject === 'apps/portal' && process.env.CI_PORTAL_SPEED === '1';
+    if (measurePortal && process.env.NEXT_PUBLIC_SUPABASE_URL !== 'http://127.0.0.1:54321') {
+      throw new Error('Portal speed check requires the loopback fixture');
+    }
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = crypto.randomBytes(32).toString('hex');
-    return npmScript('build', subject);
+    npmScript('build', subject);
+    if (measurePortal) appSpeed('portal');
+    return;
   }
-  if (command === 'browser-install' || command === 'landing-e2e') {
+  if (command === 'console-v2-speed') {
+    process.env.VITE_USE_SEED = 'true';
+    npmScript('build', 'apps/console-v2');
+    return appSpeed('console-v2');
+  }
+  if (command === 'browser-install' || browserSuites[command]) {
     const args = command === 'browser-install' ? ['install', '--with-deps', 'chromium']
-      : ['test', '-c', 'scripts/ci-hosted/playwright.landing.config.cjs'];
+      : ['test', '-c', browserSuites[command]];
     return run(process.execPath, [require.resolve('@playwright/test/cli'), ...args]);
   }
   if (command === 'visual' || command === 'visual-preflight') {
@@ -103,4 +134,4 @@ async function main() {
   throw new Error('Unknown command');
 }
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { nextApps, detect, install };
+module.exports = { nextApps, detect, install, browserSuites, appSpeedConfig };

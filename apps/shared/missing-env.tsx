@@ -1,5 +1,6 @@
 import { AppShell, PageContainer, PageHeader, Section } from "@masarx/ui";
 import { getUiDefaults } from "@masarx/config";
+import { resolveLocaleDir } from "./i18n/direction";
 
 type MissingEnvNoticeProps = {
   appName: string;
@@ -25,7 +26,7 @@ export function MissingEnvNotice({
   const uiDefaults = getUiDefaults();
   const testId = testIdPrefix ? `${testIdPrefix}-missing-env` : undefined;
   return (
-    <html lang={locale}>
+    <html lang={locale} dir={resolveLocaleDir(locale, uiDefaults.rtlLocales)}>
       <body>
         <AppShell
           appName={appName}

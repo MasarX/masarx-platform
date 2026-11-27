@@ -12,13 +12,14 @@ const reopen = 'ALTER DATABASE postgres ALLOW_CONNECTIONS true';
 const restoreRole = 'ALTER ROLE postgres CONNECTION LIMIT 7';
 const readLimit = "SELECT rolconnlimit FROM pg_roles WHERE rolname = 'postgres'";
 
-function cloneFixture({ rolsuper = false, cloneError, reopenError, restoredLimit = '7' } = {}) {
+function cloneFixture({ rolsuper = false, cloneError, reopenError, restoredLimit = '7', connectionsLeft = '0' } = {}) {
   const admin = jest.fn(async (sql, next) => {
     if (sql.includes('FROM pg_roles CROSS JOIN pg_settings')) {
       return JSON.stringify({ rolconnlimit: 7, rolsuper, logLevel: 'warning', restoreLogging: logReset });
     }
     if (sql.includes('FROM pg_database WHERE')) return JSON.stringify({ owner: 'postgres', limit: -1, explicitAcl: false });
-    if (sql.includes('pg_terminate_backend') || next === reload) return 't';
+    if (sql.includes('pg_terminate_backend')) return connectionsLeft;
+    if (next === reload) return 't';
     if (sql === showLogging) return 'debug2';
     if (sql.includes('FROM pg_db_role_setting')) return '[]';
     if (sql.startsWith('CREATE DATABASE') && cloneError) throw cloneError;
@@ -49,7 +50,7 @@ test('rejects new postgres probe connections before closing and cloning the temp
     [showLogging],
     [expect.stringContaining('FROM pg_database WHERE')],
     ['ALTER DATABASE postgres ALLOW_CONNECTIONS false'],
-    [expect.stringContaining('pg_terminate_backend')],
+    [expect.stringContaining('pg_terminate_backend'), "SELECT count(*) FROM pg_stat_activity WHERE datname = 'postgres'"],
     [`CREATE DATABASE ${worker} TEMPLATE postgres STRATEGY WAL_LOG OWNER postgres CONNECTION LIMIT -1`],
     [expect.stringContaining('FROM pg_db_role_setting')],
   ]);
@@ -80,6 +81,13 @@ test('preserves the hosted clone error and finishes cleanup when reopening the t
   const { restore, clone } = cloneFixture({ cloneError, reopenError });
   await expect(clone()).rejects.toBe(cloneError);
   expect(cloneError.restoreError).toBe(reopenError);
+  expect(restore.mock.calls).toEqual(restoreCalls);
+});
+
+test('refuses to clone while template connections remain and still restores the template', async () => {
+  const { restore, created, clone } = cloneFixture({ connectionsLeft: '1' });
+  await expect(clone()).rejects.toThrow('Could not release connections to the migrated template');
+  expect(created).toEqual([]);
   expect(restore.mock.calls).toEqual(restoreCalls);
 });
 
