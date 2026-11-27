@@ -1738,7 +1738,7 @@ async function seedWorkflowOrchestration(client) {
     dialog_provider AS (
         SELECT
             id,
-            COALESCE(metadata->>'base_url', $1) AS base_url
+            COALESCE(metadata->>'base_url', '${DIALOG360_FIXTURE_BASE_URL}') AS base_url
         FROM providers
         WHERE name = 'dialog360_whatsapp'
         LIMIT 1
@@ -2205,7 +2205,7 @@ async function seedWorkflowOrchestration(client) {
     WHERE wt.id = checksums.workflow_template_id;
   `;
 
-  await client.query(workflowSeedSql, [DIALOG360_FIXTURE_BASE_URL]);
+  await client.query(workflowSeedSql);
   console.log('  - Workflow templates and steps seeded');
 }
 
