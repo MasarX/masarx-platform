@@ -442,7 +442,7 @@ describe('label renderer response privacy', () => {
     ['label_designer_get_sample_payload', failure(), 400, 'payload_missing', '42501'],
     ['label_designer_get_sample_payload', success({ ok: false, error: { message: upstreamText } }), 400, 'payload_missing', 'unknown'],
     ['render', null, 200, 'render_failure', 'unknown'],
-  ])('classifies designer preview failure at %s', async (stage, failedResult, status, code, errorClass) => {
+  ])('classifies designer preview failure at %s (case %#)', async (stage, failedResult, status, code, errorClass) => {
     const responses = {
       label_designer_whoami: success({ ok: true, organization_id: 'org' }),
       draft: success({ draft_value: { templates: { shipping: {} } } }),
