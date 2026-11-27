@@ -166,8 +166,20 @@ describe('label renderer internal errors', () => {
   test('keeps bundle artifact failures on the fixed upload error contract', async () => {
     const fileFailure = new Error('fixture artifact detail');
     const File = jest.fn(() => { throw fileFailure; });
+    const pdf = require('pdf-lib');
     const renderer = loadRenderer({
-      pdfModule: require('pdf-lib'),
+      pdfModule: {
+        ...pdf,
+        PDFDocument: {
+          async create() {
+            const doc = await pdf.PDFDocument.create();
+            const addPage = doc.addPage.bind(doc);
+            // pdf-lib validates page-size arrays against its own realm.
+            doc.addPage = page => addPage(Array.isArray(page) ? Array.from(page) : page);
+            return doc;
+          },
+        },
+      },
       env: { ...previewEnv, LABEL_RENDERER_DB_JWT: 'fixture-db-jwt' },
       client: {
         rpc: jest.fn(name => ({
