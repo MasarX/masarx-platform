@@ -7,14 +7,14 @@ it('cancels pending seed evidence replay when the listener unsubscribes', async 
     const initialTimerCount = vi.getTimerCount();
     const listener = vi.fn();
     const unsubscribe = streamEvidence(listener);
+    const subscribedTimerCount = vi.getTimerCount();
 
-    vi.advanceTimersToNextTimer();
     unsubscribe();
 
-    expect(listener).toHaveBeenCalledTimes(1);
+    expect(subscribedTimerCount).toBeGreaterThan(initialTimerCount);
     const remainingTimerCount = vi.getTimerCount();
     vi.runOnlyPendingTimers();
-    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).not.toHaveBeenCalled();
     expect(remainingTimerCount).toBe(initialTimerCount);
   } finally {
     vi.useRealTimers();
