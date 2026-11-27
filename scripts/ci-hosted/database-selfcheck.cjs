@@ -16,7 +16,7 @@ const { imageRequest, rewrite } = require('./docker-images.cjs');
 const { captureDatabaseLog, collectStackDiagnostics, belongsToStack, imagePrefix, needsHostedDatabaseInit } = require('./stack-diagnostics.cjs');
 const { checkTransport } = require('./docker-selfcheck.cjs');
 const { migrationIssues, invocation, lintResult } = require('./db-lint.cjs');
-const { loadBackendLocalPreSuiteCommands, loadBackendLocalPgtapEnv, writePsqlWrapper } = require('../ops/ci/cloud-pool-db-local.js');
+const { loadBackendLocalPreSuiteCommands, loadBackendLocalPgtapEnv, loadLaneConfig, writePsqlWrapper } = require('../ops/ci/cloud-pool-db-local.js');
 const { runHostedPgtap } = require('../ops/ci/cloud-pool-db-local-pgtap.js');
 const { databaseResult, PGTAP_SHARD_COUNT } = require('./database-result.cjs');
 
@@ -61,6 +61,22 @@ async function checkDatabaseLog(temp) {
   assert.match(qualify,
     /if\s*\(useDatabaseInit\)\s*\{\s*summary\.databasePid1\s*=\s*await timed\('database-init',\s*\(\)\s*=>\s*verifyHostedDatabaseInit\(checked,\s*env,\s*databaseContainer\)\);\s*\}/,
     'the classifier controls the database PID 1 verification');
+  assert(loadLaneConfig().exclude.includes('postgrest'), 'PostgREST is excluded during migration replay');
+  let previousIndex = -1;
+  for (const step of [
+    "await startStack('stack-start', lane.exclude)",
+    "await timed('migrations'",
+    "throw new Error('Applied migration stamps do not match the complete source inventory')",
+    "await timed('integration-stack-stop'",
+    'const integrationExclude = lane.exclude.filter(service => !Object.hasOwn(integrationImages, service))',
+    "await startStack('integration-stack-start', integrationExclude)",
+    'await timed(`pgtap:',
+    'await timed(`integration:',
+  ]) {
+    const index = qualify.indexOf(step);
+    assert(index > previousIndex, `Missing or out-of-order hosted shard step: ${step}`);
+    previousIndex = index;
+  }
   assert.match(qualify, /ok: false \}/);
   assert.match(qualify, /await timed\('migrations',[\s\S]*?migrationError = error;[\s\S]*?throw error;/, 'from-zero migration failure');
   assert.match(qualify, /await timed\(`pgtap:\$\{shard\}`,[\s\S]*?pgtapDeadline\(Date\.now\(\), env\.JOB_STARTED_AT\)[\s\S]*?\? runHostedShard\([\s\S]*?remaining, admin:[\s\S]*?: checked\(process\.execPath, \['scripts\/ci-hosted\/pgtap\.cjs'\], testEnv, remaining\(\)\);/, 'serial and parallel share the deadline');
