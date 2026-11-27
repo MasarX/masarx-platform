@@ -102,7 +102,7 @@ describe('dependency security foundation', () => {
     expect(fieldops.dependencies).not.toHaveProperty('@react-native/virtualized-lists');
     expect(mobileCore.dependencies).toEqual({
       'expo-modules-core': '55.0.27',
-      'expo-sqlite': '~55.0.18',
+      'expo-sqlite': '~55.0.20',
     });
     expect(mobileCore.peerDependencies).toEqual({
       expo: '~55.0.32',
