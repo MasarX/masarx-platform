@@ -729,10 +729,11 @@ describe('Dispatch stop exceptions pipeline', () => {
     expect(result?.items?.[0]?.completion_effects).toBeTruthy();
     expect(result?.items?.[0]?.completion_effects?.workflow_run_id).toBeTruthy();
     expect(result?.items?.[0]?.completion_effects?.operation_result).toBeTruthy();
-    expect(result?.items?.[0]?.completion_effects?.operation_result?.shipment_resort?.status).toBe(
-      'blocked'
-    );
-    expect(result?.items?.[0]?.completion_effects?.operation_result?.shipment_resort?.reason).toBeTruthy();
+    const operationResult = result.items[0].completion_effects.operation_result;
+    expect(operationResult.shipment_id).toBe(seed.shipmentId);
+    const resort = operationResult.shipment_resort;
+    expect(resort.status).toBe('resorted');
+    expect(resort.reason).toBeTruthy();
 
     await setServiceContext(seed.organizationId, seed.userId);
     const reattemptTask = await getTaskSnapshotForResource(
