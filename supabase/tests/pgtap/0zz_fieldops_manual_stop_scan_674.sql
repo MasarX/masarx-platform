@@ -3,7 +3,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(37);
+SELECT plan(39);
 
 SELECT ok(
   NOT has_function_privilege('anon', 'api.record_scan_event_v1(jsonb)', 'EXECUTE')
@@ -44,6 +44,7 @@ DECLARE
   fixture_branch uuid := gen_random_uuid();
   shipment_id uuid := gen_random_uuid();
   run_id uuid := gen_random_uuid();
+  other_run uuid := gen_random_uuid();
   stop_id uuid := gen_random_uuid();
   other_stop uuid := gen_random_uuid();
   boxless_shipment uuid := gen_random_uuid();
@@ -52,6 +53,8 @@ DECLARE
   barcode text := tracking || ':1';
   boxless_tracking text := 'PGTS' || upper(left(boxless_shipment::text, 8));
   fixture_capture_time timestamptz := now();
+  expired_reason text := 'pgt_expired_' || left(org_id::text, 8);
+  reason_codes jsonb := jsonb_build_array('scanner_unavailable', expired_reason);
   payload jsonb;
   policy jsonb;
   scan record;
@@ -90,18 +93,25 @@ BEGIN
   PERFORM public.ensure_shipment_boxes(shipment_id, 2);
 
   INSERT INTO public.route_runs (id, organization_id, branch_id, driver_user_id, status, planned_date, planned_start_at)
-  VALUES (run_id, org_id, fixture_branch, driver_id, 'in_progress', fixture_capture_time::date, fixture_capture_time);
+  VALUES (run_id, org_id, fixture_branch, driver_id, 'in_progress', fixture_capture_time::date, fixture_capture_time),
+         (other_run, org_id, fixture_branch, driver_id, 'planned', fixture_capture_time::date + 1,
+          fixture_capture_time + interval '1 day');
   INSERT INTO public.route_stops (id, organization_id, route_run_id, client_id, shipment_id, stop_kind, sequence_order)
   VALUES (stop_id, org_id, run_id, client_id, shipment_id, 'delivery', 1),
-         (other_stop, org_id, run_id, client_id, shipment_id, 'delivery', 2),
-         (boxless_stop, org_id, run_id, client_id, boxless_shipment, 'delivery', 3);
+         (other_stop, org_id, other_run, client_id, shipment_id, 'delivery', 1),
+         (boxless_stop, org_id, run_id, client_id, boxless_shipment, 'delivery', 2);
+
+  INSERT INTO public.lookup_values (lookup_definition_id, value, label, status, effective_from, effective_until)
+  VALUES ((SELECT id FROM public.lookup_definitions WHERE category = 'stop_scan_manual_entry_reason'),
+    expired_reason, 'Expired fixture reason', 'active',
+    fixture_capture_time - interval '2 days', fixture_capture_time - interval '1 day');
 
   SELECT s.cached_value INTO STRICT policy
   FROM public.settings s WHERE s.category = 'scan_policy' AND s.scope_type = 'global';
   policy := policy || jsonb_build_object(
     'version', 3,
     'accepted_scan_types', (policy->'accepted_scan_types') || '["stop_parcel"]'::jsonb,
-    'manual_entry', '{"enabled":false,"reason_codes":["scanner_unavailable"]}'::jsonb);
+    'manual_entry', jsonb_build_object('enabled', FALSE, 'reason_codes', reason_codes));
   PERFORM 1 FROM public.upsert_settings_value_v1('scan_policy', 'tenant', org_id, policy, 3, 'pgTAP stop scan disabled');
 
   PERFORM set_config('request.jwt.claim.sub', driver_id::text, true);
@@ -130,7 +140,7 @@ BEGIN
 
   RETURN NEXT is((SELECT p.value#>'{manual_entry,reason_codes}'
     FROM api.resolve_scan_policy(jsonb_build_object('organization_id', org_id)) p),
-    '["scanner_unavailable"]'::jsonb, 'assigned driver reads scope-specific reason choices from the policy');
+    reason_codes, 'assigned driver reads scope-specific reason choices from the policy');
 
   FOR entry IN SELECT * FROM (VALUES
     ('missing reason', payload #- '{metadata,scan_reason_code}',
@@ -138,6 +148,8 @@ BEGIN
     ('unknown reason', jsonb_set(payload, '{metadata,scan_reason_code}', '"unknown_code"'),
       'Select an active manual-entry reason for the stop parcel scan'),
     ('reason outside the resolved policy', jsonb_set(payload, '{metadata,scan_reason_code}', '"barcode_unreadable"'),
+      'Select an active manual-entry reason for the stop parcel scan'),
+    ('expired reason listed in policy', jsonb_set(payload, '{metadata,scan_reason_code}', to_jsonb(expired_reason)),
       'Select an active manual-entry reason for the stop parcel scan'),
     ('non-string reason', jsonb_set(payload, '{metadata,scan_reason_code}', '42'),
       'Select an active manual-entry reason for the stop parcel scan'),
@@ -236,6 +248,12 @@ BEGIN
 
   PERFORM set_config('request.jwt.claim.sub', operator_id::text, true);
   PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', operator_id, 'role', 'authenticated')::text, true);
+  RETURN NEXT throws_ok(format('SELECT * FROM api.record_scan_event_v1(%L)', payload ||
+    jsonb_build_object('idempotency_key', gen_random_uuid(), 'device_id', (
+      SELECT d.device_id FROM api.register_user_device_v1(jsonb_build_object(
+        'device_platform', 'android', 'device_identifier_sha256', encode(digest(operator_id::text, 'sha256'), 'hex')
+      )) d))), '42501', 'Stop parcel scan requires access to the assigned stop',
+    'tenant route operator cannot record a manual-entry scan for the assigned driver');
   RETURN NEXT is(api.resolve_fieldops_stop_detail_v1(stop_id, 'dispatcher')#>>'{parcels,0,status}', 'scanned',
     'tenant route operator can read confirmation in authorized route scope');
 

@@ -19,6 +19,14 @@ INSERT INTO public.lookup_values (lookup_definition_id, value, label, descriptio
 SELECT id, 'stop_parcel', 'Stop parcel', 'Confirms a parcel at an assigned route stop', 85
 FROM public.lookup_definitions WHERE category = 'scan_type';
 
+DO $migration$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM public.schema_registry WHERE category = 'scan_policy' AND version = 2) THEN
+    RAISE EXCEPTION 'scan_policy schema v2 missing; cannot create v3';
+  END IF;
+END;
+$migration$;
+
 -- Older FieldOps builds reject any unfamiliar value in scan_input_modes.
 INSERT INTO public.schema_registry (category, version, schema, description, examples, is_active)
 SELECT category, 3,
@@ -124,7 +132,7 @@ BEGIN
       RAISE EXCEPTION 'Stop parcel scan requires access to the assigned stop' USING ERRCODE = '42501';
     END IF;
 
-    -- A shipment-level parcel is valid only for stops without box rows.
+    -- Fall back to the shipment tracking number when no box has a non-NULL barcode.
     IF NOT COALESCE((
       SELECT COALESCE(bool_or(b.barcode = NEW.barcode), NEW.barcode = v_tracking_number)
       FROM public.shipment_boxes b
@@ -162,7 +170,9 @@ BEGIN
       AND (lv.effective_until IS NULL OR lv.effective_until > now());
 
     IF jsonb_typeof(NEW.metadata->'scan_reason_code') IS DISTINCT FROM 'string' OR v_reason_id IS NULL THEN
-      RAISE EXCEPTION 'Select an active manual-entry reason for the stop parcel scan' USING ERRCODE = '23514';
+      RAISE EXCEPTION 'Select an active manual-entry reason for the stop parcel scan'
+        USING ERRCODE = '23514',
+          DETAIL = format('scan_reason_code=%s', COALESCE(NEW.metadata->'scan_reason_code', 'null'::jsonb));
     END IF;
     IF NEW.metadata ? 'scan_reason_note' AND jsonb_typeof(NEW.metadata->'scan_reason_note') <> 'string' THEN
       RAISE EXCEPTION 'Manual-entry note must be text when provided' USING ERRCODE = '23514';
@@ -195,24 +205,26 @@ DECLARE
     s.cod_amount,$sql$;
   scan_readback constant text := $sql$  -- The base resolver authorizes the stop first. Route visibility also protects
   -- the new ledger projection independently of the caller-supplied active role.
-  WITH confirmed AS (
-    SELECT DISTINCT se.barcode
-    FROM public.route_stops rs
-    JOIN public.route_runs rr ON rr.id = rs.route_run_id AND rr.organization_id = rs.organization_id
-    JOIN public.scan_events se
-      ON se.route_stop_id = rs.id AND se.organization_id = rs.organization_id
-      AND se.route_run_id = rs.route_run_id AND se.client_id = rs.client_id AND se.shipment_id = rs.shipment_id
-    WHERE rs.id = p_stop_id AND se.scan_type = 'stop_parcel'
-      AND public.route_run_actor_can_read_v1(rs.organization_id, rr.id, rr.driver_user_id)
-  )
-  SELECT jsonb_set(v_envelope, '{parcels}', COALESCE(jsonb_agg(
-    CASE WHEN c.barcode IS NOT NULL AND parcel.value->>'status' = 'pending'
-      THEN parcel.value || '{"status":"scanned"}'::jsonb
-      ELSE parcel.value
-    END ORDER BY parcel.ordinality), '[]'::jsonb))
-  INTO v_envelope
-  FROM jsonb_array_elements(v_envelope->'parcels') WITH ORDINALITY AS parcel(value, ordinality)
-  LEFT JOIN confirmed c ON c.barcode = parcel.value->>'code';
+  IF jsonb_typeof(v_envelope->'parcels') = 'array' THEN
+    WITH confirmed AS (
+      SELECT DISTINCT se.barcode
+      FROM public.route_stops rs
+      JOIN public.route_runs rr ON rr.id = rs.route_run_id AND rr.organization_id = rs.organization_id
+      JOIN public.scan_events se
+        ON se.route_stop_id = rs.id AND se.organization_id = rs.organization_id
+        AND se.route_run_id = rs.route_run_id AND se.client_id = rs.client_id AND se.shipment_id = rs.shipment_id
+      WHERE rs.id = p_stop_id AND se.scan_type = 'stop_parcel'
+        AND public.route_run_actor_can_read_v1(rs.organization_id, rr.id, rr.driver_user_id)
+    )
+    SELECT jsonb_set(v_envelope, '{parcels}', COALESCE(jsonb_agg(
+      CASE WHEN c.barcode IS NOT NULL AND parcel.value->>'status' = 'pending'
+        THEN parcel.value || '{"status":"scanned"}'::jsonb
+        ELSE parcel.value
+      END ORDER BY parcel.ordinality), '[]'::jsonb), FALSE)
+    INTO v_envelope
+    FROM jsonb_array_elements(v_envelope->'parcels') WITH ORDINALITY AS parcel(value, ordinality)
+    LEFT JOIN confirmed c ON c.barcode = parcel.value->>'code';
+  END IF;
 
 $sql$;
 BEGIN
