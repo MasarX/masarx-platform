@@ -84,6 +84,9 @@ import { todayDateInputValue } from '@/lib/date-input';
 import { sanitizeOperatorMessage } from '@/components/operatorMessages';
 import { reportError } from '@/lib/telemetry';
 import type { ListResult } from '@/types/domain';
+import { asRecord, compactReference, compactReferenceToken, firstText } from './shipment-display';
+
+export { compactReferenceToken } from './shipment-display';
 
 const AddressTabLazy = lazy(() =>
   import('./shipments-address-tab').then((module) => ({ default: module.AddressTab })),
@@ -342,28 +345,6 @@ function operatorShipmentCreateErrorMessage(error: unknown): string {
   );
 }
 
-export function compactReferenceToken(raw: unknown, label = 'Reference'): string {
-  const value = String(raw ?? '').trim();
-  if (!value) return '—';
-  const parts = value
-    .split(/[^a-z0-9]+/i)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const meaningful = parts.length > 1 ? parts[parts.length - 1] : parts[0];
-  const suffix = String(meaningful ?? '').replace(/[^a-z0-9]/gi, '').toUpperCase().slice(-6);
-  return `${label} #${suffix || 'UNKNOWN'}`;
-}
-
-function compactReference(raw: unknown, label = 'Reference'): ReactNode {
-  const compact = compactReferenceToken(raw, label);
-  if (compact === '—') return compact;
-  return (
-    <span className="mono" title={`${label} reference`}>
-      {compact}
-    </span>
-  );
-}
-
 function titleCaseKey(raw: unknown, fallback = 'Not recorded'): string {
   const value = String(raw ?? '').trim();
   if (!value) return fallback;
@@ -380,12 +361,6 @@ function lookupDisplayValue(lookup: string, value: unknown, fallback = 'Not reco
   return String(lookupRow(lookup, token)?.label ?? titleCaseKey(token, fallback));
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function nestedRecord(value: unknown, path: string[]): Record<string, unknown> | null {
   let cursor: unknown = value;
   for (const key of path) {
@@ -394,14 +369,6 @@ function nestedRecord(value: unknown, path: string[]): Record<string, unknown> |
     cursor = record[key];
   }
   return asRecord(cursor);
-}
-
-function firstText(...values: unknown[]): string | null {
-  for (const value of values) {
-    const text = String(value ?? '').trim();
-    if (text) return text;
-  }
-  return null;
 }
 
 function workflowMutationProofRows(
@@ -3701,10 +3668,19 @@ export function ShipmentContextPanel({
       id: 'scans',
       label: 'Scans',
       count: directory?.scan_event_count,
-      render: () => <ScansTab shipment={shipment} />,
+      render: async () => {
+        const { ScansTab } = await import('./shipment-history');
+        return <ScansTab shipment={shipment} />;
+      },
     },
-    { id: 'decisions', label: 'Decisions', render: () => <DecisionsTab shipment={shipment} /> },
-    { id: 'audit', label: 'Audit', render: () => <AuditTab shipment={shipment} /> },
+    { id: 'decisions', label: 'Decisions', render: async () => {
+        const { DecisionsTab } = await import('./shipment-history');
+        return <DecisionsTab shipment={shipment} />;
+      } },
+    { id: 'audit', label: 'Audit', render: async () => {
+        const { AuditTab } = await import('./shipment-history');
+        return <AuditTab shipment={shipment} />;
+      } },
   ];
 
   const summary: ReactNode = (
@@ -5017,195 +4993,4 @@ function LabelsTab({ shipment }: { shipment: Shipment }) {
       </div>
     </div>
   );
-}
-
-function ScansTab({ shipment }: { shipment: Shipment }) {
-  // CLAIM-OPERATIONS-WIRING (Phase C1) — read seam moved from `api.seed.*` to
-  // canonical resource registry (`ui_list_resource_v1('scan_events')`).
-  // Backed by public.scan_events (HASH partitioned;
-  // supabase/migrations/202601251060_scan_events_v1.sql:49).
-  const { data, isLoading, error } = useResourceList<Record<string, unknown>>('scan_events', {
-    filter: { shipment_id: shipment.id },
-    sort: { key: 'occurred_at', dir: 'desc' },
-  });
-  if (isLoading) return <StateView kind="loading" />;
-  if (error) return <StateView kind="error" hint={(error as Error).message} />;
-  const scans = data?.rows ?? [];
-  return (
-    <DataTable
-      columns={[
-        { key: 'occurred_at', label: 'When', format: 'datetime' },
-        { key: 'scan_type', label: 'Scan type', render: (raw) => humanizeToken(raw) },
-        { key: 'box_barcode', label: 'Barcode', mono: true },
-        { key: 'user_id', label: 'User', render: (raw) => compactReference(raw, 'User') },
-        { key: 'notes', label: 'Notes' },
-      ]}
-      rows={scans}
-      allowSelection={false}
-      emptyText="No scans yet."
-    />
-  );
-}
-
-function DecisionsTab({ shipment }: { shipment: Shipment }) {
-  const go = useConsoleNavigator();
-  const destinationAddressId = String(
-    (shipment as { destination_address_id?: string | null }).destination_address_id ?? '',
-  ).trim();
-  const log = useResourceList<Record<string, unknown>>('decision_log', {
-    filter: { resource_type: 'shipment', resource_id: shipment.id },
-    sort: { key: 'timestamp', dir: 'desc' },
-  });
-  const reviewTasks = useResourceList<Record<string, unknown>>('manual_review_tasks', {
-    filter: destinationAddressId ? { address_id: destinationAddressId } : { address_id: '__none__' },
-    sort: { key: 'updated_at', dir: 'desc' },
-    page_size: 10,
-  }, { enabled: Boolean(destinationAddressId) });
-  const latestReviewTaskId = useMemo(() => {
-    const rows = reviewTasks.data?.rows ?? [];
-    return firstText(rows.find((row) => String(row.task_type ?? '').trim().toLowerCase() === 'geocoding')?.id);
-  }, [reviewTasks.data?.rows]);
-  const reviewDecisionLog = useResourceList<Record<string, unknown>>(
-    'decision_log',
-    {
-      filter: latestReviewTaskId
-        ? { resource_type: 'manual_review_task', resource_id: latestReviewTaskId }
-        : { resource_type: 'manual_review_task', resource_id: '__none__' },
-      sort: { key: 'timestamp', dir: 'desc' },
-    },
-    { enabled: Boolean(latestReviewTaskId) },
-  );
-  const rows = useMemo(() => {
-    const byId = new Map<string, Record<string, unknown>>();
-    for (const row of [...(log.data?.rows ?? []), ...(reviewDecisionLog.data?.rows ?? [])]) {
-      const key = String(row.id ?? `${row.resource_type ?? ''}:${row.resource_id ?? ''}:${row.timestamp ?? ''}`);
-      byId.set(key, row);
-    }
-    return Array.from(byId.values()).sort((a, b) => {
-      const at = Date.parse(String(a.timestamp ?? a.created_at ?? ''));
-      const bt = Date.parse(String(b.timestamp ?? b.created_at ?? ''));
-      return (Number.isFinite(bt) ? bt : 0) - (Number.isFinite(at) ? at : 0);
-    });
-  }, [log.data?.rows, reviewDecisionLog.data?.rows]);
-  if (log.isLoading || reviewTasks.isLoading || reviewDecisionLog.isLoading) return <StateView kind="loading" />;
-  if (log.error && reviewDecisionLog.error) return <StateView kind="error" hint={(log.error as Error).message} />;
-  return (
-    <div className="stack">
-      {log.error || reviewDecisionLog.error ? (
-        <p className="state__hint">
-          One decision stream is unavailable, so this view is showing the shipment decision rows that could be read.
-        </p>
-      ) : null}
-      <DataTable
-        columns={[
-          { key: 'timestamp', label: 'When', format: 'datetime' },
-          { key: 'decision_category', label: 'Category', lookup: 'decision_category' },
-          { key: 'decision_point', label: 'Decision', render: (raw) => humanizeToken(raw) },
-          { key: 'decision_outcome', label: 'Outcome', render: (raw) => humanizeToken(raw) },
-          { key: 'resolved_from', label: 'Scope' },
-          { key: 'settings_resolution_id', label: 'Resolution', render: (raw) => compactReference(raw, 'Resolution') },
-        ]}
-        rows={rows}
-        allowSelection={false}
-        emptyText="No decisions recorded for this shipment."
-        rowActions={[
-          {
-            label: 'View activity',
-            icon: 'trace_tree',
-            onClick: (row) => {
-              go(`/insights/traces?correlation_id=${encodeURIComponent(
-                String(row.correlation_id ?? ''),
-              )}`);
-            },
-          },
-        ]}
-      />
-    </div>
-  );
-}
-
-function AuditTab({ shipment }: { shipment: Shipment }) {
-  const log = useResourceList<Record<string, unknown>>('audit_table_changes', {
-    filter: { table_name: 'shipments', pk: { id: shipment.id } },
-    sort: { key: 'created_at', dir: 'desc' },
-  });
-  const actions = useResourceList<Record<string, unknown>>('shipment_actions', {
-    filter: { shipment_id: shipment.id },
-    sort: { key: 'timestamp', dir: 'desc' },
-    page_size: 50,
-  });
-  if (log.isLoading || actions.isLoading) return <StateView kind="loading" />;
-  if (log.error && actions.error) {
-    return (
-      <div className="state state--denied">
-        <h3 className="state__title">Audit access denied</h3>
-        <p className="state__hint">Audit activity permission is required.</p>
-      </div>
-    );
-  }
-  const all = log.data?.rows ?? [];
-  const tableRows: Record<string, unknown>[] = log.error
-    ? []
-    : all
-        .filter((row) => auditPkMatchesShipment(row.pk, shipment.id))
-        .map((row) => ({
-          ...row,
-          audit_source: 'System audit',
-        }));
-  const actionRows: Record<string, unknown>[] = actions.error
-    ? []
-    : (actions.data?.rows ?? []).map((row) => {
-        const actionData = asRecord(row.action_data) ?? {};
-        return {
-          id: row.id ?? `shipment_action_${row.timestamp ?? row.created_at ?? ''}`,
-          created_at: row.timestamp ?? row.created_at,
-          op: row.action_type ?? 'shipment_action',
-          changed_by: row.performed_by_user_id ?? row.performed_by_system ?? row.created_by ?? row.actor_user_id,
-          correlation_id: row.correlation_id ?? actionData.correlation_id,
-          audit_source: 'Shipment action',
-        };
-      });
-  const rows: Record<string, unknown>[] = [...tableRows, ...actionRows].sort((a, b) => {
-    const at = Date.parse(String(a['created_at'] ?? ''));
-    const bt = Date.parse(String(b['created_at'] ?? ''));
-    return (Number.isFinite(bt) ? bt : 0) - (Number.isFinite(at) ? at : 0);
-  });
-  return (
-    <div className="stack">
-      {log.error || actions.error ? (
-        <p className="state__hint">
-          One audit stream is unavailable, so this view is showing the shipment audit records that could be read.
-        </p>
-      ) : null}
-      <DataTable
-        columns={[
-          { key: 'created_at', label: 'When', format: 'datetime' },
-          { key: 'audit_source', label: 'Source' },
-          { key: 'op', label: 'Operation', render: (raw) => humanizeToken(raw) },
-          { key: 'changed_by', label: 'Actor', render: (raw) => compactReference(raw, 'Actor') },
-          { key: 'correlation_id', label: 'Activity', render: (raw) => (raw ? 'Linked' : '-') },
-        ]}
-        rows={rows}
-        allowSelection={false}
-        emptyText="No audit changes recorded for this shipment."
-      />
-    </div>
-  );
-}
-
-function auditPkMatchesShipment(pk: unknown, shipmentId: string): boolean {
-  if (pk === shipmentId) return true;
-  if (typeof pk === 'string') {
-    if (pk === shipmentId) return true;
-    try {
-      return auditPkMatchesShipment(JSON.parse(pk), shipmentId);
-    } catch {
-      return false;
-    }
-  }
-  if (pk && typeof pk === 'object') {
-    const rec = pk as Record<string, unknown>;
-    return rec.id === shipmentId || rec.shipment_id === shipmentId;
-  }
-  return false;
 }

@@ -652,6 +652,31 @@ jobs:
       - name: Build present console
         if: ${{ !cancelled() && steps.subject.outputs.present == 'true' && steps.install.outcome == 'success' }}
         run: node scripts/ci-hosted/tasks.cjs build apps/console
+      - name: Build Console V2 in live mode
+        id: console-v2-build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          ANALYZE: '1'
+          VITE_USE_SEED: &console_v2_live 'false'
+          VITE_SUPABASE_URL: https://synthetic-project.example.invalid
+        run: |
+          export VITE_SUPABASE_ANON_KEY="$(node -p "require('node:crypto').randomBytes(32).toString('hex')")"
+          npm run build --workspace @masarx/console-v2
+      - name: Check live Console V2 bundle size
+        id: console-v2-bundle
+        if: ${{ !cancelled() && steps.console-v2-build.outcome == 'success' }}
+        env:
+          VITE_USE_SEED: *console_v2_live
+        run: npm run check:bundle-size --workspace @masarx/console-v2
+      - name: Retain Console V2 bundle analysis on failure
+        if: ${{ failure() && (steps.console-v2-build.outcome == 'failure' || steps.console-v2-bundle.outcome == 'failure') && hashFiles('apps/console-v2/dist/bundle-stats.html') != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
+        with:
+          name: console-v2-bundle-analysis
+          path: apps/console-v2/dist/bundle-stats.html
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: false
 
   build-portal-landing:
     name: Build (portal and landing)

@@ -35,6 +35,7 @@ Follows engineering standard v1.29.3.
 | [Release on tag](.github/workflows/release-on-tag.yml) | Verifies the tagged commit and builds, attests and publishes the static Landing archive. | Verify 10, build and publish 20. |
 
 - Set job and step limits from measured run and job timings, plus a margin.
+- The Console build job also builds Console V2 in live mode and enforces its [bundle budgets](apps/console-v2/scripts/check-bundle-size.mjs).
 - Root Markdown changes select Unit Jest, which runs the public-source boundary test.
 - Append-only migrations checks the PR opener on `pull_request`. On `merge_group` it follows the squash commits back to the event base, fetching missing commits by SHA, and checks each author and committer. Both steps use the [identity allowlist](config/ci/commit-identities.json). A commit rejection reports its short SHA. Guard errors give a fixed reason without identity values.
 - CI runs only on free GitHub-hosted runners. Get the owner's approval before spending money or using a paid service. Use at most 20 jobs per CI run. CI runs Landing E2E. Full Console, Portal and FieldOps journeys need separate qualification.
@@ -58,6 +59,7 @@ QA supplies `scripts/ci-hosted/console-v2-auth-qa-fixture.cjs` and `scripts/ci-h
 - The fixture receives `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` and `QA_JWT_EXPIRY_SECONDS`. Require the job-local identity and shortened expiry, create and verify the synthetic account using the reviewed fixture pattern, then return only `{email,password}` on private stdout. A failed prerequisite exits nonzero.
 - The browser receives `VERIFY_BASE`, `E2E_CONSOLE_LIVE`, `E2E_CONSOLE_AUTH_EMAIL`, `E2E_CONSOLE_AUTH_PASSWORD`, the live public Vite inputs and `SPEED_EVIDENCE_DIR`. Use fresh, separate browser contexts. Return one JSON object on private stdout with `liveStartup`, `demoStartup`, `signIn`, `restore`, `refresh`, `signOut`, `mfa`, `startupP75` and `refreshReason`. The status values are `PASS`, `FAIL` and `NOT_RUN`, plus `UNSUPPORTED` for the routed MFA case with the source evidence on #684. Refresh requires the SDK's successful `refresh_token` grant and a same-identity authenticated read. A grant that is absent within the observation window is `NOT_RUN` with `REFRESH_NOT_OBSERVED`. A fixture that cannot confirm the shortened expiry leaves refresh `NOT_RUN` with `REFRESH_EXPIRY_UNBOUND`.
 - Write the two Dashboard speed files named in the QA contract with `viewport: "1440x900"` and five `runs` entries containing integer `lcpMs` and `inpMs`. The job calculates nearest-rank p75 and the limits from the candidate's speed-budget table before publishing its allowlisted evidence. Preview policy blocks external connections and fonts.
+- Each failed runner stage reports a fixed step and reason code in the job log and `auth-qualification.json`. The [PR stack proof](.github/workflows/console-v2-auth-stack.yml) runs the same isolated Supabase stage against the pinned candidate, including migration replay, Auth health and teardown. It runs independently of `ci-gate` and stops before building the app.
 
 ## Test policy
 
