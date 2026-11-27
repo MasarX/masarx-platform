@@ -62,8 +62,6 @@ apps/console-v2/src/modules/platform/organizations.tsx 162
 apps/console-v2/src/modules/platform/release-proof.tsx 28
 apps/console-v2/src/modules/platform/users.tsx 160
 apps/console-v2/src/modules/workflows/_bindings/condition-model.ts 7
-apps/console-v2/src/modules/workflows/review-queue.tsx 193
-apps/console-v2/src/modules/workflows/runs.tsx 269
 apps/console-v2/src/modules/workflows/workflow-run-context.tsx 17
 apps/console/app/_components/webhook-tester-page.tsx 1
 apps/console/app/integrations/plugins/[plugin_id]/page.tsx 2
