@@ -45,7 +45,12 @@
   }
 
   const query = new URLSearchParams(window.location.search);
-  const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reducedMotionQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  // "on" or "off" is an explicit choice (the motion control or ?motion=);
+  // no stored value means follow the OS reduced-motion setting.
+  const MOTION_STORAGE_KEY = 'masarx-motion';
+  // Older builds stored every resolved state here, so it never meant a choice.
+  const LEGACY_MOTION_STORAGE_KEY = 'masarx_motion';
   // Same key and values as packages/ui/src/theme.tsx: "light" or "dark" is an
   // explicit choice; no stored value means follow the OS (system mode).
   const THEME_STORAGE_KEY = 'masarx-ui-theme';
@@ -181,6 +186,7 @@
 
   const langToggle = document.querySelector('[data-lang-toggle]');
   const themeToggle = document.querySelector('[data-theme-toggle]');
+  const motionToggle = document.querySelector('[data-motion-toggle]');
   const heroSection = document.querySelector('.hero');
   const tiltEls = [...document.querySelectorAll('[data-tilt]')];
   const navToggle = document.querySelector('.nav-toggle');
@@ -581,13 +587,34 @@
     refreshTurnstileTheme();
   }
 
+  let motionMode = 'system';
+
+  function resolveSystemMotion() {
+    return reducedMotionQuery && reducedMotionQuery.matches ? 'off' : 'on';
+  }
+
   function setMotion(mode) {
-    const next = knownMotions.has(mode) ? mode : (prefersReducedMotion ? 'off' : 'on');
+    motionMode = knownMotions.has(mode) ? mode : 'system';
+    writeStorageValue('localStorage', MOTION_STORAGE_KEY, motionMode === 'system' ? '' : motionMode);
+    applyMotion(motionMode === 'system' ? resolveSystemMotion() : motionMode);
+  }
+
+  function labelMotionToggle(lang) {
+    if (!motionToggle) return;
+    motionToggle.textContent = getText(isMotionOn() ? 'motion_pause' : 'motion_play', lang);
+    motionToggle.hidden = false;
+  }
+
+  function applyMotion(next) {
     root.dataset.motion = next;
-    writeStorageValue('localStorage', 'masarx_motion', next);
+    labelMotionToggle(root.lang || 'en');
 
     if (next === 'off') {
+      // Entrance animations run once; show their targets so a later resume never leaves them hidden.
       document.querySelectorAll('[data-reveal]').forEach((el) => el.classList.add('is-inview'));
+      document.querySelectorAll('.compare-card, .cap-card, .grid-2 .card').forEach((el) => el.classList.add('is-card-visible'));
+      document.querySelectorAll('.step-card').forEach((el) => el.classList.add('is-step-visible'));
+      document.querySelectorAll('.step-connector').forEach((el) => el.classList.add('is-connector-drawn'));
       tiltEls.forEach((el) => {
         el.style.removeProperty('--rx');
         el.style.removeProperty('--ry');
@@ -3719,6 +3746,7 @@
       themeToggle.textContent = getText(labelKey, next);
       themeToggle.setAttribute('aria-pressed', String(isDarkTheme()));
     }
+    labelMotionToggle(next);
 
     document.querySelectorAll('[data-i18n]').forEach((el) => {
       const key = el.dataset.i18n;
@@ -3839,13 +3867,21 @@
     themeToggle.addEventListener('click', () => setTheme(isDarkTheme() ? 'light' : 'dark'));
   }
 
+  if (motionToggle) {
+    motionToggle.addEventListener('click', () => setMotion(isMotionOn() ? 'off' : 'on'));
+  }
+
   // --- Initial state ---
 
-  const initialMotion =
-    (query.get('motion') && knownMotions.has(query.get('motion')) && query.get('motion'))
-    || readStorageValue('localStorage', 'masarx_motion')
-    || root.dataset.motion
-    || (prefersReducedMotion ? 'off' : 'on');
+  function readInitialMotion() {
+    const fromQuery = query.get('motion');
+    if (knownMotions.has(fromQuery)) return fromQuery;
+    writeStorageValue('localStorage', LEGACY_MOTION_STORAGE_KEY, '');
+    const stored = readStorageValue('localStorage', MOTION_STORAGE_KEY);
+    return knownMotions.has(stored) ? stored : 'system';
+  }
+
+  const initialMotion = readInitialMotion();
 
   function readInitialTheme() {
     const fromQuery = query.get('theme');
@@ -3874,6 +3910,13 @@
     else if (colorSchemeQuery.addListener) colorSchemeQuery.addListener(onColorSchemeChange);
   }
   setMotion(initialMotion);
+  if (reducedMotionQuery) {
+    const onReducedMotionChange = () => {
+      if (motionMode === 'system') applyMotion(resolveSystemMotion());
+    };
+    if (reducedMotionQuery.addEventListener) reducedMotionQuery.addEventListener('change', onReducedMotionChange);
+    else if (reducedMotionQuery.addListener) reducedMotionQuery.addListener(onReducedMotionChange);
+  }
   setLang(initialLang);
 
   applyRuntimeLinks();
@@ -4306,11 +4349,12 @@
         el.setAttribute('data-typing', '');
         let i = 0;
         const step = () => {
-          if (i < text.length) {
+          if (i < text.length && isMotionOn()) {
             el.textContent += text[i];
             i++;
             setTimeout(step, 25 + Math.random() * 20);
           } else {
+            el.textContent = text;
             el.removeAttribute('data-typing');
             resolve();
           }
@@ -4320,7 +4364,7 @@
     }
 
     async function replayLifecycleTypewriter() {
-      if (typewriterRunning) return;
+      if (typewriterRunning || !isMotionOn()) return;
       typewriterRunning = true;
       const steps = heroSection.querySelectorAll('.lifecycle-step');
       if (!steps.length) { typewriterRunning = false; return; }

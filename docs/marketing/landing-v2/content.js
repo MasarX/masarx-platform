@@ -259,6 +259,8 @@
 
       theme_dark: { en: 'Dark', ar: 'داكن' },
       theme_light: { en: 'Light', ar: 'فاتح' },
+      motion_pause: { en: 'Pause motion', ar: 'إيقاف الحركة' },
+      motion_play: { en: 'Play motion', ar: 'تشغيل الحركة' },
 
       cta_contact_sales: { en: 'Contact sales', ar: 'تواصل مع المبيعات' },
       cta_explore: { en: 'See how it works', ar: 'شاهد كيف تعمل' },
