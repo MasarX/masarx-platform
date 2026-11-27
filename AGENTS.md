@@ -58,19 +58,15 @@ Push and let CI run tests, lint, typecheck and builds. Do not run them locally o
 
 ## Critical changes (the only changes that get a review)
 
-The owner's rule (24 Nov): critical means production, secrets, real data, making anything public, host/network/firewall changes, repo settings and release gates.
+[Critical paths](config/ci/critical-paths.json) lists the file rules used by the CI verdict check. Use the categories below to assess the behavior of a change, including changes CI cannot classify by path.
 
-- Production: production configuration and deploys, `/scripts/deploy/`, `/supabase/config.toml` and `/config/edge/functions.json`.
-- Secrets: how they are stored, read, scoped or rotated, and token helpers. This includes `/scripts/utils/load-env.js`, `/scripts/utils/env-file.js` and `/scripts/qa/qa-log.js`.
-- Real data:
-  - every migration in `/supabase/migrations/`;
-  - deletes, purges, retention, audit logs and history, backups and restores, including `scripts/ops/workspace/destroy.js` and `scripts/ops/workspace/delete-branch.js`;
-  - the database-target selection in `/scripts/utils/pg-candidates.js` and `/scripts/utils/pg-hostaddr.js`;
-  - sign-in, permissions, and server code that decides which real data people can access or what personal data an API returns. This includes SQL grants, row-level security, server code in `/supabase/functions/`, `SECURITY DEFINER` function bodies, API contract views, `apps/shared/security-middleware.ts`, the server routes in `apps/console/app/api/` and `apps/portal/app/api/`, and the Console, Console V2 and Portal sign-in and access-policy paths. It also covers personal data carried in exports, prints and outbound messages.
-  - safety-critical rules until end-to-end tests cover every project safety rule. Each new safety rule requires review until its end-to-end test lands. [Issue #558](https://github.com/MasarX/masarx-platform/issues/558) tracks the rule and test inventory.
-- Making anything public: repository, package or bucket visibility, and new public endpoints.
-- Host, network and firewall: public ingress routes, CORS, token rules and rewrites in `tooling/apps/api-ingress-worker/`, the egress proxy and its allowlists, servers, DNS and firewall rules. Egress controls include `supabase/functions/api-caller/egress.mjs`, `supabase/functions/api-caller/proxy.mjs`, `supabase/migrations/20261123046800_validate_outbound_integration_urls.sql` and `scripts/ops/verify-api-caller-guarded-egress-proxy.js`.
-- Repo settings and release gates: rulesets and repository settings, the privacy deny check, `/CODEOWNERS`, `/.github/`, `/scripts/ci-hosted/`, `/config/ci/` (including the quarantine and accepted-failure lists), `/scripts/ops/ci/`, `/scripts/tests/run-pgtap-cloud.js`, and scripts CI or deploy workflows run directly or through `package.json` script entries. This includes `scripts/edge/verify-frozen-lock.cjs`, `scripts/edge/verify-npm-import-lock.js` and `scripts/ops/vercel/validate-build.js`. Deleting, skipping or weakening a test, including pgTAP authorization and contract tests, or changing the test-file guard allowlist is critical.
+- Production configuration and deploys.
+- Storage, reading, scoping and rotation of secrets, including token helpers.
+- Real data, including every migration, deletion, purges, retention, audit logs, history, backups, restores and database-target selection. This includes sign-in, permissions, server-side access decisions, SQL grants, row-level security, security-definer functions, API contract views and personal data in exports, prints and outbound messages.
+- Safety-critical rules until end-to-end tests cover every project safety rule. Each new safety rule requires review until its end-to-end test lands. [Issue #558](https://github.com/MasarX/masarx-platform/issues/558) tracks the rule and test inventory.
+- Public repository, package or bucket visibility and new public endpoints.
+- Hosts, servers, DNS and firewalls, including public ingress routes, CORS, token rules, rewrites, egress proxies and allowlists.
+- Repository settings, rulesets and release gates, including privacy screening, CI configuration, quarantine and accepted-failure lists, and scripts run by CI or deploy workflows directly or through `package.json` script entries. Deleting, skipping or weakening a test, including pgTAP authorization and contract tests, or changing the test-file guard allowlist is critical.
 
 Documentation changes that alter a manual or automated merge or deploy gate, or who must review or approve a change, are critical.
 

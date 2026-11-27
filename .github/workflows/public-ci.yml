@@ -868,6 +868,9 @@ jobs:
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - name: Require the complete producer set
         env:
@@ -920,3 +923,27 @@ jobs:
               print('CI timing summary unavailable')
           sys.exit(0 if good else 1)
           PY
+      - name: Resolve the review verdict base
+        id: verdict-base
+        if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') }}
+        env:
+          VERDICT_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          if [[ ! "$VERDICT_BASE" =~ ^[a-f0-9]{40}$ ]]; then
+            echo '::error::Missing or invalid review verdict base SHA'
+            exit 1
+          fi
+          printf 'sha=%s\n' "$VERDICT_BASE" >> "$GITHUB_OUTPUT"
+      - name: Check out the base review verdict policy and helper
+        id: verdict-checkout
+        if: ${{ !cancelled() && steps.verdict-base.outcome == 'success' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ steps.verdict-base.outputs.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Require the critical-change review verdict
+        if: ${{ !cancelled() && steps.verdict-checkout.outcome == 'success' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/ci-hosted/review-verdict.cjs

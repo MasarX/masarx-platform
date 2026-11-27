@@ -8,14 +8,17 @@
       ],
       "allowed_changed_path_re": [
         "^AGENTS\\.md$",
+        "^config/ci/critical-paths\\.json$",
+        "^scripts/ci-hosted/review-verdict\\.cjs$",
         "^scripts/ops/ci/changed-migrations-regex\\.js$",
-        "^tests/unit/ops/(?:changed-migrations-regex|local-gate|migration-fixture-guard|migration-guards|native-objectives-lint|native-pr-admission-workflow|pr-change-classify)\\.test\\.js$"
+        "^tests/unit/ops/(?:changed-migrations-regex|local-gate|migration-fixture-guard|migration-guards|native-objectives-lint|native-pr-admission-workflow|pr-change-classify|review-verdict)\\.test\\.js$"
       ],
       "test_paths": [
         "tests/unit/ops/changed-migrations-regex.test.js",
         "tests/unit/ops/local-gate.test.js",
         "tests/unit/ops/native-objectives-lint.test.js",
-        "tests/unit/ops/native-pr-admission-workflow.test.js"
+        "tests/unit/ops/native-pr-admission-workflow.test.js",
+        "tests/unit/ops/review-verdict.test.js"
       ]
     },
     {
