@@ -103,7 +103,6 @@ function nonNegativeNumber(value: string): number | null {
 }
 
 export function ProductContextSetupForm({
-  const { t } = useI18n();
   levels,
   branches,
   zones,
@@ -125,6 +124,7 @@ export function ProductContextSetupForm({
   onReady,
   onCancel,
 }: ProductContextSetupFormProps) {
+  const { t } = useI18n();
   const branchTypeOptions = getLookups('branch_type');
   const branchStatusOptions = getLookups('branch_status');
   const zoneColorOptions = getLookups('zone_color_token');

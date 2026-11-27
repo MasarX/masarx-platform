@@ -29,7 +29,7 @@
 //   * keeps seed-raw alignment enforced in tests/lint instead of importing
 //     seed-raw into production source.
 
-import { englishT, fill, type Translate } from './i18n';
+import { englishT, fill, type Translate } from './i18n-catalog';
 
 /**
  * Named const accessors for every capability the console-v2 FE reads.
@@ -59,8 +59,6 @@ export const CAP = Object.freeze({
   SHIPMENTS_WRITE: 'shipments.write',
   ROUTES_READ: 'routes.read',
   ROUTES_WRITE: 'routes.write',
-  ROUTES_SCAN_LOAD: 'routes.scan_load',
-  ROUTES_CONFIRM_DEPARTURE: 'routes.confirm_departure',
   ROUTE_PLANS_READ: 'route_plans.read',
   ROUTE_PLANS_WRITE: 'route_plans.write',
   BASKETS_READ: 'baskets.read',
@@ -221,12 +219,11 @@ export function hasWildcardCapability(
   return false;
 }
 
-
 function titleCasePhrase(value: string): string {
   return value.replace(/\b[a-z]/g, (match) => match.toUpperCase());
 }
 
-// Labels come from the capabilities catalog (lib/seed-raw/i18n/areas/capabilities.ts).
+// Labels come from the capabilities catalog (lib/seed-raw/i18n/areas).
 // A key the catalog does not name falls back to its own words. `t` defaults to English
 // for code outside React; components pass the active-locale `t`.
 export function formatCapabilityLabel(

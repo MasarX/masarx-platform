@@ -2183,12 +2183,12 @@ interface SubscriptionsTabProps {
 }
 
 function SubscriptionsTab({
-  const { t } = useI18n();
   offering,
   registryAvailable,
   liveCount,
   fmtNumber,
 }: SubscriptionsTabProps) {
+  const { t } = useI18n();
   const showLive = registryAvailable && liveCount != null;
   const value = showLive ? liveCount : undefined;
   return (

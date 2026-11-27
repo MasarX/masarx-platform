@@ -6,8 +6,8 @@ import { findUntranslated } from '@/test/helpers/untranslated';
 import { ServiceOfferingsModule } from '@/modules/catalog/service-offerings';
 import { ProductContextSetupForm } from '@/modules/catalog/product-context-setup';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/catalog-service-offerings';
-import { ar as setupAr } from '@/lib/seed-raw/i18n/areas/catalog-product-context-setup';
+import ar from '@/lib/seed-raw/i18n/areas/ar/catalog-service-offerings';
+import setupAr from '@/lib/seed-raw/i18n/areas/ar/catalog-product-context-setup';
 
 function lookup(catalog: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], catalog);

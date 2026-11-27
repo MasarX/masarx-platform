@@ -1,0 +1,55 @@
+// Product context setup form: Console V2 copy in English and Arabic (issue #302).
+import type { CatalogShape } from '@/lib/i18n-catalog';
+import type English from '../en/catalog-product-context-setup';
+
+const messages: CatalogShape<typeof English> = {
+  catalogProductContextSetup: {
+    productContextSetupForm: {
+      serviceLevelNameIs: 'اسم مستوى الخدمة مطلوب',
+      branchNameIsRequired: 'اسم الفرع مطلوب',
+      branchTypeIsRequired: 'نوع الفرع مطلوب',
+      branchStatusIsRequired: 'حالة الفرع مطلوبة',
+      branchTimezoneIsRequired: 'المنطقة الزمنية للفرع مطلوبة',
+      zoneNameIsRequired: 'اسم المنطقة مطلوب',
+      zoneSetupRequiresZones: 'إعداد المنطقة يتطلب صلاحية zones.write',
+      offeringDisplayNameIs: 'اسم العرض المعروض مطلوب',
+      serviceLevelKeyCould: 'تعذّر إنشاء مفتاح مستوى الخدمة.',
+      productContextReadyDisplayname: 'سياق المنتج جاهز - {displayName}',
+      serviceLevel: 'مستوى الخدمة',
+      serviceLevelName: 'اسم مستوى الخدمة',
+      levelDescription: 'وصف المستوى',
+      levelTier: 'فئة المستوى',
+      priorityRank: 'رتبة الأولوية',
+      slaMinutes: 'دقائق اتفاقية مستوى الخدمة',
+      slaLabel: 'تسمية اتفاقية مستوى الخدمة',
+      branch: 'الفرع',
+      branchName: 'اسم الفرع',
+      branchCode: 'رمز الفرع',
+      branchType: 'نوع الفرع',
+      selectBranchType: 'اختر نوع الفرع',
+      branchStatus: 'حالة الفرع',
+      selectBranchStatus: 'اختر حالة الفرع',
+      branchTimezone: 'المنطقة الزمنية للفرع',
+      branchCity: 'مدينة الفرع',
+      branchAddress: 'عنوان الفرع',
+      dailyCapacity: 'السعة اليومية',
+      coverageZone: 'منطقة التغطية',
+      attachZoneCoverage: 'إرفاق تغطية المنطقة',
+      zone: 'المنطقة',
+      zoneName: 'اسم المنطقة',
+      zoneColor: 'لون المنطقة',
+      noColorToken: 'بلا رمز لون',
+      offeringName: 'اسم العرض',
+      offeringSlug: 'المعرّف المختصر للعرض',
+      offeringPriority: 'أولوية العرض',
+      basePrice: 'السعر الأساسي',
+      currency: 'العملة',
+      maxWeightKg: 'الحد الأقصى للوزن (كغ)',
+      cancel: 'إلغاء',
+      provisioning: 'جارٍ التجهيز...',
+      provisionSetup: 'تجهيز الإعداد',
+    },
+  },
+};
+
+export default messages;
