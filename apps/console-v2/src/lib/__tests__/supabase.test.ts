@@ -21,7 +21,10 @@ vi.mock('@supabase/supabase-js', () => {
       key,
       rpc: vi.fn(),
       from: vi.fn(),
-      auth: { getSession: vi.fn() },
+      auth: {
+        getSession: vi.fn(async () => ({ data: { session: null }, error: null })),
+        signOut: vi.fn(async () => ({ error: null })),
+      },
     })),
   };
 });
@@ -151,5 +154,87 @@ describe('lib/supabase — getSupabaseClient swap-seam', () => {
 
     expect(client).not.toBeNull();
     expect(createClient).toHaveBeenCalledTimes(1);
+  });
+
+  // #803: with no session supabase-js would send the anon key as the bearer.
+  it('stops an Edge function call with no session before it is sent and signs out locally', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://api.example.test/');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key-xyz');
+    const network = vi.fn(async () => new Response('{}'));
+    vi.stubGlobal('fetch', network);
+    try {
+      const client = getSupabaseClient() as unknown as { auth: { signOut: ReturnType<typeof vi.fn> } };
+      const options = (vi.mocked(createClient).mock.calls[0] as unknown[])[2] as {
+        global: { fetch: typeof fetch };
+      };
+      const fnUrl = 'https://api.example.test/functions/v1/label-renderer';
+
+      await expect(
+        options.global.fetch(fnUrl, { method: 'POST', headers: new Headers({ Authorization: 'Bearer anon-key-xyz' }) }),
+      ).rejects.toThrow(/sign in again/);
+      await expect(options.global.fetch(fnUrl, { method: 'POST' })).rejects.toThrow(/sign in again/);
+      expect(network).not.toHaveBeenCalled();
+      expect(client.auth.signOut).toHaveBeenCalledWith({ scope: 'local' });
+
+      await options.global.fetch(fnUrl, { method: 'POST', headers: { Authorization: 'Bearer signed-in-user-token' } });
+      expect(network).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // #803 review: a retryable refresh failure returns no session with an error; auth-js keeps
+  // the stored session for a later refresh, so the wrapper must not sign out.
+  it('stops an Edge function call after a failed session lookup but keeps the session', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://api.example.test/');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key-xyz');
+    const network = vi.fn(async () => new Response('{}'));
+    vi.stubGlobal('fetch', network);
+    try {
+      const client = getSupabaseClient() as unknown as {
+        auth: { getSession: ReturnType<typeof vi.fn>; signOut: ReturnType<typeof vi.fn> };
+      };
+      client.auth.getSession.mockResolvedValue({
+        data: { session: null },
+        error: Object.assign(new Error('Failed to fetch'), { status: 0 }),
+      });
+      const options = (vi.mocked(createClient).mock.calls[0] as unknown[])[2] as {
+        global: { fetch: typeof fetch };
+      };
+      const fnUrl = 'https://api.example.test/functions/v1/label-renderer';
+
+      await expect(
+        options.global.fetch(fnUrl, { method: 'POST', headers: new Headers({ Authorization: 'Bearer anon-key-xyz' }) }),
+      ).rejects.toThrow(/sign in again/);
+      expect(network).not.toHaveBeenCalled();
+      expect(client.auth.signOut).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // #803 review: signed-out REST and auth requests legitimately carry the anon key.
+  it('sends REST and auth requests with the anon key as bearer to the network', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://api.example.test/');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key-xyz');
+    const network = vi.fn(async () => new Response('{}'));
+    vi.stubGlobal('fetch', network);
+    try {
+      const client = getSupabaseClient() as unknown as { auth: { signOut: ReturnType<typeof vi.fn> } };
+      const options = (vi.mocked(createClient).mock.calls[0] as unknown[])[2] as {
+        global: { fetch: typeof fetch };
+      };
+      const anon = { Authorization: 'Bearer anon-key-xyz' };
+
+      await options.global.fetch('https://api.example.test/rest/v1/x', { headers: anon });
+      await options.global.fetch('https://api.example.test/auth/v1/token?grant_type=password', {
+        method: 'POST',
+        headers: anon,
+      });
+      expect(network).toHaveBeenCalledTimes(2);
+      expect(client.auth.signOut).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

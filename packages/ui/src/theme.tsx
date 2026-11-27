@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { type ContextStore, useContextStore, useContextStoreValue } from "./context-store";
 
 export type ThemeMode = "light" | "dark" | "system";
 type ResolvedTheme = "light" | "dark";
@@ -16,7 +17,7 @@ type ThemeContextValue = {
 export const THEME_STORAGE_KEY = "masarx-ui-theme";
 const THEME_ATTRIBUTE = "data-theme";
 
-const ThemeContext = React.createContext<ThemeContextValue | null>(null);
+const ThemeContext = React.createContext<ContextStore<ThemeContextValue> | null>(null);
 
 function resolveSystemTheme(): ResolvedTheme {
   if (typeof window === "undefined" || !window.matchMedia) {
@@ -71,12 +72,13 @@ export function ThemeProvider({ children }: { children?: React.ReactNode }) {
     React.useState<ResolvedTheme>("light");
 
   React.useEffect(() => {
-    setThemeState(readStoredTheme());
+    const storedTheme = readStoredTheme();
+    React.startTransition(() => setThemeState(storedTheme));
   }, []);
 
   React.useEffect(() => {
     const resolved = theme === "system" ? resolveSystemTheme() : theme;
-    setResolvedTheme(resolved);
+    React.startTransition(() => setResolvedTheme(resolved));
     applyTheme(resolved);
   }, [theme]);
 
@@ -94,7 +96,7 @@ export function ThemeProvider({ children }: { children?: React.ReactNode }) {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const handleChange = () => {
       const resolved = resolveSystemTheme();
-      setResolvedTheme(resolved);
+      React.startTransition(() => setResolvedTheme(resolved));
       applyTheme(resolved);
     };
     if (media.addEventListener) {
@@ -114,9 +116,10 @@ export function ThemeProvider({ children }: { children?: React.ReactNode }) {
     () => ({ theme, resolvedTheme, setTheme, toggleTheme }),
     [theme, resolvedTheme, setTheme, toggleTheme]
   );
+  const store = useContextStore(value);
 
   return (
-    <ThemeContext.Provider value={value}>
+    <ThemeContext.Provider value={store}>
       {children ?? null}
     </ThemeContext.Provider>
   );
@@ -126,7 +129,7 @@ export function ThemeProvider({ children }: { children?: React.ReactNode }) {
  * Access theme state and toggle helpers.
  */
 export function useTheme(): ThemeContextValue {
-  const ctx = React.useContext(ThemeContext);
+  const ctx = useContextStoreValue(React.useContext(ThemeContext));
   if (ctx) return ctx;
   return {
     theme: "system",

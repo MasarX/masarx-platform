@@ -67,10 +67,13 @@ test.each([
   try {
     const verifier = fs.readFileSync(path.join(root, script), 'utf8');
     write(script, verifier);
-    write('config/edge/functions.json', JSON.stringify({ functions: [
-      { name, enabled: true },
-      { name: 'fixture-disabled', enabled: false },
-    ] }));
+    write('config/edge/functions.json', JSON.stringify({
+      use_api_bundle_limit_bytes: require('../../../config/edge/functions.json').use_api_bundle_limit_bytes,
+      functions: [
+        { name, enabled: true },
+        { name: 'fixture-disabled', enabled: false },
+      ],
+    }));
     write(`supabase/functions/${name}/index.ts`, 'import "fixture-import";\n');
     write(`supabase/functions/${name}/deno.json`, JSON.stringify({
       imports: { 'fixture-import': `npm:${npmEntry}` },

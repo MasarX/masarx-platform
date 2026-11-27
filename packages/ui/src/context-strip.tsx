@@ -350,7 +350,7 @@ export function ContextStrip({
     wrapperClassName: string;
     testId: string;
   }) => (
-    <div className={wrapperClassName}>
+    <div className={wrapperClassName} data-evidence-mask="context-identity">
       <label
         htmlFor={scopeSwitcherId}
         className="text-[11px] font-medium text-ui-muted"
@@ -415,6 +415,11 @@ export function ContextStrip({
             {entry.label}
           </span>
           <span
+            data-evidence-mask={
+              entry.key === "signed-in" || entry.key === "org" || entry.key === "scope"
+                ? "context-identity"
+                : undefined
+            }
             className={[
               "text-ui-ink",
               entry.tone === "accent" ? "font-medium" : "font-normal",

@@ -369,7 +369,8 @@ test("command palette reports read registry failure and disables resource comman
   );
   expect(status).toHaveAttribute("aria-live", "polite");
   expect(status).toHaveTextContent("Read registry unavailable");
-  expect(status).toHaveTextContent("read registry offline");
+  expect(status.textContent?.trim()).toBe("Read registry unavailable.");
+  expect(status).not.toHaveTextContent("offline");
 
   const item = await screen.findByRole("button", { name: /Create shipment/ });
   expect(item).toBeDisabled();
@@ -400,7 +401,8 @@ test("command palette reports registry readback failure without hiding navigatio
   );
   expect(status).toHaveAttribute("aria-live", "polite");
   expect(status).toHaveTextContent("Command registry unavailable");
-  expect(status).toHaveTextContent("registry offline");
+  expect(status.textContent?.trim()).toBe("Command registry unavailable");
+  expect(status).not.toHaveTextContent("offline");
   expect(screen.getByRole("button", { name: /Shipments/ })).toBeInTheDocument();
   expect(screen.queryByText("No matches")).not.toBeInTheDocument();
 });

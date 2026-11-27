@@ -245,6 +245,7 @@ jobs:
       build_portal: ${{ steps.changes.outputs.build_portal }}
       build_landing: ${{ steps.changes.outputs.build_landing }}
       e2e: ${{ steps.changes.outputs.e2e }}
+      preview_sweep: ${{ steps.changes.outputs.preview_sweep }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -298,13 +299,22 @@ jobs:
           node scripts/ci-hosted/selfcheck.cjs
           node scripts/ci-hosted/shard-selfcheck.cjs
           node scripts/ci-hosted/database-selfcheck.cjs
-          node --test scripts/ci-hosted/images.test.cjs
+          node --test scripts/ci-hosted/images.test.cjs scripts/tests/bootstrap/online-index-fixtures.test.js
           node --test scripts/ci-hosted/integration.test.cjs
+          node scripts/ci-hosted/review-verdict.cjs --self-check
       - name: Check deploy branch references
         timeout-minutes: 1
         run: node scripts/ci-hosted/deploy-branch-refs.cjs
       - name: Test database deploy retry
         run: bash scripts/deploy/supabase-db-push-retry.test.sh
+      - name: Check pull request opener
+        if: github.event_name == 'pull_request'
+        run: node scripts/ci-hosted/identity-guard.cjs
+      - name: Check merge-group commit identities
+        if: github.event_name == 'merge_group'
+        env:
+          GROUP_HEAD: ${{ github.event.merge_group.head_sha }}
+        run: node scripts/ci-hosted/identity-guard.cjs
 
   lint:
     name: Lint
@@ -320,10 +330,18 @@ jobs:
           fetch-depth: 1
       - *timing_begin
       - name: Fetch lint base
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.event_name == 'workflow_dispatch' && github.token || '' }}
         run: |
+          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
+            LOCAL_GATE_BASE_SHA=$(gh api "repos/$GITHUB_REPOSITORY/compare/$DEFAULT_BRANCH...$GITHUB_SHA" --jq '.merge_base_commit.sha // empty')
+          fi
           [[ "$LOCAL_GATE_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'A proven lint base SHA is required.' >&2; exit 1; }
           git fetch --no-tags --depth=1 origin "$LOCAL_GATE_BASE_SHA"
           git cat-file -e "${LOCAL_GATE_BASE_SHA}^{commit}"
+          printf 'Lint base: %s\n' "$LOCAL_GATE_BASE_SHA"
+          printf 'LOCAL_GATE_BASE_SHA=%s\n' "$LOCAL_GATE_BASE_SHA" >> "$GITHUB_ENV"
       - name: Detect subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect lint
@@ -368,6 +386,8 @@ jobs:
           NPM_CONFIG_CACHE: ${{ runner.temp }}/npm-cache
         run: node scripts/ci-hosted/tasks.cjs install
       - *timing_work
+      - name: Require CI coverage or an active quarantine for every test suite
+        run: node scripts/ci-hosted/suite-coverage.cjs
       - name: Verify Edge npm import lock
         run: |
           if [[ "$GITHUB_EVENT_NAME" == 'pull_request' ]] &&
@@ -411,6 +431,8 @@ jobs:
             echo '::error::The frozen Edge manifest accepted an unexpected file.'
             exit 1
           fi
+          rm -- "$EDGE_FROZEN_WORKDIR/supabase/unexpected.ts"
+          node scripts/edge/verify-label-renderer-preview.cjs
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs lint
@@ -498,6 +520,7 @@ jobs:
             node scripts/ci-hosted/jest.cjs unit
           fi
       - name: Upload unit-summary
+        id: jest_report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
         with:
@@ -509,11 +532,18 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
           include-hidden-files: false
+      - &jest_failure_summary
+        name: Report unexpected Jest assertions
+        if: ${{ always() && !cancelled() }}
+        env:
+          JEST_ARTIFACT_URL: ${{ steps.jest_report.outputs.artifact-url }}
+        run: node scripts/ci-hosted/jest-failure-summary.cjs "$HOSTED_JEST_LANE"
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2]
     env:
+      HOSTED_JEST_LANE: unit
       JEST_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
 
   ui:
@@ -547,9 +577,40 @@ jobs:
         run: node scripts/ci-hosted/base-guard.cjs jest.cjs ui
       - name: Run Console v2 Vitest
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        env:
-          CONSOLE_V2_CI_DEFER_CAPABILITY_LINT: '1'
         run: npm run test --workspace @masarx/console-v2
+      - name: Run FieldOps UI tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run test:ui:fieldops -- --runInBand
+      - name: Capture signed-in previews
+        id: preview-sweep
+        timeout-minutes: 15
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && github.event_name == 'pull_request' && (needs.append-only.result != 'success' || needs.append-only.outputs.preview_sweep != 'false') }}
+        env:
+          FORCE_COLOR: '0'
+        run: |
+          if ! node scripts/ci-hosted/tasks.cjs browser-install >/dev/null 2>&1; then
+            echo 'Preview sweep browser setup failed'
+            exit 1
+          fi
+          for locale in en ar; do
+            echo "Preview sweep locale: $locale"
+            SWEEP_LOCALE="$locale" node node_modules/@playwright/test/cli.js test -c scripts/ci-hosted/preview-sweep.config.cjs 2>&1 |
+              sed -u -nE \
+                -e '/^SWEEP (console|console-v2|portal) (en|ar) (light|dark) (desktop|phone) (session|loading|empty|error|denied|complete)$/p' \
+                -e '/^SWEEP-GEOM (console|console-v2|portal) (en|ar) (light|dark) (desktop|phone) (loading|empty|error|denied) [0-9]+ [0-9]+ (-?[0-9]+\.[0-9]{3} ){2}([0-9]+\.[0-9]{3} ){2}(0\.[0-9]{9}|1\.000000000)$/p' \
+                -e '/^SWEEP-FAIL (console|console-v2|portal) (en|ar) (light|dark) (desktop|phone) (loading|empty|error|denied) (new-session|new-context|route-guard|session-cookie|init-session|new-page|open-shell|shell-theme|open-mobile-menu|follow-route-link|close-mobile-menu|open-route|signed-in|marker|marker-in-view|language|direction|theme|screenshot|close-context)$/p' \
+                -e 's/^SWEEP-ERROR (Error: )?strict mode violation: .* resolved to ([0-9]+) elements:$/SWEEP-ERROR strict mode violation: resolved to \2 elements/p' \
+                -e 's/^SWEEP-ERROR *(Error: |- )?(expect\(locator\)\.toBeVisible\(\) failed|Timeout: +[0-9]+ms|Target page, context or browser has been closed|Page crashed|Frame was detached|Execution context was destroyed, most likely because of a navigation)\.?$/SWEEP-ERROR \2/p'
+          done
+      - name: Upload signed-in preview screenshots
+        if: ${{ !cancelled() && steps.preview-sweep.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
+        with:
+          name: signed-in-previews-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/signed-in-previews/*.png
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: false
       - *timing_report
       - name: Check proposed test-result capture
         if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.jest.outputs.present == 'true' }}
@@ -560,6 +621,7 @@ jobs:
             node scripts/ci-hosted/jest.cjs ui
           fi
       - name: Upload ui-summary
+        id: jest_report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
         with:
@@ -571,6 +633,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
           include-hidden-files: false
+      - *jest_failure_summary
+    env:
+      HOSTED_JEST_LANE: ui
 
   build-console:
     name: Build (console)
@@ -595,9 +660,38 @@ jobs:
       - *timing_install
       - *install_locked
       - *timing_work
+      - name: Install lockfile-selected Chromium
+        run: node scripts/ci-hosted/tasks.cjs browser-install
+      - name: Build and measure Console V2
+        run: node scripts/ci-hosted/tasks.cjs console-v2-speed
       - name: Build present console
-        if: steps.subject.outputs.present == 'true'
+        if: ${{ !cancelled() && steps.subject.outputs.present == 'true' && steps.install.outcome == 'success' }}
         run: node scripts/ci-hosted/tasks.cjs build apps/console
+      - name: Build Console V2 in live mode
+        id: console-v2-build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          ANALYZE: '1'
+          VITE_USE_SEED: &console_v2_live 'false'
+          VITE_SUPABASE_URL: https://synthetic-project.example.invalid
+        run: |
+          export VITE_SUPABASE_ANON_KEY="$(node -p "require('node:crypto').randomBytes(32).toString('hex')")"
+          npm run build --workspace @masarx/console-v2
+      - name: Check live Console V2 bundle size
+        id: console-v2-bundle
+        if: ${{ !cancelled() && steps.console-v2-build.outcome == 'success' }}
+        env:
+          VITE_USE_SEED: *console_v2_live
+        run: npm run check:bundle-size --workspace @masarx/console-v2
+      - name: Retain Console V2 bundle analysis on failure
+        if: ${{ failure() && (steps.console-v2-build.outcome == 'failure' || steps.console-v2-bundle.outcome == 'failure') && hashFiles('apps/console-v2/dist/bundle-stats.html') != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
+        with:
+          name: console-v2-bundle-analysis
+          path: apps/console-v2/dist/bundle-stats.html
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: false
 
   build-portal-landing:
     name: Build (portal and landing)
@@ -631,19 +725,26 @@ jobs:
       - *timing_install
       - *install_locked
       - *timing_work
+      - name: Install lockfile-selected Chromium
+        if: steps.subject.outputs.portal == 'true'
+        run: node scripts/ci-hosted/tasks.cjs browser-install
       - name: Build present portal
         if: steps.subject.outputs.portal == 'true'
+        env:
+          CI_PORTAL_SPEED: '1'
         run: node scripts/ci-hosted/tasks.cjs build apps/portal
       - name: Build present landing
         if: ${{ !cancelled() && steps.subject.outputs.landing == 'true' && steps.install.outcome == 'success' }}
         run: node scripts/ci-hosted/tasks.cjs build landing
 
   e2e:
-    name: Landing E2E and Console V2 axe (full-app E2E excluded)
+    name: Landing and Console V2 browser tests
     needs: append-only
     if: ${{ !cancelled() && (needs.append-only.result != 'success' || needs.append-only.outputs.e2e != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      SPEED_EVIDENCE_DIR: test-results/speed-evidence
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
@@ -668,8 +769,22 @@ jobs:
         run: node scripts/ci-hosted/tasks.cjs browser-install
       - *timing_work
       - name: Run synthetic local landing suite
+        id: landing_e2e
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs landing-e2e
+      - name: Report Landing speed measurements
+        if: ${{ !cancelled() && (steps.landing_e2e.outcome == 'success' || steps.landing_e2e.outcome == 'failure') }}
+        env:
+          LANDING_E2E_OUTCOME: ${{ steps.landing_e2e.outcome }}
+        run: |
+          shopt -s nullglob
+          reports=("$SPEED_EVIDENCE_DIR"/speed--*.json)
+          if (( ${#reports[@]} )); then
+            jq -c '{screen, route, viewport, sampleCount: (.runs | length), p75, budget, limit}' "${reports[@]}"
+          elif [[ "$LANDING_E2E_OUTCOME" == success ]]; then
+            echo 'Missing Landing speed measurements.' >&2
+            exit 1
+          fi
       # Runs after a landing failure too, so one run reports both suites.
       - name: Run Console V2 seed-mode axe suite
         id: console_a11y
@@ -677,6 +792,9 @@ jobs:
         env:
           A11Y_EVIDENCE_DIR: test-results/console-a11y/evidence
         run: node scripts/ci-hosted/tasks.cjs console-a11y
+      - name: Run Console V2 seed-mode E2E
+        if: ${{ !cancelled() && steps.console.outputs.present == 'true' }}
+        run: node scripts/ci-hosted/tasks.cjs console-seed
       - *timing_report
       - name: Upload Console V2 axe evidence
         if: ${{ !cancelled() && steps.console_a11y.outcome != 'skipped' }}

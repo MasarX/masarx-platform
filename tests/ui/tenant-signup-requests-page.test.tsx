@@ -87,10 +87,12 @@ test.each([
   [401, { message: "JWT token=synthetic-short" }, "Sign in again before reviewing this request."],
   [403, { message: "permission denied for table private_users" }, "You do not have permission to review this request. Contact your administrator."],
   [500, { message: "Unexpected private configuration" }, "Unable to complete the review. Try again or contact your administrator."],
-  [422, { message: "A rejection reason is required." }, "A rejection reason is required."],
+  [422, { message: "A rejection reason is required." }, "Unable to complete the review. Try again or contact your administrator."],
 ])("tenant review HTTP %s uses safe contextual copy (case %#)", async (status, error, message) => {
   fetchReview.mockResolvedValue({ ok: false, status, json: async () => ({ ok: false, error }) });
-  expect(await submitReview()).toEqual({ status: "error", message });
+  const result = await submitReview();
+  expect(result).toEqual({ status: "error", message });
+  expect(result.message).not.toContain("rejection reason");
   const [, request] = fetchReview.mock.calls[0];
   expect(JSON.parse(request.body)).toMatchObject({ request_id: requestId, decision: "rejected", reason: "Synthetic validation reason" });
 });
