@@ -58,21 +58,37 @@ test('the DEV label probe requires HTTP 200, ok true and canonical base64 PDF by
 
 test.each([
   [[null, 503, 200], 0, [1000, 2000]],
-  [[503, 502, 500], EXIT.renderStatus, [1000, 2000]],
+  [[503, 502, 500], EXIT.renderStatus, [1000, 2000], 'LABEL_PROBE_RENDER_ERROR status=500 renderer_code=unavailable'],
   [[null, null, null], EXIT.renderNetwork, [1000, 2000]],
-  [[403], EXIT.renderStatus, []],
-])('DEV label probe handles renderer results %j with code %i and waits %j', async (statuses, code, waits) => {
+  [[403], EXIT.renderStatus, [], 'LABEL_PROBE_RENDER_ERROR status=403 renderer_code=auth_required'],
+])('DEV label probe handles renderer results %j with code %i and waits %j', async (statuses, code, waits, diagnostic) => {
   const pdf = Buffer.from('%PDF-1.7\n\n');
   const send = jest.fn();
+  const readError = jest.fn().mockResolvedValue({ error: { code: 'auth_required', message: 'fixture detail' } });
   for (const status of statuses) {
     if (status === null) send.mockRejectedValueOnce(new Error('fixture network failure'));
     else send.mockResolvedValueOnce({
       status,
+      json: status === 500 ? async () => { throw new SyntaxError('fixture response is not JSON'); } : readError,
       text: async () => JSON.stringify({ ok: true, pdf_base64: pdf.toString('base64') }),
     });
   }
   const wait = jest.fn().mockResolvedValue(undefined);
-  await expect(renderPreview(send, wait)).resolves.toEqual(code === 0 ? { code, pdfBytes: pdf.length } : { code });
+  const expected = code === 0 ? { code, pdfBytes: pdf.length } : { code };
+  if (diagnostic) expected.diagnostic = diagnostic;
+  await expect(renderPreview(send, wait)).resolves.toEqual(expected);
   expect(send).toHaveBeenCalledTimes(statuses.length);
   expect(wait.mock.calls).toEqual(waits.map(ms => [ms]));
+  expect(readError).toHaveBeenCalledTimes(statuses.includes(403) ? 1 : 0);
+});
+
+test('DEV label probe reports only allowlisted renderer errors', async () => {
+  const result = await renderPreview(async () => ({
+    status: 400,
+    json: async () => ({ error: { code: 'unknown_code', message: 'fixture detail' } }),
+  }));
+  expect(result).toEqual({
+    code: EXIT.renderStatus,
+    diagnostic: 'LABEL_PROBE_RENDER_ERROR status=400 renderer_code=unavailable',
+  });
 });
