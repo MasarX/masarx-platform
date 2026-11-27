@@ -263,7 +263,7 @@ export function NavigationNext({
       (sectionId) => !activeSectionIds.includes(sectionId)
     );
     if (next.length !== collapsedSections.length) {
-      setCollapsedSections(next);
+      React.startTransition(() => setCollapsedSections(next));
     }
   }, [activeSectionIds, collapsedSections, setCollapsedSections]);
 

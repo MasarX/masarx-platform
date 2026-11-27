@@ -6073,6 +6073,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
             customerName={liveStop.customerName}
             customerPhone={liveStop.customerPhone}
             codAmount={liveStop.cod?.amount}
+            locale={ctx.locale}
             contextKey={activeStopId}
             scanExpectedCodes={liveStop.parcels.map((parcel) => parcel.code).filter((code) => code.trim() !== "")}
             scanExpectedParcels={

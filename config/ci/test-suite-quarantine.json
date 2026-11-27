@@ -1,0 +1,109 @@
+[
+  {
+    "match": [
+      "tests/integration/workflows/communications.test.js",
+      "tests/integration/workflows/outbound-3pl.test.js"
+    ],
+    "owner": "MasarX QA",
+    "reason": "Live communications and third-party logistics adapter certification requires isolated provider sandbox accounts and credentials (#134).",
+    "expires": "2026-12-11"
+  },
+  {
+    "match": [
+      "config/tooling/jest.config.js",
+      "package.json#test:integration",
+      "package.json#test:integration:cloud",
+      "tests/integration/*.test.js",
+      "tests/integration/!(workflows)/**/*.test.js",
+      "tests/integration/workflows/!(communications|outbound-3pl).test.js",
+      "tests/integration/workflows/*/**/*.test.js"
+    ],
+    "owner": "MasarX QA",
+    "reason": "The remaining integration suites require hosted Supabase API, database, Auth and Edge services with synthetic seed fixtures (#707).",
+    "expires": "2026-12-15"
+  },
+  {
+    "match": [
+      "playwright.config.ts",
+      "package.json#test:e2e",
+      "tests/e2e/**/*.spec.ts"
+    ],
+    "owner": "MasarX QA",
+    "reason": "The post-DEV report runs the anonymous subset. Full signed-in Console and Portal coverage is tracked in #130. The two shipment amend/cancel specs (#116) require the isolated hosted lane tracked in #518.",
+    "expires": "2026-12-11"
+  },
+  {
+    "match": [
+      "playwright.tenant-invite.config.ts",
+      "package.json#test:e2e:tenant-invite"
+    ],
+    "owner": "MasarX QA",
+    "reason": "The invite scenarios require isolated tenant Auth fixtures and email delivery capture (#685).",
+    "expires": "2026-12-15"
+  },
+  {
+    "match": [
+      "playwright.fieldops.config.ts",
+      "package.json#test:e2e:fieldops",
+      "tests/fieldops-e2e/**/*.spec.ts",
+      "tests/e2e/fieldops-mobile/playwright.config.ts",
+      "package.json#test:e2e:fieldops-mobile"
+    ],
+    "owner": "MasarX QA",
+    "reason": "FieldOps browser suites need the app runtime, isolated Supabase and seeded driver accounts (#130).",
+    "expires": "2026-12-11"
+  },
+  {
+    "match": [
+      "tests/e2e/fieldops-e2e-detox/.detoxrc.js",
+      "tests/e2e/fieldops-e2e-detox/jest.detox.config.js"
+    ],
+    "owner": "MasarX QA",
+    "reason": "The native Detox configuration needs a built FieldOps Android app, an emulator and a disposable backend (#679).",
+    "expires": "2026-12-15"
+  },
+  {
+    "match": [
+      "apps/console-v2/package.json#test:e2e:console:live*",
+      "apps/console-v2/tests/e2e/console.label-designer.e2e.spec.ts"
+    ],
+    "owner": "MasarX QA",
+    "reason": "Console V2 live-readiness scenarios need a separately provisioned backend and role fixtures (#684).",
+    "expires": "2026-12-15"
+  },
+  {
+    "match": [
+      "apps/console-v2/playwright.visual.config.ts",
+      "apps/console-v2/package.json#test:visual*"
+    ],
+    "owner": "MasarX Design",
+    "reason": "Visual baseline comparison requires an audited fixture, browser and reference-image setup. The regeneration workflow is opt-in and has separate prerequisites (#683).",
+    "expires": "2026-12-18"
+  },
+  {
+    "match": [
+      "package.json#test:load*",
+      "tests/load/*.js"
+    ],
+    "owner": "MasarX QA",
+    "reason": "Load tests need an isolated target with generated data and a planned rate budget (#135).",
+    "expires": "2026-12-11"
+  },
+  {
+    "match": [
+      "package.json#test:edge-smoke*",
+      "package.json#test:qa:cases*"
+    ],
+    "owner": "MasarX QA",
+    "reason": "These entry points require deployed Edge functions, service credentials and isolated QA case fixtures (#686).",
+    "expires": "2026-12-15"
+  },
+  {
+    "match": [
+      "supabase/rollback/tests/**/*.sql"
+    ],
+    "owner": "MasarX Delivery",
+    "reason": "Rollback tests need a disposable database replayed to the exact migration boundary, followed by an inverse and refusal check (#690).",
+    "expires": "2026-12-11"
+  }
+]

@@ -383,6 +383,52 @@
                       <p class="form-status" data-track-location-status aria-live="polite"></p>
                     </form>
                   </article>
+
+                  <article class="card card-pad track-action-card track-option-card" data-track-option aria-labelledby="track-option-title" hidden>
+                    <div class="track-panel-head">
+                      <h3 id="track-option-title" data-i18n="track_option_title">Change how you receive it</h3>
+                      <span class="track-lock" data-i18n="track_option_pill">One request</span>
+                    </div>
+                    <div class="track-option-loading" data-track-option-loading hidden>
+                      <span class="track-courier-skel"></span>
+                      <span class="track-courier-skel"></span>
+                      <p class="form-status" data-i18n="track_option_loading">Finding pickup branches…</p>
+                    </div>
+                    <div class="track-courier-notice" data-track-option-notice hidden>
+                      <strong data-track-option-notice-title></strong>
+                      <p data-track-option-notice-text></p>
+                    </div>
+                    <form class="track-form" data-track-option-form hidden>
+                      <fieldset class="choices options" role="radiogroup" aria-labelledby="track-option-legend" data-track-option-choices>
+                        <legend id="track-option-legend" data-i18n="track_option_legend">How should we deliver?</legend>
+                      </fieldset>
+                      <div class="track-option-branch" data-track-option-branch hidden>
+                        <label class="field">
+                          <span data-i18n="track_option_branch_label">Branch, nearest first</span>
+                          <select name="branch_id" data-track-option-branch-select required></select>
+                        </label>
+                        <div class="track-definition track-option-detail" data-track-option-branch-detail></div>
+                      </div>
+                      <div class="track-option-place" data-track-option-place hidden>
+                        <fieldset class="choices nested" role="radiogroup" aria-labelledby="track-option-place-legend" data-track-option-places>
+                          <legend id="track-option-place-legend" data-i18n="track_option_place_legend">Where should we leave it?</legend>
+                        </fieldset>
+                        <div data-track-option-other hidden>
+                          <label class="field">
+                            <span data-i18n="track_option_other_label">Describe the place</span>
+                            <input type="text" name="instruction" maxlength="120" pattern=".*\S.*" required aria-describedby="track-option-counter" data-track-option-instruction>
+                          </label>
+                          <p class="track-option-counter" id="track-option-counter" data-track-option-counter></p>
+                        </div>
+                        <label class="track-option-consent">
+                          <input type="checkbox" data-track-option-consent>
+                          <span data-track-option-consent-text></span>
+                        </label>
+                      </div>
+                      <button class="btn btn-primary" type="submit" data-track-option-submit data-i18n="track_option_submit">Send request</button>
+                      <p class="form-status" id="track-option-status" data-track-option-status aria-live="polite"></p>
+                    </form>
+                  </article>
                 </div>
               </section>
             </section>
