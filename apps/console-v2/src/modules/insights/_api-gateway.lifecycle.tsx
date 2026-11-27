@@ -77,7 +77,7 @@ export function ApiGatewayOutboundLifecycleBody({ row }: { row: ApiGatewayLifecy
           </div>
         </div>
         <Chip
-          label={row.outbound_status ?? row.intake_state ?? 'pending'}
+          label={row.outbound_status ?? row.intake_state ?? t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.pending')}
           kind={outboundTone(row.outbound_status, row.status_code)}
           size="xs"
           className="mono"

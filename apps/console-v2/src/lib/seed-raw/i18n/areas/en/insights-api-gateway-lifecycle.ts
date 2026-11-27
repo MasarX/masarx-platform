@@ -18,6 +18,7 @@ const messages = {
       policyCheck: 'Policy check',
       recorded: 'Recorded',
       received: 'Received',
+      pending: 'pending',
       noProviderDeliveryUpdate: 'No provider delivery update yet',
       noProviderDeliveryUpdate2: 'No provider delivery update is available for this API request yet.',
     },

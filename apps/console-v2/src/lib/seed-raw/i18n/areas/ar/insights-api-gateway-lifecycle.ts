@@ -20,6 +20,7 @@ const messages: CatalogShape<typeof English> = {
       policyCheck: 'فحص السياسة',
       recorded: 'مسجّل',
       received: 'مستلم',
+      pending: 'قيد الانتظار',
       noProviderDeliveryUpdate: 'لا يوجد تحديث لتسليم المزوّد بعد',
       noProviderDeliveryUpdate2: 'لا يتوفر تحديث لتسليم المزوّد لطلب API هذا بعد.',
     },

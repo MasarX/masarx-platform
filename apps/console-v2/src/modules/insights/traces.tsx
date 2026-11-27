@@ -154,7 +154,7 @@ function ObservabilityRow({ row, totalMs, fmtNumber, onSelect }: ObservabilityRo
         className="mono"
         style={{ fontSize: '10.5px', color: 'var(--ink-3)', textAlign: 'right' }}
       >
-        {row.durMs > 0 ? `${fmtNumber(row.durMs)}ms` : '—'}
+        {row.durMs > 0 ? fill(t('insightsTraces.observabilityRow.durationMs'), { ms: fmtNumber(row.durMs) }) : '—'}
       </span>
     </div>
   );
@@ -172,13 +172,13 @@ function eventDrawerBody(row: TimelineRow, t: Translate): ReactNode {
         <div>{fill(t('insightsTraces.eventDrawerBody.resource'), { value: String(row.ev.resource_type) })}</div>
         <div>{fill(t('insightsTraces.eventDrawerBody.status'), { value: String(row.ev.status) })}</div>
         <div>{fill(t('insightsTraces.eventDrawerBody.eventTime'), { value: String(row.ev.event_time) })}</div>
-        <div>{fill(t('insightsTraces.eventDrawerBody.duration'), { value: row.durMs > 0 ? `${row.durMs}ms` : t('insightsTraces.eventDrawerBody.notAvailable') })}</div>
+        <div>{fill(t('insightsTraces.eventDrawerBody.duration'), { value: row.durMs > 0 ? fill(t('insightsTraces.eventDrawerBody.durationMs'), { ms: String(row.durMs) }) : t('insightsTraces.eventDrawerBody.notAvailable') })}</div>
       </div>
       {metaKeys.length > 0 && (
         <>
           <h4 className="eyebrow" style={{ marginTop: '12px' }}>{t('insightsTraces.eventDrawerBody.additionalDetails')}</h4>
           <p className="state__hint">
-            {`${metaKeys.length} additional detail${metaKeys.length === 1 ? '' : 's'} recorded for support review.`}
+            {fill(t(metaKeys.length === 1 ? 'insightsTraces.eventDrawerBody.additionalDetailsCountOne' : 'insightsTraces.eventDrawerBody.additionalDetailsCount'), { count: String(metaKeys.length) })}
           </p>
         </>
       )}
@@ -352,7 +352,7 @@ export function TracesModule() {
       list.push(
         <Chip
           key="total"
-          label={`total · ${fmtNumber(totalMs)}ms`}
+          label={fill(t('insightsTraces.tracesModule.totalMs'), { ms: fmtNumber(totalMs) })}
           kind="info"
           size="xs"
           className="mono"
@@ -363,7 +363,11 @@ export function TracesModule() {
       list.push(
         <Chip
           key="evcount"
-          label={`${observabilityEvents.length} events · ${domainEvents.length} domain · ${workflowRuns.length} workflows`}
+          label={fill(t('insightsTraces.tracesModule.eventCounts'), {
+            events: String(observabilityEvents.length),
+            domain: String(domainEvents.length),
+            workflows: String(workflowRuns.length),
+          })}
           kind="neutral"
           size="xs"
           className="mono"

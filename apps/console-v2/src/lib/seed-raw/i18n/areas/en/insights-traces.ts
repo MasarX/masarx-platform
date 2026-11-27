@@ -4,6 +4,7 @@ const messages = {
   insightsTraces: {
     observabilityRow: {
       eventEventTypeDurms: 'Event {event_type}, {durMs} ms',
+      durationMs: '{ms}ms',
     },
     eventDrawerBody: {
       activityEvent: 'Activity event',
@@ -17,6 +18,9 @@ const messages = {
       status: 'Status: {value}',
       eventTime: 'Event time: {value}',
       duration: 'Duration: {value}',
+      durationMs: '{ms}ms',
+      additionalDetailsCountOne: '{count} additional detail recorded for support review.',
+      additionalDetailsCount: '{count} additional details recorded for support review.',
     },
     domainEventCard: {
       recorded: 'Recorded',
@@ -50,6 +54,8 @@ const messages = {
       noActivityFoundFor: 'No activity found for reference "{activeId}".',
       recorded: 'Recorded',
       totalValueMs: ' · total {value}ms',
+      totalMs: 'total · {ms}ms',
+      eventCounts: '{events} events · {domain} domain · {workflows} workflows',
       timelineEvents: 'Timeline events',
       relatedEvents: 'Related events',
       relatedWorkflows: 'Related workflows',

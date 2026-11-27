@@ -11,6 +11,13 @@ function lookup(catalog: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], catalog);
 }
 
+/** Runs the shared untranslated check on one filled template; `data` names the values the test supplied. */
+function untranslatedIn(text: string, data: readonly string[]): string[] {
+  const node = document.createElement('span');
+  node.textContent = text;
+  return findUntranslated(node, data);
+}
+
 describe('SupportCasesModule in Arabic', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -30,6 +37,14 @@ describe('SupportCasesModule in Arabic', () => {
     expect(findUntranslated(plain)).toEqual([]);
   });
 
+  it('renders the KPI strip and the queue count in Arabic', async () => {
+    renderWithProviders(<SupportCasesModule />, { locale: 'ar', capabilities: ['all'] });
+
+    expect(findUntranslated(await screen.findByTestId('support-kpi-strip'))).toEqual([]);
+    const [queue] = await screen.findAllByText(ar.supportCases.queuePane.queue);
+    expect(findUntranslated(queue.parentElement ?? queue)).toEqual([]);
+  });
+
   it('shows the denied state in Arabic', async () => {
     renderWithProviders(<SupportCasesModule />, { locale: 'ar', capabilities: ['shipments.read'] });
     expect(await screen.findByText(ar.supportCases.supportCasesModule.youDoNotHave)).toBeInTheDocument();
@@ -43,6 +58,17 @@ describe('SupportCasesModule in Arabic', () => {
   ])('keeps the English copy for %s and has Arabic', (key, english) => {
     expect(englishT(key)).toBe(english);
     expect(lookup(ar, key)).toMatch(/[؀-ۿ]/);
+  });
+
+  it.each([
+    ['supportCasesModule.totalUnassigned', { total: '9', unassigned: '2' }, '9 total · 2 unassigned'],
+    ['queuePane.caseCountOne', { count: '1' }, '1 case'],
+    ['queuePane.caseCount', { count: '5' }, '5 cases'],
+    ['queueRow.unassigned', {}, 'Unassigned'],
+    ['supportCasesModule.utcReference', {}, 'UTC reference'],
+  ])('fills %s in English and has no English left in Arabic', (key, values, english) => {
+    expect(fill(englishT(`supportCases.${key}`), values)).toBe(english);
+    expect(untranslatedIn(fill(String(lookup(ar.supportCases, key)), values), Object.values(values))).toEqual([]);
   });
 
   it('fills the reference template in both languages', () => {

@@ -5,7 +5,8 @@ import type English from '../en/insights-traces';
 const messages: CatalogShape<typeof English> = {
   insightsTraces: {
     observabilityRow: {
-      eventEventTypeDurms: 'الحدث {event_type}، {durMs} ms',
+      eventEventTypeDurms: 'الحدث {event_type}، {durMs} مللي ثانية',
+      durationMs: '{ms} مللي ثانية',
     },
     eventDrawerBody: {
       activityEvent: 'حدث النشاط',
@@ -19,6 +20,9 @@ const messages: CatalogShape<typeof English> = {
       status: 'الحالة: {value}',
       eventTime: 'وقت الحدث: {value}',
       duration: 'المدة: {value}',
+      durationMs: '{ms} مللي ثانية',
+      additionalDetailsCountOne: 'تفصيل إضافي واحد ({count}) مسجّل لمراجعة الدعم.',
+      additionalDetailsCount: '{count} من التفاصيل الإضافية مسجّلة لمراجعة الدعم.',
     },
     domainEventCard: {
       recorded: 'مسجّل',
@@ -51,7 +55,9 @@ const messages: CatalogShape<typeof English> = {
       noEventsFound: 'لم يتم العثور على أحداث',
       noActivityFoundFor: 'لم يتم العثور على نشاط للمرجع "{activeId}".',
       recorded: 'مسجّل',
-      totalValueMs: ' · الإجمالي {value}ms',
+      totalValueMs: ' · الإجمالي {value} مللي ثانية',
+      totalMs: 'الإجمالي · {ms} مللي ثانية',
+      eventCounts: '{events} أحداث · {domain} أحداث نطاق · {workflows} عمليات سير عمل',
       timelineEvents: 'أحداث الخط الزمني',
       relatedEvents: 'الأحداث المرتبطة',
       relatedWorkflows: 'سير العمل المرتبط',

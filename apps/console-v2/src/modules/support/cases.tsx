@@ -1707,7 +1707,10 @@ export function SupportCasesModule() {
           label={t('supportCases.supportCasesModule.open')}
           value={String(openCount)}
           tone={openCount > 0 ? 'info' : 'neutral'}
-          delta={`${decoratedCases.length} total · ${decoratedCases.filter((c) => !c.assigned_to).length} unassigned`}
+          delta={fill(t('supportCases.supportCasesModule.totalUnassigned'), {
+            total: String(decoratedCases.length),
+            unassigned: String(decoratedCases.filter((c) => !c.assigned_to).length),
+          })}
         />
         <KPICard
           label={t('supportCases.supportCasesModule.pendingResponse')}
@@ -1907,7 +1910,7 @@ function QueuePane({
           <span className="eyebrow">{t('supportCases.queuePane.queue')}</span>
           <span style={{ flex: 1 }} />
           <span className="mono" style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>
-            {rows.length} case{rows.length === 1 ? '' : 's'}
+            {fill(t(rows.length === 1 ? 'supportCases.queuePane.caseCountOne' : 'supportCases.queuePane.caseCount'), { count: String(rows.length) })}
           </span>
         </div>
         <div
@@ -2073,7 +2076,7 @@ function QueueRow({ row, isActive, onPick, users, now }: QueueRowProps) {
             title={t('supportCases.queueRow.unassigned')}
             aria-label={t('supportCases.queueRow.unassigned')}
           >
-            unassigned
+            {t('supportCases.queueRow.unassigned')}
           </span>
         )}
       </div>
@@ -3457,7 +3460,7 @@ function NewCaseForm({
   const submit = () => {
     if (!priority || !channel) {
       pushToast(
-        t('%s.newCaseForm.cannotCreateCaseOptionsMissing'),
+        t('supportCases.newCaseForm.cannotCreateCaseOptionsMissing'),
         'danger',
       );
       return;

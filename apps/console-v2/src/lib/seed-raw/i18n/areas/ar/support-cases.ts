@@ -12,6 +12,7 @@ const messages: CatalogShape<typeof English> = {
     },
     supportCasesModule: {
       unassigned: 'غير مُسنَد',
+      totalUnassigned: '{total} إجمالًا · {unassigned} غير مُسنَدة',
       clientContext: 'سياق العميل',
       senderContext: 'سياق المرسل',
       recipientContext: 'سياق المستلم',
@@ -55,7 +56,7 @@ const messages: CatalogShape<typeof English> = {
       pastDueTime: 'تجاوز الموعد المحدد',
       allWithinSla: 'الكل ضمن مستوى الخدمة',
       resolvedToday: 'تم حلها اليوم',
-      utcReference: 'مرجع UTC',
+      utcReference: 'مرجع التوقيت العالمي المنسّق',
     },
     supportMutationReadbackCard: {
       supportUpdateConfirmed: 'تم تأكيد تحديث الدعم',
@@ -72,6 +73,8 @@ const messages: CatalogShape<typeof English> = {
       queueFilters: 'عوامل تصفية القائمة',
       cases: 'الطلبات',
       noCasesInThis: 'لا توجد طلبات في هذا العرض. جرّب تغيير عامل التصفية إلى «الكل».',
+      caseCountOne: 'طلب واحد ({count})',
+      caseCount: '{count} طلبات',
     },
     queueRow: {
       sla: 'مستوى الخدمة',

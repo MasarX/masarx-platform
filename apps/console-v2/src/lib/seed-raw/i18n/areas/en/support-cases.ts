@@ -10,6 +10,7 @@ const messages = {
     },
     supportCasesModule: {
       unassigned: 'Unassigned',
+      totalUnassigned: '{total} total · {unassigned} unassigned',
       clientContext: 'Client context',
       senderContext: 'Sender context',
       recipientContext: 'Recipient context',
@@ -70,6 +71,8 @@ const messages = {
       queueFilters: 'Queue filters',
       cases: 'Cases',
       noCasesInThis: 'No cases in this view. Try switching the filter to "All".',
+      caseCountOne: '{count} case',
+      caseCount: '{count} cases',
     },
     queueRow: {
       sla: 'SLA',
