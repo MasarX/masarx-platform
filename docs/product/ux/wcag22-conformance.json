@@ -12,7 +12,7 @@
         "consistent-help": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance landing: consistent-help (FAQ and contact links keep the same relative order across landing and tracking pages)" },
         "redundant-entry": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance landing: redundant-entry (the driver documents step does not ask again for status lookup fields)" },
         "status-messages": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance landing: status-messages (every form has a polite live region for its status)" },
-        "reduced-motion": { "status": "fail", "issue": "https://github.com/MasarX/masarx-platform/issues/493", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance landing: reduced-motion (under prefers-reduced-motion the page sets data-motion=off and runs no animation over 5 s; by default, motion over 5 s has a control that stops it). HTML ships data-motion=on, which outranks the OS setting in app.js, and the infinite aurora background runs with no stop control" }
+        "reduced-motion": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance landing: reduced-motion (under prefers-reduced-motion the page sets data-motion=off and runs no animation over 5 s; by default, motion over 5 s has a control that stops it)" }
       }
     },
     "public-tracking": {
@@ -26,7 +26,7 @@
         "consistent-help": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance public-tracking: consistent-help (FAQ and contact links keep the same relative order across landing and tracking pages)" },
         "redundant-entry": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance public-tracking: redundant-entry (verify and request steps do not ask again for the reference or digits)" },
         "status-messages": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance public-tracking: status-messages (every form has a polite live region and a failed lookup reports in it)" },
-        "reduced-motion": { "status": "fail", "issue": "https://github.com/MasarX/masarx-platform/issues/493", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance public-tracking: reduced-motion (under prefers-reduced-motion the page sets data-motion=off and runs no animation over 5 s; by default, motion over 5 s has a control that stops it). HTML ships data-motion=on, which outranks the OS setting in app.js, and the infinite aurora background runs with no stop control" }
+        "reduced-motion": { "status": "pass", "evidence": "ci: tests/landing-e2e/landing-conformance-wcag22.spec.ts › conformance public-tracking: reduced-motion (under prefers-reduced-motion the page sets data-motion=off and runs no animation over 5 s; by default, motion over 5 s has a control that stops it)" }
       }
     },
     "portal-tracking": {
