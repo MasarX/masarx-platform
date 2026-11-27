@@ -49,9 +49,6 @@ apps/console-v2/src/modules/integrations/ExternalIntakeWorkspaceToolbar.tsx 15
 apps/console-v2/src/modules/integrations/_helpers.ts 1
 apps/console-v2/src/modules/integrations/_webhook-replay-outcome.ts 1
 apps/console-v2/src/modules/integrations/_webhook-tester/envelopes.ts 1
-apps/console-v2/src/modules/integrations/catalog.tsx 117
-apps/console-v2/src/modules/integrations/mapping.tsx 193
-apps/console-v2/src/modules/integrations/webhook-tester.tsx 219
 apps/console-v2/src/modules/network/branches.tsx 186
 apps/console-v2/src/modules/network/geocoding.tsx 187
 apps/console-v2/src/modules/network/hubs.tsx 11
