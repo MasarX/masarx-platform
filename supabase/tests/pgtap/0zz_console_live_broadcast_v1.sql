@@ -1,7 +1,7 @@
 BEGIN;
 SET LOCAL search_path TO public, extensions, pgtap, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(17);
+SELECT plan(24);
 
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid = 'realtime.messages'::regclass),
   'Realtime uses row-level security');
@@ -139,6 +139,55 @@ BEGIN
   RETURN NEXT throws_ok(v_publish_routes, '42501',
     'new row violates row-level security policy for table "messages"',
     'an anonymous actor cannot publish Console invalidations');
+  RESET ROLE;
+  -- Simulate a later feature with wide permissive policies; the restrictive boundaries must still hold.
+  CREATE POLICY pgtap_wide_read ON realtime.messages FOR SELECT TO anon, authenticated USING (true);
+  CREATE POLICY pgtap_wide_write ON realtime.messages FOR INSERT TO anon, authenticated WITH CHECK (true);
+  INSERT INTO realtime.messages (topic, extension, event, payload, private)
+  VALUES ('pgtap-wide:' || v_org::text, 'broadcast', 'probe', '{}', true);
+
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claim.role', 'anon', true);
+  PERFORM set_config('request.jwt.claims', '{"role":"anon"}', true);
+  SET LOCAL ROLE anon;
+  PERFORM set_config('realtime.topic', 'pgtap-wide:' || v_org::text, true);
+  RETURN NEXT is((SELECT count(*)::int FROM realtime.messages WHERE topic = 'pgtap-wide:' || v_org::text), 1,
+    'the simulated wide policy exposes topics outside the Console namespace');
+  PERFORM set_config('realtime.topic', v_routes, true);
+  RETURN NEXT is((SELECT count(*)::int FROM realtime.messages WHERE topic = v_routes), 0,
+    'with a wide policy, an anonymous actor still receives no Console invalidations');
+  RETURN NEXT throws_ok(v_publish_routes, '42501',
+    'new row violates row-level security policy for table "messages"',
+    'with a wide policy, an anonymous actor still cannot publish Console invalidations');
+  RESET ROLE;
+
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  PERFORM set_config('request.jwt.claim.sub', v_other_actor::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_other_actor, 'role', 'authenticated')::text, true);
+  SET LOCAL ROLE authenticated;
+  PERFORM set_config('realtime.topic', v_routes, true);
+  RETURN NEXT is((SELECT count(*)::int FROM realtime.messages WHERE topic = v_routes), 0,
+    'with a wide policy, the second tenant still receives nothing from the first tenant');
+  PERFORM set_config('realtime.topic', 'pgtap-wide:' || v_org::text, true);
+  RETURN NEXT is((SELECT count(*)::int FROM realtime.messages WHERE topic = v_routes), 0,
+    'with a wide policy, a non-Console channel topic still cannot read Console invalidations');
+  RESET ROLE;
+
+  PERFORM set_config('request.jwt.claim.sub', v_row_reader::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_row_reader, 'role', 'authenticated')::text, true);
+  SET LOCAL ROLE authenticated;
+  PERFORM set_config('realtime.topic', v_routes, true);
+  RETURN NEXT is((SELECT count(*)::int FROM realtime.messages WHERE topic = v_routes), 0,
+    'with a wide policy, the row-scoped driver still cannot subscribe to tenant-wide routes');
+  RESET ROLE;
+
+  PERFORM set_config('request.jwt.claim.sub', v_actor::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_actor, 'role', 'authenticated')::text, true);
+  SET LOCAL ROLE authenticated;
+  PERFORM set_config('realtime.topic', v_routes, true);
+  RETURN NEXT throws_ok(v_publish_routes, '42501',
+    'new row violates row-level security policy for table "messages"',
+    'with a wide policy, a tenant operator still cannot publish Console invalidations');
   RESET ROLE;
 END;
 $$;
