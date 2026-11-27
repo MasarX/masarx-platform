@@ -1548,12 +1548,12 @@ function SignInScreen({
 
   const reportSubmissionFailure = React.useCallback(
     (error: unknown) => {
-      const nextMessage = formatAuthErrorMessage(error);
+      const nextMessage = formatAuthErrorMessage(error, strings);
       setErrorMessage(nextMessage);
       logDebugFailure("failed to authenticate", error);
       Alert.alert(strings.auth.signInFailed, nextMessage);
     },
-    [strings.auth.signInFailed]
+    [strings]
   );
 
   const handleSendOtp = async () => {
@@ -1564,7 +1564,7 @@ function SignInScreen({
         email: normalizedEmail,
       });
       if (error) {
-        const nextMessage = formatAuthErrorMessage(error);
+        const nextMessage = formatAuthErrorMessage(error, strings);
         setErrorMessage(nextMessage);
         Alert.alert(strings.auth.signInFailed, nextMessage);
         return;
@@ -1585,7 +1585,7 @@ function SignInScreen({
         type: "email",
       });
       if (error) {
-        const nextMessage = formatAuthErrorMessage(error);
+        const nextMessage = formatAuthErrorMessage(error, strings);
         setErrorMessage(nextMessage);
         Alert.alert(strings.auth.signInFailed, nextMessage);
         return;
@@ -1606,9 +1606,9 @@ function SignInScreen({
         password,
       });
       if (error) {
-        const nextMessage = formatAuthErrorMessage(error);
+        const nextMessage = formatAuthErrorMessage(error, strings);
         setErrorMessage(nextMessage);
-        Alert.alert("Sign-in failed", nextMessage);
+        Alert.alert(strings.auth.signInFailed, nextMessage);
         return;
       }
     } finally {
@@ -1654,7 +1654,7 @@ function SignInScreen({
             <Pressable
               key={candidate}
               accessibilityRole="button"
-              accessibilityLabel={candidate === "password" ? "Use password" : "Use email code"}
+              accessibilityLabel={candidate === "password" ? strings.signIn.usePassword : strings.signIn.useEmailCode}
               accessibilityState={{ selected: candidate === method }}
               testID={fieldOpsSignInMethodTestId(candidate)}
               onPress={() => {
@@ -1809,9 +1809,9 @@ function Bootstrap() {
   if (!publicConfig) {
     return (
       <View style={styles.container} accessibilityRole="alert">
-        <Text style={styles.title}>Fieldops</Text>
+        <Text style={styles.title}>Fieldops</Text>{/* i18n-literal-ok: product name shown before config loads */}
         <Text style={styles.error}>{i18nStrings.bootstrap.missing_public_configuration}</Text>
-        <Text style={styles.subtitle}>Ask your administrator to check the app setup.</Text>
+        <Text style={styles.subtitle}>{i18nStrings.setup.checkAppSetup}</Text>
       </View>
     );
   }
@@ -1820,13 +1820,9 @@ function Bootstrap() {
     return (
       <View style={styles.container} accessibilityRole="alert">
         <Text style={styles.title}>{publicConfig.appName}</Text>
-        <Text style={styles.error}>Invalid Supabase key</Text>
-        <Text style={styles.subtitle}>
-          This app cannot start with a privileged server key.
-        </Text>
-        <Text style={styles.mono}>
-          Ask your administrator to configure a public client key and restart the app.
-        </Text>
+        <Text style={styles.error}>{i18nStrings.setup.invalidSupabaseKey}</Text>
+        <Text style={styles.subtitle}>{i18nStrings.setup.privilegedKey}</Text>
+        <Text style={styles.mono}>{i18nStrings.setup.configurePublicKey}</Text>
       </View>
     );
   }
@@ -2108,7 +2104,7 @@ function BootstrapConfigured({ publicConfig, storage }: BootstrapConfiguredProps
         return (
           <View style={styles.container}>
             <Text style={styles.title}>{publicConfig.appName}</Text>
-            <Text style={styles.subtitle}>Loading session...</Text>
+            <Text style={styles.subtitle}>{strings.session.loading}</Text>
           </View>
         );
       }
@@ -2129,7 +2125,7 @@ function BootstrapConfigured({ publicConfig, storage }: BootstrapConfiguredProps
         return (
           <View style={styles.container}>
             <Text style={styles.title}>{publicConfig.appName}</Text>
-            <Text style={styles.subtitle}>Bootstrapping...</Text>
+            <Text style={styles.subtitle}>{strings.session.bootstrapping}</Text>
           </View>
         );
       }
@@ -2138,7 +2134,7 @@ function BootstrapConfigured({ publicConfig, storage }: BootstrapConfiguredProps
         return (
           <View style={styles.container}>
             <Text style={styles.title}>{publicConfig.appName}</Text>
-            <Text style={styles.error}>Failed to load app context.</Text>
+            <Text style={styles.error}>{strings.session.contextFailed}</Text>
             <Text style={styles.mono}>{formatUnknownError(ctxQuery.error)}</Text>
           </View>
         );
@@ -2146,7 +2142,7 @@ function BootstrapConfigured({ publicConfig, storage }: BootstrapConfiguredProps
 
       if (Platform.OS === "web" && (!webScopeKey || boundWebScope !== webScopeKey)) {
         return <View style={styles.container}><Text style={!webScopeKey ? styles.error : styles.subtitle}>
-          {!webScopeKey ? "Authenticated organization is unavailable. No offline action can be confirmed." : "Resolving authenticated offline storage..."}
+          {!webScopeKey ? strings.session.organizationUnavailable : strings.session.resolvingOfflineStorage}
         </Text></View>;
       }
 
@@ -2154,10 +2150,10 @@ function BootstrapConfigured({ publicConfig, storage }: BootstrapConfiguredProps
         return (
           <View style={styles.container}>
             <Text style={styles.title}>{publicConfig.appName}</Text>
-            <Text style={styles.error}>Durable offline storage is unavailable. No queued action was confirmed.</Text>
+            <Text style={styles.error}>{strings.session.offlineStorageUnavailable}</Text>
             <Text style={styles.mono}>{formatUnknownError(outboxInitQuery.error ?? cacheInitQuery.error)}</Text>
             <Pressable onPress={() => { void outboxInitQuery.refetch(); void cacheInitQuery.refetch(); }} accessibilityRole="button">
-              <Text>Retry storage</Text>
+              <Text>{strings.session.retryStorage}</Text>
             </Pressable>
           </View>
         );
@@ -2167,8 +2163,8 @@ function BootstrapConfigured({ publicConfig, storage }: BootstrapConfiguredProps
         return (
           <View style={styles.container}>
             <Text style={styles.title}>{publicConfig.appName}</Text>
-            <Text style={styles.error}>Failed to load app context.</Text>
-            <Text style={styles.mono}>No context payload was returned.</Text>
+            <Text style={styles.error}>{strings.session.contextFailed}</Text>
+            <Text style={styles.mono}>{strings.session.contextEmpty}</Text>
           </View>
         );
       }
@@ -2177,7 +2173,7 @@ function BootstrapConfigured({ publicConfig, storage }: BootstrapConfiguredProps
         return (
           <View style={styles.container}>
             <Text style={styles.title}>{publicConfig.appName}</Text>
-            <Text style={styles.subtitle}>Bootstrapping...</Text>
+            <Text style={styles.subtitle}>{strings.session.bootstrapping}</Text>
           </View>
         );
       }
@@ -6220,7 +6216,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
             onLongPress={() => handleSignOut()}
             delayLongPress={500}
             style={({ pressed }) => [styles.avatar, pressed && styles.avatarPressed]}
-            accessibilityLabel={`Role ${userRoleLabel}. Long press to sign out.`}
+            accessibilityLabel={strings.session.avatarSignOut.replace("{role}", () => String(userRoleLabel))}
           >
             <Text style={styles.avatarText}>{userRoleCode}</Text>
           </Pressable>

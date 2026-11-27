@@ -173,7 +173,7 @@ test('sweep provisioner masks generated passwords before use and emits fixed lab
         tenantRoles.set(roleKey, role.capability_keys);
         return response([{ settings_id: orgId }]);
       }
-      if (query.includes('resolve_access_control_policy_v1') && readOnly) {
+      if (query.includes('resolve_access_control_policy_v1') && !readOnly) {
         const key = parameters[3];
         const configured = key === 'dispatcher' ? tenantRoles.get(key) : roles[key].required;
         const capabilities = [...configured, ...(key === driftRole ? ['system.write'] : [])];
@@ -256,6 +256,11 @@ test('sweep provisioner masks generated passwords before use and emits fixed lab
     expect(deletedRoles).toEqual(['dispatcher']);
     expect(users.size).toBe(3);
     expect(readdirSync(directory)).toEqual([]);
+
+    for (const [url, { body }] of request.mock.calls) {
+      if (!url.endsWith('/database/query')) continue;
+      expect(Object.keys(JSON.parse(body)).sort()).toEqual(['parameters', 'query', 'read_only']);
+    }
   } finally {
     request.mockRestore();
     log.mockRestore();

@@ -17,7 +17,7 @@ import { Textarea } from "./textarea";
 import { RelationField } from "./relation-field";
 import { formatReferenceValue } from "./resource-utils";
 import { useToast } from "./use-toast";
-import { formatUiError } from "./utils";
+import { formatUiError, UiMessageError } from "./utils";
 import { isTimeoutError, resolveUiRpcTimeoutMs, withTimeout } from "./promise-timeout";
 import { useUnsavedChangesGuard } from "./use-unsaved-changes";
 import { resolveBaseOrigin, resolveSafeHref } from "./url-guard";
@@ -297,7 +297,7 @@ export function WarehouseTransferManifestCreateForm({
         result?.transfer_id ?? result?.warehouse_transfer_id ?? ""
       ).trim();
       if (!transferId) {
-        throw new Error(t("errors.missingTransferId"));
+        throw new UiMessageError(t("errors.missingTransferId"));
       }
 
       toast({

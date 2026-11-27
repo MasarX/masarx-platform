@@ -1,8 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 
-const css = fs.readFileSync(
-  path.resolve(__dirname, '..', '..', 'docs', 'marketing', 'landing-v2', 'app.css'),
+const { readSharedUiTokenCss } = require('../../scripts/frontend/landing-shared-tokens');
+
+const repoRoot = path.resolve(__dirname, '..', '..');
+const css = readSharedUiTokenCss(repoRoot) + fs.readFileSync(
+  path.join(repoRoot, 'docs', 'marketing', 'landing-v2', 'app.css'),
   'utf8',
 );
 
@@ -11,7 +14,7 @@ const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]
   selector: selector.trim().replace(/\s+/g, ' '),
   body,
 }));
-const trackingRules = rules.filter(({ selector }) => /\.track-|\[data-track-|body\.track-/.test(selector));
+const trackingRules = rules.filter(({ selector }) => /\.track-|\.pod-|\.choices?\b|\[data-track-/.test(selector));
 const defined = new Set([...css.matchAll(/(--[\w-]+)\s*:/g)].map(([, name]) => name));
 
 describe('landing tracking styles', () => {
@@ -31,7 +34,7 @@ describe('landing tracking styles', () => {
 
   it('uses no colour literals', () => {
     const literals = trackingRules.flatMap(({ selector, body }) =>
-      (body.match(/#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?)\(|\b(?:white|black)\b/gi) || []).map(
+      (body.match(/#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?)\((?!\s*var\(--[\w-]+\)\s*\))|(?<![\w-])(?:white|black)(?![\w-])/gi) || []).map(
         (literal) => `${selector}: ${literal}`,
       ),
     );
@@ -41,7 +44,7 @@ describe('landing tracking styles', () => {
   it('draws the timeline on the inline-start edge', () => {
     const timeline = trackingRules.filter(({ selector }) => selector.includes('.track-timeline'));
     const body = timeline.map((rule) => rule.body).join('\n');
-    expect(body).toMatch(/border-inline-start:/);
+    expect(body).toMatch(/border-inline-start:[^;]*var\(--[\w-]+\)/);
     expect(body).toMatch(/inset-inline-start:/);
     expect(body).not.toMatch(/\b(?:border|padding|margin)-(?:left|right)\b|(?:^|[\s;])(?:left|right)\s*:/m);
   });

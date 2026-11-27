@@ -1,3 +1,10 @@
+const { fixtureHost } = require('../../fixtures/builders/hosts');
+
+const consoleHost = fixtureHost('console', 'vercel.app');
+const portalHost = fixtureHost('portal', 'vercel.app');
+const landingHost = fixtureHost('landing', 'pages.dev');
+const docsHost = fixtureHost('docs', 'pages.dev');
+
 const {
   buildPreviewManifestOutputs,
   resolveBooleanOutput,
@@ -43,16 +50,16 @@ describe('preview-manifest-outputs', () => {
           readiness_failure_class: 'preview-runtime-unready',
         },
         console: {
-          deployment_url: 'https://console-preview.vercel.app',
+          deployment_url: `https://${consoleHost}`,
         },
         portal: {
-          deployment_url: 'https://portal-preview.vercel.app',
+          deployment_url: `https://${portalHost}`,
         },
         landing: {
-          url: 'https://landing-preview.pages.dev',
+          url: `https://${landingHost}`,
         },
         docs: {
-          url: 'https://docs-preview.pages.dev',
+          url: `https://${docsHost}`,
         },
       },
     });
@@ -73,10 +80,10 @@ describe('preview-manifest-outputs', () => {
       db_ready: '1',
       rest_ready: '0',
       readiness_failure_class: 'preview-runtime-unready',
-      console_url: 'https://console-preview.vercel.app',
-      portal_url: 'https://portal-preview.vercel.app',
-      landing_url: 'https://landing-preview.pages.dev',
-      docs_url: 'https://docs-preview.pages.dev',
+      console_url: `https://${consoleHost}`,
+      portal_url: `https://${portalHost}`,
+      landing_url: `https://${landingHost}`,
+      docs_url: `https://${docsHost}`,
     });
   });
 
