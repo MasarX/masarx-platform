@@ -9,6 +9,7 @@ import { CAP } from '@/lib/capabilities';
 import { useResourceList } from '@/lib/queries';
 import * as api from '@/lib/api';
 import { pushToast } from '@/components/toastStore';
+import { fill, useI18n } from '@/lib/i18n';
 
 interface MigrationSource extends Record<string, unknown> {
   id: string;
@@ -147,6 +148,7 @@ function statusTone(status: string) {
 }
 
 export function CustomerMigrationModule() {
+  const { t } = useI18n();
   const canReadPlugin = useCapability(CAP.INTEGRATION_PLUGINS_READ);
   const canWritePlugin = useCapability(CAP.INTEGRATION_PLUGINS_WRITE);
   const canTestPlugin = useCapability(CAP.INTEGRATION_PLUGINS_TEST);
@@ -218,29 +220,29 @@ export function CustomerMigrationModule() {
 
   const requestColumns = useMemo<DataTableColumn<MigrationRequest>[]>(
     () => [
-      { key: 'request_key', label: 'Request' },
-      { key: 'mode', label: 'Mode' },
+      { key: 'request_key', label: t('integrationsCustomerMigration.customerMigrationModule.request') },
+      { key: 'mode', label: t('integrationsCustomerMigration.customerMigrationModule.mode') },
       {
         key: 'status',
-        label: 'Status',
+        label: t('integrationsCustomerMigration.customerMigrationModule.status'),
         render: (_raw, row) => <Chip kind={statusTone(row.status)} label={row.status} />,
       },
       {
         key: 'validation',
-        label: 'Validation',
+        label: t('integrationsCustomerMigration.customerMigrationModule.validation'),
         render: (_raw, row) =>
           `${summaryValue(row.validation_summary, 'clients')} client / ${summaryValue(row.validation_summary, 'recipients')} recipients / ${summaryValue(row.validation_summary, 'errors')} errors`,
       },
       {
         key: 'redaction',
-        label: 'Redaction',
+        label: t('integrationsCustomerMigration.customerMigrationModule.redaction'),
         render: (_raw, row) => `${summaryValue(row.redaction_summary, 'secret_fields_redacted')} fields`,
       },
-      { key: 'workflow_run_id', label: 'Workflow run' },
-      { key: 'decision_log_id', label: 'Decision' },
-      { key: 'updated_at', label: 'Updated' },
+      { key: 'workflow_run_id', label: t('integrationsCustomerMigration.customerMigrationModule.workflowRun') },
+      { key: 'decision_log_id', label: t('integrationsCustomerMigration.customerMigrationModule.decision') },
+      { key: 'updated_at', label: t('integrationsCustomerMigration.customerMigrationModule.updated') },
     ],
-    [],
+    [t],
   );
 
   async function saveConfig() {
@@ -264,9 +266,9 @@ export function CustomerMigrationModule() {
       setProfileId(response.profile_id);
       setResult(null);
       await Promise.all([sourcesQuery.refetch(), profilesQuery.refetch()]);
-      pushToast('Migration config saved', 'good');
+      pushToast(t('integrationsCustomerMigration.customerMigrationModule.migrationConfigSaved'), 'good');
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Config save failed', 'danger');
+      pushToast(err instanceof Error ? err.message : t('integrationsCustomerMigration.customerMigrationModule.configSaveFailed'), 'danger');
     } finally {
       setBusy(null);
     }
@@ -276,7 +278,7 @@ export function CustomerMigrationModule() {
     if ((mode === 'execute' ? !canExecute : !canPreview) || !selectedSourceId || !selectedProfileId) return;
     const batchId = externalBatchId.trim();
     if (!batchId || !payload.trim()) {
-      pushToast('Enter an external batch ID and a JSON payload.', 'warn');
+      pushToast(t('integrationsCustomerMigration.customerMigrationModule.enterAnExternalBatch'), 'warn');
       return;
     }
     setBusy(mode);
@@ -299,16 +301,16 @@ export function CustomerMigrationModule() {
       pushToast(
         response.ok === false
           ? response.error?.code === 'validation_failed'
-            ? 'Migration validation failed'
-            : 'Migration failed'
+            ? t('integrationsCustomerMigration.customerMigrationModule.migrationValidationFailed')
+            : t('integrationsCustomerMigration.customerMigrationModule.migrationFailed')
           : mode === 'preview'
-            ? 'Migration preview ready'
-            : 'Customer migration executed',
+            ? t('integrationsCustomerMigration.customerMigrationModule.migrationPreviewReady')
+            : t('integrationsCustomerMigration.customerMigrationModule.customerMigrationExecuted'),
         response.ok === false ? 'warn' : 'good',
       );
     } catch (err) {
       await Promise.all([requestsQuery.refetch(), importJobsQuery.refetch()]);
-      pushToast(err instanceof Error ? err.message : 'Migration failed', 'danger');
+      pushToast(err instanceof Error ? err.message : t('integrationsCustomerMigration.customerMigrationModule.migrationFailed'), 'danger');
     } finally {
       setBusy(null);
     }
@@ -325,8 +327,8 @@ export function CustomerMigrationModule() {
     return (
       <StateView
         kind="denied"
-        title="Customer migration is not available"
-        hint="Integration plugin and import read access are required."
+        title={t('integrationsCustomerMigration.customerMigrationModule.customerMigrationIsNot')}
+        hint={t('integrationsCustomerMigration.customerMigrationModule.integrationPluginAndImport')}
       />
     );
   }
@@ -334,75 +336,75 @@ export function CustomerMigrationModule() {
   return (
     <section className="page-stack">
       <PageHeader
-        eyebrow="Integrations"
-        titleAccent="Customer"
-        titlePlain="migration"
+        eyebrow={t('integrationsCustomerMigration.customerMigrationModule.integrations')}
+        titleAccent={t('integrationsCustomerMigration.customerMigrationModule.titleAccent')}
+        titlePlain={t('integrationsCustomerMigration.customerMigrationModule.titlePlain')}
       />
 
       <div className="surface-panel">
         <div className="section-header">
           <div>
-            <h2>Plugin config</h2>
-            <p>Source, profile, and mapping rows used by migration preview and execution.</p>
+            <h2>{t('integrationsCustomerMigration.customerMigrationModule.pluginConfig')}</h2>
+            <p>{t('integrationsCustomerMigration.customerMigrationModule.sourceProfileAndMapping')}</p>
           </div>
           <div className="action-row">
             <Button onClick={() => void saveConfig()} disabled={!canConfigure || busy != null}>
-              {busy === 'config' ? 'Saving...' : 'Save config'}
+              {busy === 'config' ? t('integrationsCustomerMigration.customerMigrationModule.saving') : t('integrationsCustomerMigration.customerMigrationModule.saveConfig')}
             </Button>
           </div>
         </div>
         <div className="form-grid">
           <label>
-            Source name
+            {t('integrationsCustomerMigration.customerMigrationModule.sourceName')}
             <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
           </label>
           <label>
-            Source key
+            {t('integrationsCustomerMigration.customerMigrationModule.sourceKey')}
             <input value={sourceKey} onChange={(event) => setSourceKey(event.target.value)} />
           </label>
           <label>
-            Provider
+            {t('integrationsCustomerMigration.customerMigrationModule.provider')}
             <input value={providerName} onChange={(event) => setProviderName(event.target.value)} />
           </label>
           <label>
-            Profile name
+            {t('integrationsCustomerMigration.customerMigrationModule.profileName')}
             <input value={profileName} onChange={(event) => setProfileName(event.target.value)} />
           </label>
           <label>
-            Profile key
+            {t('integrationsCustomerMigration.customerMigrationModule.profileKey')}
             <input value={profileKey} onChange={(event) => setProfileKey(event.target.value)} />
           </label>
         </div>
         <div className="split-panel">
           <label>
-            Mapping rules
+            {t('integrationsCustomerMigration.customerMigrationModule.mappingRules')}
             <textarea value={mappingRules} onChange={(event) => setMappingRules(event.target.value)} rows={12} />
           </label>
           <label>
-            Validation rules
+            {t('integrationsCustomerMigration.customerMigrationModule.validationRules')}
             <textarea value={validationRules} onChange={(event) => setValidationRules(event.target.value)} rows={12} />
           </label>
         </div>
         {!canConfigure ? (
-          <p>Plugin read, write, test, approve, activate, and audit read access are required to save configuration.</p>
+          <p>{t('integrationsCustomerMigration.customerMigrationModule.pluginReadWriteTest')}</p>
         ) : null}
         <div className="split-panel">
           <div className="readback-card">
-            <h3>Config readback</h3>
-            <p>Source: {selectedSource?.display_name ?? configResult?.source_id ?? 'Not saved'}</p>
-            <p>Profile: {selectedProfile?.display_name ?? configResult?.profile_id ?? 'Not saved'}</p>
-            <p>Plugin: {selectedSource?.plugin_key ?? configResult?.plugin_id ?? 'Not saved'}</p>
-            <p>Version: {selectedSource?.plugin_version_id ?? configResult?.plugin_version_id ?? 'Not saved'}</p>
-            <p>Binding: {selectedSource?.plugin_binding_id ?? configResult?.plugin_binding_id ?? 'Not saved'}</p>
-            <p>Plugin status: {selectedSource?.plugin_version_status ?? configResult?.status ?? 'Not saved'}</p>
+            <h3>{t('integrationsCustomerMigration.customerMigrationModule.configReadback')}</h3>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.source'), { value: String(selectedSource?.display_name ?? configResult?.source_id ?? t('integrationsCustomerMigration.customerMigrationModule.notSaved')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.profile'), { value: String(selectedProfile?.display_name ?? configResult?.profile_id ?? t('integrationsCustomerMigration.customerMigrationModule.notSaved')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.plugin'), { value: String(selectedSource?.plugin_key ?? configResult?.plugin_id ?? t('integrationsCustomerMigration.customerMigrationModule.notSaved')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.version'), { value: String(selectedSource?.plugin_version_id ?? configResult?.plugin_version_id ?? t('integrationsCustomerMigration.customerMigrationModule.notSaved')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.binding'), { value: String(selectedSource?.plugin_binding_id ?? configResult?.plugin_binding_id ?? t('integrationsCustomerMigration.customerMigrationModule.notSaved')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.pluginStatus'), { value: String(selectedSource?.plugin_version_status ?? configResult?.status ?? t('integrationsCustomerMigration.customerMigrationModule.notSaved')) })}</p>
             <p>
-              Onboarding readiness: {configResult?.onboarding_readiness
+              {fill(t('integrationsCustomerMigration.customerMigrationModule.onboardingReadiness'), { value: String(configResult?.onboarding_readiness
                 ? configResult.onboarding_readiness.ok === true
-                  ? 'Ready'
-                  : `Blocked (${String(configResult.onboarding_readiness.blocking_count ?? 0)})`
-                : 'Not checked'}
+                  ? t('integrationsCustomerMigration.customerMigrationModule.ready')
+                  : fill(t('integrationsCustomerMigration.customerMigrationModule.blocked'), { value: String(String(configResult.onboarding_readiness.blocking_count ?? 0)) })
+                : t('integrationsCustomerMigration.customerMigrationModule.notChecked')) })}
             </p>
-            <p>Decision: {configResult?.decision_log_id ?? 'Not saved'}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.decision2'), { value: String(configResult?.decision_log_id ?? t('integrationsCustomerMigration.customerMigrationModule.notSaved')) })}</p>
           </div>
         </div>
       </div>
@@ -410,27 +412,27 @@ export function CustomerMigrationModule() {
       <div className="surface-panel">
         <div className="section-header">
           <div>
-            <h2>Migration run</h2>
-            <p>Preview validates stored mapping and rules before workflow execution creates client and recipient records.</p>
+            <h2>{t('integrationsCustomerMigration.customerMigrationModule.migrationRun')}</h2>
+            <p>{t('integrationsCustomerMigration.customerMigrationModule.previewValidatesStoredMapping')}</p>
           </div>
           <div className="action-row">
             <Button onClick={() => void run('preview')} disabled={!canPreview || busy != null || !selectedSourceId || !selectedProfileId}>
-              {busy === 'preview' ? 'Previewing...' : 'Preview'}
+              {busy === 'preview' ? t('integrationsCustomerMigration.customerMigrationModule.previewing') : t('integrationsCustomerMigration.customerMigrationModule.preview')}
             </Button>
             <Button kind="primary" onClick={() => void run('execute')} disabled={!canExecute || busy != null || !selectedSourceId || !selectedProfileId}>
-              {busy === 'execute' ? 'Executing...' : 'Execute'}
+              {busy === 'execute' ? t('integrationsCustomerMigration.customerMigrationModule.executing') : t('integrationsCustomerMigration.customerMigrationModule.execute')}
             </Button>
           </div>
         </div>
         {canPreview && !canExecute ? (
-          <p>Client and recipient write access is required to execute. Preview remains available.</p>
+          <p>{t('integrationsCustomerMigration.customerMigrationModule.clientAndRecipientWrite')}</p>
         ) : null}
         {!canPreview ? (
-          <p>Import write plus client, recipient, audit, and workflow read access are required to preview.</p>
+          <p>{t('integrationsCustomerMigration.customerMigrationModule.importWritePlusClient')}</p>
         ) : null}
         <div className="form-grid">
           <label>
-            Source
+            {t('integrationsCustomerMigration.customerMigrationModule.source2')}
             <select value={selectedSourceId} onChange={(event) => changeSource(event.target.value)}>
               {sources.map((source) => (
                 <option key={source.id} value={source.id}>{source.display_name}</option>
@@ -438,7 +440,7 @@ export function CustomerMigrationModule() {
             </select>
           </label>
           <label>
-            Profile
+            {t('integrationsCustomerMigration.customerMigrationModule.profile2')}
             <select value={selectedProfileId} onChange={(event) => setProfileId(event.target.value)}>
               {profilesForSource.map((profile) => (
                 <option key={profile.id} value={profile.id}>{profile.display_name}</option>
@@ -446,18 +448,18 @@ export function CustomerMigrationModule() {
             </select>
           </label>
           <label>
-            External batch ID (required)
+            {t('integrationsCustomerMigration.customerMigrationModule.externalBatchIdRequired')}
             <input
               value={externalBatchId}
               onChange={(event) => setExternalBatchId(event.target.value)}
-              placeholder="example-batch-001"
+              placeholder={t('integrationsCustomerMigration.customerMigrationModule.exampleBatch001')}
               required
             />
           </label>
         </div>
         <div className="split-panel">
           <label>
-            JSON payload (required)
+            {t('integrationsCustomerMigration.customerMigrationModule.jsonPayloadRequired')}
             <textarea
               value={payload}
               onChange={(event) => setPayload(event.target.value)}
@@ -467,26 +469,26 @@ export function CustomerMigrationModule() {
             />
           </label>
           <div className="readback-card">
-            <h3>Run readback</h3>
-            <p>Result: {result ? `${result.status} / ${result.mode}` : 'No run yet'}</p>
-            <p>Import job: {result?.import_job_id ?? 'No run yet'}</p>
-            <p>Imported client: {importedClient ? String(importedClient.name) : result?.imported_client_id ?? 'Not created'}</p>
-            <p>Recipients: {summaryValue(result?.result_summary, 'imported_recipients')}</p>
+            <h3>{t('integrationsCustomerMigration.customerMigrationModule.runReadback')}</h3>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.result'), { value: String(result ? `${result.status} / ${result.mode}` : t('integrationsCustomerMigration.customerMigrationModule.noRunYet')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.importJob'), { value: String(result?.import_job_id ?? t('integrationsCustomerMigration.customerMigrationModule.noRunYet')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.importedClient'), { value: String(importedClient ? String(importedClient.name) : result?.imported_client_id ?? t('integrationsCustomerMigration.customerMigrationModule.notCreated')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.recipients'), { value: String(summaryValue(result?.result_summary, 'imported_recipients')) })}</p>
             <p>
-              Imported recipients: {importedRecipients.length > 0
+              {fill(t('integrationsCustomerMigration.customerMigrationModule.importedRecipients'), { value: String(importedRecipients.length > 0
                 ? importedRecipients.map((recipient) => recipient.name ?? recipient.id).join(', ')
-                : result?.imported_recipient_ids?.join(', ') || 'Not created'}
+                : result?.imported_recipient_ids?.join(', ') || t('integrationsCustomerMigration.customerMigrationModule.notCreated')) })}
             </p>
-            <p>Validation errors: {summaryValue(result?.validation_summary, 'errors')}</p>
-            <p>Redacted fields: {summaryValue(result?.redaction_summary, 'secret_fields_redacted')}</p>
-            <p>Idempotency: {result?.idempotency_reused ? 'Existing import job reused' : result ? 'New import job' : 'Not checked'}</p>
-            <p>Plugin version: {result?.plugin_version_id ?? 'No run yet'}</p>
-            <p>Plugin binding: {result?.plugin_binding_id ?? 'No run yet'}</p>
-            <p>Job readback: {importJob ? `${importJob.status} / ${importJob.row_count ?? 0} rows` : 'No run yet'}</p>
-            <p>Workflow: {result?.workflow_run_id ?? 'No run yet'}</p>
-            <p>Decision: {result?.decision_log_id ?? 'No run yet'}</p>
-            <p>Events: {result?.domain_event_ids?.length ?? 0}</p>
-            <p>Error: {result?.error?.code ?? 'None'}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.validationErrors'), { value: String(summaryValue(result?.validation_summary, 'errors')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.redactedFields'), { value: String(summaryValue(result?.redaction_summary, 'secret_fields_redacted')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.idempotency'), { value: String(result?.idempotency_reused ? t('integrationsCustomerMigration.customerMigrationModule.existingImportJobReused') : result ? t('integrationsCustomerMigration.customerMigrationModule.newImportJob') : t('integrationsCustomerMigration.customerMigrationModule.notChecked')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.pluginVersion'), { value: String(result?.plugin_version_id ?? t('integrationsCustomerMigration.customerMigrationModule.noRunYet')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.pluginBinding'), { value: String(result?.plugin_binding_id ?? t('integrationsCustomerMigration.customerMigrationModule.noRunYet')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.jobReadback'), { value: String(importJob ? fill(t('integrationsCustomerMigration.customerMigrationModule.rows'), { status: String(importJob.status), value: String(importJob.row_count ?? 0) }) : t('integrationsCustomerMigration.customerMigrationModule.noRunYet')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.workflow'), { value: String(result?.workflow_run_id ?? t('integrationsCustomerMigration.customerMigrationModule.noRunYet')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.decision2'), { value: String(result?.decision_log_id ?? t('integrationsCustomerMigration.customerMigrationModule.noRunYet')) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.events'), { value: String(result?.domain_event_ids?.length ?? 0) })}</p>
+            <p>{fill(t('integrationsCustomerMigration.customerMigrationModule.error'), { value: String(result?.error?.code ?? t('integrationsCustomerMigration.customerMigrationModule.none')) })}</p>
           </div>
         </div>
       </div>
@@ -494,8 +496,8 @@ export function CustomerMigrationModule() {
       <div className="surface-panel">
         <div className="section-header">
           <div>
-            <h2>Migration import jobs</h2>
-            <p>Canonical import lifecycle with workflow, plugin, validation, and target lineage.</p>
+            <h2>{t('integrationsCustomerMigration.customerMigrationModule.migrationImportJobs')}</h2>
+            <p>{t('integrationsCustomerMigration.customerMigrationModule.canonicalImportLifecycleWith')}</p>
           </div>
         </div>
         <DataTable
@@ -503,7 +505,7 @@ export function CustomerMigrationModule() {
           columns={requestColumns}
           viewKey="customer-migration-import-jobs"
           entityKind="migration import job"
-          emptyText={requestsQuery.isLoading ? 'Loading migration import jobs...' : 'No migration import jobs yet.'}
+          emptyText={requestsQuery.isLoading ? t('integrationsCustomerMigration.customerMigrationModule.loadingMigrationImportJobs') : t('integrationsCustomerMigration.customerMigrationModule.noMigrationImportJobs')}
         />
       </div>
     </section>
