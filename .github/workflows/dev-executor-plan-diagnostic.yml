@@ -54,12 +54,12 @@ jobs:
             timeout 20s psql -X -w -A -q -t -v ON_ERROR_STOP=1 -v grants="$grants" -v revokes="$revokes" \
               -f scripts/deploy/dev-executor-plan-diagnostic.sql 2>/dev/null)" || unreadable catalog-query
           state="${readout%%$'\n'*}"
-          state_pattern='^history_latest=([0-9]{12,14}|unknown) closure_recorded=(true|false) closure_receipt=(true|false) predecessor_seal_valid=(true|false) public_targets=[0-9]+ direct_executor_targets=[0-9]+$'
+          state_pattern='^closure_recorded=(true|false) closure_receipt=(true|false) predecessor_seal_valid=(true|false) public_targets=[0-9]+ direct_executor_targets=[0-9]+$'
           if [[ "${readout##*$'\n'}" != 'diagnostic_status=complete' || ! "$state" =~ $state_pattern ]]; then
             unreadable inputs-or-readout
           fi
-          counts_pattern='^closure_added=[0-9]+ closure_removed=[0-9]+ closure_invalid=[0-9]+$'
-          row_pattern='^(before_extra|before_missing|projected_extra|projected_missing|already_in_receipt|invalid_addition) (function|relation|schema) (EXECUTE|SELECT|USAGE|INSERT|UPDATE|DELETE)( ([a-zA-Z_][a-zA-Z_0-9]*))?$'
+          counts_pattern='^closure_added=[0-9]+ closure_removed=[0-9]+ closure_invalid=[0-9]+ before_extra=[0-9]+ projected_extra=[0-9]+$'
+          row_pattern='^(relkind=[rpv] relispartition=(true|false) maintenance_name_match=(true|false) inherited_write_required=(true|false) executor_select=(true|false))( ([a-zA-Z_][a-zA-Z_0-9]*))?$'
           {
             printf '%s\n' "$state"
             while IFS= read -r row; do
@@ -67,13 +67,15 @@ jobs:
               if [[ "$row" =~ $counts_pattern ]]; then
                 printf '%s\n' "$row"
               elif [[ "$row" =~ $row_pattern ]]; then
-                name="${BASH_REMATCH[5]}"
-                if [[ -z "$name" ]] || ! git grep -qwF -e "$name" -- supabase/migrations; then
-                  name=redacted
+                evidence="${BASH_REMATCH[1]}"
+                parent="${BASH_REMATCH[7]}"
+                if [[ -n "$parent" ]] && git grep -qwF -e "$parent" -- supabase/migrations; then
+                  printf '%s parent=%s\n' "$evidence" "$parent"
+                else
+                  printf '%s\n' "$evidence"
                 fi
-                printf '%s %s %s name=%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "$name"
               else
-                printf '%s\n' 'delta_object=redacted'
+                unreadable evidence-format
               fi
             done <<< "${readout#*$'\n'}"
             printf '%s\n' 'diagnostic_status=complete'
