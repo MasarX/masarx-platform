@@ -1,5 +1,5 @@
 // Area catalogs: every English key has an Arabic value with the same placeholders.
-import { act, renderHook, type RenderHookResult } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { I18nProvider, useI18n } from '../i18n';
@@ -78,7 +78,7 @@ describe('i18n area catalogs', () => {
     expect(loader.translateCatalog(arabic, 'modules.recipients.plain')).toBe('');
   });
 
-  it('reads the cached catalog on rerender and keeps the current locale during a switch', async () => {
+  it('renders without suspending and keeps the current locale until a switch has loaded', async () => {
     vi.resetModules();
     let releaseArabic!: () => void;
     const arabicReady = new Promise<void>((resolve) => { releaseArabic = resolve; });
@@ -92,11 +92,9 @@ describe('i18n area catalogs', () => {
     const consoleError = vi.spyOn(console, 'error');
     localStorage.setItem('console-v2.locale', 'en');
     try {
-      let view!: RenderHookResult<ReturnType<typeof useI18n>, undefined>;
-      await act(() => {
-        view = renderHook<ReturnType<typeof useI18n>, undefined>(useI18n, { wrapper: I18nProvider });
-      });
-      await act(async () => { await loader.loadConsoleCatalog('en'); });
+      await loader.loadConsoleCatalog('en');
+      // The first synchronous render already has the hook result: nothing suspended.
+      const view = renderHook(useI18n, { wrapper: I18nProvider });
       expect(view.result.current.t('shell.userMenu.access')).toBe('Access control');
       expect(loadCatalog).not.toHaveBeenCalledWith('ar');
 
@@ -104,16 +102,23 @@ describe('i18n area catalogs', () => {
       view.rerender();
       expect(loadCatalog).not.toHaveBeenCalled();
 
-      await act(() => view.result.current.toggleLocale());
+      act(() => view.result.current.toggleLocale());
       expect(loadCatalog).toHaveBeenCalledWith('ar');
       expect(view.result.current.locale).toBe('en');
       expect(view.result.current.t('shell.userMenu.access')).toBe('Access control');
       expect(document.documentElement.dir).toBe('ltr');
 
+      // Switching back before Arabic loads wins: the late Arabic load is ignored.
+      act(() => view.result.current.toggleLocale());
       await act(async () => {
         releaseArabic();
         await loader.loadConsoleCatalog('ar');
       });
+      expect(view.result.current.locale).toBe('en');
+      expect(document.documentElement.dir).toBe('ltr');
+
+      // Arabic is now loaded, so the next switch applies at once.
+      act(() => view.result.current.toggleLocale());
       expect(view.result.current.locale).toBe('ar');
       expect(view.result.current.t('shell.userMenu.access')).toBe(
         loader.translateCatalog(loader.getConsoleCatalog('ar'), 'shell.userMenu.access')
@@ -162,6 +167,19 @@ describe('i18n area catalogs', () => {
 
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(consoleError.mock.calls.flat().join('\n')).not.toMatch(/suspended inside an `act` scope/);
+    } finally {
+      consoleError.mockRestore();
+      localStorage.removeItem('console-v2.locale');
+    }
+  });
+
+  it('throws a developer error naming a catalog that was not loaded before render', async () => {
+    vi.resetModules();
+    const { I18nProvider, useI18n } = await import('../i18n');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    localStorage.setItem('console-v2.locale', 'ar');
+    try {
+      expect(() => renderHook(useI18n, { wrapper: I18nProvider })).toThrow(/Console catalog "ar" is not loaded/);
     } finally {
       consoleError.mockRestore();
       localStorage.removeItem('console-v2.locale');

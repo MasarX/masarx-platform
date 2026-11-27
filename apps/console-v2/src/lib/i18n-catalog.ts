@@ -49,12 +49,17 @@ export function loadConsoleCatalog(locale: Locale): Promise<Catalog> {
   const cached = catalogPromises[locale];
   if (cached) return cached;
 
-  const promise = buildCatalog(locale).then((catalog) => {
-    catalogs[locale] = catalog;
-    // React can read the catalog synchronously even when it was preloaded outside render.
-    Object.assign(promise, { status: 'fulfilled', value: catalog });
-    return catalog;
-  });
+  const promise = buildCatalog(locale).then(
+    (catalog) => {
+      catalogs[locale] = catalog;
+      return catalog;
+    },
+    (error: unknown) => {
+      // A failed chunk load is not cached, so the next switch or reload tries again.
+      delete catalogPromises[locale];
+      throw error;
+    }
+  );
   catalogPromises[locale] = promise;
   return promise;
 }

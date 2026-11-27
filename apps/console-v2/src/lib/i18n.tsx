@@ -1,9 +1,10 @@
 // i18n.tsx — EN + AR with RTL logic flip. Uses dot-paths into the catalog;
 // missing keys return the path so they're easy to spot in screenshots.
-import { createContext, startTransition, Suspense, use, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NextIntlClientProvider } from 'next-intl';
 import { useIdentity } from './identity';
 import { useResolveSettings } from './queries';
+import { reportError } from './telemetry';
 import { englishT, getConsoleCatalog, loadConsoleCatalog, readConsoleLocale, translateCatalog, type Locale, type Translate } from './i18n-catalog';
 
 export { englishT, fill, type Translate } from './i18n-catalog';
@@ -46,19 +47,14 @@ export function resolveIntlLocale(locale: Locale, preferred: readonly string[] =
 const Ctx = createContext<I18nCtx | null>(null);
 const TenantTimeZoneCtx = createContext<((zone: string | null) => void) | null>(null);
 
+// Render never suspends: the entry point loads the first catalog before mounting
+// and setLocale loads the next one before switching. Suspending here varied the
+// hook order between renders, and use() stops act() from flushing effects in tests.
 export function I18nProvider({ children }: { children: ReactNode }) {
-  return (
-    <Suspense fallback={null}>
-      <ConsoleLocaleProvider>{children}</ConsoleLocaleProvider>
-    </Suspense>
-  );
-}
-
-function ConsoleLocaleProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(readConsoleLocale);
-  // Call use() only while a catalog loads: after any use() call, even on a settled
-  // promise, React's act() stops flushing and drops the queued effects and updates.
-  const catalog = getConsoleCatalog(locale) ?? use(loadConsoleCatalog(locale));
+  const catalog = getConsoleCatalog(locale);
+  // The language the latest switch asked for; an older load that settles later is ignored.
+  const requested = useRef<Locale | null>(null);
   const dir = locale === 'ar' ? 'rtl' : 'ltr';
   const intlLocale = useMemo(() => resolveIntlLocale(locale), [locale]);
   const [tenantTimeZone, setTenantTimeZone] = useState<string | null>(null);
@@ -127,12 +123,28 @@ function ConsoleLocaleProvider({ children }: { children: ReactNode }) {
     [intlLocale]
   );
 
+  // Keeps the current language on screen until the next catalog has loaded.
+  const setLocale = useCallback((next: Locale) => {
+    requested.current = next;
+    const apply = () => {
+      if (requested.current === next) startTransition(() => setLocaleState(next));
+    };
+    if (getConsoleCatalog(next)) {
+      apply();
+      return;
+    }
+    loadConsoleCatalog(next).then(apply, (error: unknown) => {
+      if (requested.current === next) requested.current = null;
+      reportError(error instanceof Error ? error : new Error(String(error)), { locale: next });
+    });
+  }, []);
+
   const value = useMemo<I18nCtx>(
     () => ({
       locale,
       dir,
-      setLocale: (next) => startTransition(() => setLocaleState(next)),
-      toggleLocale: () => startTransition(() => setLocaleState((l) => (l === 'en' ? 'ar' : 'en'))),
+      setLocale,
+      toggleLocale: () => setLocale((requested.current ?? locale) === 'en' ? 'ar' : 'en'),
       t,
       timeZone,
       fmtDateTime,
@@ -140,9 +152,11 @@ function ConsoleLocaleProvider({ children }: { children: ReactNode }) {
       fmtCurrency,
       fmtNumber,
     }),
-    [locale, dir, t, timeZone, fmtDateTime, fmtTime, fmtCurrency, fmtNumber]
+    [locale, dir, setLocale, t, timeZone, fmtDateTime, fmtTime, fmtCurrency, fmtNumber]
   );
 
+  // After every hook, so the hook order is the same on every render.
+  if (!catalog) throw new Error(`Console catalog "${locale}" is not loaded; await loadConsoleCatalog("${locale}") before rendering I18nProvider`);
   return (
     <Ctx.Provider value={value}>
       <TenantTimeZoneCtx.Provider value={setTenantTimeZone}>
