@@ -38,12 +38,15 @@ const quiet = (command, args, env = baseEnv, timeout, options) =>
 const npm = (args, env) => quiet('npm', args, env);
 const writeJson = (file, value) => fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 
-function failureCode(error) {
+const imagePolicyDenied = 'DOCKER_IMAGE_POLICY_DENIED';
+
+function failureCode(error, exitCode) {
+  if (error.code === imagePolicyDenied) return imagePolicyDenied;
   if (error.failure?.timeout || error.name === 'TimeoutError' || ['ETIMEDOUT', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'].includes(error.code)) return 'TIMEOUT_OR_LIMIT';
   if (error.code === 'ERR_ASSERTION') return 'CHECK_FAILED';
   if (error instanceof SyntaxError) return 'INVALID_OUTPUT';
   if (error.failure?.signal || error.signal) return 'COMMAND_SIGNAL';
-  if (Number.isInteger(error.failure?.exitCode ?? error.status)) return 'COMMAND_EXIT';
+  if (exitCode !== undefined) return 'COMMAND_EXIT';
   return 'OPERATION_FAILED';
 }
 
@@ -69,10 +72,13 @@ async function qualify(stackOnly) {
     candidateCommit: process.env.CANDIDATE_SHA, candidateTree: process.env.CANDIDATE_TREE,
     stages: {}, failureReasons: {}, builds: {}, qa: Object.fromEntries(checks.map(name => [name, 'NOT_RUN'])),
   };
-  const fail = (name, step, code) => {
+  const fail = (name, step, error) => {
+    const status = error.failure?.exitCode ?? error.status;
+    const exitCode = Number.isInteger(status) ? status : undefined;
+    const code = failureCode(error, exitCode);
     report.stages[name] = 'FAIL';
-    report.failureReasons[name] = { step, code };
-    console.error(`${name}: FAIL ${step} ${code}`);
+    report.failureReasons[name] = { step, code, exitCode };
+    console.error(`${name}: FAIL ${step} ${code}${exitCode === undefined ? '' : ` exit=${exitCode}`}`);
   };
   const stage = async (name, work) => {
     let step = name;
@@ -82,7 +88,7 @@ async function qualify(stackOnly) {
       console.log(`${name}: PASS`);
       return result;
     } catch (error) {
-      fail(name, step, failureCode(error));
+      fail(name, step, error);
       throw error;
     }
   };
@@ -132,7 +138,6 @@ async function qualify(stackOnly) {
       });
       const { exclude, psqlClientMajor } = loadLaneConfig();
       assert(exclude.includes('postgrest'));
-      const requiredPins = pins.filter(pin => pin.role !== 'realtime');
       const { major } = readSupabaseConfig();
       assert.equal(String(major), String(psqlClientMajor));
       mark('cliInstall');
@@ -141,8 +146,9 @@ async function qualify(stackOnly) {
       mark('dockerPreflight');
       const dockerRoot = (await quiet('docker', ['info', '--format', '{{.DockerRootDir}}'], baseEnv, 30_000)).trim();
       mark('imagePullOrVerification');
-      await prepareImages(requiredPins, { env: baseEnv, checked: quiet, timed: (_, action) => action(), summary: {}, dockerRoot, quiet: true });
-      report.imageDigests = Object.fromEntries(requiredPins.map(pin => [pin.image, pin.digest]));
+      // Fresh database setup uses the Realtime image even when the service is excluded.
+      await prepareImages(pins, { env: baseEnv, checked: quiet, timed: (_, action) => action(), summary: {}, dockerRoot, quiet: true });
+      report.imageDigests = Object.fromEntries(pins.map(pin => [pin.image, pin.digest]));
       mark('stackConfiguration');
       const ports = await hostedStackPorts();
       const { apiPort, dbPort } = ports;
@@ -162,13 +168,16 @@ async function qualify(stackOnly) {
       await quiet('docker', ['network', 'create', '--opt', 'com.docker.network.bridge.host_binding_ipv4=127.0.0.1', project]);
       networkCreated = true;
       mark('imageGuard');
-      guard = await imageGuard(requiredPins, path.join(temp, 'image-pins.json'),
+      guard = await imageGuard(pins, path.join(temp, 'image-pins.json'),
         { ...baseEnv, SUPABASE_HOME: path.join(temp, 'supabase-home') }, database);
       started = true;
       mark('stackStart');
       await quiet(cli, ['start', '--workdir', stack, '--network-id', project, '-x',
         exclude.filter(service => service !== 'postgrest').join(',')], guard.env, 360_000).catch(error => {
-        if (JSON.parse(fs.readFileSync(guard.policyFile, 'utf8')).denied > 0) mark('imagePolicy');
+        if (JSON.parse(fs.readFileSync(guard.policyFile, 'utf8')).denied > 0) {
+          mark('imagePolicy');
+          error.code = imagePolicyDenied;
+        }
         throw error;
       });
       mark('databaseInit');
@@ -348,19 +357,19 @@ async function qualify(stackOnly) {
     ];
     const outcomes = await Promise.allSettled(cleanup);
     const failedCleanup = outcomes.find(result => result.status === 'rejected');
-    if (failedCleanup) fail('teardown', 'stopServices', failureCode(failedCleanup.reason));
+    if (failedCleanup) fail('teardown', 'stopServices', failedCleanup.reason);
     guard?.child.kill();
     // The CLI may remove the network itself.
     try {
       const remaining = networkCreated ? await quiet('docker', ['network', 'ls', '--format', '{{.Name}}']) : '';
       if (remaining.split('\n').includes(project)) await quiet('docker', ['network', 'rm', project]);
     } catch (error) {
-      fail('teardown', 'removeNetwork', failureCode(error));
+      fail('teardown', 'removeNetwork', error);
     }
     try {
       fs.rmSync(temp, { recursive: true, force: true });
     } catch (error) {
-      fail('teardown', 'removePrivateFiles', failureCode(error));
+      fail('teardown', 'removePrivateFiles', error);
     }
     if (report.stages.teardown === 'FAIL') process.exitCode = 1;
     else {
