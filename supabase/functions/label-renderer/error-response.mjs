@@ -17,8 +17,11 @@ const isSqlState = (value) =>
 export const isRendererErrorClass = (value) =>
   (typeof value === "string" && fixedClasses.has(value)) || isSqlState(value);
 
-/** @param {unknown} error */
-export function rendererInternalErrorBody(error) {
+/**
+ * @param {string} code
+ * @param {unknown} error
+ */
+export function rendererError(code, error) {
   let errorClass = unknown;
   try {
     if (error instanceof RendererConfigurationError) {
@@ -33,5 +36,10 @@ export function rendererInternalErrorBody(error) {
   } catch {
     // A thrown value can have getters that throw during classification.
   }
-  return { error: { code: rendererInternalCode, class: errorClass } };
+  return { code, class: errorClass };
+}
+
+/** @param {unknown} error */
+export function rendererInternalErrorBody(error) {
+  return { error: rendererError(rendererInternalCode, error) };
 }

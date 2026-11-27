@@ -22,7 +22,7 @@ beforeAll(async () => {
 
 // Execute the real entrypoint and private construction boundaries with substituted
 // external modules. This is isolate-loading proof, not native JWT/PDF/DB proof.
-function loadRenderer({ pdfLoad, pdfModule, bidiFailure, env = {}, client, fetch, File } = {}) {
+function loadRenderer({ pdfLoad, pdfModule, bidiFailure, env = {}, client, fetch, File, authorized = false, setTimeout: schedule = setTimeout } = {}) {
   const imports = [];
   const reachedPdf = new Error('fixture reached PDF construction');
   const createPdf = jest.fn(() => { throw reachedPdf; });
@@ -30,17 +30,17 @@ function loadRenderer({ pdfLoad, pdfModule, bidiFailure, env = {}, client, fetch
     if (bidiFailure) throw bidiFailure;
     return { getEmbeddingLevels() {}, getReorderedString: value => value };
   });
-  const authorize = jest.fn(() => ({ ok: false, status: 401, message: 'Authentication required' }));
+  const authorize = jest.fn(() => authorized ? { ok: true } : { ok: false, status: 401, message: 'Authentication required' });
   const logStructured = jest.fn();
   let handler;
   const sandbox = vm.createContext({
     Request, Response, Headers, URL, TextEncoder, TextDecoder, Uint8Array, Error, crypto, File, fetch,
-    console, performance, setTimeout, clearTimeout, atob, btoa,
+    console, performance, setTimeout: schedule, clearTimeout, atob, btoa,
     Deno: { env: { get: () => undefined }, serve: fn => { handler = fn; } },
   });
   const module = { exports: {} };
   // Expose private functions only in the test copy; unchanged production still loads for the red wave.
-  const expose = '\nmodule.exports = { ensureRendererDeps: typeof ensureRendererDeps === "undefined" ? undefined : ensureRendererDeps, renderTemplatePdf, buildFallbackPdf, buildBundleDocument, handleBundleRequest };';
+  const expose = '\nmodule.exports = { ensureRendererDeps: typeof ensureRendererDeps === "undefined" ? undefined : ensureRendererDeps, renderTemplatePdf, buildFallbackPdf, buildBundleDocument, handleBundleRequest, handlePrintRequest };';
   const compiled = ts.transpileModule(source, {
     fileName: filename,
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -59,7 +59,8 @@ function loadRenderer({ pdfLoad, pdfModule, bidiFailure, env = {}, client, fetch
     './_shared/mod.mjs': { classifyError, logStructured, readEnv: key => env[key] ?? '' },
     './_shared/cors.mjs': cors,
     './error-response.mjs': errorResponse,
-    './auth.mjs': { authorizeLabelRendererRequest: authorize, resolveLabelRendererOperation: () => 'jobs' },
+    './auth.mjs': { authorizeLabelRendererRequest: authorize, resolveLabelRendererOperation: () => 'jobs',
+      verifyLabelRendererToken: async () => ({ ok: authorized }) },
     '../_shared/db-hotpath.ts': { executeHotpathRpc: jest.fn(), hotpathModeEnabled: () => false },
     '../_shared/label-storage-url.ts': require('../../../supabase/functions/_shared/label-storage-url'),
     '../_shared/asset-cache.ts': require('../../../supabase/functions/_shared/asset-cache'),
@@ -217,8 +218,291 @@ describe('label renderer internal errors', () => {
     expect(File).toHaveBeenCalledTimes(1);
     expect(response).toEqual({
       statusCode: 500,
-      body: { status: 'failed', error: 'upload_failed', reason: 'upload_failed' },
+      body: { status: 'failed', error: 'upload_failed', error_class: 'unknown', reason: 'upload_failed' },
     });
+  });
+});
+
+describe('label renderer response privacy', () => {
+  const upstreamText = 'untrusted upstream diagnostic';
+  const dbError = { code: '42501', message: upstreamText, details: upstreamText, hint: null };
+  const job = { id: 'job', organization_id: 'org', attempts: 0 };
+  const template = { renderer_config: { blocks: [{ type: 'text', fallback: 'Synthetic label' }] } };
+  const composed = { job: { ...job, template }, payload: {} };
+  const row = { job_id: job.id, composed };
+  const integration = { kind: 'provider', providerName: 'fixture' };
+  const shipment = { shipment_id: 'shipment' };
+  const env = { EDGE_SUPABASE_URL: 'https://fixture.test', EDGE_SUPABASE_ANON_KEY: 'fixture-anon' };
+  const success = (data = null) => ({ data, error: null });
+  const failure = (error = dbError) => ({ data: null, error });
+
+  function expectSafe(result, status, fields) {
+    expect(result.statusCode).toBe(status);
+    expect(result.body).toMatchObject(fields);
+    expect(JSON.stringify(result.body)).not.toContain(upstreamText);
+  }
+
+  function printRenderer({ policy, rpcs = {}, unavailable, uploadFailure, pageFailure } = {}) {
+    const settings = {
+      default_expires_seconds: 60,
+      print_sync_bundle_strategy: 'direct',
+      print_sync_bundle_return_mode: 'file_path_only',
+      single_file_passthrough_enabled: false,
+      print_sync_lease_recovery_max_attempts: 1,
+      ...policy,
+    };
+    const responses = {
+      resolve_settings_merged: success(settings),
+      request_label_generation_bulk_compact_v1: success({ job_ids: [job.id] }),
+      lease_and_compose_label_payloads_compact: success([row]),
+      lease_label_jobs_by_ids_compact: success([job]),
+      lease_label_jobs_by_ids: success([job]),
+      compose_label_payloads: success([row]),
+      ...rpcs,
+    };
+    const renderer = loadRenderer({
+      env: { ...env, LABEL_RENDERER_DB_JWT: 'fixture-db-jwt' },
+      client: {
+        rpc: jest.fn((name, args) => typeof responses[name] === 'function'
+          ? responses[name](args) : responses[name] ?? success()),
+        from: () => ({ insert: async () => success() }),
+      },
+      fetch: async (_url, { method }) => unavailable || (uploadFailure && method === 'PUT')
+        ? new Response(upstreamText, { status: 502 }) : Response.json({}),
+      pdfModule: {
+        PDFDocument: {
+          create: async () => ({
+            addPage: () => {
+              if (pageFailure) throw new Error(upstreamText);
+              return { drawText() {}, getWidth: () => 288 };
+            },
+            embedFont: async () => ({ widthOfTextAtSize: () => 15 }),
+            save: async () => new Uint8Array([1]),
+          }),
+        },
+        StandardFonts: { Helvetica: 'Helvetica', HelveticaBold: 'HelveticaBold' },
+        rgb: () => ({}),
+        degrees: () => ({}),
+      },
+      File: class {},
+      setTimeout: resolve => queueMicrotask(resolve),
+    });
+    return {
+      ...renderer,
+      print: (input = { shipments: [shipment] }) => renderer.api.handlePrintRequest(
+        { organization_id: 'org', ...input }, 'correlation', integration,
+      ),
+      bundle: () => renderer.api.handleBundleRequest({ organization_id: 'org' }, integration),
+    };
+  }
+
+  function expectPrintFailure(result, status, step, code, errorClass) {
+    const fields = { error: code, error_class: errorClass };
+    expectSafe(result, status, {
+      ...fields,
+      steps: expect.arrayContaining([expect.objectContaining({ step, ...fields })]),
+    });
+  }
+
+  test.each([
+    ['direct', 'request_label_generation_bulk_compact_v1', 'enqueue_label_jobs', 'enqueue_label_jobs_failed', {}],
+    ['direct', 'request_label_generation_target_v1', 'enqueue_label_jobs', 'enqueue_label_jobs_failed',
+      { targets: [{ target_type: 'shipment', target_id: 'shipment' }] }],
+    ['direct', 'lease_label_jobs_by_ids_compact', 'render_label_jobs', 'lease_label_jobs_by_ids_compact_failed', {}],
+    ['direct', 'compose_label_payloads', 'render_label_jobs', 'compose_label_payloads_failed', {}],
+    ['direct', 'complete_label_jobs', 'bundle_labels', 'complete_label_jobs_failed', {}],
+    ['merge', 'lease_label_jobs_by_ids', 'render_label_jobs', 'lease_label_jobs_by_ids_failed', {}],
+    ['merge', 'compose_label_payloads', 'render_label_jobs', 'compose_label_payloads_failed', {}],
+    ['merge', 'complete_label_jobs', 'render_label_jobs', 'complete_label_jobs_failed', {}],
+  ])('%s print classifies %s failure in the response and step', async (strategy, rpc, step, code, input) => {
+    const renderer = printRenderer({
+      policy: { print_sync_bundle_strategy: strategy, print_sync_compact_enabled: false },
+      rpcs: { [rpc]: failure() },
+    });
+    const result = await renderer.print(Object.keys(input).length ? input : undefined);
+    expectPrintFailure(result, 500, step, code, '42501');
+  });
+
+  test('classifies storage outage in both direct-print and bundle 503 responses', async () => {
+    const renderer = printRenderer({ unavailable: true });
+    expectPrintFailure(await renderer.print(), 503, 'render_label_jobs', 'label_bucket_unavailable', 'unknown');
+    expectSafe(await renderer.bundle(), 503, {
+      status: 'failed', reason: 'label_bucket_unavailable', error: 'label_bucket_unavailable', error_class: 'unknown',
+    });
+  });
+
+  test('classifies render and bundle upload errors in their 500 response and step', async () => {
+    expectPrintFailure(await printRenderer({ pageFailure: true }).print(),
+      500, 'render_label_jobs', 'render_failure', 'unknown');
+    expectPrintFailure(await printRenderer({ uploadFailure: true }).print(),
+      500, 'bundle_labels', 'bundle_upload_failed', 'unknown');
+  });
+
+  test('records safe passthrough and compact batch fallbacks in a successful print', async () => {
+    const renderer = printRenderer({
+      policy: { single_file_passthrough_enabled: true },
+      rpcs: {
+        lease_and_compose_label_payloads_compact: failure(),
+        lease_label_jobs_by_ids: failure(),
+      },
+    });
+    const compact = {
+      compact_compose_fallback_reason: 'compact_compose_failed', compact_compose_fallback_reason_class: '42501',
+    };
+    expectSafe(await renderer.print(), 200, {
+      status: 'ok',
+      artifact_kind: 'bundle',
+      steps: expect.arrayContaining([expect.objectContaining({
+        step: 'render_label_jobs',
+        calls: [
+          expect.objectContaining({
+            strategy: 'single_file_passthrough', ...compact,
+            fallback_reason: 'single_file_passthrough_failed', fallback_reason_class: '42501',
+          }),
+          expect.objectContaining(compact),
+        ],
+      })]),
+    });
+  });
+
+  test('records a safe compact fallback in a successful single-file print', async () => {
+    const renderer = printRenderer({
+      policy: { single_file_passthrough_enabled: true },
+      rpcs: { lease_and_compose_label_payloads_compact: failure() },
+    });
+    expectSafe(await renderer.print(), 200, {
+      status: 'ok',
+      artifact_kind: 'single_file',
+      steps: expect.arrayContaining([expect.objectContaining({
+        step: 'render_label_jobs',
+        calls: [expect.objectContaining({
+          compact_compose_fallback_reason: 'compact_compose_failed', compact_compose_fallback_reason_class: '42501',
+        })],
+      })]),
+    });
+  });
+
+  test('keeps the classified compact fallback when legacy composition returns no rows', async () => {
+    const renderer = printRenderer({
+      rpcs: { lease_and_compose_label_payloads_compact: failure(), compose_label_payloads: success([]) },
+    });
+    expectSafe(await renderer.print(), 500, {
+      error: 'compose_label_payloads missing rows',
+      steps: expect.arrayContaining([expect.objectContaining({
+        compact_compose_fallback_reason: 'compact_compose_failed', compact_compose_fallback_reason_class: '42501',
+      })]),
+    });
+  });
+
+  test.each([
+    ['lease_label_jobs_by_ids', 'lease_label_jobs_by_ids_failed'],
+    ['get_label_jobs_status', 'get_label_jobs_status_failed'],
+    ['lease_label_jobs_by_ids_compact', 'lease_label_jobs_by_ids_compact_failed'],
+  ])('classifies lease recovery failure from %s', async (rpc, code) => {
+    const retry = jest.fn().mockReturnValueOnce(success([])).mockReturnValue(failure());
+    const renderer = printRenderer({
+      policy: { print_sync_compact_enabled: false, print_sync_lease_recovery_max_attempts: 2 },
+      rpcs: {
+        lease_label_jobs_by_ids_compact: success([]),
+        lease_label_jobs_by_ids: success([]),
+        [rpc]: rpc === 'lease_label_jobs_by_ids_compact' ? retry : failure(),
+      },
+    });
+    expectSafe(await renderer.print(), 500, {
+      error: 'lease_label_jobs_by_ids_compact missing rows',
+      steps: expect.arrayContaining([expect.objectContaining({
+        lease_recovery_status_error: code, lease_recovery_status_error_class: '42501',
+      })]),
+    });
+  });
+
+  test('uses the fixed per-job upload reason in results returned by a later print failure', async () => {
+    const lease = jest.fn().mockReturnValueOnce(success([job])).mockReturnValue(failure());
+    const renderer = printRenderer({
+      policy: { print_sync_bundle_strategy: 'merge', render_max_jobs: 1 },
+      rpcs: {
+        request_label_generation_bulk_compact_v1: success({ job_ids: [job.id, 'another-job'] }),
+        lease_label_jobs_by_ids: lease,
+      },
+      uploadFailure: true,
+    });
+    expectSafe(await renderer.print(), 500, {
+      error: 'lease_label_jobs_by_ids_failed', error_class: '42501',
+      steps: expect.arrayContaining([expect.objectContaining({
+        results: [expect.objectContaining({ status: 'failed', reason: 'upload_failed', error_class: 'unknown' })],
+      })]),
+    });
+    expect(lease).toHaveBeenCalledTimes(2);
+  });
+
+  test.each([
+    ['label_designer_whoami', failure(), 403, 'auth_required', '42501'],
+    ['label_designer_whoami', success({ ok: false, error: { message: upstreamText } }), 403, 'auth_required', 'unknown'],
+    ['draft', failure(), 404, 'draft_not_found', '42501'],
+    ['label_designer_get_sample_payload', failure(), 400, 'payload_missing', '42501'],
+    ['label_designer_get_sample_payload', success({ ok: false, error: { message: upstreamText } }), 400, 'payload_missing', 'unknown'],
+    ['render', null, 200, 'render_failure', 'unknown'],
+  ])('classifies designer preview failure at %s', async (stage, failedResult, status, code, errorClass) => {
+    const responses = {
+      label_designer_whoami: success({ ok: true, organization_id: 'org' }),
+      draft: success({ draft_value: { templates: { shipping: {} } } }),
+      label_designer_get_sample_payload: success({ ok: true, payload: {} }),
+      [stage]: failedResult,
+    };
+    const renderer = loadRenderer({
+      env,
+      client: {
+        rpc: name => ({ single: async () => responses[name] ?? failure() }),
+        from: () => ({ select: () => ({ eq: () => ({ single: async () => responses.draft }) }) }),
+      },
+      pdfLoad: () => Promise.reject(new Error(upstreamText)),
+    });
+    const response = await renderer.handler(new Request(env.EDGE_SUPABASE_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'designer_preview', user_jwt: 'fixture-session', draft_id: 'draft', shipment_id: 'shipment',
+      }),
+    }));
+    const result = { statusCode: response.status, body: await response.json() };
+    expectSafe(result, status, { ok: false, error: { code, class: errorClass } });
+    if (status === 400 || status === 200) {
+      expect(result.body.validation).toEqual({ ok: false, error: { code: 'validation_failed', class: '42501' } });
+    }
+  });
+
+  test.each([false, true])('classifies per-job compose and render failures in worker responses (batch=%s)', async batch => {
+    const rpc = jest.fn(name => {
+      switch (name) {
+        case 'lease_label_job': return { single: async () => success(job) };
+        case 'lease_label_jobs': return success([job, { ...job, id: 'next-job' }]);
+        case 'compose_label_payload': return {
+          single: async () => batch ? success(composed) : failure(),
+        };
+        default: return success();
+      }
+    });
+    const renderer = loadRenderer({
+      env: { ...env, LABEL_RENDERER_DB_JWT: 'fixture-db-jwt' },
+      client: { rpc, from: () => ({ insert: async () => success() }) },
+      fetch: async () => Response.json({}),
+      authorized: true,
+      pdfLoad: () => Promise.reject(new Error(upstreamText)),
+    });
+    const response = await renderer.handler(new Request(env.EDGE_SUPABASE_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ max_jobs: batch ? 2 : 1 }),
+    }));
+    const result = { statusCode: response.status, body: await response.json() };
+    const resultFields = batch
+      ? { status: 'ok', jobs: [
+        expect.objectContaining({ status: 'failed', error: 'label_render_failed', error_class: 'unknown' }),
+        expect.objectContaining({ status: 'failed', error: 'label_render_failed', error_class: 'unknown' }),
+      ] }
+      : { status: 'failed', reason: 'compose_label_payload_failed', error_class: '42501' };
+    expectSafe(result, 200, resultFields);
+    expect(JSON.stringify(rpc.mock.calls)).not.toContain(upstreamText);
   });
 });
 

@@ -783,10 +783,11 @@
           },
           "reason": {
             "type": "string",
-            "description": "Failure reason when status=failed."
+            "description": "Fixed renderer reason code when status=failed."
           },
-          "message": {
-            "type": "string"
+          "error_class": {
+            "type": "string",
+            "description": "Allowlisted renderer failure class."
           }
         },
         "additionalProperties": true
@@ -860,7 +861,12 @@
             ]
           },
           "error": {
-            "type": "string"
+            "type": "string",
+            "description": "The fixed renderer error code for classified bundle failures."
+          },
+          "error_class": {
+            "type": "string",
+            "description": "Allowlisted renderer failure class."
           },
           "organization_id": {
             "type": "string",
