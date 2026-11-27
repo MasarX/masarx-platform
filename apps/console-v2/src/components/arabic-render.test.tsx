@@ -66,8 +66,6 @@ describe('shared components in Arabic', () => {
         },
       ],
       total: 1,
-      page: 0,
-      page_size: 50,
     });
     renderWithProviders(<SessionsList userId="usr_test_0001" />, {
       locale: 'ar',

@@ -34,6 +34,7 @@ import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { StateView } from '@/components/StateView';
 import { useModal, useDrawer } from '@/hooks/useOverlay';
 import { useIdentity } from '@/lib/identity';
+import { useT } from '@/lib/i18n';
 import {
   CAP,
   formatCapabilityLabel,
@@ -548,6 +549,7 @@ const TABS: Array<{ key: AccessTabKey; label: string }> = [
 // -----------------------------------------------------------------------------
 
 export function AccessModule() {
+  const t = useT();
   const { user, scope, capabilities, hasCapability } = useIdentity();
   const myCaps = useMemo(() => new Set(capabilities), [capabilities]);
   const modal = useModal();
@@ -766,7 +768,7 @@ export function AccessModule() {
     modal.open({
       title: (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-          {`Request access · ${formatCapabilityLabel(cap, { titleCase: true })}`}
+          {`Request access · ${formatCapabilityLabel(cap, { titleCase: true }, t)}`}
         </span>
       ),
       body: (
@@ -857,7 +859,7 @@ export function AccessModule() {
                       return;
                     }
                     setAccessRequestEvidence(readback);
-                    pushToast(`Access request submitted - ${formatCapabilityTitle(cap)}`, 'good');
+                    pushToast(`Access request submitted - ${formatCapabilityTitle(cap, t)}`, 'good');
                     modal.close();
                   },
                   onError: () => pushToast('Access request could not be submitted. Review the request and try again.', 'danger'),
@@ -1892,14 +1894,14 @@ export function AccessModule() {
                       <td>{accessResourceLabel(key)}</td>
                       <td>
                         <Chip
-                          label={r ? formatCapabilityLabel(r, { titleCase: true }) : 'Not available'}
+                          label={r ? formatCapabilityLabel(r, { titleCase: true }, t) : 'Not available'}
                           kind={rOk ? 'good' : 'warn'}
                           size="xs"
                         />
                       </td>
                       <td>
                         <Chip
-                          label={w ? formatCapabilityLabel(w, { titleCase: true }) : 'Not available'}
+                          label={w ? formatCapabilityLabel(w, { titleCase: true }, t) : 'Not available'}
                           kind={wOk ? 'good' : 'warn'}
                           size="xs"
                         />
@@ -2040,7 +2042,7 @@ export function AccessModule() {
           )}
           {!canApprove ? (
             <p className="state__hint" style={{ padding: '0 16px 16px' }}>
-              Role changes require {formatCapabilityRequirement(CAP.ACCESS_POLICY_APPROVE)}.
+              Role changes require {formatCapabilityRequirement(CAP.ACCESS_POLICY_APPROVE, t)}.
             </p>
           ) : null}
         </div>

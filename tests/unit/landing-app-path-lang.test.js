@@ -1442,7 +1442,8 @@ describe('landing app language routing', () => {
       const css = fs.readFileSync(path.resolve(__dirname, '../../docs/marketing/landing-v2/app.css'), 'utf8');
       expect(css).toMatch(/scroll-padding-top:\s*var\(--scroll-offset\)/);
       expect(css).toMatch(/@media \(max-width: 768px\)\s*\{\s*\.header-row \{ flex-wrap: wrap; \}/);
-      expect(css).toContain('content-visibility: auto');
+      // Skipped sections resize after a focus or fragment scroll and move its target off screen (#626).
+      expect(css).not.toMatch(/content-visibility:\s*auto/);
     } finally {
       getter.mockRestore();
       window.ResizeObserver = originalObserver;

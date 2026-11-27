@@ -109,7 +109,43 @@ test('fails closed after three dropped requests with three seconds of total back
   expect(console.error.mock.calls).toEqual([[`::error::${message}`]]);
 });
 
-test.each([403, 404, 408, 503])('fails closed on HTTP %i after one GET', async status => {
+test.each([502, 503, 504])('recovers from HTTP %i within three GET attempts', async status => {
+  const fetchRequest = githubFetch()
+    .mockResolvedValueOnce(new Response(null, { status }))
+    .mockResolvedValueOnce(new Response(null, { status }));
+  const result = guard(env, fetchRequest);
+
+  await jest.advanceTimersByTimeAsync(999);
+  expect(fetchRequest).toHaveBeenCalledTimes(1);
+  await jest.advanceTimersByTimeAsync(1);
+  expect(fetchRequest).toHaveBeenCalledTimes(2);
+  await jest.advanceTimersByTimeAsync(1999);
+  expect(fetchRequest).toHaveBeenCalledTimes(2);
+  await jest.advanceTimersByTimeAsync(1);
+  await expect(result).resolves.toBe(0);
+  expect(fetchRequest).toHaveBeenCalledTimes(5);
+  const [[endpoint], [second], [third]] = fetchRequest.mock.calls;
+  expect([second, third]).toEqual([endpoint, endpoint]);
+  expect(fetchRequest.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+  expect(fs.readFileSync(env.GITHUB_OUTPUT, 'utf8')).toBe('superseded=false\n');
+});
+
+test.each([502, 503, 504])('fails closed after three GET attempts for persistent HTTP %i', async status => {
+  const fetchRequest = jest.fn(async () => new Response(null, { status }));
+  const result = guard(env, fetchRequest);
+
+  await jest.advanceTimersByTimeAsync(3000);
+  await expect(result).resolves.toBe(1);
+  expect(fetchRequest).toHaveBeenCalledTimes(3);
+  expect(fetchRequest.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+  expect(jest.getTimerCount()).toBe(0);
+  expect(fs.existsSync(env.GITHUB_OUTPUT)).toBe(false);
+  expect(console.error).toHaveBeenCalledWith(
+    `::error::Guard could not verify GitHub deployment state: GitHub API returned HTTP ${status} for /git/ref/heads/main`,
+  );
+});
+
+test.each([403, 404, 408])('fails closed on HTTP %i after one GET', async status => {
   const fetchRequest = jest.fn().mockResolvedValue(new Response(null, {
     status, headers: { 'Retry-After': '1' },
   }));

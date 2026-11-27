@@ -48,6 +48,41 @@ const INGRESS_FORWARDED_PATH_HEADERS = new Set([
 ]);
 const UUID_CANONICAL_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const UUID_HEX_PATTERN = /^[0-9a-f]{32}$/i;
+const SHARED_STORAGE_NAMESPACES = new Set(["global", "fonts"]);
+const INVALID_STORAGE_KEY_CHARACTERS = /[\\\p{Cc}]/u;
+const STORAGE_OBJECT_URL = /^https?:\/\/[^/?#\\]+\/storage\/v1\/object\/(?:public\/|sign\/|authenticated\/)?([^/?#]+)\/([^?#]+)(?:[?#].*)?$/i;
+
+export const canonicalStorageKey = (value, organizationId, { write = false, allowShared = false } = {}) => {
+  if (typeof value !== "string" || typeof organizationId !== "string" || !UUID_CANONICAL_PATTERN.test(organizationId) ||
+    INVALID_STORAGE_KEY_CHARACTERS.test(value)) return null;
+
+  let key;
+  try {
+    key = decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+
+  const [namespace, ...segments] = key.split("/");
+  if (segments.length === 0 || INVALID_STORAGE_KEY_CHARACTERS.test(key) ||
+    segments.some((segment) => !segment || segment === "." || segment === "..")) return null;
+  if (write) {
+    return namespace === organizationId && key === value &&
+        segments.every((segment) => /^[A-Za-z0-9._-]+$/.test(segment))
+      ? key : null;
+  }
+  return namespace === organizationId || (allowShared && SHARED_STORAGE_NAMESPACES.has(namespace)) ? key : null;
+};
+
+export const isStorageBucketId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value);
+
+export const parseStorageObjectUrl = (value) => {
+  if (INVALID_STORAGE_KEY_CHARACTERS.test(value)) return null;
+  // Inspect the supplied path before URL parsing can remove dot segments.
+  const match = STORAGE_OBJECT_URL.exec(value);
+  return match && isStorageBucketId(match[1]) ? { bucket: match[1], path: match[2] } : null;
+};
+
 const TRACEPARENT_VERSION_PATTERN = /^[0-9a-f]{2}$/i;
 const TRACEPARENT_TRACE_ID_PATTERN = /^[0-9a-f]{32}$/i;
 const TRACEPARENT_SPAN_ID_PATTERN = /^[0-9a-f]{16}$/i;
@@ -297,6 +332,14 @@ const normalizeErrorCode = (value, fallback = "edge.request.failed") => {
     .replace(/_+/g, "_")
     .replace(/^_+|_+$/g, "") || "edge.request.failed";
 };
+
+const LOGGABLE_DATABASE_ERROR_CODES = new Set([
+  "23505", "42501", "57014", "P0001",
+  "PGRST116", "PGRST202", "PGRST301", "PGRST302",
+]);
+
+export const databaseErrorCodeForLog = (code) =>
+  LOGGABLE_DATABASE_ERROR_CODES.has(code) ? code : null;
 
 export const buildErrorEnvelope = ({
   status,

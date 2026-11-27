@@ -1,4 +1,5 @@
 {
+  "use_api_bundle_limit_bytes": 5000000,
   "functions": [
     {
       "name": "api-caller",
@@ -112,19 +113,9 @@
       "enabled": true
     },
     {
-      "name": "fieldops-otp-verifier",
-      "auth_mode": "supabase_jwt",
-      "enabled": false
-    },
-    {
-      "name": "github-planning-receiver",
-      "auth_mode": "public_no_jwt",
-      "enabled": false
-    },
-    {
       "name": "integration-plugin-studio",
       "auth_mode": "supabase_jwt",
-      "enabled": false
+      "enabled": true
     }
   ]
 }
