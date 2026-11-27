@@ -11,6 +11,7 @@
 // swap-seam pattern.
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { trimTrailingSlashes } from './trim-trailing-slashes';
 
 type ConsoleSupabaseClient = SupabaseClient<any, any, any>;
 
@@ -39,7 +40,8 @@ export function getSupabaseClient(): ConsoleSupabaseClient | null {
     cached = null;
     return null;
   }
-  cached = createClient(url, key, {
+  const functionsUrl = new URL('functions/v1/', `${trimTrailingSlashes(url)}/`).href;
+  const client: ConsoleSupabaseClient = createClient(url, key, {
     db: { schema: 'api' },
     auth: {
       persistSession: true,
@@ -48,8 +50,24 @@ export function getSupabaseClient(): ConsoleSupabaseClient | null {
       flowType: 'pkce',
       storageKey: 'masarx-console-v2-auth',
     },
-    global: { headers: { 'x-client-info': 'console-v2' } },
+    global: {
+      headers: { 'x-client-info': 'console-v2' },
+      fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = input instanceof Request ? input.url : String(input);
+        const bearer = new Headers(init?.headers).get('Authorization');
+        // With no session supabase-js sends the anon key as the bearer (or no bearer for
+        // new-format keys), which every Console Edge function rejects. Stop here and sign out
+        // locally so the identity provider drops to unauthenticated and AppGuard shows its
+        // sign-in action, which returns the user to this page.
+        if (target.startsWith(functionsUrl) && (!bearer || bearer === `Bearer ${key}`)) {
+          void client.auth.signOut({ scope: 'local' }).catch(() => undefined);
+          return Promise.reject(new Error('Console session ended; sign in again'));
+        }
+        return fetch(input, init);
+      },
+    },
   });
+  cached = client;
   return cached;
 }
 
