@@ -1035,14 +1035,15 @@ test.describe("landing tracking", () => {
       const body = route.request().postDataJSON();
       const url = new URL(route.request().url());
 
-      expect(body.turnstile_token).toBe("TURNSTILE-EXAMPLE_PASSWORD");
-
+      // The challenge token fallback covers /lookup and /verify; later calls use session_token (#410).
       if (url.pathname.endsWith("/lookup")) {
+        expect(body.turnstile_token).toBe("TURNSTILE-EXAMPLE_PASSWORD");
         await routePayload({ ok: true, step: "verify", verification: { phone_digits: 3 } })(route);
         return;
       }
 
       if (url.pathname.endsWith("/verify")) {
+        expect(body.turnstile_token).toBe("TURNSTILE-EXAMPLE_PASSWORD");
         await routePayload({ ...trackingPayload, session_token: "sess-demo-fallback" })(route);
         return;
       }

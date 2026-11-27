@@ -27,6 +27,7 @@ test('runs one manual dry-run job in dev with only read access and pinned GitHub
     'database-dry-run',
     'e2e-report',
     'ingress',
+    'label-render-probe',
     'landing',
     'portal',
     'summary',

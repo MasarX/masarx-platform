@@ -9,9 +9,14 @@ SELECT is((
   JOIN pg_namespace n ON n.oid = p.pronamespace
   WHERE n.nspname = 'workflow_handlers'
     AND p.prokind = 'f'
-    AND p.prosrc ~* $path$\mPERFORM\s+(?:pg_catalog\.)?set_config\s*\(\s*'search_path'\s*,\s*'public(?:, workflow_handlers)?(?:, extensions)?, pg_temp'\s*,\s*(?:false|true)\s*\)$path$
-    AND NOT EXISTS (
-      SELECT 1 FROM unnest(p.proconfig) AS settings(setting) WHERE setting LIKE 'search_path=%'
+    AND (
+      p.prosrc ~* $path$\mset_config\s*\(\s*'search_path'\s*,[^;]*,\s*(?:is_local\s*(?:=>|:=)\s*)?false\s*\)$path$
+      OR (
+        p.prosrc ~* $path$\mPERFORM\s+(?:pg_catalog\.)?set_config\s*\(\s*'search_path'\s*,\s*'public(?:, workflow_handlers)?(?:, extensions)?, pg_temp'\s*,\s*true\s*\)$path$
+        AND NOT EXISTS (
+          SELECT 1 FROM unnest(p.proconfig) AS settings(setting) WHERE setting LIKE 'search_path=%'
+        )
+      )
     )
 ), 0::bigint, 'workflow handlers that change search path all restore it at the function boundary');
 

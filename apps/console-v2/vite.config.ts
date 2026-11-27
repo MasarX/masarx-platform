@@ -2,9 +2,27 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { TanStackRouterVite } from '@tanstack/router-vite-plugin';
 import { visualizer } from 'rollup-plugin-visualizer';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { resolveDevServerAllowedHosts } from './dev-server-allowed-hosts';
+
+function consoleRuntimeChunk(id: string): string | undefined {
+  if (id.includes('/node_modules/@tanstack/')) return 'tanstack';
+  if (id.includes('/node_modules/react/')) return 'react';
+
+  const supabasePackage = id.match(/\/node_modules\/@supabase\/([^/]+)\//)?.[1];
+  if (supabasePackage) {
+    // Keep the Auth entry and its eager class alias with the class they load.
+    if (supabasePackage === 'auth-js' && /\/src\/(?:index|AuthClient|GoTrueClient)\.ts$/.test(id)) {
+      return 'supabase-auth-client';
+    }
+    return `supabase-${supabasePackage}`;
+  }
+
+  const sharedRuntime = id.match(/\/src\/lib\/(data-source|api|queries|i18n)\.tsx?$/)?.[1];
+  return sharedRuntime ? `console-${sharedRuntime}` : undefined;
+}
 
 // Phase F (lazy seed). The seed catalog under src/lib/seed-raw/ is only
 // consumed in seed/demo mode; production builds (`VITE_USE_SEED=false`) must
@@ -13,7 +31,7 @@ import { resolveDevServerAllowedHosts } from './dev-server-allowed-hosts';
 // boolean compile-time constant `__SEED_ENABLED__` so Rollup can see a
 // literal `if (false) { ... }` branch around the seed dynamic import in
 // `src/lib/seed-loader.ts` and dead-code-eliminate it cleanly.
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   const npmPackageJson = process.env.npm_package_json;
   const logicalPackageRoot =
     npmPackageJson && path.basename(path.dirname(npmPackageJson)) === 'console-v2'
@@ -25,6 +43,13 @@ export default defineConfig(({ mode }) => {
   const seedMode = process.env.VITE_USE_SEED ?? env.VITE_USE_SEED;
   const seedEnabled = seedMode !== 'false';
   const cspNonce = process.env.CONSOLE_V2_CSP_NONCE_PLACEHOLDER;
+  // Console V2 uses the shared UI for label design. All other screens use its own catalogs.
+  const sharedUiMessages = Object.fromEntries(['en', 'ar'].map((locale) => {
+    const catalogPath = path.resolve(__dirname, '../../packages/config/messages', `${locale}.json`);
+    const { ui } = JSON.parse(readFileSync(catalogPath, 'utf8'));
+    if (!ui?.labelDesigner) throw new Error(`Missing labelDesigner messages in ${locale}`);
+    return [locale, { ui: { labelDesigner: ui.labelDesigner } }];
+  }));
 
   return {
     root: __dirname,
@@ -62,9 +87,14 @@ export default defineConfig(({ mode }) => {
     // Stringified per Vite's define contract.
     define: {
       __SEED_ENABLED__: JSON.stringify(seedEnabled),
+      __UI_MESSAGE_CATALOGS__: JSON.stringify(JSON.stringify(sharedUiMessages)),
     },
     resolve: {
       alias: [
+        // Compile the SDK's published Auth sources with the app's ES2022 target.
+        ...(command === 'build'
+          ? [{ find: /^@supabase\/auth-js$/, replacement: '@supabase/auth-js/src/index.ts' }]
+          : []),
         { find: '@', replacement: path.resolve(__dirname, './src') },
         {
           find: /^@masarx\/config$/,
@@ -94,10 +124,8 @@ export default defineConfig(({ mode }) => {
         // into Sentry it must install the package and provide the DSN.
         external: ['@sentry/react'],
         output: {
-          manualChunks: {
-            react: ['react', 'react-dom'],
-            tanstack: ['@tanstack/react-router', '@tanstack/react-query'],
-          },
+          onlyExplicitManualChunks: true,
+          manualChunks: consoleRuntimeChunk,
         },
       },
     },

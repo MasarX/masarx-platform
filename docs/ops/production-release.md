@@ -13,7 +13,7 @@ Production remains paused under [#152](https://github.com/MasarX/masarx-platform
 
 Use the [v0.2.0 milestone](https://github.com/MasarX/masarx-platform/milestone/1) for the ship date and scope. A release candidate needs a successful staging deployment and a recorded rollback rehearsal before production admission. See [#243](https://github.com/MasarX/masarx-platform/issues/243) and [#200](https://github.com/MasarX/masarx-platform/issues/200).
 
-Set `RELEASE_SHA` to the approved full commit SHA. Use a configured App helper path in `APP_RUN` for the GitHub read commands. Run the tag block from a trusted checkout containing the [shared CI check](../../scripts/deploy/require-ci-gate.sh). The operator verifies first-parent ancestry and exact-SHA `ci-gate` success before creating the annotated tag using the authorized identity from [the release policy](../../DELIVERY.md#releases).
+Set `RELEASE_SHA` to the approved full commit SHA. Use a configured App helper path in `APP_RUN` for the GitHub read commands. Run the tag block from a trusted checkout containing the [shared CI check](../../scripts/deploy/require-ci-gate.sh). Before creating an annotated tag, the block verifies first-parent ancestry, inclusion of the [replacement tag policy](https://github.com/MasarX/masarx-platform/pull/566) and its workflow, and exact-SHA `ci-gate` success. Use the authorized identity from [the release policy](../../DELIVERY.md#releases).
 
 ```bash
 set -euo pipefail
@@ -23,6 +23,14 @@ app_gh=(python -I "$APP_RUN" --org MasarX --repo masarx-platform gh)
 [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
 git fetch origin main
 git rev-list --first-parent origin/main | grep -Fx "$RELEASE_SHA" > /dev/null
+if ! TAG_POLICY_MERGE_SHA=$("${app_gh[@]}" api "repos/$repo/pulls/566" \
+     --jq 'select(.merged == true) | .merge_commit_sha') ||
+   [[ ! "$TAG_POLICY_MERGE_SHA" =~ ^[a-f0-9]{40}$ ]] ||
+   ! git merge-base --is-ancestor "$TAG_POLICY_MERGE_SHA" "$RELEASE_SHA" ||
+   ! git cat-file -e "$RELEASE_SHA:.github/workflows/release-on-tag.yml"; then
+  printf '%s\n' 'Release requires a target containing the merged tag policy and workflow.' >&2
+  exit 1
+fi
 bash scripts/deploy/require-ci-gate.sh "$repo" "$RELEASE_SHA" "${app_gh[@]}" || exit 1
 git tag -a "$tag" "$RELEASE_SHA" -m "Release $tag"
 git push origin "refs/tags/$tag"
