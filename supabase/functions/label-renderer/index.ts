@@ -34,7 +34,7 @@ const ensureRendererDeps = (): Promise<void> => {
   }
   return rendererDepsPromise;
 };
-import { classifyError, logStructured, readEnv } from "./_shared/mod.mjs";
+import { canonicalStorageKey, classifyError, logStructured, parseStorageObjectUrl, readEnv } from "./_shared/mod.mjs";
 import { resolveCorsPolicy } from "./_shared/cors.mjs";
 import { authorizeLabelRendererRequest, resolveLabelRendererOperation, verifyLabelRendererToken } from "./auth.mjs";
 import { BARCODE_MAX_CHARS, canonicalBarcodeType, encodeAdditionalBarcode, rotateBarcodePoint } from "./barcode.ts";
@@ -357,36 +357,18 @@ const STORAGE_API_BASE = SUPABASE_URL ? `${SUPABASE_URL.replace(/\/+$/, "")}/sto
 const buildLabelOutputFilePath = (organizationId: string, jobId: string) =>
   `${organizationId}/labels/${jobId}.pdf`;
 
-const normalizeBundleFilePathCandidate = (value: unknown): string | null => {
+const normalizeBundleFilePathCandidate = (value: unknown, organizationId: string): string | null => {
   if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  try {
-    const parsed = new URL(trimmed);
-    const pathname = decodeURIComponent(parsed.pathname || "");
-    const signMarker = `/storage/v1/object/sign/${LABEL_BUCKET}/`;
-    const publicMarker = `/storage/v1/object/public/${LABEL_BUCKET}/`;
-    if (pathname.includes(signMarker)) {
-      const index = pathname.indexOf(signMarker);
-      const slice = pathname.slice(index + signMarker.length);
-      return slice.length > 0 ? slice : null;
-    }
-    if (pathname.includes(publicMarker)) {
-      const index = pathname.indexOf(publicMarker);
-      const slice = pathname.slice(index + publicMarker.length);
-      return slice.length > 0 ? slice : null;
-    }
-    return pathname.startsWith("/") ? pathname.slice(1) : pathname;
-  } catch (_err) {
-    return trimmed;
-  }
+  const url = parseStorageObjectUrl(value);
+  if (url && url.bucket !== LABEL_BUCKET) return null;
+  return canonicalStorageKey(url?.path ?? value, organizationId);
 };
 
-const dedupeBundleTargets = (targets: BundleTarget[]): BundleTarget[] => {
+const dedupeBundleTargets = (targets: BundleTarget[], organizationId: string): BundleTarget[] => {
   const seen = new Set<string>();
   const deduped: BundleTarget[] = [];
   for (const target of targets) {
-    const normalizedFilePath = normalizeBundleFilePathCandidate(target.fileUrl ?? null);
+    const normalizedFilePath = normalizeBundleFilePathCandidate(target.fileUrl, organizationId);
     const key =
       normalizedFilePath ??
       [
@@ -399,14 +381,7 @@ const dedupeBundleTargets = (targets: BundleTarget[]): BundleTarget[] => {
       ].join(":");
     if (seen.has(key)) continue;
     seen.add(key);
-    deduped.push(
-      normalizedFilePath
-        ? {
-            ...target,
-            fileUrl: normalizedFilePath,
-          }
-        : target,
-    );
+    deduped.push({ ...target, fileUrl: normalizedFilePath });
   }
   return deduped;
 };
@@ -769,8 +744,7 @@ const storageCreateSignedUrls = async (
   const deduped = Array.from(
     new Set(
       (Array.isArray(paths) ? paths : [])
-        .map((path) => String(path || "").trim())
-        .filter((path) => path.length > 0),
+        .filter((path) => typeof path === "string" && path.length > 0),
     ),
   );
   if (deduped.length === 0) return { data: [], error: null };
@@ -1413,23 +1387,15 @@ const prepareDesignerPreviewSnapshot = async (
   const unknownRefs = new Set<string>();
   const dropKeys = new Set<string>();
 
-  const isAllowedPath = (path: string) => {
-    const normalized = path.trim();
-    return (
-      normalized.startsWith(`${orgId}/`) ||
-      normalized.startsWith("fonts/") ||
-      normalized.startsWith("global/")
-    );
-  };
-
   for (const asset of rawAssets) {
     const name = normalizeString(asset?.name);
-    const path = normalizeString(asset?.path);
-    const display = name ?? path ?? "";
-    if (path && !isAllowedPath(path)) {
+    const rawPath = normalizeString(asset?.path);
+    const path = canonicalStorageKey(asset?.path, orgId, { allowShared: true });
+    const display = name ?? rawPath ?? "";
+    if (rawPath && !path) {
       if (display) unknownRefs.add(display);
       if (name) dropKeys.add(name);
-      if (path) dropKeys.add(path);
+      dropKeys.add(rawPath);
       continue;
     }
     if (!path) {
@@ -1443,8 +1409,8 @@ const prepareDesignerPreviewSnapshot = async (
     if (!bytes) {
       if (display) missingRefs.add(display);
       if (name) missingKeySet.add(name);
-      missingKeySet.add(path);
-      dropKeys.add(path);
+      missingKeySet.add(rawPath ?? path);
+      dropKeys.add(rawPath ?? path);
     }
   }
 
@@ -2327,6 +2293,7 @@ const registerAssetKeys = (
 const loadTemplateAssets = async (
   snapshot: TemplateSnapshot,
   rendererConfig: TemplateRendererConfig,
+  organizationId: string,
   missingAssets?: string[],
 ): Promise<Map<string, LoadedAsset>> => {
   const map = new Map<string, LoadedAsset>();
@@ -2344,7 +2311,8 @@ const loadTemplateAssets = async (
     const key = asset.name ?? asset.path;
     if (map.has(key) || map.has(asset.path)) continue;
 
-    const bytes = await fetchAsset(asset.path);
+    const path = canonicalStorageKey(asset.path, organizationId, { allowShared: true });
+    const bytes = path ? await fetchAsset(path) : null;
     if (!bytes) {
       missing.push(key);
       continue;
@@ -2384,8 +2352,8 @@ const renderTemplateBlocksToPage = async (
   const arabicPolicy = asRecord(labelRenderPolicy?.arabic) ?? {};
   const arabicEnabled = arabicPolicy?.enabled === true;
   const arabicDirection = normalizeString(arabicPolicy?.direction);
-  const arabicFontRegularKey = normalizeString(arabicPolicy?.font_asset_regular);
-  const arabicFontBoldKey = normalizeString(arabicPolicy?.font_asset_bold);
+  const arabicFontRegularKey = arabicPolicy?.font_asset_regular;
+  const arabicFontBoldKey = arabicPolicy?.font_asset_bold;
   let fontkitRegistered = false;
 
   const resolveFontName = (fontName?: string) => {
@@ -2403,8 +2371,8 @@ const renderTemplateBlocksToPage = async (
     fontkitRegistered = true;
   };
 
-  const embedFontFromAsset = async (assetKey: string | null) => {
-    const key = normalizeString(assetKey);
+  const embedFontFromAsset = async (assetKey: unknown) => {
+    const key = canonicalStorageKey(assetKey, job.organization_id, { allowShared: true });
     if (!key) return null;
     const cacheKey = `asset_font:${key}`;
     if (options.fontCache.has(cacheKey)) {
@@ -2881,7 +2849,7 @@ const renderTemplatePdf = async (
 
   const fontCache = new Map<string, EmbeddedFontPromise>();
   const missingAssets: string[] = [];
-  const assets = await loadTemplateAssets(snapshot, rendererConfig, missingAssets);
+  const assets = await loadTemplateAssets(snapshot, rendererConfig, job.organization_id, missingAssets);
 
   const getAssetEmbed = async (ref?: string) => {
     if (!ref) {
@@ -3541,7 +3509,7 @@ const collectBundleTargets = async (bundle: BundleRequest): Promise<BundleTarget
         targets.push({ labelId: null, shipmentId: null, shipmentBoxId: null, targetType: null, targetId: null, targetBoxId: null, fileUrl: null });
       }
     }
-    return dedupeBundleTargets(targets);
+    return dedupeBundleTargets(targets, bundle.organization_id);
   }
 
   const labelIds = Array.isArray(bundle.label_ids) && bundle.label_ids.length > 0 ? bundle.label_ids : null;
@@ -3580,7 +3548,7 @@ const collectBundleTargets = async (bundle: BundleRequest): Promise<BundleTarget
     });
   });
 
-  return dedupeBundleTargets(targets);
+  return dedupeBundleTargets(targets, bundle.organization_id);
 };
 
 const downloadLabelPdf = async (filePath: string | null | undefined): Promise<Uint8Array | null> => {
@@ -4951,13 +4919,13 @@ const handlePrintRequest = async (
             ? [heightPoints, widthPoints]
             : [widthPoints, heightPoints];
 
-          const cacheKey = `${templateSnapshot.template_id ?? templateSnapshot.template_key ?? "template"}:${
+          const cacheKey = `${jobForTemplate.organization_id}:${templateSnapshot.template_id ?? templateSnapshot.template_key ?? "template"}:${
             templateSnapshot.template_version ?? 0
           }`;
           let template = templateCache.get(cacheKey);
           if (!template) {
             const missingAssets: string[] = [];
-            const assets = await loadTemplateAssets(templateSnapshot, rendererConfig, missingAssets);
+            const assets = await loadTemplateAssets(templateSnapshot, rendererConfig, jobForTemplate.organization_id, missingAssets);
             const assetsLoaded = new Set(assets.values()).size;
             const dpi = typeof pageCfg.dpi === "number" && pageCfg.dpi > 0 ? pageCfg.dpi : 203;
             const dotPt = 72 / dpi;
@@ -5693,7 +5661,7 @@ const handleBundleRequest = async (
   );
   const passthroughPath =
     singleFilePassthroughEnabled && targets.length === 1
-      ? normalizeBundleFilePathCandidate(targets[0]?.fileUrl ?? null)
+      ? targets[0].fileUrl
       : null;
 
   if (passthroughPath) {

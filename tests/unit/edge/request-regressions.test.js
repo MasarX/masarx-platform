@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const ts = require('typescript');
-const { webcrypto } = require('crypto');
+const { randomUUID, webcrypto } = require('crypto');
 
 const functionsRoot = path.resolve(__dirname, '../../../supabase/functions');
 const compiledModules = new Map();
@@ -496,14 +496,16 @@ describe.each([
 });
 
 describe('UI resource download storage paths', () => {
+  const organizationId = randomUUID();
+
   function downloadHandler(filePath) {
-    const createSignedUrl = jest.fn(async () => ({ data: { signedUrl: 'https://storage.example.test/signed' }, error: null }));
-    const from = jest.fn(() => ({ createSignedUrl }));
+    const createSignedUrls = jest.fn(async () => ({ data: [{ signedUrl: 'https://storage.example.test/signed' }], error: null }));
+    const from = jest.fn(() => ({ createSignedUrls }));
     const rpc = jest.fn(async (name) => {
       if (name === 'ui_read_registry_v1') return { data: { resources: [{
         key: 'exports', download: { bucket: 'reports', path_column: 'file_path' },
       }] }, error: null };
-      if (name === 'ui_get_resource_v1') return { data: { file_path: filePath }, error: null };
+      if (name === 'ui_get_resource_v1') return { data: { organization_id: organizationId, file_path: filePath }, error: null };
       throw new Error(`Unexpected RPC: ${name}`);
     });
     const createClient = jest.fn(() => ({ rpc, storage: { from } }));
@@ -511,26 +513,26 @@ describe('UI resource download storage paths', () => {
       env: { EDGE_SUPABASE_URL: 'https://api.example.test', EDGE_SUPABASE_ANON_KEY: 'anon', EDGE_SUPABASE_SERVICE_ROLE_KEY: 'service' },
       createClient,
     });
-    return { handler, from, createSignedUrl };
+    return { handler, from, createSignedUrls };
   }
 
   test.each([
-    ['https://api.example.test/storage/v1/object/public/reports/tenant/report.pdf', 'reports', 'tenant/report.pdf'],
-    ['https://api.example.test/storage/v1/object/sign/reports/tenant/report.pdf?token=existing', 'reports', 'tenant/report.pdf'],
-    ['https://api.example.test/storage/v1/object/authenticated/reports/tenant/report.pdf', 'reports', 'tenant/report.pdf'],
-    ['https://api.example.test/storage/v1/object/reports/tenant/report.pdf', 'reports', 'tenant/report.pdf'],
-    ['https://api.example.test/storage/v1/object/public/reports/tenant/Quarter%201%20%23.pdf', 'reports', 'tenant/Quarter 1 #.pdf'],
-    ['reports/tenant/report.pdf', 'reports', 'tenant/report.pdf'],
-    ['/reports/tenant/report.pdf', 'reports', 'tenant/report.pdf'],
-    ['tenant/report.pdf', 'reports', 'tenant/report.pdf'],
+    [`https://api.example.test/storage/v1/object/public/reports/${organizationId}/report.pdf`, 'reports', `${organizationId}/report.pdf`],
+    [`https://api.example.test/storage/v1/object/sign/reports/${organizationId}/report.pdf?token=existing`, 'reports', `${organizationId}/report.pdf`],
+    [`https://api.example.test/storage/v1/object/authenticated/reports/${organizationId}/report.pdf`, 'reports', `${organizationId}/report.pdf`],
+    [`https://api.example.test/storage/v1/object/reports/${organizationId}/report.pdf`, 'reports', `${organizationId}/report.pdf`],
+    [`https://api.example.test/storage/v1/object/public/reports/${organizationId}/Quarter%201%20%23.pdf`, 'reports', `${organizationId}/Quarter 1 #.pdf`],
+    [`reports/${organizationId}/report.pdf`, 'reports', `${organizationId}/report.pdf`],
+    [`/reports/${organizationId}/report.pdf`, 'reports', `${organizationId}/report.pdf`],
+    [`${organizationId}/report.pdf`, 'reports', `${organizationId}/report.pdf`],
   ])('signs the correct bucket and decoded key for %s', async (filePath, bucket, key) => {
-    const { handler, from, createSignedUrl } = downloadHandler(filePath);
+    const { handler, from, createSignedUrls } = downloadHandler(filePath);
     const response = await handler(new Request('https://api.example.test/functions/v1/ui-resource-download?resource=exports&id=record', {
       headers: { authorization: 'Bearer user' },
     }));
     expect(response.status).toBe(200);
     expect(from).toHaveBeenCalledWith(bucket);
-    expect(createSignedUrl).toHaveBeenCalledWith(key, 900);
+    expect(createSignedUrls).toHaveBeenCalledWith([key], 900);
   });
 
   test.each([
@@ -538,6 +540,23 @@ describe('UI resource download storage paths', () => {
     'https://api.example.test/storage/v1/object/public/reports/%invalid.pdf',
     'https://api.example.test/unrelated/report.pdf',
   ])('rejects unsupported or malformed storage URL %s', async (filePath) => {
+    const { handler, from } = downloadHandler(filePath);
+    const response = await handler(new Request('https://api.example.test/functions/v1/ui-resource-download?resource=exports&id=record', {
+      headers: { authorization: 'Bearer user' },
+    }));
+    expect(response.status).toBe(500);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['foreign organization', `${randomUUID()}/report.pdf`],
+    ['parent segment', `${organizationId}/../report.pdf`],
+    ['current segment', `${organizationId}/./report.pdf`],
+    ['empty segment', `${organizationId}//report.pdf`],
+    ['backslash', `${organizationId}/reports\\report.pdf`],
+    ['control character', `${organizationId}/report.pdf\u000a`],
+    ['URL path with a dot segment', `https://api.example.test/storage/v1/object/public/reports/${organizationId}/./report.pdf`],
+  ])('rejects %s before signing', async (_case, filePath) => {
     const { handler, from } = downloadHandler(filePath);
     const response = await handler(new Request('https://api.example.test/functions/v1/ui-resource-download?resource=exports&id=record', {
       headers: { authorization: 'Bearer user' },
