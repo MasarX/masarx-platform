@@ -161,9 +161,7 @@ export const en = {
         write: 'route plan update',
       },
       routes: {
-        confirm_departure: 'route departure confirmation',
         read: 'routes read',
-        scan_load: 'route scan-out',
         write: 'route update',
       },
       senders: {
@@ -389,9 +387,7 @@ export const ar: CatalogShape<typeof en> = {
         write: 'تحديث خطط المسارات',
       },
       routes: {
-        confirm_departure: 'تأكيد مغادرة المسار',
         read: 'قراءة المسارات',
-        scan_load: 'مسح تحميل المسار',
         write: 'تحديث المسارات',
       },
       senders: {

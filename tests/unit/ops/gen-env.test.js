@@ -1,3 +1,8 @@
+const { supabasePoolerHost } = require('../../fixtures/builders/hosts');
+
+const westPooler0 = supabasePoolerHost(0, 'eu-test-1');
+const westPooler1 = supabasePoolerHost(1, 'eu-test-1');
+
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -422,7 +427,7 @@ describe('branches/gen-env', () => {
       preferred_database_url: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'pass',"@",'192.0.2.20',":",'6543',"/",'postgres'].join("")),
       db_ready_candidate_name: 'DATABASE_URL_POOLER+ipv4host',
       db_pass: 'pass',
-      pooler_host: 'aws-0-eu-west-1.pooler.supabase.com',
+      pooler_host: westPooler0,
       pooler_port: '6543',
       pooler_user: 'postgres.abcdefghijklmnopqrst',
     };
@@ -442,8 +447,8 @@ describe('branches/gen-env', () => {
     const written = fs.readFileSync(outPath, 'utf8');
     expect(written).toContain(('DATABASE_URL=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'pass',"@",'192.0.2.20',":",'6543',"/",'postgres'].join("")));
     expect(written).toContain(('DATABASE_URL_DIRECT=' + ['postgresql',":","/","/",'postgres',":",'pass',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join("")));
-    expect(written).toContain(('DATABASE_URL_POOLER=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'pass',"@",'aws-0-eu-west-1.pooler.supabase.com',":",'6543',"/",'postgres'].join("")));
-    expect(written).toContain('SUPABASE_POOLER_HOST=aws-0-eu-west-1.pooler.supabase.com');
+    expect(written).toContain(('DATABASE_URL_POOLER=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'pass',"@",westPooler0,":",'6543',"/",'postgres'].join("")));
+    expect(written).toContain(`SUPABASE_POOLER_HOST=${westPooler0}`);
     expect(written).toContain('SUPABASE_POOLER_PORT=6543');
     expect(written).toContain('SUPABASE_POOLER_USER=postgres.abcdefghijklmnopqrst');
     expect(written).toContain('DATABASE_URL_SELECTED_DSN_NAME=DATABASE_URL_POOLER+ipv4host');
@@ -457,7 +462,7 @@ describe('branches/gen-env', () => {
       'SUPABASE_BRANCH_PARENT_REF=uvwxyzabcdefghijklmn',
       'PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE=branch',
       'SUPABASE_DB_PASSWORD=secret',
-      ('DATABASE_URL=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'stale-password',"@",'aws-1-eu-west-1.pooler.supabase.com',":",'5432',"/",'postgres'].join("")),
+      ('DATABASE_URL=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'stale-password',"@",westPooler1,":",'5432',"/",'postgres'].join("")),
       '',
     ].join('\n'), 'utf8');
 
@@ -467,7 +472,7 @@ describe('branches/gen-env', () => {
         project_ref: 'abcdefghijklmnopqrst',
         workspace_mode: 'branch',
         branch_parent_ref: 'uvwxyzabcdefghijklmn',
-        pooler_host: 'aws-0-eu-west-1.pooler.supabase.com',
+        pooler_host: westPooler0,
         pooler_port: '5432',
         pooler_user: 'postgres.abcdefghijklmnopqrst',
         db_ready_candidate_name: 'DATABASE_URL_POOLER+poolerhost:aws-0',
@@ -477,8 +482,8 @@ describe('branches/gen-env', () => {
 
     expect(result.status).toBe(0);
     const written = fs.readFileSync(outPath, 'utf8');
-    expect(written).toContain(('DATABASE_URL=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'secret',"@",'aws-0-eu-west-1.pooler.supabase.com',":",'5432',"/",'postgres'].join("")));
-    expect(written).toContain(('DATABASE_URL_POOLER=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'secret',"@",'aws-0-eu-west-1.pooler.supabase.com',":",'5432',"/",'postgres'].join("")));
+    expect(written).toContain(('DATABASE_URL=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'secret',"@",westPooler0,":",'5432',"/",'postgres'].join("")));
+    expect(written).toContain(('DATABASE_URL_POOLER=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'secret',"@",westPooler0,":",'5432',"/",'postgres'].join("")));
     expect(written).toContain('DATABASE_URL_SELECTED_DSN_NAME=DATABASE_URL_POOLER+poolerhost:aws-0');
   });
 });

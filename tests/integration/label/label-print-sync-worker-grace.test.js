@@ -76,7 +76,7 @@ if (!DATABASE_URL) {
            id, organization_id, client_id, raw_input,
            city, province, country, validation_status
          ) VALUES
-           ($1::uuid, $3::uuid, $4::uuid, 'Print Sync Origin', 'Riyadh', 'Riyadh', 'SA', 'validated'),
+           ($1::uuid, $3::uuid, $4::uuid, 'Print Sync Origin', 'Riyadh', 'Riyadh', 'SA', 'valid'),
            ($2::uuid, $3::uuid, $4::uuid, 'Print Sync Destination', 'Jeddah', 'Makkah', 'SA', 'pending')`,
         [originAddressId, destAddressId, orgId, clientId],
       );

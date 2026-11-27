@@ -59,8 +59,6 @@ export const CAP = Object.freeze({
   SHIPMENTS_WRITE: 'shipments.write',
   ROUTES_READ: 'routes.read',
   ROUTES_WRITE: 'routes.write',
-  ROUTES_SCAN_LOAD: 'routes.scan_load',
-  ROUTES_CONFIRM_DEPARTURE: 'routes.confirm_departure',
   ROUTE_PLANS_READ: 'route_plans.read',
   ROUTE_PLANS_WRITE: 'route_plans.write',
   BASKETS_READ: 'baskets.read',
@@ -220,7 +218,6 @@ export function hasWildcardCapability(
   }
   return false;
 }
-
 
 function titleCasePhrase(value: string): string {
   return value.replace(/\b[a-z]/g, (match) => match.toUpperCase());

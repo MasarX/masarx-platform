@@ -580,7 +580,10 @@ export async function DashboardPage({
           data-testid={buildTestId(testIdPrefix, "ready")}
           className="grid gap-4 lg:grid-cols-3"
         >
-          <div className="rounded-lg border border-ui-border/60 border-s-[3px] border-s-ui-accent bg-ui-accent-soft/20 p-5">
+          <div
+            data-evidence-mask="dashboard-identity"
+            className="rounded-lg border border-ui-border/60 border-s-[3px] border-s-ui-accent bg-ui-accent-soft/20 p-5"
+          >
             <div className="text-xs font-medium text-ui-muted">
               {t("identityTitle")}
             </div>
@@ -591,7 +594,10 @@ export async function DashboardPage({
               {t("identityRole", { role: formatValue(me.user?.user_type, t) })}
             </div>
           </div>
-          <div className="rounded-lg border border-ui-border/60 border-s-[3px] border-s-[rgb(var(--ui-success))] bg-[rgb(var(--ui-success)/0.08)] p-5">
+          <div
+            data-evidence-mask="dashboard-identity"
+            className="rounded-lg border border-ui-border/60 border-s-[3px] border-s-[rgb(var(--ui-success))] bg-[rgb(var(--ui-success)/0.08)] p-5"
+          >
             <div className="text-xs font-medium text-ui-muted">
               {t("scopeTitle")}
             </div>

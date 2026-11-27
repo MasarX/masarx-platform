@@ -1,6 +1,7 @@
 {
   "measuredDateUtc": "2026-11-22",
   "runCount": 5,
+  "hostedSerialShardLoadFactor": 1.5,
   "seconds": {
     "001_runtime_basics.sql": 2.382,
     "001_verify_extensions.sql": 0.179,

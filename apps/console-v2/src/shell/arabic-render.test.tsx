@@ -20,6 +20,7 @@ import * as api from '@/lib/api';
 import { navigation as seedNavigation } from '@/lib/seed-raw/navigation.js';
 import { AppShell } from './AppShell';
 import { TenantPicker } from './TenantPicker';
+import { Topbar } from './Topbar';
 import { UserMenuDrawer } from './UserMenuDrawer';
 
 const TENANT = { id: 'org_test', label: 'Test Logistics', rank: 2 };
@@ -60,6 +61,16 @@ describe('console shell in Arabic', () => {
     });
     expect(chrome).toHaveLength(2);
     expect(chrome.flatMap((element) => findUntranslated(element, DATA))).toEqual([]);
+  });
+
+  it('cycles the theme with a localized accessible name for each mode', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Topbar />, { locale: 'ar', theme: 'light', identity: IDENTITY });
+
+    await user.click(screen.getByRole('button', { name: /السمة: فاتحة/ }));
+    await user.click(screen.getByRole('button', { name: /السمة: داكنة/ }));
+    await user.click(screen.getByRole('button', { name: /السمة: النظام/ }));
+    expect(screen.getByRole('button', { name: /السمة: فاتحة/ })).toBeInTheDocument();
   });
 
   it('user menu drawer', () => {

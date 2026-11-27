@@ -7,7 +7,6 @@
     "edge-runtime",
     "logflare",
     "vector",
-    "realtime",
     "postgres-meta",
     "supavisor",
     "postgrest"
@@ -15,9 +14,10 @@
   "supabase_start_required": [
     "gotrue",
     "storage-api",
-    "kong"
+    "kong",
+    "realtime"
   ],
-  "rationale": "Migrations and pgTAP use gotrue-managed auth tables (auth.sessions, auth.identities, auth.mfa_factors) and storage-api-managed storage.objects/storage.buckets, so gotrue and storage-api run with the db. vault, pg_cron and pg_net are extensions inside the Postgres image. On a fresh volume the CLI creates the config.toml storage buckets through the storage API behind kong (127.0.0.1:54321), so kong runs too. Bucket creation is served by storage-api itself, not PostgREST, and nothing in the suite needs REST, realtime, studio, mail, edge functions, logs or the pooler.",
+  "rationale": "Migrations and pgTAP use gotrue-managed auth tables (auth.sessions, auth.identities, auth.mfa_factors) and storage-api-managed storage.objects/storage.buckets, so gotrue and storage-api run with the db. vault, pg_cron and pg_net are extensions inside the Postgres image. On a fresh volume the CLI creates the config.toml storage buckets through the storage API behind kong (127.0.0.1:54321), so kong runs too. Bucket creation is served by storage-api itself, not PostgREST. Realtime initializes its schema before the Console live broadcast migration and authorization tests. The standalone pgTAP lane excludes REST, studio, mail, edge functions, logs and the pooler. Hosted integration enables PostgREST, Edge Runtime and Mailpit through the hosted image inventory.",
   "image_source": {
     "mode": "registry",
     "registry": "public.ecr.aws",
@@ -27,7 +27,8 @@
   "pre_pull_images": [
     "supabase/postgres",
     "supabase/gotrue",
-    "supabase/storage-api"
+    "supabase/storage-api",
+    "supabase/realtime"
   ],
   "psql_client_image": "postgres:17@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1",
   "pull_backoff_seconds": [

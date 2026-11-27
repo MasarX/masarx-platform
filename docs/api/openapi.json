@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "MasarX Delivery Platform Edge API",
-    "version": "contract-05fcacbe2a26",
+    "version": "contract-710419b89268",
     "x-versioning-policy": "contract-<sha256(openapi_without_info.version)[:12]>",
     "description": "Public endpoints for MasarX partners and clients.\n\nProduction base:\n- https://vomhkplympywspxymnstltsw.example.invalid\n\nAsync event intake:\n- POST /v1/webhook\n\nCompatibility ingress (provider mirroring only):\n- /api/... (DB-driven route packs)\n\nLegacy URL-token compatibility:\n- https://vomhkplympywspxymnstltsw.example.invalid/t/<token>/...\n- https://vomhkplympywspxymnstltsw.example.invalid/v1/webhook?token=<token> (migration-only, deprecated)\n\nDefaults:\n- Webhook shipment-create events require active sender/client binding, typed mapping, terminal inbox readback, and workflow/shipment lineage.\n- Webhook shipment updates should use typed events such as update.status, update.address, update.driver, update.action, or update.attachment; generic shipment.updated is compatibility-only and must resolve to one typed intent.\n- Webhook cancellation uses shipment.canceled; shipment.cancelled is compatibility spelling only during mapping. Cancellation and reschedule events must resolve to workflow-backed shipment actions before terminal success.\n- API Gateway shipment-create routes default to workflow-engine processing, provider dispatch, canonical shipment readback, and Console-visible request/workflow/shipment lineage.\n\nNote:\n- /v1/webhook is not the synchronous shipment command API. If MasarX exposes partner shipment writes, those use explicit shipment resources/actions while still normalizing into the same workflow engine.",
     "contact": {
@@ -783,10 +783,11 @@
           },
           "reason": {
             "type": "string",
-            "description": "Failure reason when status=failed."
+            "description": "Fixed renderer reason code when status=failed."
           },
-          "message": {
-            "type": "string"
+          "error_class": {
+            "type": "string",
+            "description": "Allowlisted renderer failure class."
           }
         },
         "additionalProperties": true
@@ -860,7 +861,12 @@
             ]
           },
           "error": {
-            "type": "string"
+            "type": "string",
+            "description": "The fixed renderer error code for classified bundle failures."
+          },
+          "error_class": {
+            "type": "string",
+            "description": "Allowlisted renderer failure class."
           },
           "organization_id": {
             "type": "string",

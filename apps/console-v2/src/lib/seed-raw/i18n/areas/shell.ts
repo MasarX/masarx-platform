@@ -53,7 +53,6 @@ export const en = {
       densityTitle: 'Density: {density} (click to cycle)',
       toggleLanguage: 'Toggle language',
       otherLocale: 'AR',
-      toggleTheme: 'Toggle theme',
       userMenu: 'User menu',
     },
     status: {
@@ -428,7 +427,6 @@ export const ar: CatalogShape<typeof en> = {
       densityTitle: 'الكثافة: {density} (انقر للتبديل)',
       toggleLanguage: 'تبديل اللغة',
       otherLocale: 'EN',
-      toggleTheme: 'تبديل المظهر',
       userMenu: 'قائمة المستخدم',
     },
     status: {
