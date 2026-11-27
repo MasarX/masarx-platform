@@ -16,7 +16,7 @@ const bases = {
   ar: () => import('./seed-raw/i18n/ar.js').then((module) => module.ar as Catalog),
 };
 const catalogs: Partial<Record<Locale, Catalog>> = {};
-const pending: Partial<Record<Locale, Promise<Catalog>>> = {};
+const catalogPromises: Partial<Record<Locale, Promise<Catalog>>> = {};
 
 /** Adds an area's keys to a catalog; a key defined twice is an error, so each string has one source. */
 function mergeArea(target: Catalog, area: Catalog, source: string, path = ''): void {
@@ -42,12 +42,21 @@ async function buildCatalog(locale: Locale): Promise<Catalog> {
   ]);
   const catalog = structuredClone(base);
   for (const [source, area] of translations) mergeArea(catalog, area, source);
-  catalogs[locale] = catalog;
   return catalog;
 }
 
 export function loadConsoleCatalog(locale: Locale): Promise<Catalog> {
-  return (pending[locale] ??= buildCatalog(locale));
+  const cached = catalogPromises[locale];
+  if (cached) return cached;
+
+  const promise = buildCatalog(locale).then((catalog) => {
+    catalogs[locale] = catalog;
+    // React can read the catalog synchronously even when it was preloaded outside render.
+    Object.assign(promise, { status: 'fulfilled', value: catalog });
+    return catalog;
+  });
+  catalogPromises[locale] = promise;
+  return promise;
 }
 
 export function getConsoleCatalog(locale: Locale): Catalog | undefined {

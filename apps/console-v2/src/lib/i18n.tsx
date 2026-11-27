@@ -4,7 +4,7 @@ import { createContext, startTransition, Suspense, use, useCallback, useContext,
 import { NextIntlClientProvider } from 'next-intl';
 import { useIdentity } from './identity';
 import { useResolveSettings } from './queries';
-import { englishT, getConsoleCatalog, loadConsoleCatalog, readConsoleLocale, translateCatalog, type Locale, type Translate } from './i18n-catalog';
+import { englishT, loadConsoleCatalog, readConsoleLocale, translateCatalog, type Locale, type Translate } from './i18n-catalog';
 
 export { englishT, fill, type Translate } from './i18n-catalog';
 
@@ -56,7 +56,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
 function ConsoleLocaleProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(readConsoleLocale);
-  const catalog = getConsoleCatalog(locale) ?? use(loadConsoleCatalog(locale));
+  const catalog = use(loadConsoleCatalog(locale));
   const dir = locale === 'ar' ? 'rtl' : 'ltr';
   const intlLocale = useMemo(() => resolveIntlLocale(locale), [locale]);
   const [tenantTimeZone, setTenantTimeZone] = useState<string | null>(null);

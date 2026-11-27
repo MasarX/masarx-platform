@@ -1,4 +1,5 @@
 // Area catalogs: every English key has an Arabic value with the same placeholders.
+import { act, renderHook, type RenderHookResult } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { englishT, getConsoleCatalog } from '../i18n-catalog';
 
@@ -73,6 +74,58 @@ describe('i18n area catalogs', () => {
     expect(loader.getConsoleCatalog('ar')).toBe(arabic);
     expect(loader.translateCatalog(arabic, 'shell.userMenu.access')).toBe('التحكم في الوصول');
     expect(loader.translateCatalog(arabic, 'modules.recipients.plain')).toBe('');
+  });
+
+  it('reads the cached catalog on rerender and keeps the current locale during a switch', async () => {
+    vi.resetModules();
+    let releaseArabic!: () => void;
+    const arabicReady = new Promise<void>((resolve) => { releaseArabic = resolve; });
+    vi.doMock('../seed-raw/i18n/ar.js', async () => {
+      await arabicReady;
+      return vi.importActual('../seed-raw/i18n/ar.js');
+    });
+    const loader = await import('../i18n-catalog');
+    const loadCatalog = vi.spyOn(loader, 'loadConsoleCatalog');
+    const { I18nProvider, useI18n } = await import('../i18n');
+    const consoleError = vi.spyOn(console, 'error');
+    localStorage.setItem('console-v2.locale', 'en');
+    try {
+      let view!: RenderHookResult<ReturnType<typeof useI18n>, undefined>;
+      await act(() => {
+        view = renderHook<ReturnType<typeof useI18n>, undefined>(useI18n, { wrapper: I18nProvider });
+      });
+      await act(async () => { await loader.loadConsoleCatalog('en'); });
+      expect(view.result.current.t('shell.userMenu.access')).toBe('Access control');
+      expect(loadCatalog).not.toHaveBeenCalledWith('ar');
+
+      loadCatalog.mockClear();
+      view.rerender();
+      expect(loadCatalog).toHaveBeenCalledWith('en');
+
+      await act(() => view.result.current.toggleLocale());
+      expect(loadCatalog).toHaveBeenCalledWith('ar');
+      expect(view.result.current.locale).toBe('en');
+      expect(view.result.current.t('shell.userMenu.access')).toBe('Access control');
+      expect(document.documentElement.dir).toBe('ltr');
+
+      await act(async () => {
+        releaseArabic();
+        await loader.loadConsoleCatalog('ar');
+      });
+      expect(view.result.current.locale).toBe('ar');
+      expect(view.result.current.t('shell.userMenu.access')).toBe(
+        loader.translateCatalog(loader.getConsoleCatalog('ar'), 'shell.userMenu.access')
+      );
+      expect(document.documentElement.dir).toBe('rtl');
+      expect(consoleError.mock.calls.flat().join('\n')).not.toMatch(
+        /change in the order of Hooks|Rendered (?:more|fewer) hooks|error during concurrent rendering/i
+      );
+    } finally {
+      vi.doUnmock('../seed-raw/i18n/ar.js');
+      consoleError.mockRestore();
+      loadCatalog.mockRestore();
+      localStorage.removeItem('console-v2.locale');
+    }
   });
 
   it('serves area keys through the English catalog lookup', () => {
