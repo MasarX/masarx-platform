@@ -62,6 +62,7 @@ import { useCapability, useIdentity } from '@/lib/identity';
 import { CAP } from '@/lib/capabilities';
 import { lookupRow } from '@/lib/api';
 import type { Scope, ScopeType, SettingsResolution } from '@/types/domain';
+import { fill, useI18n, type Translate } from '@/lib/i18n';
 
 type SettingsResolutionStep = SettingsResolution['ladder_path'][number];
 
@@ -233,15 +234,16 @@ function buildLadderResolution(
 // ---------- Status pill with mini rollout bar ----------
 
 function StatusPill({ flag }: { flag: FeatureFlag }) {
+  const { t } = useI18n();
   if (flag.kill_switch) {
     return (
       <span
         className="chip chip--danger chip--xs"
         data-testid={`ff-status-pill-${flag.id}`}
-        title="Kill switch engaged — flag forced OFF across all scopes"
+        title={t('platformFeatureFlags.statusPill.killSwitchEngagedFlag')}
       >
         <Icon name="warn" size={10} />
-        <span style={{ marginLeft: 4 }}>Killed</span>
+        <span style={{ marginLeft: 4 }}>{t('platformFeatureFlags.statusPill.killed')}</span>
       </span>
     );
   }
@@ -294,15 +296,17 @@ function StatusPill({ flag }: { flag: FeatureFlag }) {
 
 // ---------- Editor drawer body ----------
 
-const TABS = [
-  { key: 'profile', label: 'Profile' },
-  { key: 'targeting', label: 'Targeting' },
-  { key: 'rollout', label: 'Rollout' },
-  { key: 'history', label: 'History' },
-  { key: 'kill_switch', label: 'Kill switch' },
-] as const;
+function editorTabs(t: Translate) {
+  return [
+    { key: 'profile', label: t('platformFeatureFlags.editorDrawerBody.tabProfile') },
+    { key: 'targeting', label: t('platformFeatureFlags.editorDrawerBody.tabTargeting') },
+    { key: 'rollout', label: t('platformFeatureFlags.editorDrawerBody.tabRollout') },
+    { key: 'history', label: t('platformFeatureFlags.editorDrawerBody.tabHistory') },
+    { key: 'kill_switch', label: t('platformFeatureFlags.editorDrawerBody.tabKillSwitch') },
+  ] as const;
+}
 
-type TabKey = (typeof TABS)[number]['key'];
+type TabKey = ReturnType<typeof editorTabs>[number]['key'];
 
 interface EditorDrawerProps {
   flag: FeatureFlag;
@@ -311,6 +315,7 @@ interface EditorDrawerProps {
 }
 
 function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
+  const { t } = useI18n();
   const canWrite = useCapability(CAP.FEATURE_FLAGS_WRITE);
   const { scope } = useIdentity();
   const [tab, setTab] = useState<TabKey>('profile');
@@ -375,9 +380,9 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
   // the broadest enabled tier (lowest `scopeRankByType`). No inline ternary
   // ladder over hardcoded global/tenant/client/sender literals.
   const impactEstimate = useMemo(() => {
-    if (killEngaged) return { kind: 'danger' as ChipKind, label: 'kill engaged · 0 sessions' };
+    if (killEngaged) return { kind: 'danger' as ChipKind, label: t('platformFeatureFlags.editorDrawerBody.killEngaged0Sessions') };
     const enabled = scopes.filter((s) => s.enabled);
-    if (enabled.length === 0) return { kind: 'neutral' as ChipKind, label: '0 sessions affected' };
+    if (enabled.length === 0) return { kind: 'neutral' as ChipKind, label: t('platformFeatureFlags.editorDrawerBody.n0SessionsAffected') };
     // Pick the broadest enabled tier — lowest ladder_rank wins, mirroring the
     // canonical override-ladder semantics (the registry orders Global=0 first).
     const broadest = enabled
@@ -391,38 +396,38 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
       kind: (meta.impact_tone ?? 'neutral') as ChipKind,
       label: `~${rollout}% of ${meta.impact_label ?? `${broadest!.scope_type} sessions`}`,
     };
-  }, [killEngaged, rollout, scopes, scopeRankByType]);
+  }, [killEngaged, rollout, scopes, scopeRankByType, t]);
 
   const profileRows: KvRow[] = useMemo(
     () => [
-      { key: 'key', label: 'Key', value: flag.key, mono: true },
-      { key: 'label', label: 'Label', value: flag.label },
-      { key: 'description', label: 'Description', value: flag.description ?? '' },
+      { key: 'key', label: t('platformFeatureFlags.editorDrawerBody.key'), value: flag.key, mono: true },
+      { key: 'label', label: t('platformFeatureFlags.editorDrawerBody.label'), value: flag.label },
+      { key: 'description', label: t('platformFeatureFlags.editorDrawerBody.description'), value: flag.description ?? '' },
       {
         key: 'status',
-        label: 'Status',
+        label: t('platformFeatureFlags.editorDrawerBody.status'),
         value: flag.status,
         lookup: 'feature_flag_status',
       },
       {
         key: 'scope_type',
-        label: 'Scope',
+        label: t('platformFeatureFlags.editorDrawerBody.scope'),
         value: flag.scope_type,
         lookup: 'feature_flag_scope',
       },
-      { key: 'scope_id', label: 'Scope ID', value: flag.scope_id, mono: true },
+      { key: 'scope_id', label: t('platformFeatureFlags.editorDrawerBody.scopeId'), value: flag.scope_id, mono: true },
       {
         key: 'kill_switch',
-        label: 'Kill switch',
+        label: t('platformFeatureFlags.editorDrawerBody.killSwitch'),
         value: flag.kill_switch ? 'engaged' : 'off',
       },
       {
         key: 'last_updated_at',
-        label: 'Updated',
+        label: t('platformFeatureFlags.editorDrawerBody.updated'),
         value: flag.last_updated_at ?? '',
       },
     ],
-    [flag],
+    [flag, t],
   );
 
   // Persist routes to the canonical RPC for each editor action. The label
@@ -479,15 +484,15 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
 
       {/* Tab strip */}
       <div className="dt-toolbar" data-testid="ff-editor-tabs">
-        {TABS.map((t) => (
+        {editorTabs(t).map((entry) => (
           <button
-            key={t.key}
+            key={entry.key}
             type="button"
-            className={`dt-tb-view-tab ${tab === t.key ? 'is-active' : ''}`}
-            onClick={() => setTab(t.key)}
-            data-testid={`ff-tab-${t.key}`}
+            className={`dt-tb-view-tab ${tab === entry.key ? 'is-active' : ''}`}
+            onClick={() => setTab(entry.key)}
+            data-testid={`ff-tab-${entry.key}`}
           >
-            {t.label}
+            {entry.label}
           </button>
         ))}
       </div>
@@ -501,14 +506,12 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
       {tab === 'targeting' ? (
         <div data-testid="ff-tab-targeting-pane">
           <p className="state__hint" style={{ marginTop: 0 }}>
-            Per-scope overrides · LaunchDarkly Targeting / Unleash Strategy parity. The ladder
-            below resolves the winning scope; toggle a scope to override it for that ladder
-            level. Lower scopes (Sender) override higher scopes (Global).
+            {t('platformFeatureFlags.editorDrawerBody.perScopeOverridesLaunchdarkly')}
           </p>
           <LadderViz resolution={ladderResolution} />
 
           <div className="section-eyebrow" style={{ marginTop: 14 }}>
-            Per-scope toggles
+            {t('platformFeatureFlags.editorDrawerBody.perScopeToggles')}
           </div>
           <div style={{ display: 'grid', gap: 8 }} data-testid="ff-targeting-scopes">
             {/* W34c — targeting order derives from canonical
@@ -569,7 +572,7 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
                         });
                       }}
                     />
-                    Enabled
+                    {t('platformFeatureFlags.editorDrawerBody.enabled')}
                   </label>
                   <input
                     type="range"
@@ -578,7 +581,7 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
                     step={5}
                     value={pct}
                     disabled={!canWrite || !enabled}
-                    aria-label={`${scopeLabelByType[scopeType] ?? scopeType} rollout percentage`}
+                    aria-label={fill(t('platformFeatureFlags.editorDrawerBody.rolloutPercentage'), { value: String(scopeLabelByType[scopeType] ?? scopeType) })}
                     data-testid={`ff-targeting-slider-${scopeType}`}
                     onChange={(e) => {
                       const next = Number(e.target.value);
@@ -607,9 +610,9 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-            <Button label="Cancel" kind="ghost" onClick={onClose} />
+            <Button label={t('platformFeatureFlags.editorDrawerBody.cancel')} kind="ghost" onClick={onClose} />
             <Button
-              label="Save targeting"
+              label={t('platformFeatureFlags.editorDrawerBody.saveTargeting')}
               iconName="check"
               kind="primary"
               capability={CAP.FEATURE_FLAGS_WRITE}
@@ -622,9 +625,7 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
       {tab === 'rollout' ? (
         <div data-testid="ff-tab-rollout-pane">
           <p className="state__hint" style={{ marginTop: 0 }}>
-            Global rollout percentage applied at the flag level (LaunchDarkly Percentage
-            Rollout / Unleash Gradual Rollout parity). Per-scope overrides on the Targeting
-            tab take precedence over this global setting.
+            {t('platformFeatureFlags.editorDrawerBody.globalRolloutPercentageApplied')}
           </p>
           <div
             className="card"
@@ -657,7 +658,7 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
               step={1}
               value={rollout}
               disabled={!canWrite || killEngaged}
-              aria-label="Global rollout percentage"
+              aria-label={t('platformFeatureFlags.editorDrawerBody.globalRolloutPercentage')}
               data-testid="ff-rollout-slider"
               onChange={(e) => setRollout(Number(e.target.value))}
               style={{ width: '100%' }}
@@ -680,9 +681,9 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-            <Button label="Cancel" kind="ghost" onClick={onClose} />
+            <Button label={t('platformFeatureFlags.editorDrawerBody.cancel')} kind="ghost" onClick={onClose} />
             <Button
-              label="Apply rollout"
+              label={t('platformFeatureFlags.editorDrawerBody.applyRollout')}
               iconName="check"
               kind="primary"
               capability={CAP.FEATURE_FLAGS_WRITE}
@@ -695,15 +696,14 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
       {tab === 'history' ? (
         <div data-testid="ff-tab-history-pane">
           <p className="state__hint" style={{ marginTop: 0 }}>
-            Flag mutation history (synthesized from `last_updated_at` + actor on the
-            canonical `feature_flags` row). Full audit lives in <code>/insights/decisions</code>.
+            {t('platformFeatureFlags.editorDrawerBody.flagMutationHistory')} <code>{t('platformFeatureFlags.editorDrawerBody.insightsDecisions')}</code>.
           </p>
           <div className="card" style={{ padding: 0 }}>
             <div
               className="dt-toolbar"
               style={{ borderBottom: '1px solid var(--line)', padding: '8px 10px' }}
             >
-              <span className="eyebrow">Recent activity</span>
+              <span className="eyebrow">{t('platformFeatureFlags.editorDrawerBody.recentActivity')}</span>
               <span className="dt-tb-spacer" />
               <a
                 href={`/insights/decisions?resource_id=${encodeURIComponent(flag.id)}`}
@@ -711,7 +711,7 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
                 style={{ textDecoration: 'none' }}
                 data-testid="ff-history-decisions-link"
               >
-                Open in decision log
+                {t('platformFeatureFlags.editorDrawerBody.openInDecisionLog')}
               </a>
             </div>
             <div style={{ padding: 10, display: 'grid', gap: 8 }}>
@@ -727,7 +727,7 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
                   {flag.last_updated_at?.slice(0, 16).replace('T', ' ') ?? '—'}
                 </span>
                 <span style={{ fontSize: 12 }}>
-                  Status changed → <strong className="mono">{flag.status}</strong>
+                  {t('platformFeatureFlags.editorDrawerBody.statusChanged')} <strong className="mono">{flag.status}</strong>
                 </span>
                 <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
                   {flag.last_updated_by_user_id ?? '—'}
@@ -746,7 +746,7 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
                     {flag.last_updated_at?.slice(0, 16).replace('T', ' ') ?? '—'}
                   </span>
                   <span style={{ fontSize: 12, color: 'var(--ink-1)' }}>
-                    Kill switch engaged
+                    {t('platformFeatureFlags.editorDrawerBody.killSwitchEngaged')}
                   </span>
                   <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
                     {flag.last_updated_by_user_id ?? '—'}
@@ -762,10 +762,10 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
                 }}
               >
                 <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-                  created
+                  {t('platformFeatureFlags.editorDrawerBody.created')}
                 </span>
                 <span style={{ fontSize: 12 }}>
-                  Flag created · default rollout {flag.rollout_percentage}%
+                  {fill(t('platformFeatureFlags.editorDrawerBody.flagCreatedDefaultRollout'), { rollout_percentage: String(flag.rollout_percentage) })}
                 </span>
                 <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
                   {flag.last_updated_by_user_id ?? '—'}
@@ -779,9 +779,7 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
       {tab === 'kill_switch' ? (
         <div data-testid="ff-tab-kill_switch-pane">
           <p className="state__hint" style={{ marginTop: 0 }}>
-            Engaging the kill switch immediately disables the flag across all scopes,
-            overriding any per-scope override or percentage rollout. Use this to force-stop
-            a feature when an incident requires immediate rollback.
+            {t('platformFeatureFlags.editorDrawerBody.engagingTheKillSwitch')}
           </p>
           <div
             className="card"
@@ -797,18 +795,18 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Dot kind={killEngaged ? 'danger' : 'good'} />
               <span style={{ fontSize: 14, fontWeight: 600 }}>
-                {killEngaged ? 'Kill switch engaged' : 'Kill switch off'}
+                {killEngaged ? t('platformFeatureFlags.editorDrawerBody.killSwitchEngaged') : t('platformFeatureFlags.editorDrawerBody.killSwitchOff')}
               </span>
             </div>
             <p className="state__hint" style={{ margin: 0 }}>
               {killEngaged
-                ? 'This flag is currently force-disabled. All targeting and rollout settings are ignored. Release the kill switch to resume normal evaluation.'
-                : 'Engage the kill switch to immediately force-disable this flag across every scope. Logged to the decision log with the operator identity + reason.'}
+                ? t('platformFeatureFlags.editorDrawerBody.thisFlagIsCurrently')
+                : t('platformFeatureFlags.editorDrawerBody.engageTheKillSwitch')}
             </p>
             <div style={{ display: 'flex', gap: 8 }}>
               {killEngaged ? (
                 <Button
-                  label="Release kill switch"
+                  label={t('platformFeatureFlags.editorDrawerBody.releaseKillSwitch')}
                   iconName="refresh"
                   kind="primary"
                   capability={CAP.FEATURE_FLAGS_WRITE}
@@ -828,7 +826,7 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
                 />
               ) : (
                 <Button
-                  label="Engage kill switch"
+                  label={t('platformFeatureFlags.editorDrawerBody.engageKillSwitch')}
                   iconName="warn"
                   kind="danger"
                   capability={CAP.FEATURE_FLAGS_WRITE}
@@ -858,6 +856,7 @@ function EditorDrawerBody({ flag, onClose, completePct }: EditorDrawerProps) {
 // ---------- New flag form ----------
 
 function NewFlagForm({ onClose }: { onClose: () => void }) {
+  const { t } = useI18n();
   const [key, setKey] = useState('');
   const [label, setLabel] = useState('');
   const [description, setDescription] = useState('');
@@ -885,34 +884,34 @@ function NewFlagForm({ onClose }: { onClose: () => void }) {
   return (
     <div data-testid="ff-new-form">
       <p className="state__hint" style={{ marginTop: 0 }}>
-        Creates a new flag in the canonical <code>feature_flags</code> table at the global
-        scope, status OFF by default. Targeting + rollout can be edited from the flag drawer.
+        {t('platformFeatureFlags.newFlagForm.createsANewFlag')} <code>{t('platformFeatureFlags.newFlagForm.featureFlags')}</code>{' '}
+        {t('platformFeatureFlags.newFlagForm.tableAtTheGlobalScope')}
       </p>
       <div className="field">
-        <label className="field__label">Flag key</label>
+        <label className="field__label">{t('platformFeatureFlags.newFlagForm.flagKey')}</label>
         <input
           type="text"
-          placeholder="checkout_skip_signature"
+          placeholder={t('platformFeatureFlags.newFlagForm.checkoutSkipSignature')}
           value={key}
           data-testid="ff-new-key"
           onChange={(e) => setKey(e.target.value)}
         />
       </div>
       <div className="field">
-        <label className="field__label">Label</label>
+        <label className="field__label">{t('platformFeatureFlags.newFlagForm.label')}</label>
         <input
           type="text"
-          placeholder="Checkout · skip signature"
+          placeholder={t('platformFeatureFlags.newFlagForm.checkoutSkipSignature2')}
           value={label}
           data-testid="ff-new-label"
           onChange={(e) => setLabel(e.target.value)}
         />
       </div>
       <div className="field">
-        <label className="field__label">Description</label>
+        <label className="field__label">{t('platformFeatureFlags.newFlagForm.description')}</label>
         <textarea
           rows={3}
-          placeholder="What does this flag toggle? Link to the design doc when applicable."
+          placeholder={t('platformFeatureFlags.newFlagForm.whatDoesThisFlag')}
           value={description}
           data-testid="ff-new-description"
           onChange={(e) => setDescription(e.target.value)}
@@ -920,22 +919,22 @@ function NewFlagForm({ onClose }: { onClose: () => void }) {
         />
       </div>
       <div className="field">
-        <label className="field__label">Initial status</label>
+        <label className="field__label">{t('platformFeatureFlags.newFlagForm.initialStatus')}</label>
         <select
           className="field"
           value={status}
           data-testid="ff-new-status"
           onChange={(e) => setStatus(e.target.value as FeatureFlag['status'])}
         >
-          <option value="off">Off</option>
-          <option value="on">On</option>
-          <option value="percentage">Percentage rollout</option>
+          <option value="off">{t('platformFeatureFlags.newFlagForm.off')}</option>
+          <option value="on">{t('platformFeatureFlags.newFlagForm.on')}</option>
+          <option value="percentage">{t('platformFeatureFlags.newFlagForm.percentageRollout')}</option>
         </select>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-        <Button label="Cancel" kind="ghost" onClick={onClose} />
+        <Button label={t('platformFeatureFlags.newFlagForm.cancel')} kind="ghost" onClick={onClose} />
         <Button
-          label="Create flag"
+          label={t('platformFeatureFlags.newFlagForm.createFlag')}
           iconName="plus"
           kind="primary"
           capability={CAP.FEATURE_FLAGS_WRITE}
@@ -955,6 +954,7 @@ function BulkToggleConfirm({
   flags: FeatureFlag[];
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const [target, setTarget] = useState<'on' | 'off'>('off');
   // CLAIM-PLATFORM-FF / Phase C6 — canonical bulk-toggle RPC. The B1 RPC
   // accepts an array of flag ids + target enabled state and returns a
@@ -981,34 +981,33 @@ function BulkToggleConfirm({
   return (
     <div data-testid="ff-bulk-form">
       <p className="state__hint" style={{ marginTop: 0 }}>
-        Bulk-toggles the selected flags. Kill-switched flags are skipped (release the kill
-        switch first). All mutations land in the decision log.
+        {t('platformFeatureFlags.bulkToggleConfirm.bulkTogglesTheSelected')}
       </p>
       <div className="field">
-        <label className="field__label">Target status</label>
+        <label className="field__label">{t('platformFeatureFlags.bulkToggleConfirm.targetStatus')}</label>
         <select
           className="field"
           value={target}
           data-testid="ff-bulk-target"
           onChange={(e) => setTarget(e.target.value as 'on' | 'off')}
         >
-          <option value="off">Off</option>
-          <option value="on">On</option>
+          <option value="off">{t('platformFeatureFlags.bulkToggleConfirm.off')}</option>
+          <option value="on">{t('platformFeatureFlags.bulkToggleConfirm.on')}</option>
         </select>
       </div>
       <div style={{ marginTop: 8 }}>
-        <div className="eyebrow" style={{ fontSize: 10.5 }}>{`Targets · ${flags.length}`}</div>
+        <div className="eyebrow" style={{ fontSize: 10.5 }}>{fill(t('platformFeatureFlags.bulkToggleConfirm.targets'), { length: String(flags.length) })}</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
           {flags.slice(0, 24).map((f) => (
             <Chip key={f.id} label={f.key} size="xs" />
           ))}
-          {flags.length > 24 ? <Chip label={`+${flags.length - 24} more`} size="xs" /> : null}
+          {flags.length > 24 ? <Chip label={fill(t('platformFeatureFlags.bulkToggleConfirm.more'), { value: String(flags.length - 24) })} size="xs" /> : null}
         </div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-        <Button label="Cancel" kind="ghost" onClick={onClose} />
+        <Button label={t('platformFeatureFlags.bulkToggleConfirm.cancel')} kind="ghost" onClick={onClose} />
         <Button
-          label={`Toggle ${flags.length} flags`}
+          label={fill(t('platformFeatureFlags.bulkToggleConfirm.toggleFlags'), { length: String(flags.length) })}
           iconName="check"
           kind="primary"
           capability={CAP.FEATURE_FLAGS_WRITE}
@@ -1022,6 +1021,7 @@ function BulkToggleConfirm({
 // ---------- Page module ----------
 
 export function FeatureFlagsModule() {
+  const { t } = useI18n();
   const canRead = useCapability(CAP.FEATURE_FLAGS_READ);
   // W11-3 — read seam pinned to `feature_flag_summary`, the paired projection
   // view (public.v_feature_flag_summary, supabase/migrations/202604300100).
@@ -1082,18 +1082,18 @@ export function FeatureFlagsModule() {
 
   const openNewFlag = () => {
     modal.open({
-      title: 'New feature flag',
+      title: t('platformFeatureFlags.featureFlagsModule.newFeatureFlag'),
       body: <NewFlagForm onClose={() => modal.close()} />,
     });
   };
 
   const openBulkToggle = (rows: FeatureFlag[]) => {
     if (rows.length === 0) {
-      pushToast('Select at least one flag to bulk-toggle', 'warn');
+      pushToast(t('platformFeatureFlags.featureFlagsModule.selectAtLeastOne'), 'warn');
       return;
     }
     modal.open({
-      title: `Bulk toggle ${rows.length} flag${rows.length === 1 ? '' : 's'}`,
+      title: fill(t(rows.length === 1 ? 'platformFeatureFlags.featureFlagsModule.bulkToggleFlagOne' : 'platformFeatureFlags.featureFlagsModule.bulkToggleFlagOther'), { length: String(rows.length) }),
       body: <BulkToggleConfirm flags={rows} onClose={() => modal.close()} />,
     });
   };
@@ -1101,15 +1101,15 @@ export function FeatureFlagsModule() {
   const COLUMNS: DataTableColumn<FeatureFlag>[] = [
     {
       key: 'key',
-      label: 'Flag key',
+      label: t('platformFeatureFlags.featureFlagsModule.flagKey'),
       mono: true,
       sortable: true,
       filterable: true,
     },
-    { key: 'label', label: 'Label', sortable: true, filterable: true },
+    { key: 'label', label: t('platformFeatureFlags.featureFlagsModule.label'), sortable: true, filterable: true },
     {
       key: 'status',
-      label: 'Status',
+      label: t('platformFeatureFlags.featureFlagsModule.status'),
       sortable: true,
       filterable: true,
       lookup: 'feature_flag_status',
@@ -1117,7 +1117,7 @@ export function FeatureFlagsModule() {
     },
     {
       key: 'targeting',
-      label: 'Targeting',
+      label: t('platformFeatureFlags.featureFlagsModule.targeting'),
       filterable: false,
       render: (_raw, row) => (
         <Chip
@@ -1132,7 +1132,7 @@ export function FeatureFlagsModule() {
     },
     {
       key: 'owners',
-      label: 'Owners',
+      label: t('platformFeatureFlags.featureFlagsModule.owners'),
       render: (_raw, row) => {
         const owners = row.owners ?? [];
         if (owners.length === 0)
@@ -1151,16 +1151,16 @@ export function FeatureFlagsModule() {
         );
       },
     },
-    { key: 'last_updated_at', label: 'Updated', format: 'datetime', sortable: true },
+    { key: 'last_updated_at', label: t('platformFeatureFlags.featureFlagsModule.updated'), format: 'datetime', sortable: true },
     {
       key: 'kill_switch',
-      label: 'Kill',
+      label: t('platformFeatureFlags.featureFlagsModule.kill'),
       align: 'center',
       render: (raw) =>
         raw ? (
           <span
             className="chip chip--danger chip--xs"
-            title="Kill switch engaged"
+            title={t('platformFeatureFlags.featureFlagsModule.killSwitchEngaged')}
             data-testid="ff-kill-icon"
             style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}
           >
@@ -1176,7 +1176,7 @@ export function FeatureFlagsModule() {
 
   const ROW_ACTIONS: DataTableAction<FeatureFlag>[] = [
     {
-      label: 'Edit',
+      label: t('platformFeatureFlags.featureFlagsModule.edit'),
       icon: 'edit',
       kind: 'primary',
       capability: CAP.FEATURE_FLAGS_WRITE,
@@ -1186,7 +1186,7 @@ export function FeatureFlagsModule() {
 
   const BULK_ACTIONS: DataTableBulkAction<FeatureFlag>[] = [
     {
-      label: 'Bulk toggle',
+      label: t('platformFeatureFlags.featureFlagsModule.bulkToggle'),
       icon: 'refresh',
       kind: 'primary',
       capability: CAP.FEATURE_FLAGS_WRITE,
@@ -1199,16 +1199,16 @@ export function FeatureFlagsModule() {
       <div className="page">
         <PageHeader
           moduleKey="feature-flags"
-          eyebrow="Platform"
-          titleAccent="Feature flags"
-          titlePlain="— rollout & kill switches"
+          eyebrow={t('platformFeatureFlags.featureFlagsModule.platform')}
+          titleAccent={t('platformFeatureFlags.featureFlagsModule.titleAccent')}
+          titlePlain={t('platformFeatureFlags.featureFlagsModule.titlePlain')}
           pills={
             [
               <span key="reg" className="chip chip--xs mono">
-                Feature flag access · feature flag update
+                {t('platformFeatureFlags.featureFlagsModule.featureFlagAccessFeature')}
               </span>,
               <span key="parity" className="chip chip--xs">
-                LaunchDarkly · Unleash · GrowthBook parity
+                {t('platformFeatureFlags.featureFlagsModule.launchdarklyUnleashGrowthbookParity')}
               </span>,
             ] as ReactNode[]
           }
@@ -1216,7 +1216,7 @@ export function FeatureFlagsModule() {
         <StateView
           kind="denied"
           capability={CAP.FEATURE_FLAGS_READ}
-          hint="You do not have permission to view feature flags."
+          hint={t('platformFeatureFlags.featureFlagsModule.youDoNotHave')}
         />
       </div>
     );
@@ -1227,14 +1227,14 @@ export function FeatureFlagsModule() {
       <div className="page">
         <PageHeader
           moduleKey="feature-flags"
-          eyebrow="Platform"
-          titleAccent="Feature flags"
-          titlePlain="— rollout & kill switches"
+          eyebrow={t('platformFeatureFlags.featureFlagsModule.platform')}
+          titleAccent={t('platformFeatureFlags.featureFlagsModule.titleAccent')}
+          titlePlain={t('platformFeatureFlags.featureFlagsModule.titlePlain')}
         />
         <StateView
           kind="error"
-          title="Canonical feature_flags_thresholds not seeded"
-          hint="The feature_flags_thresholds.complete_pct setting is missing from the canonical ladder. Run migrations to seed it; this surface fails closed rather than masking the gap with a fallback."
+          title={t('platformFeatureFlags.featureFlagsModule.canonicalFeatureFlagsThresholds')}
+          hint={t('platformFeatureFlags.featureFlagsModule.theFeatureFlagsThresholds')}
         />
       </div>
     );
@@ -1244,23 +1244,23 @@ export function FeatureFlagsModule() {
     <div className="page">
       <PageHeader
         moduleKey="feature-flags"
-        eyebrow="Platform"
-        titleAccent="Feature flags"
-        titlePlain="— rollout & kill switches"
+        eyebrow={t('platformFeatureFlags.featureFlagsModule.platform')}
+        titleAccent={t('platformFeatureFlags.featureFlagsModule.titleAccent')}
+        titlePlain={t('platformFeatureFlags.featureFlagsModule.titlePlain')}
         pills={
           [
             <span key="reg" className="chip chip--xs mono">
-              Feature flag access · feature flag update
+              {t('platformFeatureFlags.featureFlagsModule.featureFlagAccessFeature')}
             </span>,
             <span key="parity" className="chip chip--xs">
-              LaunchDarkly · Unleash · GrowthBook parity
+              {t('platformFeatureFlags.featureFlagsModule.launchdarklyUnleashGrowthbookParity')}
             </span>,
           ] as ReactNode[]
         }
         actions={[
           <Button
             key="bulk"
-            label="Bulk toggle"
+            label={t('platformFeatureFlags.featureFlagsModule.bulkToggle')}
             iconName="refresh"
             kind="ghost"
             capability={CAP.FEATURE_FLAGS_WRITE}
@@ -1268,7 +1268,7 @@ export function FeatureFlagsModule() {
           />,
           <Button
             key="new"
-            label="New flag"
+            label={t('platformFeatureFlags.featureFlagsModule.newFlag')}
             iconName="plus"
             kind="primary"
             capability={CAP.FEATURE_FLAGS_WRITE}
@@ -1288,11 +1288,11 @@ export function FeatureFlagsModule() {
           padding: '8px 0 12px',
         }}
       >
-        <KPICard label="Total flags" value={kpis.total} tone="neutral" />
-        <KPICard label="On" value={kpis.on} tone="good" />
-        <KPICard label="Off" value={kpis.off} tone="neutral" />
-        <KPICard label="Rollout" value={kpis.pct} tone="info" />
-        <KPICard label="Kill-switched" value={kpis.killed} tone={kpis.killed ? 'danger' : 'neutral'} />
+        <KPICard label={t('platformFeatureFlags.featureFlagsModule.totalFlags')} value={kpis.total} tone="neutral" />
+        <KPICard label={t('platformFeatureFlags.featureFlagsModule.on')} value={kpis.on} tone="good" />
+        <KPICard label={t('platformFeatureFlags.featureFlagsModule.off')} value={kpis.off} tone="neutral" />
+        <KPICard label={t('platformFeatureFlags.featureFlagsModule.rollout')} value={kpis.pct} tone="info" />
+        <KPICard label={t('platformFeatureFlags.featureFlagsModule.killSwitched')} value={kpis.killed} tone={kpis.killed ? 'danger' : 'neutral'} />
       </div>
 
       {flagsQuery.isLoading ? (
