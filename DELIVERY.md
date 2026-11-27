@@ -2,7 +2,7 @@
 
 The Delivery Lead owns this file.
 
-Follows engineering standard v1.29.3.
+Follows engineering standard v1.29.9.
 
 ## Branching and merging
 
@@ -22,21 +22,21 @@ Follows engineering standard v1.29.3.
 
 ## Checks
 
-| Workflow | Work | Job limits (minutes) |
-| --- | --- | --- |
-| [CI](.github/workflows/public-ci.yml) | PR static checks and affected database, lint, typecheck, Jest, UI, build and browser jobs. The UI job includes [signed-in captures](DESIGN.md#review-and-sweeps) on pull request runs selected for UI inputs and omits that step on `merge_group`. The browser job runs the Landing E2E suite and the Console V2 seed-mode axe suite and uploads its Playwright JSON report as the axe evidence. The Console and Portal build jobs run their [speed specs](DESIGN.md#speed) on production builds. The base version of [changes.cjs](scripts/ci-hosted/changes.cjs) owns the shared inputs and fallback. [selfcheck.cjs](scripts/ci-hosted/selfcheck.cjs) checks its routing. Prove affected-job selection when changing it by hiding a representative change from the selector once and confirming CI reports the missed coverage. The merge group runs the full hosted suite on the combined tree. Dependency review is PR-only. Manual dispatch can regenerate visual baselines. `ci-gate` aggregates the job results. | Database build and pgTAP 20 each, database result and append-only 5 each, lint/typecheck/unit/UI 20 each, Console and Portal/Landing builds 35 each, Landing E2E and Console V2 axe 30, visual baselines 60, dependency review and gate 5 each. |
-| [CodeQL](.github/workflows/codeql.yml) | Scans JavaScript/TypeScript and Actions on PRs into `main` and on pushes to `main`. The Monday schedule also prunes Actions caches. | Analysis 20. Cache pruning has a 5-minute step limit. |
-| [Warm CI npm cache](.github/workflows/warm-ci-npm-cache.yml) | Saves the npm download cache on `main` on relevant pushes, daily, or on manual dispatch. CI jobs restore it from the default branch. | 5. |
-| [Console V2 Auth qualification](.github/workflows/console-v2-auth-qualification.yml) | One manual job binds the #629 source and starts local production-mode builds for the [Auth qualification](https://github.com/MasarX/masarx-platform/issues/684). | 35. |
-| [Verify prebuilt](.github/workflows/verify-prebuilt.yml) | Checks the Console and Portal prebuilt packaging contract on matching PR paths. | 15. |
-| [Deploy DEV](.github/workflows/deploy.yml) | `deploy` applies the database and deploys registered Edge Functions, Console, Portal, Landing and ingress. Manual `dry-run` checks the database apply and `api-schemas` reports API schema diagnostics. The report-only `e2e-report` job checks anonymous Console and Portal flows after both apps deploy when their previews allow access. | API schemas 10, database 180, label render probe 30, dry run 90, Console and Portal 35 each, Landing 20, ingress 15, summary 5. |
-| [Disable Console V2 DEV provider subdomain](.github/workflows/disable-console-v2-dev-subdomain.yml) | Manual dispatch from `main` only. Disables the Console V2 DEV Worker provider subdomain and preview URLs and verifies both settings in the run summary. Remove this workflow once the Console V2 DEV deploy ([#616](https://github.com/MasarX/masarx-platform/pull/616)) owns the setting. | 5. |
-| [DEV outbound probe](.github/workflows/dev-outbound-probe.yml) | Measures synthetic outbound dispatch and counts failures by fixed reason. | 12, including up to 10 minutes for queued work. |
-| [DEV design sweep users](.github/workflows/dev-sweep-users.yml) | Refreshes the synthetic sign-in accounts and delivers the encrypted credential artifact described under [Signed-in DEV sweep](#signed-in-dev-sweep). | 5. |
-| [Guarded egress probe](.github/workflows/guarded-egress-probe.yml) | Manual DEV and staging diagnostic that currently reports `not_configured`. | 5. |
-| [Release on tag](.github/workflows/release-on-tag.yml) | Verifies the tagged commit and builds, attests and publishes the static Landing archive. | Verify 10, build and publish 20. |
+| Workflow | Work |
+| --- | --- |
+| [CI](.github/workflows/public-ci.yml) | PR static checks and affected database, lint, typecheck, Jest, UI, build and browser jobs. The UI job includes [signed-in captures](DESIGN.md#review-and-sweeps) on pull request runs selected for UI inputs and omits that step on `merge_group`. The browser job runs the Landing E2E suite and the Console V2 seed-mode axe suite and uploads its Playwright JSON report as the axe evidence. The Console and Portal build jobs run their [speed specs](DESIGN.md#speed) on production builds. The base version of [changes.cjs](scripts/ci-hosted/changes.cjs) owns the shared inputs and fallback. [selfcheck.cjs](scripts/ci-hosted/selfcheck.cjs) checks its routing. Prove affected-job selection when changing it by hiding a representative change from the selector once and confirming CI reports the missed coverage. The merge group runs the full hosted suite on the combined tree. Dependency review is PR-only. Manual dispatch can regenerate visual baselines. `ci-gate` aggregates the job results. |
+| [CodeQL](.github/workflows/codeql.yml) | Scans JavaScript/TypeScript and Actions on PRs into `main` and on pushes to `main`. The Monday schedule also prunes Actions caches. |
+| [Warm CI npm cache](.github/workflows/warm-ci-npm-cache.yml) | Saves the npm download cache on `main` on relevant pushes, daily, or on manual dispatch. CI jobs restore it from the default branch. |
+| [Console V2 Auth qualification](.github/workflows/console-v2-auth-qualification.yml) | One manual job binds the #629 source and starts local production-mode builds for the [Auth qualification](https://github.com/MasarX/masarx-platform/issues/684). |
+| [Verify prebuilt](.github/workflows/verify-prebuilt.yml) | Checks the Console and Portal prebuilt packaging contract on matching PR paths. |
+| [Deploy DEV](.github/workflows/deploy.yml) | `deploy` applies the database and deploys registered Edge Functions, Console, Portal, Landing and ingress. Manual `dry-run` checks the database apply and `api-schemas` reports API schema diagnostics. The report-only `e2e-report` job checks anonymous Console and Portal flows after both apps deploy when their previews allow access. |
+| [Disable Console V2 DEV provider subdomain](.github/workflows/disable-console-v2-dev-subdomain.yml) | Manual dispatch from `main` only. Disables the Console V2 DEV Worker provider subdomain and preview URLs and verifies both settings in the run summary. Remove this workflow once the Console V2 DEV deploy ([#616](https://github.com/MasarX/masarx-platform/pull/616)) owns the setting. |
+| [DEV outbound probe](.github/workflows/dev-outbound-probe.yml) | Measures synthetic outbound dispatch and counts failures by fixed reason. |
+| [DEV design sweep users](.github/workflows/dev-sweep-users.yml) | Refreshes the synthetic sign-in accounts and delivers the encrypted credential artifact described under [Signed-in DEV sweep](#signed-in-dev-sweep). |
+| [Guarded egress probe](.github/workflows/guarded-egress-probe.yml) | Manual DEV and staging diagnostic that currently reports `not_configured`. |
+| [Release on tag](.github/workflows/release-on-tag.yml) | Verifies the tagged commit and builds, attests and publishes the static Landing archive. |
 
-- Set job and step limits from measured run and job timings, plus a margin.
+- Use the [job timing samples](.github/ci-timings.json) for measured CI and DEV deploy jobs. Set job and step limits in the workflow files from measured timings, plus a margin.
 - The Console build job also builds Console V2 in live mode and enforces its [bundle budgets](apps/console-v2/scripts/check-bundle-size.mjs).
 - Root Markdown changes select Unit Jest, which runs the public-source boundary test.
 - Manual branch CI uses the merge base of the dispatched commit and the protected default branch for Lint. Pull requests and merge groups use the base supplied by their event.
