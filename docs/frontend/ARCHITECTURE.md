@@ -141,6 +141,8 @@ Uses `next-intl` with bilingual support (English and Arabic).
 
 All values have sensible defaults and can be overridden per-deployment via environment variables.
 
+The decision log, settings resolution log and webhook inbox count visible rows up to the configured maximum page size plus one. When the count exceeds the maximum, the API returns that lower bound marked as approximate. The count uses the same tenant scope and filters as the list.
+
 ## Fleet delivery KPIs
 
 The driver directory and profile summary use completed shipments and route assignments for delivery counts. Today starts at UTC midnight, and this week starts at Monday midnight UTC. The weekly on-time ratio uses deliveries with a planned stop end. A delivery metric is unavailable when its source has no visible evidence. Customer rating is unavailable until the executor can read scoped shipment feedback.

@@ -122,6 +122,14 @@ async function reloadHostedCloneLogging(admin, command, level) {
   throw new Error(`Postgres clone logging did not reach ${level}`);
 }
 
+// A backend can exit on its own between the scan and its signal, so count what is left instead of trusting each signal.
+const releasePostgres = "DO $$BEGIN PERFORM pg_terminate_backend(pid, 5000) FROM pg_stat_activity WHERE datname = 'postgres'; END$$";
+const postgresConnections = "SELECT count(*) FROM pg_stat_activity WHERE datname = 'postgres'";
+
+async function releasePostgresConnections(admin, message) {
+  if ((await admin(releasePostgres, postgresConnections)).trim() !== '0') throw new Error(message);
+}
+
 async function cloneHostedDatabases(admin, databases, created, restore = admin, strategy = 'WAL_LOG') {
   if (!databases.length) return;
   const { owner, limit, explicitAcl } = JSON.parse(await admin(`SELECT json_build_object(
@@ -129,8 +137,7 @@ async function cloneHostedDatabases(admin, databases, created, restore = admin, 
     FROM pg_database WHERE datname = 'postgres'`));
   try {
     await admin('ALTER DATABASE postgres ALLOW_CONNECTIONS false');
-    const live = (await admin("SELECT bool_and(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity WHERE datname = 'postgres'")).trim();
-    if (live && live !== 't') throw new Error('Could not release connections to the migrated template');
+    await releasePostgresConnections(admin, 'Could not release connections to the migrated template');
     for (const database of databases) {
       await admin(`CREATE DATABASE ${database} TEMPLATE postgres STRATEGY ${strategy} OWNER ${owner} CONNECTION LIMIT ${limit}`);
       created.push(database);
@@ -233,8 +240,7 @@ async function snapshotIntegrationDatabase({ checked, env, admin, dockerRoot, pr
 async function activateIntegrationDatabase(admin, expectedOid) {
   if (!/^[1-9]\d*$/.test(expectedOid)) throw new Error('Missing pristine integration database identity');
   await admin('ALTER DATABASE postgres ALLOW_CONNECTIONS false');
-  const terminated = (await admin("SELECT bool_and(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity WHERE datname = 'postgres'")).trim();
-  if (terminated && terminated !== 't') throw new Error('Could not release pgTAP database connections');
+  await releasePostgresConnections(admin, 'Could not release pgTAP database connections');
   // Keep the local services' normal database name and switch both names atomically.
   await admin(`ALTER DATABASE postgres RENAME TO pgtap_completed;
     ALTER DATABASE ${integrationSnapshot} RENAME TO postgres`);
