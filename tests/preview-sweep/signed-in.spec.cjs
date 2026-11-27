@@ -29,6 +29,10 @@ for (const app of ['console', 'console-v2', 'portal']) {
         const path = v2 ? '/operate/shipments' : '/resources/shipments';
         const reader = app === 'portal' ? 'sender_user' : 'dispatcher';
         const checkpoint = stage => console.log('\nSWEEP', app, locale, theme, size, stage);
+        const portalMarkers = app === 'portal' ? {
+          error: 'portal-resource-error',
+          denied: 'portal-resource-blocked',
+        } : {};
 
         async function check(state, code, run, page) {
           try {
@@ -37,15 +41,15 @@ for (const app of ['console', 'console-v2', 'portal']) {
             console.log('\nSWEEP-FAIL', app, locale, theme, size, state, code);
             if (code === 'marker' && error instanceof Error) {
               console.log('SWEEP-ERROR ' + error.message.replaceAll('\n', '\nSWEEP-ERROR '));
-              if (page && app === 'portal' && (state === 'error' || state === 'denied') &&
-                  error.message.includes('resolved to 2 elements')) {
-                const markerTestId = state === 'error' ? 'portal-resource-error' : 'portal-resource-blocked';
-                const pair = await page.evaluate(testId => {
+              const markerTestId = portalMarkers[state];
+              if (page && markerTestId && error.message.includes('resolved to 2 elements')) {
+                const [markers, removed] = await page.evaluate(testId => {
                   const publicId = /^(portal-resource-(blocked|error|ready|shipment-search)|portal-app-shell-sidebar|route-(loading|error)-page)$/;
                   const publicTag = /^(a|article|aside|div|main|p|section|span)$/;
                   const matches = document.querySelectorAll(`[data-testid="${testId}"]`);
-                  if (matches.length !== 2) return 'miss';
-                  return Array.from(matches, element => {
+                  const removed = (window.__sweepRemoved || []).join(' ') || 'none';
+                  if (matches.length !== 2) return [`count=${matches.length}`, removed];
+                  const pair = Array.from(matches, element => {
                     const chain = [];
                     for (let node = element; node; node = node.parentElement) {
                       const id = node.getAttribute('data-testid');
@@ -56,8 +60,10 @@ for (const app of ['console', 'console-v2', 'portal']) {
                     const tag = publicTag.test(element.localName) ? element.localName : 'other';
                     return `${tag}:${visible ? 'visible' : 'hidden'}:${chain.join('>')}`;
                   }).join(' ');
-                }, markerTestId).catch(() => 'miss');
-                console.log('\nSWEEP-MARKERS', app, locale, theme, size, state, pair);
+                  return [pair, removed];
+                }, markerTestId).catch(() => ['miss', 'none']);
+                console.log('\nSWEEP-MARKERS', app, locale, theme, size, state, markers);
+                console.log('\nSWEEP-REMOVED', app, locale, theme, size, state, removed);
               }
             }
             throw error;
@@ -71,6 +77,8 @@ for (const app of ['console', 'console-v2', 'portal']) {
             baseURL, viewport, colorScheme: theme, reducedMotion: 'reduce',
             locale, deviceScaleFactor: 1, hasTouch: size === 'phone', serviceWorkers: 'block',
           }));
+          const markerTestId = portalMarkers[state];
+          let documentResponse;
           try {
             await check(state, 'route-guard', () => context.route('**/*', route =>
               allowedOrigins.has(new URL(route.request().url()).origin) ? route.continue() : route.abort()));
@@ -88,6 +96,38 @@ for (const app of ['console', 'console-v2', 'portal']) {
               }, { locale, theme, session: account.session }));
             }
             const page = await check(state, 'new-page', () => context.newPage());
+            if (markerTestId) {
+              await page.addInitScript(selector => {
+                const removed = window.__sweepRemoved = [];
+                const publicId = /^(portal-resource-(blocked|error|ready|shipment-search)|portal-app-shell-sidebar|route-(loading|error)-page)$/;
+                new MutationObserver(records => {
+                  if (removed.length === 5) return;
+                  for (const record of records) {
+                    for (const node of record.removedNodes) {
+                      if (node.nodeType !== 1 || !(node.matches(selector) || node.querySelector(selector))) continue;
+                      const chain = [];
+                      for (let element = record.target; element?.nodeType === 1; element = element.parentElement) {
+                        const id = element.getAttribute('data-testid');
+                        if (publicId.test(id)) chain.push(id);
+                        else if (/^[SBP]:/.test(element.id)) chain.push('seg');
+                        else if (element.hasAttribute('hidden')) chain.push('hidden');
+                        else if (element.localName === 'template') chain.push('template');
+                      }
+                      removed.push(chain.join('>') || 'root');
+                      if (removed.length === 5) return;
+                    }
+                  }
+                }).observe(document, { childList: true, subtree: true });
+              }, `[data-testid="${markerTestId}"]`);
+              const shipmentsURL = new URL(path, baseURL).href;
+              page.on('response', response => {
+                if (response.url() !== shipmentsURL) return;
+                const request = response.request();
+                if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+                  documentResponse = response;
+                }
+              });
+            }
             if (!v2 && state === 'empty') {
               // Hydrate the signed-in shell before triggering the route's streaming loading state.
               await check(state, 'open-shell', () => page.goto('/'));
@@ -105,6 +145,15 @@ for (const app of ['console', 'console-v2', 'portal']) {
             }
             await capture(page, account.release);
           } finally {
+            if (documentResponse) {
+              // Reading the stream here keeps its completion out of the marker assertion's timing.
+              const html = await documentResponse.text().catch(() => null);
+              if (html !== null) {
+                const markerCount = html.split(`data-testid="${markerTestId}"`).length - 1;
+                const segmentCount = html.split('<div hidden id="S:').length - 1;
+                console.log('\nSWEEP-SSR', app, locale, theme, size, state, markerCount, segmentCount);
+              }
+            }
             account.dispose();
             await check(state, 'close-context', () => context.close());
           }

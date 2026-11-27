@@ -561,6 +561,8 @@ jobs:
             echo 'Preview sweep browser setup failed'
             exit 1
           fi
+          removed_token='portal-resource-(blocked|error|ready|shipment-search)|portal-app-shell-sidebar|route-(loading|error)-page|seg|hidden|template'
+          removed_chain="(root|($removed_token)(>($removed_token))*)"
           for locale in en ar; do
             echo "Preview sweep locale: $locale"
             SWEEP_LOCALE="$locale" node node_modules/@playwright/test/cli.js test -c scripts/ci-hosted/preview-sweep.config.cjs 2>&1 |
@@ -568,7 +570,9 @@ jobs:
                 -e '/^SWEEP (console|console-v2|portal) (en|ar) (light|dark) (desktop|phone) (session|loading|empty|error|denied|complete)$/p' \
                 -e '/^SWEEP-GEOM (console|console-v2|portal) (en|ar) (light|dark) (desktop|phone) (loading|empty|error|denied) [0-9]+ [0-9]+ (-?[0-9]+\.[0-9]{3} ){2}([0-9]+\.[0-9]{3} ){2}(0\.[0-9]{9}|1\.000000000)$/p' \
                 -e '/^SWEEP-FAIL (console|console-v2|portal) (en|ar) (light|dark) (desktop|phone) (loading|empty|error|denied) (new-session|new-context|route-guard|session-cookie|init-session|new-page|open-shell|shell-theme|open-mobile-menu|follow-route-link|close-mobile-menu|open-route|signed-in|marker|marker-in-view|language|direction|theme|screenshot|close-context)$/p' \
-                -e '/^SWEEP-MARKERS portal (en|ar) (light|dark) (desktop|phone) (error|denied)( miss|( (a|article|aside|div|main|p|section|span|other):(visible|hidden):((portal-resource-(blocked|error|ready|shipment-search)|portal-app-shell-sidebar|route-(loading|error)-page|other)>)*portal-resource-(blocked|error)){2})$/p' \
+                -e '/^SWEEP-SSR portal (en|ar) (light|dark) (desktop|phone) (error|denied) [0-9]{1,3} [0-9]{1,3}$/p' \
+                -e '/^SWEEP-MARKERS portal (en|ar) (light|dark) (desktop|phone) (error|denied)( miss| count=[0-9]{1,3}|( (a|article|aside|div|main|p|section|span|other):(visible|hidden):((portal-resource-(blocked|error|ready|shipment-search)|portal-app-shell-sidebar|route-(loading|error)-page|other)>)*portal-resource-(blocked|error)){2})$/p' \
+                -e "/^SWEEP-REMOVED portal (en|ar) (light|dark) (desktop|phone) (error|denied) (none|$removed_chain( $removed_chain){0,4})$/p" \
                 -e 's/^SWEEP-ERROR (Error: )?strict mode violation: .* resolved to ([0-9]+) elements:$/SWEEP-ERROR strict mode violation: resolved to \2 elements/p' \
                 -e 's/^SWEEP-ERROR *(Error: |- )?(expect\(locator\)\.toBeVisible\(\) failed|Timeout: +[0-9]+ms|Received: hidden|Received: <element\(s\) not found>|element\(s\) not found|Target page, context or browser has been closed|Page crashed|Frame was detached|Execution context was destroyed, most likely because of a navigation)\.?$/SWEEP-ERROR \2/p'
           done
