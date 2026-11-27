@@ -27,6 +27,11 @@ const renderTimeoutMs = 30_000;
 const pdfHeader = Buffer.from('%PDF-');
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const labelType = 'shipping';
+// Only fixed codes from the renderer's non-200 designer preview responses are safe to report.
+const previewErrorCodes = new Set([
+  'auth_required', 'draft_id_required', 'shipment_id_required', 'config_missing',
+  'org_required', 'draft_not_found', 'template_missing', 'payload_missing',
+]);
 
 class ProbeError extends Error {
   constructor(code) {
@@ -80,13 +85,13 @@ async function jsonRequest(url, headers, code, method = 'GET', body) {
 
 async function renderPreview(send, wait = delay) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    let response;
     let status;
     let text;
     try {
-      const response = await send();
+      response = await send();
       status = response.status;
       if (status === 200) text = await response.text();
-      else await response.body?.cancel().catch(() => {});
     } catch {
       status = undefined;
     }
@@ -99,9 +104,20 @@ async function renderPreview(send, wait = delay) {
       }
       return checkPreview(status, result);
     }
-    if (status !== undefined && (status < 500 || status >= 600)) return checkPreview(status);
+    if (status !== undefined) {
+      if (status < 500 || status >= 600 || attempt === 2) {
+        const body = await response.json().catch(() => null);
+        const errorCode = body?.error?.code;
+        const rendererCode = previewErrorCodes.has(errorCode) ? errorCode : 'unavailable';
+        return {
+          code: EXIT.renderStatus,
+          diagnostic: `LABEL_PROBE_RENDER_ERROR status=${status} renderer_code=${rendererCode}`,
+        };
+      }
+      await response.body?.cancel().catch(() => {});
+    }
     if (attempt < 2) await wait(1000 * 2 ** attempt);
-    else return { code: status === undefined ? EXIT.renderNetwork : EXIT.renderStatus };
+    else return { code: EXIT.renderNetwork };
   }
 }
 
@@ -289,7 +305,7 @@ async function run(env) {
   let stage = EXIT.database;
   let createAttempted = false;
   let userId;
-  let pdfBytes;
+  let rendered;
   let cleaned = false;
   try {
     await db.connect();
@@ -314,14 +330,13 @@ async function run(env) {
     requireProbe(claims?.role === 'authenticated' && claims.sub === user.id, stage);
 
     stage = EXIT.renderNetwork;
-    const rendered = await renderPreview(() => request(
+    rendered = await renderPreview(() => request(
       `${projectUrl}/functions/v1/label-renderer`, { apikey: anonKey, authorization: `Bearer ${jwt}` }, 'POST', {
         mode: 'designer_preview', user_jwt: jwt, label_type: labelType,
         draft_id: fixture.draftId, shipment_id: fixture.shipmentId, shipment_box_id: fixture.boxId,
       },
     ));
     requireProbe(rendered.code === 0, rendered.code);
-    pdfBytes = rendered.pdfBytes;
   } catch (error) {
     errors.push(error instanceof ProbeError ? error.code : stage);
   } finally {
@@ -332,22 +347,24 @@ async function run(env) {
     }
     await db.end();
   }
-  return { pdfBytes, cleaned, errors };
+  return { pdfBytes: rendered?.pdfBytes, renderDiagnostic: rendered?.diagnostic, cleaned, errors };
 }
 
 async function main() {
   const summary = process.env.GITHUB_STEP_SUMMARY;
   const evidence = [];
   let errors = [];
+  let renderDiagnostic;
   try {
     const result = await run(process.env);
-    errors = result.errors;
+    ({ errors, renderDiagnostic } = result);
     if (result.pdfBytes) evidence.push(`LABEL_PROBE status=200 pdf_bytes=${result.pdfBytes} sha=${process.env.GITHUB_SHA}`);
     if (result.cleaned) evidence.push('LABEL_PROBE_CLEANUP rows=0');
   } catch (error) {
     errors.push(error instanceof ProbeError ? error.code : EXIT.unexpected);
   }
   const failures = errors.map(code => `LABEL_PROBE_ERROR code=${code}`);
+  if (renderDiagnostic) failures.push(renderDiagnostic);
   for (const line of evidence) console.log(line);
   for (const line of failures) console.error(line);
   if (summary) {
