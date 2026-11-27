@@ -179,18 +179,6 @@ export function pct(numerator: number, denominator: number): string {
   return `${((numerator / denominator) * 100).toFixed(1)}%`;
 }
 
-/** Short relative-time formatter ("just now" / "12m ago" / "3h ago" / "2d ago"). */
-export function relativeTime(iso: string, now = Date.now()): string {
-  const t = new Date(iso).getTime();
-  const diff = Math.max(0, now - t);
-  const mins = Math.round(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.round(hrs / 24)}d ago`;
-}
-
 // ---------- Live-tail synthesizer ----------
 //
 // W-Cycle-E2 (P2 #12) — DEV-PREVIEW-MODE-ONLY constants. The numeric

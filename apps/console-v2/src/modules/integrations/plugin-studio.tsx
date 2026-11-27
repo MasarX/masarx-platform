@@ -32,6 +32,7 @@ import { CAP } from '@/lib/capabilities';
 import {
   redactIntegrationSourceTextForDisplay,
 } from './secret-redaction';
+import { fill, useI18n } from '@/lib/i18n';
 
 type Stage = 'idle' | 'parsing' | 'parsed' | 'inferring' | 'inferred' | 'previewing' | 'previewed' | 'saving' | 'saved' | 'error';
 
@@ -125,6 +126,7 @@ type SourceType = string;
 type PluginKind = string;
 
 export function PluginStudioModule() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const identity = useIdentity();
@@ -243,9 +245,9 @@ export function PluginStudioModule() {
     setCatalogReadback(null);
   }
 
-  function ensureStudioBackend(action: string): boolean {
+  function ensureStudioBackend(blockedMessage: string): boolean {
     if (!liveBackendUnavailable) return true;
-    pushToast(`${action} blocked · live backend is not configured`, 'danger');
+    pushToast(blockedMessage, 'danger');
     return false;
   }
 
@@ -275,7 +277,7 @@ export function PluginStudioModule() {
         directoryStatus: null,
         versionStatus: null,
         requestedAt,
-        error: 'Saved plugin id missing from save result',
+        error: t('integrationsPluginStudio.pluginStudioModule.savedPluginIdMissing'),
       });
       return;
     }
@@ -342,7 +344,7 @@ export function PluginStudioModule() {
   }
 
   async function runParse() {
-    if (!ensureStudioBackend('Parse')) return;
+    if (!ensureStudioBackend(t('integrationsPluginStudio.pluginStudioModule.parseBlocked'))) return;
     const sourcePayload = buildSourcePayload();
     const safeSourceText = redactIntegrationSourceTextForDisplay(sourceText);
     setStage('parsing');
@@ -363,20 +365,20 @@ export function PluginStudioModule() {
       setContract(res.normalized_contract);
       setMappingSuggestion(res.mapping_suggestion);
       setStage('parsed');
-      pushToast(`Parsed · ${res.normalized_contract.plugin_kind} contract`, 'good');
+      pushToast(fill(t('integrationsPluginStudio.pluginStudioModule.parsedContract'), { plugin_kind: String(res.normalized_contract.plugin_kind) }), 'good');
     } catch (err) {
       if (safeSourceText !== sourceText) setSourceText(safeSourceText);
-      const message = (err as Error)?.message ?? 'parse failed';
+      const message = (err as Error)?.message ?? t('integrationsPluginStudio.pluginStudioModule.parseFailedNoDetail');
       setErrMsg(message);
       setStage('error');
-      pushToast(`Parse failed · ${message}`, 'danger');
+      pushToast(fill(t('integrationsPluginStudio.pluginStudioModule.parseFailed'), { message: String(message) }), 'danger');
     }
   }
 
   async function runInfer() {
-    if (!ensureStudioBackend('Infer')) return;
+    if (!ensureStudioBackend(t('integrationsPluginStudio.pluginStudioModule.inferBlocked'))) return;
     if (!contract) {
-      pushToast('Run Parse first', 'warn');
+      pushToast(t('integrationsPluginStudio.pluginStudioModule.runParseFirst'), 'warn');
       return;
     }
     setStage('inferring');
@@ -397,19 +399,19 @@ export function PluginStudioModule() {
       const fieldCount = Array.isArray((res.mapping_suggestion as { fields?: unknown[] }).fields)
         ? ((res.mapping_suggestion as { fields: unknown[] }).fields.length)
         : 0;
-      pushToast(`Inferred · ${fieldCount} mapping field${fieldCount === 1 ? '' : 's'}`, 'good');
+      pushToast(fill(t(fieldCount === 1 ? 'integrationsPluginStudio.pluginStudioModule.inferredMappingFieldOne' : 'integrationsPluginStudio.pluginStudioModule.inferredMappingFieldOther'), { fieldCount: String(fieldCount) }), 'good');
     } catch (err) {
-      const message = (err as Error)?.message ?? 'infer failed';
+      const message = (err as Error)?.message ?? t('integrationsPluginStudio.pluginStudioModule.inferFailedNoDetail');
       setErrMsg(message);
       setStage('error');
-      pushToast(`Infer failed · ${message}`, 'danger');
+      pushToast(fill(t('integrationsPluginStudio.pluginStudioModule.inferFailed'), { message: String(message) }), 'danger');
     }
   }
 
   async function runPreview() {
-    if (!ensureStudioBackend('Preview')) return;
+    if (!ensureStudioBackend(t('integrationsPluginStudio.pluginStudioModule.previewBlocked'))) return;
     if (!contract || !mappingSuggestion) {
-      pushToast('Run Parse + Infer first', 'warn');
+      pushToast(t('integrationsPluginStudio.pluginStudioModule.runParseInferFirst'), 'warn');
       return;
     }
     setStage('previewing');
@@ -430,29 +432,29 @@ export function PluginStudioModule() {
       const blocking = res.review.review_summary.blocking_count;
       const tone = blocking > 0 ? 'warn' : 'good';
       pushToast(
-        `Preview · ${blocking} blocking, ${res.review.review_summary.warning_count} warning, ${res.review.review_summary.coercion_count} coercion${res.review.review_summary.coercion_count === 1 ? '' : 's'}`,
+        fill(t(res.review.review_summary.coercion_count === 1 ? 'integrationsPluginStudio.pluginStudioModule.previewBlockingWarningCoercionOne' : 'integrationsPluginStudio.pluginStudioModule.previewBlockingWarningCoercionOther'), { blocking: String(blocking), warning_count: String(res.review.review_summary.warning_count), coercion_count: String(res.review.review_summary.coercion_count) }),
         tone,
       );
     } catch (err) {
-      const message = (err as Error)?.message ?? 'preview failed';
+      const message = (err as Error)?.message ?? t('integrationsPluginStudio.pluginStudioModule.previewFailedNoDetail');
       setErrMsg(message);
       setStage('error');
-      pushToast(`Preview failed · ${message}`, 'danger');
+      pushToast(fill(t('integrationsPluginStudio.pluginStudioModule.previewFailed'), { message: String(message) }), 'danger');
     }
   }
 
   async function runSave() {
-    if (!ensureStudioBackend('Save')) return;
+    if (!ensureStudioBackend(t('integrationsPluginStudio.pluginStudioModule.saveBlocked'))) return;
     if (!contract || !mappingSuggestion || !review) {
-      pushToast('Complete Parse + Infer + Preview first', 'warn');
+      pushToast(t('integrationsPluginStudio.pluginStudioModule.completeParseInferPreview'), 'warn');
       return;
     }
     if (blockingCount > 0) {
-      pushToast(`Cannot save · ${blockingCount} blocking review item${blockingCount === 1 ? '' : 's'}`, 'danger');
+      pushToast(fill(t(blockingCount === 1 ? 'integrationsPluginStudio.pluginStudioModule.cannotSaveBlockingReviewOne' : 'integrationsPluginStudio.pluginStudioModule.cannotSaveBlockingReviewOther'), { blockingCount: String(blockingCount) }), 'danger');
       return;
     }
     if (!recommendedSaveMode) {
-      pushToast('No eligible save mode for this user/artifact', 'danger');
+      pushToast(t('integrationsPluginStudio.pluginStudioModule.noEligibleSaveMode'), 'danger');
       return;
     }
     setStage('saving');
@@ -474,12 +476,12 @@ export function PluginStudioModule() {
       setSaveResult(res);
       setStage('saved');
       void refreshSavedPluginCatalog(saved);
-      pushToast(`Saved · ${res.save_mode} mode`, 'good');
+      pushToast(fill(t('integrationsPluginStudio.pluginStudioModule.savedMode'), { save_mode: String(res.save_mode) }), 'good');
     } catch (err) {
-      const message = (err as Error)?.message ?? 'save failed';
+      const message = (err as Error)?.message ?? t('integrationsPluginStudio.pluginStudioModule.saveFailedNoDetail');
       setErrMsg(message);
       setStage('error');
-      pushToast(`Save failed · ${message}`, 'danger');
+      pushToast(fill(t('integrationsPluginStudio.pluginStudioModule.saveFailed'), { message: String(message) }), 'danger');
     }
   }
 
@@ -498,19 +500,19 @@ export function PluginStudioModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-plugin-studio"
-          eyebrow="Integrations"
-          titleAccent="Plugin"
-          titlePlain="studio"
+          eyebrow={t('integrationsPluginStudio.pluginStudioModule.integrations')}
+          titleAccent={t('integrationsPluginStudio.pluginStudioModule.titleAccent')}
+          titlePlain={t('integrationsPluginStudio.pluginStudioModule.titlePlain')}
           pills={[
             <span key="src" className="chip chip--xs mono">
-              integration-plugin-studio · /parse · /infer · /preview · /save
+              {t('integrationsPluginStudio.pluginStudioModule.integrationPluginStudioParse')}
             </span>,
           ]}
         />
         <StateView
           kind="denied"
           capability={CAP.INTEGRATION_PLUGINS_READ}
-          hint="You do not have permission to view the plugin studio."
+          hint={t('integrationsPluginStudio.pluginStudioModule.youDoNotHave')}
         />
       </div>
     );
@@ -520,15 +522,15 @@ export function PluginStudioModule() {
     <div className="page">
       <PageHeader
         moduleKey="int-plugin-studio"
-        eyebrow="Integrations"
-        titleAccent="Plugin"
-        titlePlain="studio"
+        eyebrow={t('integrationsPluginStudio.pluginStudioModule.integrations')}
+        titleAccent={t('integrationsPluginStudio.pluginStudioModule.titleAccent')}
+        titlePlain={t('integrationsPluginStudio.pluginStudioModule.titlePlain')}
         pills={[
           <span key="src" className="chip chip--xs">
-            Guided integration setup
+            {t('integrationsPluginStudio.pluginStudioModule.guidedIntegrationSetup')}
           </span>,
           <span key="mode" className="chip chip--xs">
-            {seedDiagnosticsEnabled ? 'Review checks' : 'Hosted confirmation'}
+            {seedDiagnosticsEnabled ? t('integrationsPluginStudio.pluginStudioModule.reviewChecks') : t('integrationsPluginStudio.pluginStudioModule.hostedConfirmation')}
           </span>,
         ]}
       />
@@ -562,8 +564,8 @@ export function PluginStudioModule() {
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
           <StateView
             kind="error"
-            title="Hosted confirmation required"
-            hint="Connect the hosted integration service before saving plugin changes."
+            title={t('integrationsPluginStudio.pluginStudioModule.hostedConfirmationRequired')}
+            hint={t('integrationsPluginStudio.pluginStudioModule.connectTheHostedIntegration')}
           />
         </div>
       ) : null}
@@ -589,7 +591,7 @@ export function PluginStudioModule() {
           }}
         >
           <label className="eyebrow" htmlFor="plugin-studio-source-type">
-            Source type
+            {t('integrationsPluginStudio.pluginStudioModule.sourceType')}
           </label>
           <select
             id="plugin-studio-source-type"
@@ -619,7 +621,7 @@ export function PluginStudioModule() {
           </select>
 
           <label className="eyebrow" htmlFor="plugin-studio-kind">
-            Plugin kind
+            {t('integrationsPluginStudio.pluginStudioModule.pluginKind')}
           </label>
           <select
             id="plugin-studio-kind"
@@ -639,18 +641,18 @@ export function PluginStudioModule() {
           </select>
 
           <label className="eyebrow" htmlFor="plugin-studio-name">
-            Plugin name (optional)
+            {t('integrationsPluginStudio.pluginStudioModule.pluginNameOptional')}
           </label>
           <input
             id="plugin-studio-name"
             className="field"
-            placeholder="e.g. Examplecourier KSA"
+            placeholder={t('integrationsPluginStudio.pluginStudioModule.eGExamplecourierKsa')}
             value={pluginName}
             onChange={(e) => setPluginName(e.target.value)}
           />
 
           <label className="eyebrow" htmlFor="plugin-studio-source">
-            Source payload
+            {t('integrationsPluginStudio.pluginStudioModule.sourcePayload')}
           </label>
           <textarea
             id="plugin-studio-source"
@@ -667,7 +669,7 @@ export function PluginStudioModule() {
 
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <Button
-              label={stage === 'parsing' ? 'Parsing…' : 'Parse'}
+              label={stage === 'parsing' ? t('integrationsPluginStudio.pluginStudioModule.parsing') : t('integrationsPluginStudio.pluginStudioModule.parse')}
               iconName="play"
               kind="primary"
               capability={CAP.INTEGRATION_PLUGINS_WRITE}
@@ -675,7 +677,7 @@ export function PluginStudioModule() {
               disabled={liveBackendUnavailable || stage === 'parsing' || stage === 'inferring' || stage === 'previewing' || stage === 'saving'}
             />
             <Button
-              label={stage === 'inferring' ? 'Inferring…' : 'Infer mapping'}
+              label={stage === 'inferring' ? t('integrationsPluginStudio.pluginStudioModule.inferring') : t('integrationsPluginStudio.pluginStudioModule.inferMapping')}
               iconName="git"
               kind={contract ? 'primary' : 'ghost'}
               capability={CAP.INTEGRATION_PLUGINS_WRITE}
@@ -683,7 +685,7 @@ export function PluginStudioModule() {
               disabled={liveBackendUnavailable || !contract || stage === 'parsing' || stage === 'inferring' || stage === 'previewing' || stage === 'saving'}
             />
             <Button
-              label={stage === 'previewing' ? 'Previewing…' : 'Preview'}
+              label={stage === 'previewing' ? t('integrationsPluginStudio.pluginStudioModule.previewing') : t('integrationsPluginStudio.pluginStudioModule.preview')}
               iconName="eye"
               kind={mappingSuggestion ? 'primary' : 'ghost'}
               capability={CAP.INTEGRATION_PLUGINS_WRITE}
@@ -691,7 +693,7 @@ export function PluginStudioModule() {
               disabled={liveBackendUnavailable || !mappingSuggestion || stage === 'parsing' || stage === 'inferring' || stage === 'previewing' || stage === 'saving'}
             />
             <Button
-              label={stage === 'saving' ? 'Saving…' : `Save${recommendedSaveMode ? ` (${recommendedSaveMode})` : ''}`}
+              label={stage === 'saving' ? t('integrationsPluginStudio.pluginStudioModule.saving') : recommendedSaveMode ? fill(t('integrationsPluginStudio.pluginStudioModule.saveWithMode'), { mode: recommendedSaveMode }) : t('integrationsPluginStudio.pluginStudioModule.save')}
               iconName="check"
               kind="primary"
               capability={CAP.INTEGRATION_PLUGINS_WRITE}
@@ -720,87 +722,87 @@ export function PluginStudioModule() {
             gap: '12px',
           }}
         >
-          <section aria-label="Normalized contract" data-testid="plugin-studio-contract">
-            <div className="eyebrow">Normalized contract</div>
+          <section aria-label={t('integrationsPluginStudio.pluginStudioModule.normalizedContract')} data-testid="plugin-studio-contract">
+            <div className="eyebrow">{t('integrationsPluginStudio.pluginStudioModule.normalizedContract')}</div>
             {contract ? (
               <StateView
                 kind="empty"
-                title="Contract prepared"
-                hint="The integration contract was normalized and sensitive details are hidden from this summary."
+                title={t('integrationsPluginStudio.pluginStudioModule.contractPrepared')}
+                hint={t('integrationsPluginStudio.pluginStudioModule.theIntegrationContractWas')}
               />
             ) : (
-              <StateView kind="empty" title="No contract yet" hint="Click Parse to normalize the source." />
+              <StateView kind="empty" title={t('integrationsPluginStudio.pluginStudioModule.noContractYet')} hint={t('integrationsPluginStudio.pluginStudioModule.clickParseToNormalize')} />
             )}
           </section>
 
-          <section aria-label="Mapping suggestion" data-testid="plugin-studio-mapping">
-            <div className="eyebrow">Mapping suggestion</div>
+          <section aria-label={t('integrationsPluginStudio.pluginStudioModule.mappingSuggestion')} data-testid="plugin-studio-mapping">
+            <div className="eyebrow">{t('integrationsPluginStudio.pluginStudioModule.mappingSuggestion')}</div>
             {mappingSuggestion ? (
               <StateView
                 kind="empty"
-                title="Mapping suggestion prepared"
-                hint="The suggested mapping was prepared and sensitive details are hidden from this summary."
+                title={t('integrationsPluginStudio.pluginStudioModule.mappingSuggestionPrepared')}
+                hint={t('integrationsPluginStudio.pluginStudioModule.theSuggestedMappingWas')}
               />
             ) : (
-              <StateView kind="empty" title="No mapping yet" hint="Click Infer mapping after Parse." />
+              <StateView kind="empty" title={t('integrationsPluginStudio.pluginStudioModule.noMappingYet')} hint={t('integrationsPluginStudio.pluginStudioModule.clickInferMappingAfter')} />
             )}
             {outboundSuggestions.length ? (
               <>
                 <div className="eyebrow" style={{ marginTop: '8px' }}>
-                  Outbound operations · {outboundSuggestions.length}
+                  {fill(t('integrationsPluginStudio.pluginStudioModule.outboundOperations'), { length: String(outboundSuggestions.length) })}
                 </div>
                 <StateView
                   kind="empty"
-                  title="Outbound suggestions prepared"
-                  hint="Outbound operation suggestions are ready and sensitive details are hidden from this summary."
+                  title={t('integrationsPluginStudio.pluginStudioModule.outboundSuggestionsPrepared')}
+                  hint={t('integrationsPluginStudio.pluginStudioModule.outboundOperationSuggestionsAre')}
                 />
               </>
             ) : null}
           </section>
 
-          <section aria-label="Preview review" data-testid="plugin-studio-review">
-            <div className="eyebrow">Preview review</div>
+          <section aria-label={t('integrationsPluginStudio.pluginStudioModule.previewReview')} data-testid="plugin-studio-review">
+            <div className="eyebrow">{t('integrationsPluginStudio.pluginStudioModule.previewReview')}</div>
             {review ? (
               <>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', padding: '4px 0' }}>
                   <Chip
-                    label={`${review.review_summary.blocking_count} blocking`}
+                    label={fill(t('integrationsPluginStudio.pluginStudioModule.blocking'), { blocking_count: String(review.review_summary.blocking_count) })}
                     kind={review.review_summary.blocking_count > 0 ? 'danger' : 'good'}
                     size="xs"
                   />
                   <Chip
-                    label={`${review.review_summary.warning_count} warning`}
+                    label={fill(t('integrationsPluginStudio.pluginStudioModule.warning'), { warning_count: String(review.review_summary.warning_count) })}
                     kind={review.review_summary.warning_count > 0 ? 'warn' : 'neutral'}
                     size="xs"
                   />
                   <Chip
-                    label={`${review.review_summary.coercion_count} coercion${review.review_summary.coercion_count === 1 ? '' : 's'}`}
+                    label={fill(t(review.review_summary.coercion_count === 1 ? 'integrationsPluginStudio.pluginStudioModule.coercionOne' : 'integrationsPluginStudio.pluginStudioModule.coercionOther'), { coercion_count: String(review.review_summary.coercion_count) })}
                     kind={review.review_summary.coercion_count > 0 ? 'info' : 'neutral'}
                     size="xs"
                   />
                   {recommendedSaveMode ? (
-                    <Chip label={`Save mode: ${recommendedSaveMode}`} kind="info" size="xs" />
+                    <Chip label={fill(t('integrationsPluginStudio.pluginStudioModule.saveMode'), { recommendedSaveMode: String(recommendedSaveMode) })} kind="info" size="xs" />
                   ) : (
-                    <Chip label="no save mode" kind="danger" size="xs" />
+                    <Chip label={t('integrationsPluginStudio.pluginStudioModule.noSaveMode')} kind="danger" size="xs" />
                   )}
                 </div>
                 {review.diagnostics.length ? (
                   <StateView
                     kind="error"
-                    title="Review items found"
-                    hint="Resolve the blocking and warning items before saving this integration."
+                    title={t('integrationsPluginStudio.pluginStudioModule.reviewItemsFound')}
+                    hint={t('integrationsPluginStudio.pluginStudioModule.resolveTheBlockingAnd')}
                   />
                 ) : (
-                  <div className="state__hint">No review items. Preview is clean.</div>
+                  <div className="state__hint">{t('integrationsPluginStudio.pluginStudioModule.noReviewItemsPreview')}</div>
                 )}
               </>
             ) : (
-              <StateView kind="empty" title="No preview yet" hint="Click Preview after Infer mapping." />
+              <StateView kind="empty" title={t('integrationsPluginStudio.pluginStudioModule.noPreviewYet')} hint={t('integrationsPluginStudio.pluginStudioModule.clickPreviewAfterInfer')} />
             )}
           </section>
 
-          <section aria-label="Save result" data-testid="plugin-studio-save-result">
-            <div className="eyebrow">Save result</div>
+          <section aria-label={t('integrationsPluginStudio.pluginStudioModule.saveResult')} data-testid="plugin-studio-save-result">
+            <div className="eyebrow">{t('integrationsPluginStudio.pluginStudioModule.saveResult')}</div>
             {saveResult ? (
               <>
                 <div
@@ -814,36 +816,36 @@ export function PluginStudioModule() {
                   data-testid="plugin-studio-save-readback"
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <Chip label={`saved: ${saveResult.save_mode}`} kind="good" size="xs" />
+                    <Chip label={fill(t('integrationsPluginStudio.pluginStudioModule.saved'), { save_mode: String(saveResult.save_mode) })} kind="good" size="xs" />
                     {savedResource.pluginId ? (
-                      <Chip label="Plugin saved" kind="good" size="xs" />
+                      <Chip label={t('integrationsPluginStudio.pluginStudioModule.pluginSaved')} kind="good" size="xs" />
                     ) : null}
                     {savedResource.pluginVersionId ? (
-                      <Chip label="Version saved" kind="good" size="xs" />
+                      <Chip label={t('integrationsPluginStudio.pluginStudioModule.versionSaved')} kind="good" size="xs" />
                     ) : null}
                     {savedResource.reportId ? (
-                      <Chip label="Review saved" kind="good" size="xs" />
+                      <Chip label={t('integrationsPluginStudio.pluginStudioModule.reviewSaved')} kind="good" size="xs" />
                     ) : null}
                     {savedResource.workflowIntent ? (
-                      <Chip label="Workflow prepared" kind="info" size="xs" />
+                      <Chip label={t('integrationsPluginStudio.pluginStudioModule.workflowPrepared')} kind="info" size="xs" />
                     ) : null}
                     {savedResource.workflowTemplateName ? (
-                      <Chip label="Template ready" kind="info" size="xs" />
+                      <Chip label={t('integrationsPluginStudio.pluginStudioModule.templateReady')} kind="info" size="xs" />
                     ) : null}
                     {savedResource.workflowMode ? (
-                      <Chip label="Binding ready" kind="info" size="xs" />
+                      <Chip label={t('integrationsPluginStudio.pluginStudioModule.bindingReady')} kind="info" size="xs" />
                     ) : null}
                   </div>
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     <Button
-                      label="Open saved plugin"
+                      label={t('integrationsPluginStudio.pluginStudioModule.openSavedPlugin')}
                       iconName="grid"
                       kind="primary"
                       capability={CAP.INTEGRATION_PLUGINS_READ}
                       onClick={() => void openSavedPluginCatalog()}
                     />
                     <Button
-                      label="Refresh catalog confirmation"
+                      label={t('integrationsPluginStudio.pluginStudioModule.refreshCatalogConfirmation')}
                       iconName="refresh"
                       kind="ghost"
                       capability={CAP.INTEGRATION_PLUGINS_READ}
@@ -853,7 +855,7 @@ export function PluginStudioModule() {
                   {catalogReadback ? (
                     <div
                       data-testid="plugin-studio-catalog-readback"
-                      aria-label="Catalog confirmation"
+                      aria-label={t('integrationsPluginStudio.pluginStudioModule.catalogConfirmation')}
                       className="state__hint"
                       style={{ display: 'grid', gap: '4px', fontSize: '11px', color: 'var(--ink-3)' }}
                     >
@@ -863,8 +865,8 @@ export function PluginStudioModule() {
                             catalogReadback.pluginVisible
                               && catalogReadback.directoryVisible
                               && (!catalogReadback.pluginVersionId || catalogReadback.versionVisible)
-                              ? 'Catalog confirmed'
-                              : 'Catalog confirmation pending'
+                              ? t('integrationsPluginStudio.pluginStudioModule.catalogConfirmed')
+                              : t('integrationsPluginStudio.pluginStudioModule.catalogConfirmationPending')
                           }
                           kind={
                             catalogReadback.pluginVisible
@@ -875,9 +877,9 @@ export function PluginStudioModule() {
                           }
                           size="xs"
                         />
-                        <span>Plugin: {catalogReadback.pluginVisible ? 'available' : 'updating'}</span>
-                        <span>Version: {catalogReadback.versionVisible ? 'available' : 'updating'}</span>
-                        <span>Directory: {catalogReadback.directoryVisible ? 'available' : 'updating'}</span>
+                        <span>{fill(t('integrationsPluginStudio.pluginStudioModule.plugin'), { value: String(catalogReadback.pluginVisible ? t('integrationsPluginStudio.pluginStudioModule.available') : t('integrationsPluginStudio.pluginStudioModule.updating')) })}</span>
+                        <span>{fill(t('integrationsPluginStudio.pluginStudioModule.version'), { value: String(catalogReadback.versionVisible ? t('integrationsPluginStudio.pluginStudioModule.available') : t('integrationsPluginStudio.pluginStudioModule.updating')) })}</span>
+                        <span>{fill(t('integrationsPluginStudio.pluginStudioModule.directory'), { value: String(catalogReadback.directoryVisible ? t('integrationsPluginStudio.pluginStudioModule.available') : t('integrationsPluginStudio.pluginStudioModule.updating')) })}</span>
                       </div>
                       {catalogReadback.error ? (
                         <span style={{ color: 'var(--danger)' }}>{catalogReadback.error}</span>
@@ -887,12 +889,12 @@ export function PluginStudioModule() {
                 </div>
                 <StateView
                   kind="empty"
-                  title="Save confirmation recorded"
-                  hint="The plugin, review, and workflow setup were saved. Open the catalog to inspect the operator-facing integration."
+                  title={t('integrationsPluginStudio.pluginStudioModule.saveConfirmationRecorded')}
+                  hint={t('integrationsPluginStudio.pluginStudioModule.thePluginReviewAnd')}
                 />
               </>
             ) : (
-              <StateView kind="empty" title="Not saved yet" hint="Click Save after a clean Preview." />
+              <StateView kind="empty" title={t('integrationsPluginStudio.pluginStudioModule.notSavedYet')} hint={t('integrationsPluginStudio.pluginStudioModule.clickSaveAfterA')} />
             )}
           </section>
         </div>
