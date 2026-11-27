@@ -438,13 +438,13 @@ async function main() {
     await assert.rejects(cloneHostedDatabases(async (...commands) => {
       cloneCommands.push(...commands);
       if (commands[0].includes('json_build_object')) return JSON.stringify({ owner: 'synthetic', limit: -1, explicitAcl: false });
-      if (commands[0].includes('pg_terminate_backend')) return 't';
+      if (commands[0].includes('pg_terminate_backend')) return '0';
       if (commands[0].startsWith('CREATE DATABASE pgtap_worker_2')) throw new Error('synthetic clone failure');
       return '[]';
     }, ['pgtap_worker_1', 'pgtap_worker_2'], clones), /synthetic clone failure/);
     assert.deepEqual(clones, ['pgtap_worker_1']);
     assert.equal(cloneCommands[1], 'ALTER DATABASE postgres ALLOW_CONNECTIONS false');
-    assert.match(cloneCommands[3], /TEMPLATE postgres STRATEGY WAL_LOG/);
+    assert.match(cloneCommands[4], /TEMPLATE postgres STRATEGY WAL_LOG/);
     assert.equal(cloneCommands.at(-1), 'ALTER DATABASE postgres ALLOW_CONNECTIONS true');
     const syntheticSql = {
       'autocommit.sql': 'INSERT INTO fixture VALUES (1); BEGIN; ROLLBACK;',
