@@ -57,7 +57,18 @@ function verify(
       const status = runDeno(name, [...args, entry], root, cache);
       if (status !== 0) return status;
       if (workdir) {
-        const bundle = fs.readFileSync(path.join(workdir, entry));
+        const output = path.join(workdir, entry);
+        let bundle = fs.readFileSync(output);
+        if (name === 'label-renderer') {
+          // The inlined Postgres.js Node entry loses its npm-scoped globals.
+          const nodeImports = Buffer.from(
+            'import { Buffer } from "node:buffer";\n' +
+            'import process from "node:process";\n' +
+            'import { clearImmediate, setImmediate } from "node:timers";\n',
+          );
+          bundle = Buffer.concat([nodeImports, bundle]);
+          fs.writeFileSync(output, bundle);
+        }
         const sizeBytes = bundle.length;
         const measurement = `${name}: ${sizeBytes} bytes (limit ${limitBytes} bytes)`;
         console.log(`Edge bundle ${measurement}`);

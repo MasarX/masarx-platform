@@ -121,6 +121,22 @@ describe('label renderer CORS', () => {
     expect(response.headers.get('access-control-allow-methods')).toBe(allowOrigin ? 'POST, OPTIONS' : null);
   });
 
+  test('returns a marked 500 when CORS evaluation and logging throw before dispatch', async () => {
+    const { handler, authorize, logStructured } = loadRenderer();
+    const request = new Request(endpoint, { method: 'POST' });
+    jest.spyOn(request.headers, 'get').mockImplementation(() => {
+      throw new ReferenceError('fixture request detail');
+    });
+    logStructured.mockImplementationOnce(() => { throw new Error('fixture log detail'); });
+
+    const response = await handler(request);
+    expect(response.status).toBe(500);
+    expect(response.headers.get('x-masarx-renderer-transport')).toBe('1');
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    expect(await response.json()).toEqual({ error: { code: 'renderer_internal', class: 'unknown' } });
+    expect(authorize).not.toHaveBeenCalled();
+  });
+
   test('uses local QA origins only on a loopback endpoint', async () => {
     const origin = 'http://localhost:3000';
     const { handler } = loadRenderer({ env: { PUBLIC_INGRESS_LOCAL_CORS_ALLOW_ORIGINS: origin } });
@@ -140,6 +156,9 @@ describe('label renderer internal errors', () => {
 
   test.each([
     [null, 'config_missing'],
+    [Object.defineProperty({ severity: 'ERROR' }, 'code', {
+      get() { throw new Error('fixture classification detail'); },
+    }), 'unknown'],
     [new Error('fixture timeout detail'), 'unknown'],
     [{ code: '42501', details: 'fixture detail', hint: null }, '42501'],
     [{ code: '42501\n', details: 'fixture detail', hint: null }, 'unknown'],

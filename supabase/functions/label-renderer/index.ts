@@ -5987,22 +5987,23 @@ const withCors = (res: Response, corsHeaders: Record<string, string>) => {
 };
 
 Deno.serve(async (req: Request): Promise<Response> => {
-  const { headers: corsHeaders } = resolveCorsPolicy(req, {
-    hostedAllowedOrigins: readEnv("LABEL_RENDERER_CORS_ALLOW_ORIGINS"),
-    localAllowedOrigins: readEnv("PUBLIC_INGRESS_LOCAL_CORS_ALLOW_ORIGINS"),
-    allowedMethods: "POST, OPTIONS",
-  });
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: corsHeaders });
-  }
-  // Optional smoke-test bypass: only when explicitly enabled by env
-  const smokeAllow = Deno.env.get("EDGE_SMOKE_ALLOW");
-  const smokeHeader = req.headers.get("x-smoke-test");
-  if (smokeAllow === "1" && smokeHeader === "edge-allow") {
-    // Return 204 to indicate idle/successful no-op
-    return withCors(new Response(null, { status: 204 }), corsHeaders);
-  }
+  let corsHeaders: Record<string, string> = {};
   try {
+    ({ headers: corsHeaders } = resolveCorsPolicy(req, {
+      hostedAllowedOrigins: readEnv("LABEL_RENDERER_CORS_ALLOW_ORIGINS"),
+      localAllowedOrigins: readEnv("PUBLIC_INGRESS_LOCAL_CORS_ALLOW_ORIGINS"),
+      allowedMethods: "POST, OPTIONS",
+    }));
+    if (req.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders });
+    }
+    // Optional smoke-test bypass: only when explicitly enabled by env
+    const smokeAllow = Deno.env.get("EDGE_SMOKE_ALLOW");
+    const smokeHeader = req.headers.get("x-smoke-test");
+    if (smokeAllow === "1" && smokeHeader === "edge-allow") {
+      // Return 204 to indicate idle/successful no-op
+      return withCors(new Response(null, { status: 204 }), corsHeaders);
+    }
     const payload = await parseRequest(req);
     if (
       payload &&
@@ -6237,7 +6238,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       headers: { "content-type": "application/json" },
     }), corsHeaders);
   } catch (err) {
-    logRenderer("error", "request_failed", { error: err });
+    try {
+      logRenderer("error", "request_failed", { error: err });
+    } catch {
+      // Logging must not prevent the classified response.
+    }
     return withCors(new Response(JSON.stringify(rendererInternalErrorBody(err)), {
       status: 500,
       headers: { "content-type": "application/json" },

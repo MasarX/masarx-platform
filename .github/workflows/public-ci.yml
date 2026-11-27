@@ -427,44 +427,7 @@ jobs:
             exit 1
           fi
           rm -- "$EDGE_FROZEN_WORKDIR/supabase/unexpected.ts"
-          if ! node scripts/edge/verify-label-renderer-preview.cjs 2> >(tee "$RUNNER_TEMP/label-renderer-error" >&2); then
-            export DENO_DIR="$RUNNER_TEMP/label-renderer-map-cache"
-            readonly renderer_entry=supabase/functions/label-renderer/index.ts
-            deno bundle --frozen --lock=deno.lock --no-config --node-modules-dir=none \
-              --import-map supabase/functions/label-renderer/deno.json \
-              --platform=deno --packages=bundle --minify --keep-names --sourcemap=external \
-              --output "$RUNNER_TEMP/label-renderer-map.ts" "$renderer_entry"
-            cmp "$EDGE_FROZEN_WORKDIR/$renderer_entry" "$RUNNER_TEMP/label-renderer-map.ts"
-            node - "$RUNNER_TEMP/label-renderer-map.ts" "$RUNNER_TEMP/label-renderer-error" <<'NODE'
-          const fs = require('node:fs');
-          const { SourceMap } = require('node:module');
-          const ts = require('typescript');
-          const [file, log] = process.argv.slice(2);
-          const failure = fs.readFileSync(log, 'utf8');
-          const match = failure.match(/^LABEL_RENDERER_EDGE_IDENTIFIER name=([$A-Za-z_][$\w]{0,79})$/m);
-          if (!match) throw new Error('Missing renderer identifier');
-          const name = match[1];
-          const map = new SourceMap(JSON.parse(fs.readFileSync(file + '.map', 'utf8')));
-          const bundle = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
-          const origins = new Set();
-          function visit(node) {
-            if (ts.isIdentifier(node) && node.text === name) {
-              const position = bundle.getLineAndCharacterOfPosition(node.getStart(bundle));
-              const entry = map.findEntry(position.line, position.character);
-              const source = entry.originalSource?.replaceAll('\\', '/')
-                .match(/(?:^|\/)((?:supabase\/functions|npm\/registry\.npmjs\.org)\/.+)$/)?.[1];
-              if (source && /^[-/@.\w]+$/.test(source)) {
-                origins.add(source + ':' + (entry.originalLine + 1) + ':' + (entry.originalColumn + 1));
-              }
-            }
-            ts.forEachChild(node, visit);
-          }
-          visit(bundle);
-          console.error('LABEL_RENDERER_EDGE_MAP identifier=%s count=%d origins=%s',
-            name, origins.size, [...origins].slice(0, 10).join(',') || 'unavailable');
-          NODE
-            exit 1
-          fi
+          node scripts/edge/verify-label-renderer-preview.cjs
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs lint
