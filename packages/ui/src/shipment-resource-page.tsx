@@ -169,7 +169,9 @@ function renderShipmentTimelineSection(params: {
       {timelineError ? (
         <div className="space-y-2 text-sm text-ui-muted">
           <p>{t("timelineUnavailable")}</p>
-          <p className="text-xs text-ui-muted/70">{timelineError}</p>
+          {timelineError !== t("timelineUnavailable") ? (
+            <p className="text-xs text-ui-muted/70">{timelineError}</p>
+          ) : null}
         </div>
       ) : events.length === 0 ? (
         <p className="text-sm text-ui-muted">{t("timelineEmpty")}</p>

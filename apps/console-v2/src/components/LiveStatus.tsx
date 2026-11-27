@@ -4,6 +4,7 @@
 // live regions, and the ticking age sits outside the region.
 import { createContext, useContext, useEffect, useId, useState, type ReactNode } from 'react';
 import { useI18n } from '@/lib/i18n';
+import { scopeT } from '@/lib/i18n-catalog';
 import type { LiveConnection, LiveState } from '@/lib/live-connection';
 import { Button } from './Button';
 
@@ -59,6 +60,7 @@ function useNow(active: boolean) {
 
 export function LiveChip({ live }: { live: LiveConnection }) {
   const { t, fmtTime } = useI18n();
+  const liveT = scopeT(t, 'live');
   const fmtAge = useFmtAge();
   const { state, syncedAt } = live;
   const now = useNow(state === 'live' || state === 'reconnecting');
@@ -67,9 +69,9 @@ export function LiveChip({ live }: { live: LiveConnection }) {
     state === 'live'
       ? <bdi>{age}</bdi>
       : state === 'reconnecting'
-        ? fill(t('live.lastUpdate'), 'age', age)
+        ? fill(liveT('lastUpdate'), 'age', age)
         : state === 'offline'
-          ? fill(t('live.dataFrom'), 'time', fmtTime(syncedAt))
+          ? fill(liveT('dataFrom'), 'time', fmtTime(syncedAt))
           : state === 'polling'
             ? <bdi>{fmtAge(live.pollMs)}</bdi>
             : null;
@@ -77,10 +79,10 @@ export function LiveChip({ live }: { live: LiveConnection }) {
     <span className="live-chip" data-testid="live-chip" data-state={state}>
       <span
         className={`chip chip--${CHIP_KIND[state]}`}
-        title={state === 'live' ? t('live.connectedTitle').replace('{age}', age) : undefined}
+        title={state === 'live' ? liveT('connectedTitle').replace('{age}', age) : undefined}
       >
         <span className={DOT_CLASS[state]} aria-hidden="true" />
-        <span role="status">{t(`live.state.${state}`)}</span>
+        <span role="status">{liveT(`state.${state}`)}</span>
         {detail ? <span>· {detail}</span> : null}
       </span>
       {isStale(state) ? <Button kind="ghost" label={t('common.retry')} onClick={live.retry} /> : null}

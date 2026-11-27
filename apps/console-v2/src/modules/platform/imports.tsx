@@ -67,6 +67,7 @@ import {
   type WorkflowRunDomainEvent,
 } from '@/modules/workflows/workflow-run-context';
 import { ImportCancelReasonForm } from './imports-cancel';
+import { englishT, fill, useI18n, type Translate } from '@/lib/i18n';
 
 // ---------- Domain types (mirror SSOT 1:1) ----------
 
@@ -223,24 +224,24 @@ function importSummaryLabel(key: string): string {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function importSummaryValue(value: unknown): string {
+function importSummaryValue(value: unknown, t: Translate): string {
   if (value == null || value === '') return '-';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'boolean') return value ? t('platformImports.importSummary.yes') : t('platformImports.importSummary.no');
   if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '-';
   if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+  if (Array.isArray(value)) return fill(value.length === 1 ? t('platformImports.importSummary.itemsOne') : t('platformImports.importSummary.itemsOther'), { count: String(value.length) });
   if (typeof value === 'object') {
     const count = Object.keys(objectRecord(value)).length;
-    return `${count} field${count === 1 ? '' : 's'}`;
+    return fill(count === 1 ? t('platformImports.importSummary.fieldsOne') : t('platformImports.importSummary.fieldsOther'), { count: String(count) });
   }
   return String(value);
 }
 
-function importSummaryRows(value: Record<string, unknown>): KvRow[] {
+function importSummaryRows(value: Record<string, unknown>, t: Translate): KvRow[] {
   return Object.entries(value).map(([key, entry]) => ({
     key,
     label: importSummaryLabel(key),
-    value: importSummaryValue(entry),
+    value: importSummaryValue(entry, t),
     editable: false,
   }));
 }
@@ -540,32 +541,36 @@ function defaultImportSource(): string {
   return rows.find((row) => row.is_default)?.value ?? rows[0]?.value ?? '';
 }
 
-const COLUMNS: DataTableColumn<ImportJobTableRow>[] = [
-  { key: 'kind',         label: 'Kind',       sortable: true, filterable: true, lookup: 'import_job_kind' },
-  { key: 'source',       label: 'Source',     sortable: true, filterable: true, lookup: 'import_job_source' },
-  { key: 'status',       label: 'Status',     sortable: true, filterable: true, lookup: 'import_job_status' },
-  { key: 'row_count',    label: 'Rows',       mono: true, align: 'right', sortable: true, type: 'number' },
-  { key: 'error_count',  label: 'Errors',     mono: true, align: 'right', sortable: true, type: 'number' },
-  { key: 'submitted_at', label: 'Submitted',  format: 'datetime', sortable: true },
-  { key: 'completed_at', label: 'Completed',  format: 'datetime', sortable: true },
-  { key: 'submitted_by_display', label: 'Submitted by', sortable: true, filterable: true },
-];
+function importJobColumns(t: Translate): DataTableColumn<ImportJobTableRow>[] {
+  return [
+    { key: 'kind',         label: t('platformImports.importsModule.kind'),       sortable: true, filterable: true, lookup: 'import_job_kind' },
+    { key: 'source',       label: t('platformImports.importsModule.source'),     sortable: true, filterable: true, lookup: 'import_job_source' },
+    { key: 'status',       label: t('platformImports.importsModule.status'),     sortable: true, filterable: true, lookup: 'import_job_status' },
+    { key: 'row_count',    label: t('platformImports.importsModule.rows'),       mono: true, align: 'right', sortable: true, type: 'number' },
+    { key: 'error_count',  label: t('platformImports.importsModule.errors'),     mono: true, align: 'right', sortable: true, type: 'number' },
+    { key: 'submitted_at', label: t('platformImports.importsModule.submitted'),  format: 'datetime', sortable: true },
+    { key: 'completed_at', label: t('platformImports.importsModule.completed'),  format: 'datetime', sortable: true },
+    { key: 'submitted_by_display', label: t('platformImports.importsModule.submittedBy'), sortable: true, filterable: true },
+  ];
+}
 
-const FILE_RUN_COLUMNS: DataTableColumn<TabularImportRunRow>[] = [
-  { key: 'resource_key', label: 'Resource', sortable: true, filterable: true },
-  { key: 'source_file_name', label: 'File', sortable: true, filterable: true },
-  { key: 'write_mode', label: 'Mode', sortable: true, filterable: true, lookup: 'tabular_import_write_mode' },
-  { key: 'status', label: 'Status', sortable: true, filterable: true, lookup: 'tabular_import_run_status' },
-  { key: 'total_rows', label: 'Rows', mono: true, align: 'right', sortable: true, type: 'number' },
-  { key: 'will_create', label: 'Will create', mono: true, align: 'right', sortable: true, type: 'number' },
-  { key: 'will_update', label: 'Will update', mono: true, align: 'right', sortable: true, type: 'number' },
-  { key: 'created_count', label: 'Created', mono: true, align: 'right', sortable: true, type: 'number' },
-  { key: 'skipped_count', label: 'Skipped', mono: true, align: 'right', sortable: true, type: 'number' },
-  { key: 'failed_count', label: 'Failed', mono: true, align: 'right', sortable: true, type: 'number' },
-  { key: 'blocked_count', label: 'Blocked', mono: true, align: 'right', sortable: true, type: 'number' },
-  { key: 'created_at', label: 'Prepared', format: 'datetime', sortable: true },
-  { key: 'updated_at', label: 'Updated', format: 'datetime', sortable: true },
-];
+function fileRunColumns(t: Translate): DataTableColumn<TabularImportRunRow>[] {
+  return [
+    { key: 'resource_key', label: t('platformImports.importsModule.resource'), sortable: true, filterable: true },
+    { key: 'source_file_name', label: t('platformImports.importsModule.file'), sortable: true, filterable: true },
+    { key: 'write_mode', label: t('platformImports.importsModule.mode'), sortable: true, filterable: true, lookup: 'tabular_import_write_mode' },
+    { key: 'status', label: t('platformImports.importsModule.status'), sortable: true, filterable: true, lookup: 'tabular_import_run_status' },
+    { key: 'total_rows', label: t('platformImports.importsModule.rows'), mono: true, align: 'right', sortable: true, type: 'number' },
+    { key: 'will_create', label: t('platformImports.importsModule.willCreate'), mono: true, align: 'right', sortable: true, type: 'number' },
+    { key: 'will_update', label: t('platformImports.importsModule.willUpdate'), mono: true, align: 'right', sortable: true, type: 'number' },
+    { key: 'created_count', label: t('platformImports.importsModule.created'), mono: true, align: 'right', sortable: true, type: 'number' },
+    { key: 'skipped_count', label: t('platformImports.importsModule.skipped'), mono: true, align: 'right', sortable: true, type: 'number' },
+    { key: 'failed_count', label: t('platformImports.importsModule.failed'), mono: true, align: 'right', sortable: true, type: 'number' },
+    { key: 'blocked_count', label: t('platformImports.importsModule.blocked'), mono: true, align: 'right', sortable: true, type: 'number' },
+    { key: 'created_at', label: t('platformImports.importsModule.prepared'), format: 'datetime', sortable: true },
+    { key: 'updated_at', label: t('platformImports.importsModule.updated'), format: 'datetime', sortable: true },
+  ];
+}
 
 function isCancellable(row: ImportJobRow): boolean {
   // W71-Platform (Cycle F-R-11) closure — cancellable gate resolves through
@@ -672,14 +677,14 @@ function preparedHasBlockingIssues(result: ResourceImportStudioPrepareResult | n
   );
 }
 
-function diagnosticText(diagnostic: Record<string, unknown>, index: number): string {
+function diagnosticText(diagnostic: Record<string, unknown>, index: number, t: Translate): string {
   const message = String(diagnostic.message ?? '').trim();
   const code = String(diagnostic.code ?? '').trim();
   const field = String(diagnostic.fieldPath ?? diagnostic.field_path ?? diagnostic.field ?? '').trim();
   const row = String(diagnostic.row ?? diagnostic.row_number ?? '').trim();
-  const body = message || (code ? importSummaryLabel(code) : `Issue ${index + 1}`);
+  const body = message || (code ? importSummaryLabel(code) : fill(t('platformImports.importSummary.issue'), { number: String(index + 1) }));
   const parts = [
-    row ? `Row ${row}` : '',
+    row ? fill(t('platformImports.importSummary.row'), { row }) : '',
     field,
     body,
   ].filter(Boolean);
@@ -935,7 +940,7 @@ function normalizeWriteMode(value: unknown): 'create' | 'upsert' {
   return String(value ?? '').trim().toLowerCase() === 'upsert' ? 'upsert' : 'create';
 }
 
-function importWriteModeOptions(resourceKey: string): Array<{ value: 'create' | 'upsert'; label: string }> {
+function importWriteModeOptions(resourceKey: string, t: Translate): Array<{ value: 'create' | 'upsert'; label: string }> {
   const policy = resourceImportPolicy(resourceKey);
   const identityColumns = stringArray(policy.identity_columns);
   const allowUpsert = policy.allow_upsert === true && identityColumns.length > 0;
@@ -954,12 +959,12 @@ function importWriteModeOptions(resourceKey: string): Array<{ value: 'create' | 
 
   return Array.from(allowed).map((value) => ({
     value: normalizeWriteMode(value),
-    label: value === 'upsert' ? 'Upsert' : 'Create',
+    label: value === 'upsert' ? t('platformImports.importSubmitPanel.upsert') : t('platformImports.importSubmitPanel.create'),
   }));
 }
 
 function defaultImportWriteMode(resourceKey: string): 'create' | 'upsert' {
-  const options = importWriteModeOptions(resourceKey);
+  const options = importWriteModeOptions(resourceKey, englishT);
   const policyDefault = normalizeWriteMode(resourceImportPolicy(resourceKey).default_write_mode);
   return options.some((option) => option.value === policyDefault)
     ? policyDefault
@@ -975,6 +980,7 @@ function ImportSubmitPanel({
   onRunStarted?: (run: TabularImportRunRow, result: ResourceImportStudioStartResult) => void;
   organizationId?: string | null;
 }) {
+  const { t } = useI18n();
   const [kind, setKind] = useState('shipments');
   const [source, setSource] = useState(defaultImportSource);
   const [writeMode, setWriteMode] = useState<'create' | 'upsert'>(() => defaultImportWriteMode('shipments'));
@@ -1025,7 +1031,7 @@ function ImportSubmitPanel({
   const matchedProfile = preparedProfileMatch(prepared);
   const availableProfiles = preparedAvailableProfiles(prepared);
   const selectedProfile = availableProfiles.find((profile) => profileId(profile) === selectedProfileId) ?? matchedProfile;
-  const writeModeOptions = useMemo(() => importWriteModeOptions(kind), [kind]);
+  const writeModeOptions = useMemo(() => importWriteModeOptions(kind, t), [kind, t]);
   const acceptedFormats = useMemo(() => acceptedImportFormats(kind), [kind]);
   const fileAccept = useMemo(() => acceptAttributeForFormats(acceptedFormats), [acceptedFormats]);
   const fileLabel = useMemo(() => `${acceptedFormatsLabel(acceptedFormats)} file`, [acceptedFormats]);
@@ -1191,33 +1197,33 @@ function ImportSubmitPanel({
           setSelectedProfileId(profileId(defaultProfile));
           setSaveProfileName(profileName(defaultProfile) || fallbackProfileName(kind));
           const rows = preparedRowCount(res);
-          pushToast(`Import file prepared - ${kind} - ${rows ?? 0} rows`, 'good');
+          pushToast(fill(t('platformImports.importSubmitPanel.importFilePreparedRows'), { kind: String(kind), value: String(rows ?? 0) }), 'good');
         },
         onError: (err: Error) =>
-          pushToast(`Import file prepare failed - ${err.message}`, 'danger'),
+          pushToast(fill(t('platformImports.importSubmitPanel.importFilePrepareFailed'), { message: String(err.message) }), 'danger'),
       },
     );
   }
 
   function startPreparedRun() {
     if (!runId) {
-      pushToast('Prepare the import file before starting the import', 'warn');
+      pushToast(t('platformImports.importSubmitPanel.prepareTheImportFile'), 'warn');
       return;
     }
     if (hasPreparedBlockingIssues) {
-      pushToast('Fix blocked rows and unresolved targets before starting the import', 'warn');
+      pushToast(t('platformImports.importSubmitPanel.fixBlockedRowsAnd'), 'warn');
       return;
     }
     if (kind === 'shipments' && !canWriteShipments) {
-      pushToast('Starting shipment imports requires shipments.write permission', 'warn');
+      pushToast(t('platformImports.importSubmitPanel.startingShipmentImportsRequires'), 'warn');
       return;
     }
     if (profileMode === 'new' && !saveProfileName.trim()) {
-      pushToast('Enter a mapping profile name before starting the import', 'warn');
+      pushToast(t('platformImports.importSubmitPanel.enterAMappingProfile'), 'warn');
       return;
     }
     if (profileMode === 'update' && !selectedProfileId) {
-      pushToast('Select a mapping profile before starting the import', 'warn');
+      pushToast(t('platformImports.importSubmitPanel.selectAMappingProfile'), 'warn');
       return;
     }
 
@@ -1236,7 +1242,7 @@ function ImportSubmitPanel({
       saveProfile ? { run_id: runId, save_profile: saveProfile } : { run_id: runId },
       {
         onSuccess: (res) => {
-          pushToast(`Import started - ${runId}`, 'good');
+          pushToast(fill(t('platformImports.importSubmitPanel.importStarted'), { runId: String(runId) }), 'good');
           if (onRunStarted) {
             onRunStarted(startedRunRowFromResult(prepared, res, runId), res);
           } else {
@@ -1244,7 +1250,7 @@ function ImportSubmitPanel({
           }
         },
         onError: (err: Error) =>
-          pushToast(`Import start failed - ${err.message}`, 'danger'),
+          pushToast(fill(t('platformImports.importSubmitPanel.importStartFailed'), { message: String(err.message) }), 'danger'),
       },
     );
   }
@@ -1252,14 +1258,14 @@ function ImportSubmitPanel({
   return (
     <div data-testid="imports-submit-modal">
       <p className="state__hint">
-        File uploads are prepared before start so mapping and validation can be reviewed first.
+        {t('platformImports.importSubmitPanel.fileUploadsArePrepared')}
       </p>
       {importStudioError ? (
         <div ref={importStudioErrorRef} data-testid="resource-import-studio-error">
           <StateView
             kind={importStudioPermissionDenied ? 'denied' : 'error'}
             capability={importStudioPermissionDenied ? CAP.MAPPINGS_WRITE : undefined}
-            title={importStudioPermissionDenied ? 'Import studio permission denied' : 'Import studio action failed'}
+            title={importStudioPermissionDenied ? t('platformImports.importSubmitPanel.importStudioPermissionDenied') : t('platformImports.importSubmitPanel.importStudioActionFailed')}
             hint={(importStudioError as Error).message}
           />
         </div>
@@ -1274,12 +1280,12 @@ function ImportSubmitPanel({
           marginTop: 8,
         }}
       >
-        <label className="mono" htmlFor="resource-import-studio-kind">Kind</label>
+        <label className="mono" htmlFor="resource-import-studio-kind">{t('platformImports.importSubmitPanel.kind')}</label>
         <select
           id="resource-import-studio-kind"
           className="dt-inline-input"
           value={kind}
-          aria-label="Kind"
+          aria-label={t('platformImports.importSubmitPanel.kind')}
           onChange={(e) => {
             const nextKind = e.target.value;
             setKind(nextKind);
@@ -1293,12 +1299,12 @@ function ImportSubmitPanel({
             </option>
           ))}
         </select>
-        <label className="mono" htmlFor="resource-import-studio-source">Source</label>
+        <label className="mono" htmlFor="resource-import-studio-source">{t('platformImports.importSubmitPanel.source')}</label>
         <select
           id="resource-import-studio-source"
           className="dt-inline-input"
           value={source}
-          aria-label="Source"
+          aria-label={t('platformImports.importSubmitPanel.source')}
           onChange={(e) => {
             setSource(e.target.value);
             resetPreparedRun();
@@ -1310,12 +1316,12 @@ function ImportSubmitPanel({
             </option>
           ))}
         </select>
-        <label className="mono" htmlFor="resource-import-studio-write-mode">Write mode</label>
+        <label className="mono" htmlFor="resource-import-studio-write-mode">{t('platformImports.importSubmitPanel.writeMode')}</label>
         <select
           id="resource-import-studio-write-mode"
           className="dt-inline-input"
           value={writeMode}
-          aria-label="Write mode"
+          aria-label={t('platformImports.importSubmitPanel.writeMode')}
           onChange={(e) => {
             setWriteMode(normalizeWriteMode(e.target.value));
             resetPreparedRun();
@@ -1329,12 +1335,12 @@ function ImportSubmitPanel({
         </select>
         {kind === 'shipments' ? (
           <>
-            <label className="mono" htmlFor="resource-import-studio-client">Client</label>
+            <label className="mono" htmlFor="resource-import-studio-client">{t('platformImports.importSubmitPanel.client')}</label>
             <select
               id="resource-import-studio-client"
               className="dt-inline-input"
               value={selectedClientId}
-              aria-label="Import client"
+              aria-label={t('platformImports.importSubmitPanel.importClient')}
               data-testid="resource-import-studio-client"
               disabled={isBusy || clientRows.length === 0}
               onChange={(e) => {
@@ -1343,7 +1349,7 @@ function ImportSubmitPanel({
                 resetPreparedRun();
               }}
             >
-              <option value="">Select client or map client_id from file</option>
+              <option value="">{t('platformImports.importSubmitPanel.selectClientOrMap')}</option>
               {clientRows.map((client) => {
                 const id = clientOptionId(client);
                 return (
@@ -1353,12 +1359,12 @@ function ImportSubmitPanel({
                 );
               })}
             </select>
-            <label className="mono" htmlFor="resource-import-studio-sender">Sender</label>
+            <label className="mono" htmlFor="resource-import-studio-sender">{t('platformImports.importSubmitPanel.sender')}</label>
             <select
               id="resource-import-studio-sender"
               className="dt-inline-input"
               value={selectedSenderId}
-              aria-label="Import sender"
+              aria-label={t('platformImports.importSubmitPanel.importSender')}
               data-testid="resource-import-studio-sender"
               disabled={isBusy || senderRows.length === 0}
               onChange={(e) => {
@@ -1366,7 +1372,7 @@ function ImportSubmitPanel({
                 resetPreparedRun();
               }}
             >
-              <option value="">Select sender or map sender_id from file</option>
+              <option value="">{t('platformImports.importSubmitPanel.selectSenderOrMap')}</option>
               {senderRows.map((sender) => {
                 const id = senderOptionId(sender);
                 return (
@@ -1378,7 +1384,7 @@ function ImportSubmitPanel({
             </select>
           </>
         ) : null}
-        <label className="mono" htmlFor="resource-import-studio-file">File</label>
+        <label className="mono" htmlFor="resource-import-studio-file">{t('platformImports.importSubmitPanel.file')}</label>
         <input
           id="resource-import-studio-file"
           className="dt-inline-input"
@@ -1393,39 +1399,39 @@ function ImportSubmitPanel({
             resetPreparedRun();
           }}
         />
-        <label className="mono">Import limits</label>
+        <label className="mono">{t('platformImports.importSubmitPanel.importLimits')}</label>
         <div className="state__hint" data-testid="resource-import-studio-limits">
           {[
             maxFileBytes == null ? null : `File ${formatByteLimit(maxFileBytes)}`,
             maxImportRows == null ? null : `Rows ${maxImportRows.toLocaleString()}`,
-          ].filter(Boolean).join(' - ') || 'No row-driven limits configured.'}
+          ].filter(Boolean).join(' - ') || t('platformImports.importSubmitPanel.noRowDrivenLimits')}
         </div>
         {acceptsCsv ? (
           <>
-            <label className="mono" htmlFor="resource-import-studio-pasted-csv">Paste CSV rows</label>
+            <label className="mono" htmlFor="resource-import-studio-pasted-csv">{t('platformImports.importSubmitPanel.pasteCsvRows')}</label>
             <textarea
               id="resource-import-studio-pasted-csv"
               className="dt-inline-input"
               value={pastedCsv}
-              aria-label="Paste CSV content"
+              aria-label={t('platformImports.importSubmitPanel.pasteCsvContent')}
               data-testid="resource-import-studio-pasted-csv"
               disabled={isBusy || Boolean(file)}
-              placeholder="tracking_number,recipient_name,address_line_1"
+              placeholder={t('platformImports.importSubmitPanel.trackingNumberRecipientName')}
               rows={4}
               onChange={(e) => {
                 setPastedCsv(e.target.value);
                 resetPreparedRun();
               }}
             />
-            <label className="mono" htmlFor="resource-import-studio-pasted-csv-file-name">Pasted CSV file name</label>
+            <label className="mono" htmlFor="resource-import-studio-pasted-csv-file-name">{t('platformImports.importSubmitPanel.pastedCsvFileName')}</label>
             <input
               id="resource-import-studio-pasted-csv-file-name"
               className="dt-inline-input"
               value={pastedCsvFileName}
-              aria-label="Pasted CSV file name"
+              aria-label={t('platformImports.importSubmitPanel.pastedCsvFileName')}
               data-testid="resource-import-studio-pasted-csv-file-name"
               disabled={isBusy || Boolean(file)}
-              placeholder={`${kind}-pasted-import.csv`}
+              placeholder={fill(t('platformImports.importSubmitPanel.pastedImportCsv'), { kind: String(kind) })}
               onChange={(e) => {
                 setPastedCsvFileName(e.target.value);
                 resetPreparedRun();
@@ -1435,36 +1441,36 @@ function ImportSubmitPanel({
         ) : null}
         {acceptedFormats.length === 0 ? (
           <>
-            <label className="mono">Accepted formats</label>
+            <label className="mono">{t('platformImports.importSubmitPanel.acceptedFormats')}</label>
             <StateView
               kind="error"
-              title="Import formats are not configured"
-              hint={`Seed accepted_formats on the ${kind} import policy before preparing files.`}
+              title={t('platformImports.importSubmitPanel.importFormatsAreNot')}
+              hint={fill(t('platformImports.importSubmitPanel.seedAcceptedFormatsOn'), { kind: String(kind) })}
             />
           </>
         ) : null}
-        <label className="mono">Prepared rows</label>
+        <label className="mono">{t('platformImports.importSubmitPanel.preparedRows')}</label>
         <div className="state__hint" data-testid="resource-import-studio-row-count">
-          {preparedRows == null ? 'Not prepared.' : String(preparedRows)}
+          {preparedRows == null ? t('platformImports.importSubmitPanel.notPrepared') : String(preparedRows)}
         </div>
-        <label className="mono">Prepared run</label>
+        <label className="mono">{t('platformImports.importSubmitPanel.preparedRun')}</label>
         <div className="state__hint" data-testid="resource-import-studio-run">
-          {runId ? `${runId} · ${preparedRows ?? 0} rows` : 'No prepared file run.'}
+          {runId ? fill(t('platformImports.importSubmitPanel.rows'), { runId: String(runId), value: String(preparedRows ?? 0) }) : t('platformImports.importSubmitPanel.noPreparedFileRun')}
         </div>
-        <label className="mono">Validation</label>
+        <label className="mono">{t('platformImports.importSubmitPanel.validation')}</label>
         <div className="state__hint" data-testid="resource-import-studio-validation">
           {!prepared ? (
-            'Prepare a file to review validation.'
+            t('platformImports.importSubmitPanel.prepareAFileTo')
           ) : hasPreparedBlockingIssues ? (
-            `Blocked: ${preparedBlockedCount ?? 0} rows. Start is disabled until the file or mapping is fixed.`
+            fill(t('platformImports.importSubmitPanel.blockedRowsStartIs'), { value: String(preparedBlockedCount ?? 0) })
           ) : (
-            `Ready: ${preparedRows ?? 0} rows, ${preparedWarningCount ?? 0} warnings.`
+            fill(t('platformImports.importSubmitPanel.readyRowsWarnings'), { value: String(preparedRows ?? 0), value2: String(preparedWarningCount ?? 0) })
           )}
         </div>
-        <label className="mono">Plan</label>
+        <label className="mono">{t('platformImports.importSubmitPanel.plan')}</label>
         <div className="state__hint" data-testid="resource-import-studio-plan">
           {!prepared
-            ? 'No prepared plan yet.'
+            ? t('platformImports.importSubmitPanel.noPreparedPlanYet')
             : [
                 `create ${preparedWillCreate ?? 0}`,
                 `update ${preparedWillUpdate ?? 0}`,
@@ -1472,20 +1478,20 @@ function ImportSubmitPanel({
                 `blocked ${preparedBlockedCount ?? 0}`,
               ].join(' - ')}
         </div>
-        <label className="mono">Mapping preview</label>
+        <label className="mono">{t('platformImports.importSubmitPanel.mappingPreview')}</label>
         <div className="state__hint" data-testid="resource-import-studio-mapping-preview">
           {!prepared ? (
-            'Prepare a file to preview resolved field mappings.'
+            t('platformImports.importSubmitPanel.prepareAFileTo2')
           ) : resolvedRules.length === 0 ? (
-            'No mapping rules were returned for this file.'
+            t('platformImports.importSubmitPanel.noMappingRulesWere')
           ) : (
             <table className="dt-table" style={{ margin: 0 }}>
               <thead>
                 <tr>
-                  <th>Source column</th>
-                  <th>Target field</th>
-                  <th>Status</th>
-                  <th>Context</th>
+                  <th>{t('platformImports.importSubmitPanel.sourceColumn')}</th>
+                  <th>{t('platformImports.importSubmitPanel.targetField')}</th>
+                  <th>{t('platformImports.importSubmitPanel.status')}</th>
+                  <th>{t('platformImports.importSubmitPanel.context')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1493,7 +1499,7 @@ function ImportSubmitPanel({
                   <tr key={rule.key}>
                     <td className="mono">{rule.sourceColumn || '-'}</td>
                     <td className="mono">{rule.targetField || '-'}</td>
-                    <td>{rule.enabled ? 'Enabled' : 'Disabled'}</td>
+                    <td>{rule.enabled ? t('platformImports.importSubmitPanel.enabled') : t('platformImports.importSubmitPanel.disabled')}</td>
                     <td>{rule.note || '-'}</td>
                   </tr>
                 ))}
@@ -1501,24 +1507,24 @@ function ImportSubmitPanel({
             </table>
           )}
         </div>
-        <label className="mono">Matched profile</label>
+        <label className="mono">{t('platformImports.importSubmitPanel.matchedProfile')}</label>
         <div className="state__hint" data-testid="resource-import-studio-profile-match">
           {matchedProfile ? (
             <span>
-              <strong>{profileName(matchedProfile) || 'Unnamed profile'}</strong>
+              <strong>{profileName(matchedProfile) || t('platformImports.importSubmitPanel.unnamedProfile')}</strong>
               {profileMeta(matchedProfile) ? ` · ${profileMeta(matchedProfile)}` : ''}
             </span>
           ) : prepared ? (
-            'No header-fingerprint match.'
+            t('platformImports.importSubmitPanel.noHeaderFingerprintMatch')
           ) : (
-            'Prepare a file to resolve mapping profiles.'
+            t('platformImports.importSubmitPanel.prepareAFileTo3')
           )}
         </div>
-        <label className="mono">Available profiles</label>
+        <label className="mono">{t('platformImports.importSubmitPanel.availableProfiles')}</label>
         <select
           className="dt-inline-input"
           value={selectedProfileId}
-          aria-label="Available mapping profile"
+          aria-label={t('platformImports.importSubmitPanel.availableMappingProfile')}
           data-testid="resource-import-studio-profile-list"
           disabled={!prepared || availableProfiles.length === 0}
           onChange={(e) => {
@@ -1541,14 +1547,14 @@ function ImportSubmitPanel({
               );
             })
           ) : (
-            <option value="">No reusable profile</option>
+            <option value="">{t('platformImports.importSubmitPanel.noReusableProfile')}</option>
           )}
         </select>
-        <label className="mono">Profile action</label>
+        <label className="mono">{t('platformImports.importSubmitPanel.profileAction')}</label>
         <select
           className="dt-inline-input"
           value={profileMode}
-          aria-label="Profile action"
+          aria-label={t('platformImports.importSubmitPanel.profileAction')}
           data-testid="resource-import-studio-profile-action"
           disabled={!prepared}
           onChange={(e) => {
@@ -1562,20 +1568,20 @@ function ImportSubmitPanel({
             }
           }}
         >
-          <option value="none">Start without saving profile</option>
-          <option value="new">Save as new mapping profile</option>
+          <option value="none">{t('platformImports.importSubmitPanel.startWithoutSavingProfile')}</option>
+          <option value="new">{t('platformImports.importSubmitPanel.saveAsNewMapping')}</option>
           <option value="update" disabled={availableProfiles.length === 0}>
-            Update selected mapping profile
+            {t('platformImports.importSubmitPanel.updateSelectedMappingProfile')}
           </option>
         </select>
-        <label className="mono">Profile name</label>
+        <label className="mono">{t('platformImports.importSubmitPanel.profileName')}</label>
         <input
           className="dt-inline-input"
           value={saveProfileName}
-          aria-label="Profile name"
+          aria-label={t('platformImports.importSubmitPanel.profileName')}
           data-testid="resource-import-studio-profile-name"
           disabled={!prepared || profileMode === 'none'}
-          placeholder="Required when saving or updating"
+          placeholder={t('platformImports.importSubmitPanel.requiredWhenSavingOr')}
           onChange={(e) => {
             startMutation.reset();
             setSaveProfileName(e.target.value);
@@ -1590,40 +1596,40 @@ function ImportSubmitPanel({
         >
           {preparedUnresolvedTargets.length > 0 ? (
             <div data-testid="resource-import-studio-unresolved-targets">
-              <strong>Unresolved targets:</strong> {preparedUnresolvedTargets.join(', ')}
+              <strong>{t('platformImports.importSubmitPanel.unresolvedTargets')}</strong> {preparedUnresolvedTargets.join(', ')}
             </div>
           ) : null}
           {preparedBlockingDiagnostics.length > 0 ? (
             <div data-testid="resource-import-studio-blocking-diagnostics">
-              <strong>Blocking issues</strong>
+              <strong>{t('platformImports.importSubmitPanel.blockingIssues')}</strong>
               <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
                 {preparedBlockingDiagnostics.slice(0, 6).map((diagnostic, index) => (
-                  <li key={`blocking-${index}`}>{diagnosticText(diagnostic, index)}</li>
+                  <li key={`blocking-${index}`}>{diagnosticText(diagnostic, index, t)}</li>
                 ))}
               </ul>
             </div>
           ) : null}
           {preparedWarningDiagnostics.length > 0 ? (
             <div data-testid="resource-import-studio-warning-diagnostics">
-              <strong>Warnings</strong>
+              <strong>{t('platformImports.importSubmitPanel.warnings')}</strong>
               <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
                 {preparedWarningDiagnostics.slice(0, 6).map((diagnostic, index) => (
-                  <li key={`warning-${index}`}>{diagnosticText(diagnostic, index)}</li>
+                  <li key={`warning-${index}`}>{diagnosticText(diagnostic, index, t)}</li>
                 ))}
               </ul>
             </div>
           ) : null}
           {!hasPreparedBlockingIssues && preparedWarningDiagnostics.length === 0 ? (
             <div data-testid="resource-import-studio-no-diagnostics">
-              Validation found no blocking issues for this prepared file.
+              {t('platformImports.importSubmitPanel.validationFoundNoBlocking')}
             </div>
           ) : null}
         </div>
       ) : null}
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" disabled={isBusy} onClick={onClose} />
+        <Button label={t('platformImports.importSubmitPanel.cancel')} kind="ghost" disabled={isBusy} onClick={onClose} />
         <Button
-          label="Prepare file"
+          label={t('platformImports.importSubmitPanel.prepareFile')}
           iconName="upload"
           kind="ghost"
           capability={CAP.MAPPINGS_WRITE}
@@ -1631,7 +1637,7 @@ function ImportSubmitPanel({
           onClick={prepareFile}
         />
         <Button
-          label="Start prepared run"
+          label={t('platformImports.importSubmitPanel.startPreparedRun')}
           iconName="check"
           kind="primary"
           capabilities={[
@@ -1657,6 +1663,7 @@ function ImportFileRunDrawerBody({
   onOpenWorkflowRun: (workflowRunId: string, context: { importRunId: string; recordId: string; rowNumber: string }) => void;
   onRunRefresh?: () => Promise<unknown>;
 }) {
+  const { t } = useI18n();
   const detailQuery = useResource<TabularImportRunDetailRow>('tabular_import_runs', initialRun.id);
   const cancelMutation = useResourceImportStudioCancel();
   const modal = useModal();
@@ -1689,51 +1696,51 @@ function ImportFileRunDrawerBody({
   const runStatusLabel = lookupLabel('tabular_import_run_status', run.status);
 
   const kvRows: KvRow[] = [
-    { key: 'id', label: 'Run reference', value: run.id ? 'Recorded' : '-', editable: false },
-    { key: 'resource_key', label: 'Resource', value: run.resource_key ?? '-', editable: false },
-    { key: 'relation_name', label: 'Destination', value: run.relation_name ? 'Configured' : '-', editable: false },
-    { key: 'write_mode', label: 'Write mode', value: run.write_mode ?? '-', lookup: 'tabular_import_write_mode', editable: false },
-    { key: 'status', label: 'Status', value: run.status ?? '-', lookup: 'tabular_import_run_status', editable: false },
-    { key: 'source_file_name', label: 'Source file', value: run.source_file_name ?? '-', editable: false },
-    { key: 'source_format', label: 'Source format', value: run.source_format ?? '-', editable: false },
-    { key: 'sheet_name', label: 'Sheet', value: run.sheet_name ?? '-', editable: false },
-    { key: 'total_rows', label: 'Rows', value: countValue(run.total_rows), mono: true, editable: false },
-    { key: 'will_create', label: 'Will create', value: countValue(run.will_create), mono: true, editable: false },
-    { key: 'will_update', label: 'Will update', value: countValue(run.will_update), mono: true, editable: false },
-    { key: 'will_skip', label: 'Will skip', value: countValue(run.will_skip), mono: true, editable: false },
-    { key: 'processed_count', label: 'Processed rows', value: processedCount, mono: true, editable: false },
-    { key: 'created_count', label: 'Created', value: countValue(run.created_count), mono: true, editable: false },
-    { key: 'updated_count', label: 'Updated', value: countValue(run.updated_count), mono: true, editable: false },
-    { key: 'skipped_count', label: 'Skipped', value: countValue(run.skipped_count), mono: true, editable: false },
-    { key: 'failed_count', label: 'Failed', value: countValue(run.failed_count), mono: true, editable: false },
-    { key: 'blocked_count', label: 'Blocked', value: countValue(run.blocked_count), mono: true, editable: false },
-    { key: 'warning_count', label: 'Warnings', value: countValue(run.warning_count), mono: true, editable: false },
-    { key: 'profile_name', label: 'Mapping profile', value: run.profile_name ?? '-', editable: false },
-    { key: 'mapping_config_id', label: 'Mapping profile link', value: run.mapping_config_id ? 'Linked' : '-', editable: false },
-    { key: 'task_id', label: 'Task link', value: run.task_id ? 'Linked' : '-', editable: false },
-    { key: 'report_id', label: 'Report link', value: run.report_id ? 'Linked' : '-', editable: false },
-    { key: 'created_at', label: 'Prepared at', value: run.created_at ?? '-', mono: true, editable: false },
-    { key: 'started_at', label: 'Started at', value: run.started_at ?? '-', mono: true, editable: false },
-    { key: 'completed_at', label: 'Completed at', value: run.completed_at ?? '-', mono: true, editable: false },
-    { key: 'cancel_reason', label: 'Cancel reason', value: cancellationReason ?? '-', mono: true, editable: false },
+    { key: 'id', label: t('platformImports.importFileRunDrawerBody.runReference'), value: run.id ? 'Recorded' : '-', editable: false },
+    { key: 'resource_key', label: t('platformImports.importFileRunDrawerBody.resource'), value: run.resource_key ?? '-', editable: false },
+    { key: 'relation_name', label: t('platformImports.importFileRunDrawerBody.destination'), value: run.relation_name ? 'Configured' : '-', editable: false },
+    { key: 'write_mode', label: t('platformImports.importFileRunDrawerBody.writeMode'), value: run.write_mode ?? '-', lookup: 'tabular_import_write_mode', editable: false },
+    { key: 'status', label: t('platformImports.importFileRunDrawerBody.status'), value: run.status ?? '-', lookup: 'tabular_import_run_status', editable: false },
+    { key: 'source_file_name', label: t('platformImports.importFileRunDrawerBody.sourceFile'), value: run.source_file_name ?? '-', editable: false },
+    { key: 'source_format', label: t('platformImports.importFileRunDrawerBody.sourceFormat'), value: run.source_format ?? '-', editable: false },
+    { key: 'sheet_name', label: t('platformImports.importFileRunDrawerBody.sheet'), value: run.sheet_name ?? '-', editable: false },
+    { key: 'total_rows', label: t('platformImports.importFileRunDrawerBody.rows'), value: countValue(run.total_rows), mono: true, editable: false },
+    { key: 'will_create', label: t('platformImports.importFileRunDrawerBody.willCreate'), value: countValue(run.will_create), mono: true, editable: false },
+    { key: 'will_update', label: t('platformImports.importFileRunDrawerBody.willUpdate'), value: countValue(run.will_update), mono: true, editable: false },
+    { key: 'will_skip', label: t('platformImports.importFileRunDrawerBody.willSkip'), value: countValue(run.will_skip), mono: true, editable: false },
+    { key: 'processed_count', label: t('platformImports.importFileRunDrawerBody.processedRows'), value: processedCount, mono: true, editable: false },
+    { key: 'created_count', label: t('platformImports.importFileRunDrawerBody.created'), value: countValue(run.created_count), mono: true, editable: false },
+    { key: 'updated_count', label: t('platformImports.importFileRunDrawerBody.updated'), value: countValue(run.updated_count), mono: true, editable: false },
+    { key: 'skipped_count', label: t('platformImports.importFileRunDrawerBody.skipped'), value: countValue(run.skipped_count), mono: true, editable: false },
+    { key: 'failed_count', label: t('platformImports.importFileRunDrawerBody.failed'), value: countValue(run.failed_count), mono: true, editable: false },
+    { key: 'blocked_count', label: t('platformImports.importFileRunDrawerBody.blocked'), value: countValue(run.blocked_count), mono: true, editable: false },
+    { key: 'warning_count', label: t('platformImports.importFileRunDrawerBody.warnings'), value: countValue(run.warning_count), mono: true, editable: false },
+    { key: 'profile_name', label: t('platformImports.importFileRunDrawerBody.mappingProfile'), value: run.profile_name ?? '-', editable: false },
+    { key: 'mapping_config_id', label: t('platformImports.importFileRunDrawerBody.mappingProfileLink'), value: run.mapping_config_id ? 'Linked' : '-', editable: false },
+    { key: 'task_id', label: t('platformImports.importFileRunDrawerBody.taskLink'), value: run.task_id ? 'Linked' : '-', editable: false },
+    { key: 'report_id', label: t('platformImports.importFileRunDrawerBody.reportLink'), value: run.report_id ? 'Linked' : '-', editable: false },
+    { key: 'created_at', label: t('platformImports.importFileRunDrawerBody.preparedAt'), value: run.created_at ?? '-', mono: true, editable: false },
+    { key: 'started_at', label: t('platformImports.importFileRunDrawerBody.startedAt'), value: run.started_at ?? '-', mono: true, editable: false },
+    { key: 'completed_at', label: t('platformImports.importFileRunDrawerBody.completedAt'), value: run.completed_at ?? '-', mono: true, editable: false },
+    { key: 'cancel_reason', label: t('platformImports.importFileRunDrawerBody.cancelReason'), value: cancellationReason ?? '-', mono: true, editable: false },
   ];
 
   function openCancelFileRunModal() {
     modal.open({
-      title: 'Cancel file import run',
+      title: t('platformImports.importFileRunDrawerBody.cancelFileImportRun'),
       body: (
         <ImportCancelReasonForm
           jobId={run.id}
           jobStatus={run.status}
-          entityLabel="Run"
-          bodyText="Cancelling stops the active file import run and saves the operator reason."
+          entityLabel={t('platformImports.importFileRunDrawerBody.run')}
+          bodyText={t('platformImports.importFileRunDrawerBody.cancellingStopsTheActive')}
           onClose={() => modal.close()}
           onSubmit={async (reason) => {
             const result = await cancelMutation.mutateAsync({ run_id: run.id, reason });
             setCancelResult(result);
             await detailQuery.refetch();
             await onRunRefresh?.();
-            pushToast('File import run canceled', 'warn');
+            pushToast(t('platformImports.importFileRunDrawerBody.fileImportRunCanceled'), 'warn');
             modal.close();
           }}
         />
@@ -1753,21 +1760,21 @@ function ImportFileRunDrawerBody({
   return (
     <div data-testid="imports-file-run-drawer">
       {modal.node}
-      <div className="section-eyebrow">File import run</div>
+      <div className="section-eyebrow">{t('platformImports.importFileRunDrawerBody.fileImportRun')}</div>
       {detailQuery.isLoading ? (
         <div className="state__hint" style={{ padding: '0 14px 8px' }}>
-          Loading run details.
+          {t('platformImports.importFileRunDrawerBody.loadingRunDetails')}
         </div>
       ) : detailQuery.error ? (
         <StateView
           kind={isPermissionDeniedError(detailQuery.error) ? 'denied' : 'error'}
           capability={isPermissionDeniedError(detailQuery.error) ? CAP.MAPPINGS_READ : undefined}
-          title="Run details unavailable"
+          title={t('platformImports.importFileRunDrawerBody.runDetailsUnavailable')}
           hint={(detailQuery.error as Error).message}
         />
       ) : (
         <div className="state__hint" data-testid="imports-file-run-readback" style={{ padding: '0 14px 8px' }}>
-          Run details loaded.
+          {t('platformImports.importFileRunDrawerBody.runDetailsLoaded')}
         </div>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px 10px' }}>
@@ -1776,17 +1783,17 @@ function ImportFileRunDrawerBody({
             size="sm"
             kind="danger"
             iconName="close"
-            label={cancelMutation.isPending ? 'Canceling run' : 'Cancel run'}
+            label={cancelMutation.isPending ? t('platformImports.importFileRunDrawerBody.cancelingRun') : t('platformImports.importFileRunDrawerBody.cancelRun')}
             capability={CAP.MAPPINGS_WRITE}
             disabled={cancelMutation.isPending}
             onClick={openCancelFileRunModal}
           />
         ) : (
-          <span className="state__hint">This file run is not cancellable in the current lifecycle state.</span>
+          <span className="state__hint">{t('platformImports.importFileRunDrawerBody.thisFileRunIs')}</span>
         )}
         {cancelResult ? (
           <span className="state__hint" data-testid="imports-file-run-cancel-readback">
-            Cancel confirmed with status {String(run.status ?? 'canceled')}.
+            {fill(t('platformImports.importFileRunDrawerBody.cancelConfirmedWithStatus'), { value: String(String(run.status ?? 'canceled')) })}
           </span>
         ) : null}
       </div>
@@ -1796,12 +1803,12 @@ function ImportFileRunDrawerBody({
           data-testid="imports-file-run-terminal-guard"
           style={{ padding: '0 14px 8px' }}
         >
-          Terminal file runs cannot be changed. Use Upload file to prepare a new run.
+          {t('platformImports.importFileRunDrawerBody.terminalFileRunsCannot')}
         </div>
       ) : null}
       {awaitingBackendProgress ? (
         <div className="state__hint" data-testid="imports-file-run-live-watch" style={{ padding: '0 14px 8px' }}>
-          Watching import progress. This drawer and the import run list refresh automatically.
+          {t('platformImports.importFileRunDrawerBody.watchingImportProgressThis')}
         </div>
       ) : null}
       <div
@@ -1809,37 +1816,37 @@ function ImportFileRunDrawerBody({
         data-testid="imports-file-run-outcome"
         style={{ padding: '0 14px 8px' }}
       >
-        <strong>{mixedOutcome ? 'Partial import summary' : `${runStatusLabel} import summary`}</strong>
+        <strong>{mixedOutcome ? t('platformImports.importFileRunDrawerBody.partialImportSummary') : fill(t('platformImports.importFileRunDrawerBody.importSummary'), { runStatusLabel: String(runStatusLabel) })}</strong>
         {' - '}
-        Created {createdCount}, updated {updatedCount}, skipped {skippedCount}, failed {failedCount}, blocked {blockedCount}.
+        {fill(t('platformImports.importFileRunDrawerBody.outcomeCounts'), { createdCount: String(createdCount), updatedCount: String(updatedCount), skippedCount: String(skippedCount), failedCount: String(failedCount), blockedCount: String(blockedCount) })}
         {' '}
-        Successful shipment handoff rows and failed row diagnostics are shown separately in this import summary.
+        {t('platformImports.importFileRunDrawerBody.successfulShipmentHandoffRows')}
       </div>
       {cancelMutation.error ? (
         <StateView
           kind="error"
-          title="File run cancel failed"
+          title={t('platformImports.importFileRunDrawerBody.fileRunCancelFailed')}
           hint={(cancelMutation.error as Error).message}
         />
       ) : null}
       <KvGrid rows={kvRows} />
 
       <div className="section-eyebrow" style={{ marginTop: 12 }}>
-        Shipment / recipient / address handoff
+        {t('platformImports.importFileRunDrawerBody.shipmentRecipientAddressHandoff')}
       </div>
       {handoffRows.length > 0 ? (
         <div style={{ margin: '4px 14px', overflow: 'auto' }}>
           <table className="dt-table" data-testid="imports-file-run-handoff">
             <thead>
               <tr>
-                <th>Record</th>
-                <th>Resource</th>
-                <th>ID</th>
-                <th>Row</th>
-                <th>Status</th>
-                <th>Workflow</th>
-                <th>Workflow status</th>
-                <th>Action</th>
+                <th>{t('platformImports.importFileRunDrawerBody.record')}</th>
+                <th>{t('platformImports.importFileRunDrawerBody.resource')}</th>
+                <th>{t('platformImports.importFileRunDrawerBody.id')}</th>
+                <th>{t('platformImports.importFileRunDrawerBody.row')}</th>
+                <th>{t('platformImports.importFileRunDrawerBody.status')}</th>
+                <th>{t('platformImports.importFileRunDrawerBody.workflow')}</th>
+                <th>{t('platformImports.importFileRunDrawerBody.workflowStatus')}</th>
+                <th>{t('platformImports.importFileRunDrawerBody.action')}</th>
               </tr>
             </thead>
             <tbody>
@@ -1861,9 +1868,9 @@ function ImportFileRunDrawerBody({
                             size="sm"
                             kind="ghost"
                             iconName="eye"
-                            label="Open shipment"
+                            label={t('platformImports.importFileRunDrawerBody.openShipment')}
                             capability={CAP.SHIPMENTS_READ}
-                            ariaLabel={`Open shipment context ${handoff.id}`}
+                            ariaLabel={fill(t('platformImports.importFileRunDrawerBody.openShipmentContext'), { id: String(handoff.id) })}
                             onClick={() => onOpenShipment(handoff.id)}
                           />
                           {handoff.workflowRunId ? (
@@ -1871,9 +1878,9 @@ function ImportFileRunDrawerBody({
                               size="sm"
                               kind="ghost"
                               iconName="trace_tree"
-                              label="Open workflow"
+                              label={t('platformImports.importFileRunDrawerBody.openWorkflow')}
                               capability={CAP.WORKFLOWS_READ}
-                              ariaLabel={`Open import workflow context ${handoff.workflowRunId}`}
+                              ariaLabel={fill(t('platformImports.importFileRunDrawerBody.openImportWorkflowContext'), { workflowRunId: String(handoff.workflowRunId) })}
                               onClick={() => onOpenWorkflowRun(handoff.workflowRunId, {
                                 importRunId: run.id,
                                 recordId: handoff.id,
@@ -1883,7 +1890,7 @@ function ImportFileRunDrawerBody({
                           ) : null}
                         </div>
                       ) : (
-                        <span className="state__hint">Shown in shipment context</span>
+                        <span className="state__hint">{t('platformImports.importFileRunDrawerBody.shownInShipmentContext')}</span>
                       )}
                     </td>
                   </tr>
@@ -1894,12 +1901,12 @@ function ImportFileRunDrawerBody({
         </div>
       ) : (
         <div className="state__hint" style={{ padding: '6px 14px' }}>
-          No shipment, recipient, or address handoff records are available yet.
+          {t('platformImports.importFileRunDrawerBody.noShipmentRecipientOr')}
         </div>
       )}
 
       <div className="section-eyebrow" style={{ marginTop: 12 }}>
-        Row checks
+        {t('platformImports.importFileRunDrawerBody.rowChecks')}
       </div>
       {diagnostics.length > 0 ? (
         <ul
@@ -1908,42 +1915,42 @@ function ImportFileRunDrawerBody({
           style={{ margin: '4px 14px', maxHeight: 220, overflow: 'auto' }}
         >
           {diagnostics.slice(0, 20).map((diagnostic, index) => (
-            <li key={index}>{diagnosticText(objectRecord(diagnostic), index)}</li>
+            <li key={index}>{diagnosticText(objectRecord(diagnostic), index, t)}</li>
           ))}
         </ul>
       ) : rows.length > 0 ? (
         <div className="state__hint" style={{ padding: '6px 14px' }}>
-          No row issues were found in the sampled rows.
+          {t('platformImports.importFileRunDrawerBody.noRowIssuesWere')}
         </div>
       ) : (
         <div className="state__hint" style={{ padding: '6px 14px' }}>
-          Row checks are not available for this run yet.
+          {t('platformImports.importFileRunDrawerBody.rowChecksAreNot')}
         </div>
       )}
 
       <div className="section-eyebrow" style={{ marginTop: 12 }}>
-        Mapping and validation summary
+        {t('platformImports.importFileRunDrawerBody.mappingAndValidationSummary')}
       </div>
       {summary ? (
         <div data-testid="imports-file-run-summary" style={{ margin: '4px 14px' }}>
-          <KvGrid rows={importSummaryRows(summary)} />
+          <KvGrid rows={importSummaryRows(summary, t)} />
         </div>
       ) : (
         <div className="state__hint" style={{ padding: '6px 14px' }}>
-          No mapping or validation summary has been recorded for this file run yet.
+          {t('platformImports.importFileRunDrawerBody.noMappingOrValidation')}
         </div>
       )}
 
       <div className="section-eyebrow" style={{ marginTop: 12 }}>
-        Operation report
+        {t('platformImports.importFileRunDrawerBody.operationReport')}
       </div>
       {report ? (
         <div data-testid="imports-file-run-report" style={{ margin: '4px 14px' }}>
-          <KvGrid rows={importSummaryRows(report)} />
+          <KvGrid rows={importSummaryRows(report, t)} />
         </div>
       ) : (
         <div className="state__hint" style={{ padding: '6px 14px' }}>
-          No mapping operation report has been attached to this run yet.
+          {t('platformImports.importFileRunDrawerBody.noMappingOperationReport')}
         </div>
       )}
     </div>
@@ -1953,6 +1960,9 @@ function ImportFileRunDrawerBody({
 // ---------- Module ----------
 
 export function ImportsModule() {
+  const { t } = useI18n();
+  const jobColumns = useMemo(() => importJobColumns(t), [t]);
+  const runColumns = useMemo(() => fileRunColumns(t), [t]);
   const drawer = useDrawer();
   const modal = useModal();
   const { scope } = useIdentity();
@@ -2051,13 +2061,13 @@ export function ImportsModule() {
         Date.parse(r.completed_at) >= t0,
     ).length;
     return [
-      { key: 'total',     label: 'Total imports',  value: total,          tone: 'neutral' as const },
-      { key: 'queued',    label: 'Queued',         value: queued,         tone: 'info'    as const },
-      { key: 'running',   label: 'Running',        value: running,        tone: 'warn'    as const },
-      { key: 'done',      label: 'Completed today',value: completedToday, tone: 'good'    as const },
-      { key: 'failed',    label: 'Failed today',   value: failedToday,    tone: failedToday > 0 ? 'danger' as const : 'neutral' as const },
+      { key: 'total',     label: t('platformImports.importsModule.totalImports'),  value: total,          tone: 'neutral' as const },
+      { key: 'queued',    label: t('platformImports.importsModule.queued'),         value: queued,         tone: 'info'    as const },
+      { key: 'running',   label: t('platformImports.importsModule.running'),        value: running,        tone: 'warn'    as const },
+      { key: 'done',      label: t('platformImports.importsModule.completedToday'),value: completedToday, tone: 'good'    as const },
+      { key: 'failed',    label: t('platformImports.importsModule.failedToday'),   value: failedToday,    tone: failedToday > 0 ? 'danger' as const : 'neutral' as const },
     ];
-  }, [rows]);
+  }, [rows, t]);
 
   async function refetchImportJobViews() {
     await Promise.all([
@@ -2102,14 +2112,14 @@ export function ImportsModule() {
   function openCancelJobModal(job: ImportJobRow, opts?: { refreshDrawerOnSuccess?: boolean }) {
     if (!isCancellable(job)) {
       pushToast(
-        `Import job ${job.id} cannot be cancelled from status ${job.status}`,
+        fill(t('platformImports.importsModule.importJobCannotBe'), { id: String(job.id), status: String(job.status) }),
         'warn',
       );
       return;
     }
 
     modal.open({
-      title: `Cancel import job · ${job.id}`,
+      title: fill(t('platformImports.importsModule.cancelImportJob'), { id: String(job.id) }),
       body: (
         <ImportCancelReasonForm
           jobId={job.id}
@@ -2121,7 +2131,7 @@ export function ImportsModule() {
             await refetchImportJobViews();
             modal.close();
             if (opts?.refreshDrawerOnSuccess) openJobDrawer(readback.job, readback.directory);
-            pushToast(`Import job cancelled - ${job.id}`, 'warn');
+            pushToast(fill(t('platformImports.importsModule.importJobCancelled'), { id: String(job.id) }), 'warn');
           }}
         />
       ),
@@ -2141,24 +2151,24 @@ export function ImportsModule() {
       return `${(s / 3600).toFixed(1)}h`;
     };
     const kvRows: KvRow[] = [
-      { key: 'id',                   label: 'Job reference',   value: job.id ? 'Recorded' : '—', editable: false },
-      { key: 'kind',                 label: 'Kind',            value: job.kind, lookup: 'import_job_kind', editable: false },
-      { key: 'source',               label: 'Source',          value: job.source, lookup: 'import_job_source', editable: false },
-      { key: 'status',               label: 'Status',          value: job.status, lookup: 'import_job_status', editable: false },
-      { key: 'row_count',            label: 'Rows',            value: job.row_count ?? '—', mono: true, editable: false },
-      { key: 'error_count',          label: 'Errors',          value: job.error_count ?? '—', mono: true, editable: false },
-      { key: 'submitted_at',         label: 'Submitted',       value: job.submitted_at, mono: true, editable: false },
-      { key: 'started_at',           label: 'Started',         value: job.started_at ?? '—', mono: true, editable: false },
-      { key: 'completed_at',         label: 'Completed',       value: job.completed_at ?? '—', mono: true, editable: false },
+      { key: 'id',                   label: t('platformImports.importsModule.jobReference'),   value: job.id ? 'Recorded' : '—', editable: false },
+      { key: 'kind',                 label: t('platformImports.importsModule.kind'),            value: job.kind, lookup: 'import_job_kind', editable: false },
+      { key: 'source',               label: t('platformImports.importsModule.source'),          value: job.source, lookup: 'import_job_source', editable: false },
+      { key: 'status',               label: t('platformImports.importsModule.status'),          value: job.status, lookup: 'import_job_status', editable: false },
+      { key: 'row_count',            label: t('platformImports.importsModule.rows'),            value: job.row_count ?? '—', mono: true, editable: false },
+      { key: 'error_count',          label: t('platformImports.importsModule.errors'),          value: job.error_count ?? '—', mono: true, editable: false },
+      { key: 'submitted_at',         label: t('platformImports.importsModule.submitted'),       value: job.submitted_at, mono: true, editable: false },
+      { key: 'started_at',           label: t('platformImports.importsModule.started'),         value: job.started_at ?? '—', mono: true, editable: false },
+      { key: 'completed_at',         label: t('platformImports.importsModule.completed'),       value: job.completed_at ?? '—', mono: true, editable: false },
       // W28 directory projections (non-editable; surfaced to operator drawer).
-      { key: 'submitted_by_label',   label: 'Submitted by',    value: dir?.submitted_by_label ?? (job.submitted_by_user_id ? 'Recorded account' : '—'), editable: false },
-      { key: 'tenant_label',         label: 'Tenant',          value: dir?.tenant_label ?? (job.organization_id ? 'Active tenant' : '—'), editable: false },
-      { key: 'duration_seconds',     label: 'Duration',        value: formatSeconds(dir?.duration_seconds), mono: true, editable: false },
-      { key: 'queue_wait_seconds',   label: 'Queue wait',      value: formatSeconds(dir?.queue_wait_seconds), mono: true, editable: false },
-      { key: 'error_summary_count',  label: 'Error entries',   value: dir?.error_summary_count ?? 0, mono: true, editable: false },
-      { key: 'submitted_by_user_id', label: 'Submitted account', value: job.submitted_by_user_id ? 'Recorded' : '—', mono: false, editable: false },
-      { key: 'correlation_id',       label: 'Confirmation',  value: job.correlation_id ? 'Recorded' : '—', mono: false, editable: false },
-      { key: 'cancelled_reason',     label: 'Cancelled reason',value: job.cancelled_reason ?? '—', mono: true, editable: false },
+      { key: 'submitted_by_label',   label: t('platformImports.importsModule.submittedBy'),    value: dir?.submitted_by_label ?? (job.submitted_by_user_id ? 'Recorded account' : '—'), editable: false },
+      { key: 'tenant_label',         label: t('platformImports.importsModule.tenant'),          value: dir?.tenant_label ?? (job.organization_id ? 'Active tenant' : '—'), editable: false },
+      { key: 'duration_seconds',     label: t('platformImports.importsModule.duration'),        value: formatSeconds(dir?.duration_seconds), mono: true, editable: false },
+      { key: 'queue_wait_seconds',   label: t('platformImports.importsModule.queueWait'),      value: formatSeconds(dir?.queue_wait_seconds), mono: true, editable: false },
+      { key: 'error_summary_count',  label: t('platformImports.importsModule.errorEntries'),   value: dir?.error_summary_count ?? 0, mono: true, editable: false },
+      { key: 'submitted_by_user_id', label: t('platformImports.importsModule.submittedAccount'), value: job.submitted_by_user_id ? 'Recorded' : '—', mono: false, editable: false },
+      { key: 'correlation_id',       label: t('platformImports.importsModule.confirmation'),  value: job.correlation_id ? 'Recorded' : '—', mono: false, editable: false },
+      { key: 'cancelled_reason',     label: t('platformImports.importsModule.cancelledReason'),value: job.cancelled_reason ?? '—', mono: true, editable: false },
     ];
 
     const errSummary = job.error_summary && Object.keys(job.error_summary).length > 0
@@ -2166,22 +2176,22 @@ export function ImportsModule() {
       : null;
 
     drawer.open({
-      title: 'Import run details',
+      title: t('platformImports.importsModule.importRunDetails'),
       size: 'lg',
       body: (
         <div data-testid="imports-job-drawer">
-          <div className="section-eyebrow">Import job detail</div>
+          <div className="section-eyebrow">{t('platformImports.importsModule.importJobDetail')}</div>
           <KvGrid rows={kvRows} />
           <div className="section-eyebrow" style={{ marginTop: 12 }}>
-            Error summary
+            {t('platformImports.importsModule.errorSummary')}
           </div>
           {errSummary ? (
             <div data-testid="imports-job-error-summary" style={{ margin: '4px 14px' }}>
-              <KvGrid rows={importSummaryRows(errSummary)} />
+              <KvGrid rows={importSummaryRows(errSummary, t)} />
             </div>
           ) : (
             <div className="state__hint" style={{ padding: '6px 14px' }}>
-              No errors reported.
+              {t('platformImports.importsModule.noErrorsReported')}
             </div>
           )}
         </div>
@@ -2189,7 +2199,7 @@ export function ImportsModule() {
       footer: isCancellable(job) ? (
         <div style={{ display: 'flex', gap: 8 }}>
           <Button
-            label="Cancel job"
+            label={t('platformImports.importsModule.cancelJob')}
             iconName="close"
             kind="danger"
             capability={CAP.IMPORTS_WRITE}
@@ -2240,12 +2250,11 @@ export function ImportsModule() {
     let rowCountRaw: string = '';
 
     modal.open({
-      title: 'Submit new import',
+      title: t('platformImports.importsModule.submitNewImport'),
       body: (
         <div data-testid="imports-submit-modal">
           <p className="state__hint">
-            Submits a non-file import request. The import worker moves it through
-            queued, running, completed, or failed states. File uploads must use the file upload flow.
+            {t('platformImports.importsModule.submitsANonFile')}
           </p>
           <div
             style={{
@@ -2257,11 +2266,11 @@ export function ImportsModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono">Kind</label>
+            <label className="mono">{t('platformImports.importsModule.kind')}</label>
             <select
               className="dt-inline-input"
               defaultValue={kind}
-              aria-label="Kind"
+              aria-label={t('platformImports.importsModule.kind')}
               onChange={(e) => {
                 kind = e.target.value;
               }}
@@ -2272,11 +2281,11 @@ export function ImportsModule() {
                 </option>
               ))}
             </select>
-            <label className="mono">Source</label>
+            <label className="mono">{t('platformImports.importsModule.source')}</label>
             <select
               className="dt-inline-input"
               defaultValue={source}
-              aria-label="Source"
+              aria-label={t('platformImports.importsModule.source')}
               onChange={(e) => {
                 source = e.target.value;
               }}
@@ -2287,13 +2296,13 @@ export function ImportsModule() {
                 </option>
               ))}
             </select>
-            <label className="mono">Row count</label>
+            <label className="mono">{t('platformImports.importsModule.rowCount')}</label>
             <input
               className="dt-inline-input"
               type="number"
               min={0}
-              placeholder="optional"
-              aria-label="Row count"
+              placeholder={t('platformImports.importsModule.optional')}
+              aria-label={t('platformImports.importsModule.rowCount')}
               onChange={(e) => {
                 rowCountRaw = e.target.value;
               }}
@@ -2303,16 +2312,16 @@ export function ImportsModule() {
       ),
       footer: (
         <div style={{ display: 'flex', gap: 8 }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('platformImports.importsModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Submit"
+            label={t('platformImports.importsModule.submit')}
             iconName="upload"
             kind="primary"
             capability={CAP.IMPORTS_WRITE}
             disabled={directSources.length === 0}
             onClick={async () => {
               if (!source || sourceRequiresPreparedFile(source)) {
-                pushToast('File imports must be prepared with the file upload flow before start.', 'warn');
+                pushToast(t('platformImports.importsModule.fileImportsMustBe'), 'warn');
                 return;
               }
               const args: Record<string, unknown> = {
@@ -2328,10 +2337,10 @@ export function ImportsModule() {
                 await refetchImportJobViews();
                 modal.close();
                 openJobDrawer(job, directory);
-                pushToast(`Import job submitted - ${kind}/${source} - ${job.id}`, 'good');
+                pushToast(fill(t('platformImports.importsModule.importJobSubmitted'), { kind: String(kind), source: String(source), id: String(job.id) }), 'good');
               } catch (err) {
                 const message = err instanceof Error ? err.message : 'Unknown import submit error';
-                pushToast(`Import job submit failed - ${message}`, 'danger');
+                pushToast(fill(t('platformImports.importsModule.importJobSubmitFailed'), { message: String(message) }), 'danger');
               }
             }}
           />
@@ -2354,10 +2363,10 @@ export function ImportsModule() {
         });
         latestRun = runReadback.rows?.[0] ?? null;
       } catch (err) {
-        pushToast((err as Error)?.message ?? 'Workflow run details unavailable.', 'danger');
+        pushToast((err as Error)?.message ?? t('platformImports.importsModule.workflowRunDetailsUnavailable'), 'danger');
       }
       if (!latestRun?.id) {
-        pushToast('Workflow run details are not available yet.', 'danger');
+        pushToast(t('platformImports.importsModule.workflowRunDetailsAre'), 'danger');
         return;
       }
       try {
@@ -2367,16 +2376,16 @@ export function ImportsModule() {
         });
         latestEvents = eventReadback.rows ?? [];
       } catch (err) {
-        pushToast((err as Error)?.message ?? 'Workflow event details unavailable.', 'warn');
+        pushToast((err as Error)?.message ?? t('platformImports.importsModule.workflowEventDetailsUnavailable'), 'warn');
       }
       openWorkflowRunContextDrawer(drawer, {
         workflowRunId,
         run: latestRun,
         events: latestEvents,
         contextRows: [
-          { label: 'Import run', value: context.importRunId ? 'Recorded' : '-' },
-          { label: 'Shipment', value: context.recordId ? 'Recorded' : '-' },
-          { label: 'Import row', value: context.rowNumber },
+          { label: t('platformImports.importsModule.importRun'), value: context.importRunId ? 'Recorded' : '-' },
+          { label: t('platformImports.importsModule.shipment'), value: context.recordId ? 'Recorded' : '-' },
+          { label: t('platformImports.importsModule.importRow'), value: context.rowNumber },
         ],
         deepLink: `/workflows/runs?focus=${encodeURIComponent(workflowRunId)}`,
         onOpenWorkflowModule: () => {
@@ -2387,7 +2396,7 @@ export function ImportsModule() {
     }
 
     drawer.open({
-      title: `File import · ${run.id}`,
+      title: fill(t('platformImports.importsModule.fileImport'), { id: String(run.id) }),
       size: 'lg',
       body: (
         <ImportFileRunDrawerBody
@@ -2410,7 +2419,7 @@ export function ImportsModule() {
 
   function openFileUploadModal() {
     modal.open({
-      title: 'Upload import file',
+      title: t('platformImports.importsModule.uploadImportFile'),
       body: (
         <ImportSubmitPanel
           onClose={modal.close}
@@ -2432,7 +2441,7 @@ export function ImportsModule() {
   // predicates — see DataTable.tsx:107.)
   const rowActions: DataTableAction<ImportJobTableRow>[] = [
     {
-      label: 'Cancel job',
+      label: t('platformImports.importsModule.cancelJob'),
       icon: 'close',
       kind: 'danger',
       capability: CAP.IMPORTS_WRITE,
@@ -2446,19 +2455,19 @@ export function ImportsModule() {
     return (
       <div className="page" data-testid="imports-page">
         <PageHeader
-          eyebrow="Platform"
-          titleAccent="Import"
-          titlePlain="jobs"
+          eyebrow={t('platformImports.importsModule.platform')}
+          titleAccent={t('platformImports.importsModule.titleAccent')}
+          titlePlain={t('platformImports.importsModule.titlePlain')}
           pills={[
             <span key="cap" className="chip chip--xs mono">
-              imports.read · imports.write
+              {t('platformImports.importsModule.importsReadImportsWrite')}
             </span>,
           ] as ReactNode[]}
         />
         <StateView
           kind="denied"
           capability={CAP.IMPORTS_READ}
-          hint="Import jobs management requires import access permission."
+          hint={t('platformImports.importsModule.importJobsManagementRequires')}
         />
       </div>
     );
@@ -2470,26 +2479,26 @@ export function ImportsModule() {
     <div className="page" data-testid="imports-page">
       <PageHeader
         moduleKey="imports"
-        eyebrow="Platform"
-        titleAccent="Import"
-        titlePlain="jobs"
+        eyebrow={t('platformImports.importsModule.platform')}
+        titleAccent={t('platformImports.importsModule.titleAccent')}
+        titlePlain={t('platformImports.importsModule.titlePlain')}
         pills={[
           <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
-          <span key="ssot" className="chip chip--xs mono">Import jobs</span>,
-          <span key="rls" className="chip chip--xs mono">imports.read · imports.write</span>,
-          <span key="mapping-cap" className="chip chip--xs mono">mappings.read · mappings.write</span>,
+          <span key="ssot" className="chip chip--xs mono">{t('platformImports.importsModule.importJobs')}</span>,
+          <span key="rls" className="chip chip--xs mono">{t('platformImports.importsModule.importsReadImportsWrite')}</span>,
+          <span key="mapping-cap" className="chip chip--xs mono">{t('platformImports.importsModule.mappingsReadMappingsWrite')}</span>,
           <span
             key="dir"
             className="chip chip--xs mono"
-            title="Shows tenant, submitter, row and error counts, lifecycle, timing, and error summaries."
+            title={t('platformImports.importsModule.showsTenantSubmitterRow')}
           >
-            Import job directory
+            {t('platformImports.importsModule.importJobDirectory')}
           </span>,
         ] as ReactNode[]}
         actions={[
           <Button
             key="new"
-            label="New import"
+            label={t('platformImports.importsModule.newImport')}
             iconName="upload"
             kind="primary"
             capability={CAP.IMPORTS_WRITE}
@@ -2498,7 +2507,7 @@ export function ImportsModule() {
           />,
           <Button
             key="upload-file"
-            label="Upload file"
+            label={t('platformImports.importsModule.uploadFile')}
             iconName="upload"
             kind="ghost"
             capabilities={[CAP.MAPPINGS_READ, CAP.MAPPINGS_WRITE]}
@@ -2519,19 +2528,19 @@ export function ImportsModule() {
       ) : jobsError ? (
         <StateView
           kind={isPermissionDeniedError(jobsError) ? 'denied' : 'error'}
-          title="Import jobs unavailable"
+          title={t('platformImports.importsModule.importJobsUnavailable')}
           capability={isPermissionDeniedError(jobsError) ? CAP.IMPORTS_READ : undefined}
           hint={(jobsError as Error).message}
         />
       ) : rows.length === 0 ? (
         <StateView
           kind="empty"
-          hint="No import jobs yet. Click 'New import' to enqueue your first import job."
+          hint={t('platformImports.importsModule.noImportJobsYet')}
         />
       ) : (
         <div data-testid="imports-table-wrap">
           <DataTable<ImportJobTableRow>
-            columns={COLUMNS}
+            columns={jobColumns}
             rows={tableRows}
             viewKey="import_jobs"
             entityKind="import_jobs"
@@ -2542,32 +2551,32 @@ export function ImportsModule() {
       )}
 
       <div className="section-eyebrow" style={{ marginTop: 20 }}>
-        File import runs
+        {t('platformImports.importsModule.fileImportRuns')}
       </div>
       {!canReadMappings ? (
         <StateView
           kind="denied"
           capability={CAP.MAPPINGS_READ}
-          hint="File import run history requires mapping read permission."
+          hint={t('platformImports.importsModule.fileImportRunHistory')}
         />
       ) : fileRunsQuery.isLoading ? (
         <StateView kind="loading" />
       ) : fileRunsQuery.error ? (
         <StateView
           kind={isPermissionDeniedError(fileRunsQuery.error) ? 'denied' : 'error'}
-          title="File import runs unavailable"
+          title={t('platformImports.importsModule.fileImportRunsUnavailable')}
           capability={isPermissionDeniedError(fileRunsQuery.error) ? CAP.MAPPINGS_READ : undefined}
           hint={(fileRunsQuery.error as Error).message}
         />
       ) : fileRuns.length === 0 ? (
         <StateView
           kind="empty"
-          hint="No CSV, XLS, or XLSX file runs yet. Use Upload file to prepare mapping, validation, and shipment creation."
+          hint={t('platformImports.importsModule.noCsvXlsOr')}
         />
       ) : (
         <div data-testid="imports-file-runs-table-wrap">
           <DataTable<TabularImportRunRow>
-            columns={FILE_RUN_COLUMNS}
+            columns={runColumns}
             rows={fileRuns}
             viewKey="tabular_import_runs"
             entityKind="tabular_import_runs"

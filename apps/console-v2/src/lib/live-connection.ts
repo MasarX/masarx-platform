@@ -5,13 +5,23 @@
 // empty payload; the page refetches its existing scoped reads. When realtime is
 // off for the build, or the channel fails `maxReconnects` times, the page polls
 // every `pollMs`. The page's LiveChip and the Statusbar read the same state.
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { CAP } from '@/lib/capabilities';
 import { useIdentity } from '@/lib/identity';
 import { getSupabaseClient, isRealtimeEnabled } from '@/lib/supabase';
 
 export type LiveState = 'syncing' | 'live' | 'reconnecting' | 'offline' | 'polling';
-export type LiveTopic = 'routes' | 'shipments';
+const LIVE_RESOURCES = {
+  routes: [
+    'route_runs', 'route_stops', 'route_run_directory', 'route_run_assignments',
+    'route_run_assignment_events', 'route_stop_reassignment_events', 'tasks', 'shipments',
+  ],
+  shipments: ['shipments', 'shipment_directory'],
+} satisfies Record<string, string[]>;
+type LiveTopic = keyof typeof LIVE_RESOURCES;
+type LiveClient = NonNullable<ReturnType<typeof getSupabaseClient>>;
+const channelRemovals = new WeakMap<LiveClient, Promise<unknown>>();
 type ChannelStatus = 'connecting' | 'joined' | 'lost';
 
 /** Single source for live-refresh timing. Heartbeat timing comes from the realtime client itself. */
@@ -78,10 +88,17 @@ export function useLiveConnection({
   dataUpdatedAt: number;
 }): LiveConnection {
   const queryClient = useQueryClient();
-  const { user, scope } = useIdentity();
-  const orgId = user?.organization_id || scope?.tenant?.id || null;
+  const { user, scope, hasCapability, isAuthenticated } = useIdentity();
+  const orgId = user.organization_id;
   const client = getSupabaseClient();
-  const realtime = Boolean(enabled && client && orgId && isRealtimeEnabled());
+  // With no route ID, the server's route policy requires tenant-wide route access.
+  const realtime = Boolean(
+    enabled && client && isAuthenticated && orgId && user.access_scope_type === 'tenant'
+    && (!scope.tenant?.id || scope.tenant.id === orgId) && isRealtimeEnabled()
+    && (topic === 'routes'
+      ? hasCapability(CAP.ROUTES_READ) && hasCapability(CAP.ROUTES_WRITE)
+      : hasCapability(CAP.SHIPMENTS_READ)),
+  );
 
   const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
   const [channel, setChannel] = useState<ChannelStatus>('connecting');
@@ -92,10 +109,16 @@ export function useLiveConnection({
   const [, setTick] = useState(0);
 
   const refetch = useCallback(() => {
-    void queryClient.invalidateQueries({ refetchType: 'active' });
-  }, [queryClient]);
+    void queryClient.invalidateQueries({
+      predicate: ({ queryKey: [kind, resource] }) =>
+        (kind === 'list' || kind === 'lists_by_filters')
+        && typeof resource === 'string' && LIVE_RESOURCES[topic].includes(resource),
+      refetchType: 'active',
+    });
+  }, [queryClient, topic]);
 
   useEffect(() => {
+    if (!enabled) return undefined;
     const up = () => {
       setOnline(true);
       setCatchingUp(true);
@@ -108,43 +131,62 @@ export function useLiveConnection({
       window.removeEventListener('online', up);
       window.removeEventListener('offline', down);
     };
-  }, [refetch]);
+  }, [enabled, refetch]);
 
+  const polling = !realtime || failures >= LIVE_CONFIG.maxReconnects;
   useEffect(() => {
-    if (!realtime || !client) return undefined;
+    if (polling || !client || !online) return undefined;
+    let active = true;
     let lost = false;
     const markLost = () => {
       lost = true;
       setChannel('lost');
     };
-    const ch = client
-      .channel(`console-live:${orgId}:${topic}`, { config: { private: true } })
-      .on('broadcast', { event: 'invalidate' }, () => refetch())
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          setChannel('joined');
-          setFailures(0);
-          setLastBeatAt(Date.now());
-          if (lost) {
-            setCatchingUp(true);
-            refetch();
+    let channel: ReturnType<LiveClient['channel']> | undefined;
+    const join = () => {
+      if (!active) return;
+      channel = client
+        .channel(`console-live:${orgId}:${topic}`, { config: { private: true } })
+        .on('broadcast', { event: 'invalidate' }, () => refetch())
+        .subscribe((status) => {
+          if (!active) return;
+          if (status === 'SUBSCRIBED') {
+            setChannel('joined');
+            setFailures(0);
+            setLastBeatAt(Date.now());
+            if (lost) {
+              setCatchingUp(true);
+              refetch();
+            }
+            lost = false;
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            markLost();
+            setFailures((f) => f + 1);
           }
-          lost = false;
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          markLost();
-          setFailures((f) => f + 1);
-        }
+        });
+      // One missed heartbeat (the client's own heartbeatIntervalMs) means reconnecting.
+      client.realtime.onHeartbeat((beat) => {
+        if (beat === 'ok') setLastBeatAt(Date.now());
+        else if (beat === 'timeout' || beat === 'error' || beat === 'disconnected') markLost();
       });
-    // One missed heartbeat (the client's own heartbeatIntervalMs) means reconnecting.
-    client.realtime.onHeartbeat((beat) => {
-      if (beat === 'ok') setLastBeatAt(Date.now());
-      else if (beat === 'timeout' || beat === 'error' || beat === 'disconnected') markLost();
-    });
-    return () => {
-      client.realtime.onHeartbeat(() => undefined);
-      void client.removeChannel(ch);
     };
-  }, [realtime, client, orgId, topic, attempt, refetch]);
+
+    // Realtime reuses a topic until its previous channel has left.
+    const pendingRemoval = channelRemovals.get(client);
+    if (pendingRemoval) void pendingRemoval.then(join);
+    else join();
+
+    return () => {
+      active = false;
+      if (!channel) return;
+      client.realtime.onHeartbeat(() => undefined);
+      const removal = client.removeChannel(channel);
+      channelRemovals.set(client, removal);
+      void removal.then(() => {
+        if (channelRemovals.get(client) === removal) channelRemovals.delete(client);
+      });
+    };
+  }, [polling, client, online, orgId, topic, attempt, refetch]);
 
   useEffect(() => {
     setCatchingUp(false);
@@ -172,13 +214,13 @@ export function useLiveConnection({
   }, [state, lastBeatAt]);
 
   useEffect(() => {
-    if (state !== 'polling') return undefined;
+    if (!enabled || !online || !polling) return undefined;
     const id = window.setInterval(refetch, LIVE_CONFIG.pollMs);
     return () => window.clearInterval(id);
-  }, [state, refetch]);
+  }, [enabled, online, polling, refetch]);
 
   useEffect(() => {
-    if (enabled) publish({ state, syncedAt: dataUpdatedAt });
+    publish(enabled ? { state, syncedAt: dataUpdatedAt } : null);
   }, [enabled, state, dataUpdatedAt]);
   useEffect(() => () => publish(null), []);
 
@@ -191,80 +233,4 @@ export function useLiveConnection({
   }, [refetch]);
 
   return { state, syncedAt: dataUpdatedAt, pollMs: LIVE_CONFIG.pollMs, retry };
-}
-
-// ---- rows: hold new rows behind "Show", keep order, mark in-place updates ----
-
-interface HeldView {
-  resetKey: string;
-  order: string[];
-  sig: Map<string, string>;
-  updated: Set<string>;
-}
-
-function signatures<T>(rows: readonly T[], keyOf: (row: T) => string): Map<string, string> {
-  return new Map(rows.map((r) => [keyOf(r), JSON.stringify(r)]));
-}
-
-/**
- * Keeps the on-screen order fixed while data refreshes. Rows that were not on
- * screen are counted and held until `show()`; rows on screen update in place and
- * are listed in `updated` until the next change. An empty list adopts new rows
- * directly, so the empty state fills without a click. A new `resetKey` (the
- * list's filters) starts over, and `pinnedId` (a row the user opened) is never held.
- */
-export function useHeldRows<T>(
-  rows: readonly T[] | undefined,
-  keyOf: (row: T) => string,
-  { resetKey = '', pinnedId = null }: { resetKey?: string; pinnedId?: string | null } = {},
-) {
-  const keyRef = useRef(keyOf);
-  keyRef.current = keyOf;
-  const [view, setView] = useState<HeldView | null>(null);
-
-  useEffect(() => {
-    if (!rows) return;
-    const key = keyRef.current;
-    setView((prev) => {
-      const sig = signatures(rows, key);
-      // Unchanged rows keep the same view, so a caller's fresh `[]` per render cannot loop.
-      const sameSig = !!prev && sig.size === prev.sig.size && [...sig].every(([id, s]) => prev.sig.get(id) === s);
-      if (prev && sameSig && prev.resetKey === resetKey && (!pinnedId || !sig.has(pinnedId) || prev.order.includes(pinnedId))) {
-        return prev;
-      }
-      if (!prev || prev.order.length === 0 || prev.resetKey !== resetKey) {
-        return { resetKey, order: rows.map(key), sig, updated: new Set() };
-      }
-      const updated = new Set(prev.order.filter((id) => sig.has(id) && prev.sig.has(id) && prev.sig.get(id) !== sig.get(id)));
-      // Keep a pinned row on screen after it is no longer pinned.
-      const pin = pinnedId && sig.has(pinnedId) && !prev.order.includes(pinnedId) ? [pinnedId] : [];
-      return { resetKey, order: [...pin, ...prev.order], sig, updated };
-    });
-  }, [rows, resetKey, pinnedId]);
-
-  const list = rows ?? [];
-  const byId = new Map(list.map((r) => [keyOf(r), r]));
-  const held = view?.resetKey === resetKey ? view.order : list.map(keyOf);
-  const order = pinnedId && byId.has(pinnedId) && !held.includes(pinnedId) ? [pinnedId, ...held] : held;
-  const known = new Set(order);
-  const visible = order.map((id) => byId.get(id)).filter((r): r is T => r !== undefined);
-  const newCount = list.filter((r) => !known.has(keyOf(r))).length;
-
-  const show = useCallback(() => {
-    setView((prev) => (prev && rows ? { ...prev, order: rows.map(keyRef.current), updated: new Set() } : prev));
-  }, [rows]);
-
-  return { visible, newCount, updated: view?.resetKey === resetKey ? view.updated : new Set<string>(), show };
-}
-
-/**
- * Online-only edit conflict: true when the record changed after the edit began
- * (`baseline` is the record's snapshot when the form opened). Offline never conflicts.
- */
-export function useEditConflict(baseline: unknown, record: unknown, state: LiveState) {
-  const base = baseline == null ? null : JSON.stringify(baseline);
-  const now = record == null ? null : JSON.stringify(record);
-  const [dismissed, setDismissed] = useState<string | null>(null);
-  const conflict = base != null && now != null && now !== base && now !== dismissed && state !== 'offline';
-  return { conflict, dismiss: () => setDismissed(now) };
 }

@@ -1,35 +1,31 @@
 // i18n.tsx — EN + AR with RTL logic flip. Uses dot-paths into the catalog;
 // missing keys return the path so they're easy to spot in screenshots.
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NextIntlClientProvider } from 'next-intl';
 import { useIdentity } from './identity';
 import { useResolveSettings } from './queries';
-// @ts-expect-error JS catalogs without types
-import { en } from './seed-raw/i18n/en.js';
-// @ts-expect-error JS catalogs without types
-import { ar } from './seed-raw/i18n/ar.js';
+import { reportError } from './telemetry';
+import { englishT, fill, getConsoleCatalog, loadConsoleCatalog, readConsoleLocale, translateCatalog, type Locale, type Translate } from './i18n-catalog';
 
-type Locale = 'en' | 'ar';
-type Catalog = Record<string, unknown>;
+export { englishT, fill, type Translate } from './i18n-catalog';
 
 interface I18nCtx {
   locale: Locale;
   dir: 'ltr' | 'rtl';
   setLocale: (l: Locale) => void;
   toggleLocale: () => void;
-  t: (path: string, fallback?: string) => string;
+  t: Translate;
   /** IANA zone used for date/time display; see TenantTimeZoneSync. */
   timeZone: string;
   fmtDateTime: (iso: string | number | Date) => string;
+  /** Clock time (hours, minutes, seconds) in the app locale. */
+  fmtTime: (iso: string | number | Date) => string;
   fmtCurrency: (amount: number, currency?: string) => string;
   fmtNumber: (n: number, opts?: Intl.NumberFormatOptions) => string;
-  /** Hour and minute in the display time zone. */
-  fmtTime: (iso: string | number | Date) => string;
-  /** Plural message: `path.<Intl.PluralRules category>` (else `path.other`) with `{count}` filled in. */
   tCount: (path: string, count: number) => string;
+  /** Time from now in the app locale, such as "5m ago" or "in 2h", in the largest whole unit up to days. */
+  fmtRelative: (iso: string | number | Date | null | undefined, now?: number) => string;
 }
-
-const CATALOGS: Record<Locale, Catalog> = { en: en as Catalog, ar: ar as Catalog };
 
 // Display zone, decided here only: the tenant's `tenant_default_timezone.iana`
 // once identity has loaded (TenantTimeZoneSync), else the user's own zone below.
@@ -54,21 +50,14 @@ export function resolveIntlLocale(locale: Locale, preferred: readonly string[] =
 const Ctx = createContext<I18nCtx | null>(null);
 const TenantTimeZoneCtx = createContext<((zone: string | null) => void) | null>(null);
 
-function lookup(catalog: Catalog, path: string): string | undefined {
-  const parts = path.split('.');
-  let cur: unknown = catalog;
-  for (const p of parts) {
-    if (cur && typeof cur === 'object' && p in (cur as Record<string, unknown>)) {
-      cur = (cur as Record<string, unknown>)[p];
-    } else {
-      return undefined;
-    }
-  }
-  return typeof cur === 'string' ? cur : undefined;
-}
-
+// Render never suspends: the entry point loads the first catalog before mounting
+// and setLocale loads the next one before switching. Suspending here varied the
+// hook order between renders, and use() stops act() from flushing effects in tests.
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(() => (localStorage.getItem('console-v2.locale') as Locale) || 'en');
+  const [locale, setLocaleState] = useState<Locale>(readConsoleLocale);
+  const catalog = getConsoleCatalog(locale);
+  // The language the latest switch asked for; an older load that settles later is ignored.
+  const requested = useRef<Locale | null>(null);
   const dir = locale === 'ar' ? 'rtl' : 'ltr';
   const intlLocale = useMemo(() => resolveIntlLocale(locale), [locale]);
   const [tenantTimeZone, setTenantTimeZone] = useState<string | null>(null);
@@ -81,13 +70,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   }, [locale, dir]);
 
   const t = useCallback(
-    (path: string, fallback?: string) => {
-      const fromActive = lookup(CATALOGS[locale]!, path);
-      if (fromActive) return fromActive;
-      const fromEn = lookup(CATALOGS.en!, path);
-      return fromEn ?? fallback ?? path;
-    },
-    [locale]
+    (path: string, fallback?: string) => translateCatalog(catalog, path, fallback),
+    [catalog]
   );
 
   const fmtDateTime = useCallback(
@@ -96,6 +80,17 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       if (Number.isNaN(d.getTime())) return '—';
       return new Intl.DateTimeFormat(intlLocale, {
         month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+        timeZone,
+      }).format(d);
+    },
+    [intlLocale, timeZone]
+  );
+  const fmtTime = useCallback(
+    (iso: string | number | Date) => {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '—';
+      return new Intl.DateTimeFormat(intlLocale, {
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
         timeZone,
       }).format(d);
     },
@@ -131,40 +126,63 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     [intlLocale]
   );
 
-  const fmtTime = useCallback(
-    (iso: string | number | Date) => {
-      const d = new Date(iso);
-      if (Number.isNaN(d.getTime())) return '—';
-      return new Intl.DateTimeFormat(intlLocale, { hour: 'numeric', minute: '2-digit', timeZone }).format(d);
-    },
-    [intlLocale, timeZone]
-  );
   const tCount = useCallback(
     (path: string, count: number) => {
       const category = new Intl.PluralRules(intlLocale).select(count);
-      const message = lookup(CATALOGS[locale]!, `${path}.${category}`) ?? t(`${path}.other`);
-      return message.replace('{count}', fmtNumber(count));
+      return fill(t(`${path}.${category}`, t(`${path}.other`)), { count: fmtNumber(count) });
     },
-    [intlLocale, locale, t, fmtNumber]
+    [intlLocale, t, fmtNumber]
   );
+  const fmtRelative = useCallback(
+    (iso: string | number | Date | null | undefined, now = Date.now()) => {
+      if (iso == null || iso === '') return '—';
+      const ms = new Date(iso).getTime();
+      if (Number.isNaN(ms)) return '—';
+      const s = Math.trunc((ms - now) / 1000);
+      const abs = Math.abs(s);
+      const [value, unit]: [number, Intl.RelativeTimeFormatUnit] =
+        abs < 60 ? [s, 'second'] : abs < 3600 ? [Math.trunc(s / 60), 'minute'] : abs < 86400 ? [Math.trunc(s / 3600), 'hour'] : [Math.trunc(s / 86400), 'day'];
+      return new Intl.RelativeTimeFormat(intlLocale, { style: 'narrow' }).format(value, unit);
+    },
+    [intlLocale]
+  );
+
+  // Keeps the current language on screen until the next catalog has loaded.
+  const setLocale = useCallback((next: Locale) => {
+    requested.current = next;
+    const apply = () => {
+      if (requested.current === next) startTransition(() => setLocaleState(next));
+    };
+    if (getConsoleCatalog(next)) {
+      apply();
+      return;
+    }
+    loadConsoleCatalog(next).then(apply, (error: unknown) => {
+      if (requested.current === next) requested.current = null;
+      reportError(error instanceof Error ? error : new Error(String(error)), { locale: next });
+    });
+  }, []);
 
   const value = useMemo<I18nCtx>(
     () => ({
       locale,
       dir,
-      setLocale: setLocaleState,
-      toggleLocale: () => setLocaleState((l) => (l === 'en' ? 'ar' : 'en')),
+      setLocale,
+      toggleLocale: () => setLocale((requested.current ?? locale) === 'en' ? 'ar' : 'en'),
       t,
       timeZone,
       fmtDateTime,
+      fmtTime,
       fmtCurrency,
       fmtNumber,
-      fmtTime,
+      fmtRelative,
       tCount,
     }),
-    [locale, dir, t, timeZone, fmtDateTime, fmtCurrency, fmtNumber, fmtTime, tCount]
+    [locale, dir, setLocale, t, timeZone, fmtDateTime, fmtTime, fmtCurrency, fmtNumber, fmtRelative, tCount]
   );
 
+  // After every hook, so the hook order is the same on every render.
+  if (!catalog) throw new Error(`Console catalog "${locale}" is not loaded; await loadConsoleCatalog("${locale}") before rendering I18nProvider`);
   return (
     <Ctx.Provider value={value}>
       <TenantTimeZoneCtx.Provider value={setTenantTimeZone}>
@@ -178,6 +196,11 @@ export function useI18n() {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error('useI18n outside I18nProvider');
   return ctx;
+}
+
+/** Shared components use the active locale or the preloaded English catalog. */
+export function useT(): I18nCtx['t'] {
+  return useContext(Ctx)?.t ?? englishT;
 }
 
 /**

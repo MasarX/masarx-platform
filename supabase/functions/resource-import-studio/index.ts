@@ -11,7 +11,9 @@ import {
 } from "./preparation.ts";
 import {
   buildErrorEnvelope,
+  canonicalStorageKey,
   extractToken,
+  isStorageBucketId,
   logStructured,
   parseRequestBody,
   readEnv,
@@ -312,14 +314,15 @@ const hydrateArtifacts = async (
     rawArtifacts.map(async (artifact) => {
       const record = asRecord(artifact) ?? {};
       const bucket = asString(record.storage_bucket);
-      const key = asString(record.storage_key);
-      if (!bucket || !key) return record;
+      const key = canonicalStorageKey(record.storage_key, run.organization_id);
+      if (!isStorageBucketId(bucket) || !key) return record;
       try {
-        const { data, error } = await serviceClient.storage.from(bucket).createSignedUrl(key, SIGNED_URL_TTL_SECONDS);
-        if (!error && data?.signedUrl) {
+        const { data, error } = await serviceClient.storage.from(bucket).createSignedUrls([key], SIGNED_URL_TTL_SECONDS);
+        const signed = data?.[0];
+        if (!error && signed?.signedUrl) {
           return {
             ...record,
-            signed_url: data.signedUrl,
+            signed_url: signed.signedUrl,
           };
         }
       } catch {

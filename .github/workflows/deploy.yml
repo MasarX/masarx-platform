@@ -22,6 +22,16 @@ name: Deploy dev
       project_ref:
         description: DEV Supabase project ref (required in dry-run mode before the deploy variable is set)
         type: string
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      mode:
+        type: string
+        default: deploy
+      expected_sha:
+        type: string
 
 permissions:
   contents: read
@@ -32,6 +42,7 @@ defaults:
 
 env:
   DEPLOY_ENV: ${{ inputs.environment || 'dev' }}
+  STG_RELEASE_REF_PATTERN: '^refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-rc\.[1-9][0-9]*$'
   CI: 'true'
   NPM_CONFIG_IGNORE_SCRIPTS: 'true'
   NEXT_TELEMETRY_DISABLED: '1'
@@ -45,7 +56,7 @@ jobs:
     steps:
       - name: Read configured API schemas
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_DIAGNOSTICS_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         run: |
           set -euo pipefail
@@ -57,8 +68,11 @@ jobs:
             dev:refs/heads/main) ;;
             *) schema_unreadable input ;;
           esac
-          if [[ ! "$SUPABASE_PROJECT_REF" =~ ^[a-z]{20}$ || -z "$SUPABASE_ACCESS_TOKEN" ]]; then
+          if [[ ! "$SUPABASE_PROJECT_REF" =~ ^[a-z]{20}$ ]]; then
             schema_unreadable input
+          fi
+          if [[ -z "$SUPABASE_ACCESS_TOKEN" ]]; then
+            schema_unreadable no-token
           fi
           response_file="$(mktemp)"
           trap 'rm -f "$response_file"' EXIT
@@ -451,7 +465,7 @@ jobs:
       - name: Read outbound wake HTTP diagnostics
         if: ${{ !cancelled() }}
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_DIAGNOSTICS_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         run: |
           set -euo pipefail
@@ -466,8 +480,11 @@ jobs:
 
           # The sweep discards its request ID and pg_net deletes sent queue rows.
           printf 'outbound_wake_http=UNREADABLE reason=request-correlation-unavailable\n' | tee -a "$GITHUB_STEP_SUMMARY"
-          if [[ ! "$SUPABASE_PROJECT_REF" =~ ^[a-z]{20}$ || -z "$SUPABASE_ACCESS_TOKEN" ]]; then
+          if [[ ! "$SUPABASE_PROJECT_REF" =~ ^[a-z]{20}$ ]]; then
             edge_logs_unreadable input
+          fi
+          if [[ -z "$SUPABASE_ACCESS_TOKEN" ]]; then
+            edge_logs_unreadable no-token
           fi
 
           response_file="$(mktemp 2>/dev/null)" || edge_logs_unreadable temp
@@ -522,19 +539,24 @@ jobs:
   database:
     if: github.event_name == 'push' || inputs.mode == 'deploy'
     runs-on: ubuntu-24.04
+    env:
+      EDGE_FROZEN_WORKDIR: &edge-frozen-workdir .edge-frozen
+      DEPLOY_TARGET_ENV: &deploy-target-env ${{ vars.DEPLOY_TARGET_ENV }}
     permissions:
       actions: read
+      checks: read
       contents: read
     # shortcut: Allow time for the first full apply, then set the steady-state limit from the measured first-deploy time.
     timeout-minutes: &dev-db-deploy-timeout-minutes 180
-    environment: dev
+    environment: ${{ inputs.environment || 'dev' }}
     concurrency:
-      group: deploy-dev-database
+      group: deploy-${{ inputs.environment || 'dev' }}-database
       cancel-in-progress: false
     outputs:
       superseded: ${{ steps.apply_guard.outputs.superseded }}
       configured: ${{ steps.guard.outputs.configured }}
       not_configured: ${{ steps.guard.outputs.configured == 'false' }}
+      edge_deployed: ${{ steps.deploy.outcome == 'success' }}
     steps:
       - name: Guard configuration
         id: guard
@@ -543,8 +565,17 @@ jobs:
         run: |
           case "$DEPLOY_ENV:$GITHUB_REF" in
             dev:refs/heads/main) ;;
-            *) echo '::error::Deployment requires the dev environment and the main branch ref'; exit 1 ;;
+            stg:*)
+              if [[ ! "$GITHUB_REF" =~ $STG_RELEASE_REF_PATTERN ]]; then
+                echo '::error::Staging deployment requires a numbered release candidate tag'
+                exit 1
+              fi
+              ;;
+            *) echo '::error::Deployment requires dev on main or stg on a release candidate tag'; exit 1 ;;
           esac
+          if [[ "$DEPLOY_ENV" != dev && "${DEPLOY_TARGET_ENV:-}" != "$DEPLOY_ENV" ]]; then
+            CONFIGURED=false
+          fi
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
             echo '::notice::database skipped: not configured'
@@ -567,6 +598,8 @@ jobs:
           RUN_NUMBER: ${{ github.run_number }}
           EXPECTED_SHA: ${{ inputs.expected_sha }}
           DEV_DB_REARMED_AT: ${{ vars.DEV_DB_REARMED_AT }}
+          DB_REARMED_AT: ${{ vars.DB_REARMED_AT }}
+          DB_APPLY_HISTORY_DAYS: ${{ vars.DB_APPLY_HISTORY_DAYS }}
         run: node scripts/deploy/apply-guard.cjs
       - name: Install locked edge dependencies
         if: &prepare-dev-edge steps.guard.outputs.configured == 'true' && steps.apply_guard.outputs.superseded == 'false'
@@ -576,13 +609,7 @@ jobs:
             [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
       - name: Install pinned Deno
         if: *prepare-dev-edge
-        run: &install-deno |
-          mkdir -p "$RUNNER_TEMP/edge-tools"
-          archive="$RUNNER_TEMP/deno.zip"
-          curl --fail --silent --show-error --location https://github.com/denoland/deno/releases/download/v2.9.6/deno-x86_64-unknown-linux-gnu.zip --output "$archive"
-          printf '394f07f4da2bebe6ce6f1e7ce0fa16429b29b08c35e3fac3fe25972676dff4b2  %s\n' "$archive" | sha256sum --check
-          unzip -q "$archive" deno -d "$RUNNER_TEMP/edge-tools"
-          printf '%s\n' "$RUNNER_TEMP/edge-tools" >> "$GITHUB_PATH"
+        run: &install-deno bash scripts/edge/install-pinned-deno.sh
       - name: Prepare edge packages and pinned CLI
         if: *prepare-dev-edge
         run: |
@@ -612,11 +639,23 @@ jobs:
         id: edge_lock
         if: *prepare-dev-edge
         run: &verify-edge-lock node scripts/edge/verify-frozen-lock.cjs
+      - name: Verify staging egress before database apply
+        id: egress_preflight
+        if: env.DEPLOY_ENV == 'stg' && steps.edge_lock.outcome == 'success'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          printf '::add-mask::%s\n' "$SUPABASE_PROJECT_REF"
+          cli="$RUNNER_TEMP/deploy-tools/supabase"
+          "$cli" secrets list --project-ref "$SUPABASE_PROJECT_REF" --output json 2>/dev/null |
+            node scripts/deploy/guarded-egress.cjs | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Apply migrations and deploy registered edge functions
         id: deploy
-        if: steps.guard.outputs.configured == 'true' && steps.apply_guard.outcome == 'success' && steps.apply_guard.outputs.superseded == 'false' && steps.edge_lock.outcome == 'success'
+        if: steps.guard.outputs.configured == 'true' && steps.apply_guard.outcome == 'success' && steps.apply_guard.outputs.superseded == 'false' && steps.edge_lock.outcome == 'success' && (env.DEPLOY_ENV == 'dev' || steps.egress_preflight.outcome == 'success')
         env: &dev-database-env
-          EDGE_DISPATCH_ENABLED: ${{ env.DEPLOY_ENV == 'dev' && 'true' || 'false' }}
+          EDGE_DISPATCH_ENABLED: ${{ (env.DEPLOY_ENV == 'dev' || env.DEPLOY_ENV == 'stg') && 'true' || 'false' }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
@@ -627,6 +666,22 @@ jobs:
           PUBLIC_TRACKING_CORS_ALLOW_ORIGINS: ${{ vars.PUBLIC_TRACKING_CORS_ALLOW_ORIGINS }}
         run: |
           set -euo pipefail
+          : "${DEPLOY_ENV:?Deployment environment is required}"
+          bash scripts/edge/verify-frozen-manifest.sh "$EDGE_FROZEN_WORKDIR"
+          mapfile -t edge_deploy < edge-deploy.tsv
+          if (( ${#edge_deploy[@]} == 0 )); then
+            echo '::error::The Edge deployment list is empty.'
+            exit 1
+          fi
+          for entry in "${edge_deploy[@]}"; do
+            IFS=$'\t' read -r function_name auth_mode extra <<< "$entry"
+            if [[ ! "$function_name" =~ ^[a-z0-9-]+$ || -n "$extra" ||
+              ( "$auth_mode" != supabase_jwt && "$auth_mode" != public_no_jwt ) ]] ||
+              ! grep -Eq "^[a-f0-9]{64}  supabase/functions/$function_name/index\.ts$" "$EDGE_FROZEN_WORKDIR/SHA256SUMS"; then
+              echo '::error::The Edge deployment list does not match the frozen bundle manifest.'
+              exit 1
+            fi
+          done
           printf '::add-mask::%s\n' "$SUPABASE_PROJECT_REF"
           umask 077
           deploy_temp="$(mktemp -d)"
@@ -687,6 +742,8 @@ jobs:
               echo "::warning::Could not write database apply evidence"
           fi
           rm -f "$deploy_temp/db-push.log" "$deploy_temp/edge-secret-metadata.json"; rmdir "$deploy_temp"' EXIT
+          : > "$deploy_temp/db-push.log"
+          bash scripts/deploy/prepare-executor-plan.sh
           export NO_COLOR=1
           "$cli" db push --linked --yes 2>&1 | tee "$deploy_temp/db-push.log" ||
             bash scripts/deploy/supabase-db-push.sh "$cli" "$deploy_temp/db-push.log" "${PIPESTATUS[@]}" 2>&1 | tee -a "$deploy_temp/db-push.log"
@@ -717,8 +774,10 @@ jobs:
               const { createHash } = require("node:crypto");
               const listed = JSON.parse(readFileSync(0, "utf8"));
               const local = readFileSync(process.env.EDGE_SECRET_FILE, "utf8");
+              const { DEPLOY_ENV } = process.env;
               const names = ["LABEL_RENDERER_SIGNING_KEY", "LABEL_RENDERER_GATEWAY_JWT"];
-              if (process.env.DEPLOY_ENV === "dev") names.push("EDGE_ENVIRONMENT", "EDGE_INTERNAL_CALLER_ROLES");
+              if (DEPLOY_ENV !== undefined) names.push("EDGE_INTERNAL_CALLER_ROLES");
+              if (DEPLOY_ENV === "dev") names.push("EDGE_ENVIRONMENT");
               for (const name of names) {
                 const value = local.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1];
                 if (!value || listed.find(entry => entry.name === name)?.value !== createHash("sha256").update(value).digest("hex")) {
@@ -730,14 +789,43 @@ jobs:
             exit 1
           fi
           node scripts/deploy/guarded-egress.cjs < "$deploy_temp/edge-secret-metadata.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          bash scripts/edge/verify-frozen-manifest.sh "$EDGE_FROZEN_WORKDIR"
           while IFS=$'\t' read -r function_name auth_mode; do
             flags=()
             if [[ "$auth_mode" == public_no_jwt ]]; then flags+=(--no-verify-jwt); fi
-            "$cli" functions deploy "$function_name" --project-ref "$SUPABASE_PROJECT_REF" --use-api "${flags[@]}"
-          done < edge-deploy.tsv
+            "$cli" functions deploy "$function_name" --project-ref "$SUPABASE_PROJECT_REF" --use-api --workdir "$EDGE_FROZEN_WORKDIR" "${flags[@]}"
+          done < <(printf '%s\n' "${edge_deploy[@]}")
       - name: Record database push attempt
         if: ${{ always() && steps.deploy.outputs.attempted == 'true' }}
         run: echo 'Database push started'
+
+  label-render-probe:
+    needs: database
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      needs.database.result == 'success' && needs.database.outputs.edge_deployed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: dev
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify the deployed label renderer
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: node scripts/deploy/dev-label-render-probe.cjs
 
   database-dry-run:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'
@@ -746,6 +834,7 @@ jobs:
     timeout-minutes: 90
     env:
       DEV_DB_DEPLOY_TIMEOUT_MINUTES: *dev-db-deploy-timeout-minutes
+      EDGE_FROZEN_WORKDIR: *edge-frozen-workdir
     concurrency:
       group: dev-db-dry-run
       cancel-in-progress: false
@@ -779,6 +868,11 @@ jobs:
       - name: Install pinned Node.js for Edge preparation
         run: |
           version="$(cat .nvmrc)"
+          version="${version%$'\r'}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo '::error::Expected an exact Node.js version in .nvmrc.'
+            exit 1
+          fi
           archive="$RUNNER_TEMP/node.tar.xz"
           mkdir -p "$RUNNER_TEMP/edge-node"
           curl --fail --silent --show-error --location "https://nodejs.org/dist/v$version/node-v$version-linux-x64.tar.xz" --output "$archive"
@@ -795,7 +889,7 @@ jobs:
       - name: Verify Edge frozen lock
         run: *verify-edge-lock
       - name: Self-check Edge frozen lock drift
-        run: node node_modules/jest/bin/jest.js --config config/tooling/jest.config.unit.js --runInBand --runTestsByPath tests/unit/ops/edge-frozen-lock.test.js --reporters=default
+        run: env -u EDGE_FROZEN_WORKDIR node node_modules/jest/bin/jest.js --config config/tooling/jest.config.unit.js --runInBand --runTestsByPath tests/unit/ops/edge-frozen-lock.test.js --reporters=default
       - name: Install pinned Supabase CLI
         run: |
           mkdir -p "$RUNNER_TEMP/deploy-tools"
@@ -892,9 +986,11 @@ jobs:
     if: ${{ !cancelled() && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    environment: dev
+    environment: ${{ inputs.environment || 'dev' }}
+    env:
+      DEPLOY_TARGET_ENV: *deploy-target-env
     concurrency:
-      group: deploy-dev-console
+      group: deploy-${{ inputs.environment || 'dev' }}-console
       cancel-in-progress: false
     outputs:
       preview_origin: ${{ steps.deploy.outputs.preview_origin }}
@@ -903,12 +999,21 @@ jobs:
       - name: Guard configuration
         id: guard
         env:
-          CONFIGURED: ${{ secrets.VERCEL_TOKEN != '' && vars.VERCEL_ORG_ID != '' && vars.VERCEL_PROJECT_ID_CONSOLE != '' && vars.NEXT_PUBLIC_SUPABASE_URL != '' && vars.NEXT_PUBLIC_SUPABASE_ANON_KEY != '' }}
+          CONFIGURED: ${{ secrets.VERCEL_TOKEN != '' && secrets.VERCEL_ORG_ID != '' && secrets.VERCEL_PROJECT_ID_CONSOLE != '' && vars.NEXT_PUBLIC_SUPABASE_URL != '' && vars.NEXT_PUBLIC_SUPABASE_ANON_KEY != '' }}
         run: |
           case "$DEPLOY_ENV:$GITHUB_REF" in
             dev:refs/heads/main) ;;
-            *) echo '::error::Deployment requires the dev environment and the main branch ref'; exit 1 ;;
+            stg:*)
+              if [[ ! "$GITHUB_REF" =~ $STG_RELEASE_REF_PATTERN ]]; then
+                echo '::error::Staging deployment requires a numbered release candidate tag'
+                exit 1
+              fi
+              ;;
+            *) echo '::error::Deployment requires dev on main or stg on a release candidate tag'; exit 1 ;;
           esac
+          if [[ "$DEPLOY_ENV" != dev && "${DEPLOY_TARGET_ENV:-}" != "$DEPLOY_ENV" ]]; then
+            CONFIGURED=false
+          fi
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
             echo '::notice::console skipped: not configured'
@@ -934,15 +1039,15 @@ jobs:
         if: steps.guard.outputs.configured == 'true'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_CONSOLE }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_CONSOLE }}
         run: |
           "$GITHUB_WORKSPACE/tooling/apps/deploy/node_modules/.bin/vercel" pull --yes --environment=preview --git-branch="$DEPLOY_ENV"
       - name: Build prebuilt app
         if: steps.guard.outputs.configured == 'true'
         env:
-          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_CONSOLE }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_CONSOLE }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           NEXT_PUBLIC_APP_BASE_PATH: '/'
@@ -964,8 +1069,8 @@ jobs:
         if: steps.guard.outputs.configured == 'true'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_CONSOLE }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_CONSOLE }}
           DEV_WEB_ORIGINS: ${{ vars.CORS_ALLOW_ORIGIN }}
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -982,9 +1087,11 @@ jobs:
     if: ${{ !cancelled() && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    environment: dev
+    environment: ${{ inputs.environment || 'dev' }}
+    env:
+      DEPLOY_TARGET_ENV: *deploy-target-env
     concurrency:
-      group: deploy-dev-portal
+      group: deploy-${{ inputs.environment || 'dev' }}-portal
       cancel-in-progress: false
     outputs:
       preview_origin: ${{ steps.deploy.outputs.preview_origin }}
@@ -993,12 +1100,21 @@ jobs:
       - name: Guard configuration
         id: guard
         env:
-          CONFIGURED: ${{ secrets.VERCEL_TOKEN != '' && vars.VERCEL_ORG_ID != '' && vars.VERCEL_PROJECT_ID_PORTAL != '' && vars.NEXT_PUBLIC_SUPABASE_URL != '' && vars.NEXT_PUBLIC_SUPABASE_ANON_KEY != '' }}
+          CONFIGURED: ${{ secrets.VERCEL_TOKEN != '' && secrets.VERCEL_ORG_ID != '' && secrets.VERCEL_PROJECT_ID_PORTAL != '' && vars.NEXT_PUBLIC_SUPABASE_URL != '' && vars.NEXT_PUBLIC_SUPABASE_ANON_KEY != '' }}
         run: |
           case "$DEPLOY_ENV:$GITHUB_REF" in
             dev:refs/heads/main) ;;
-            *) echo '::error::Deployment requires the dev environment and the main branch ref'; exit 1 ;;
+            stg:*)
+              if [[ ! "$GITHUB_REF" =~ $STG_RELEASE_REF_PATTERN ]]; then
+                echo '::error::Staging deployment requires a numbered release candidate tag'
+                exit 1
+              fi
+              ;;
+            *) echo '::error::Deployment requires dev on main or stg on a release candidate tag'; exit 1 ;;
           esac
+          if [[ "$DEPLOY_ENV" != dev && "${DEPLOY_TARGET_ENV:-}" != "$DEPLOY_ENV" ]]; then
+            CONFIGURED=false
+          fi
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
             echo '::notice::portal skipped: not configured'
@@ -1024,15 +1140,15 @@ jobs:
         if: steps.guard.outputs.configured == 'true'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_PORTAL }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_PORTAL }}
         run: |
           "$GITHUB_WORKSPACE/tooling/apps/deploy/node_modules/.bin/vercel" pull --yes --environment=preview --git-branch="$DEPLOY_ENV"
       - name: Build prebuilt app
         if: steps.guard.outputs.configured == 'true'
         env:
-          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_PORTAL }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_PORTAL }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           NEXT_PUBLIC_APP_BASE_PATH: '/'
@@ -1054,8 +1170,8 @@ jobs:
         if: steps.guard.outputs.configured == 'true'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_PORTAL }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_PORTAL }}
           DEV_WEB_ORIGINS: ${{ vars.CORS_ALLOW_ORIGIN }}
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -1134,9 +1250,11 @@ jobs:
     if: ${{ !cancelled() && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    environment: dev
+    environment: ${{ inputs.environment || 'dev' }}
+    env:
+      DEPLOY_TARGET_ENV: *deploy-target-env
     concurrency:
-      group: deploy-dev-landing
+      group: deploy-${{ inputs.environment || 'dev' }}-landing
       cancel-in-progress: false
     outputs:
       url: ${{ steps.deploy.outputs.url }}
@@ -1145,12 +1263,21 @@ jobs:
       - name: Guard configuration
         id: guard
         env:
-          CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.CLOUDFLARE_PAGES_PROJECT_LANDING != '' }}
+          CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' && vars.CLOUDFLARE_PAGES_PROJECT_LANDING != '' }}
         run: |
           case "$DEPLOY_ENV:$GITHUB_REF" in
             dev:refs/heads/main) ;;
-            *) echo '::error::Deployment requires the dev environment and the main branch ref'; exit 1 ;;
+            stg:*)
+              if [[ ! "$GITHUB_REF" =~ $STG_RELEASE_REF_PATTERN ]]; then
+                echo '::error::Staging deployment requires a numbered release candidate tag'
+                exit 1
+              fi
+              ;;
+            *) echo '::error::Deployment requires dev on main or stg on a release candidate tag'; exit 1 ;;
           esac
+          if [[ "$DEPLOY_ENV" != dev && "${DEPLOY_TARGET_ENV:-}" != "$DEPLOY_ENV" ]]; then
+            CONFIGURED=false
+          fi
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
             echo '::notice::landing skipped: not configured'
@@ -1189,7 +1316,7 @@ jobs:
         if: steps.guard.outputs.configured == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_PAGES_PROJECT_LANDING: ${{ vars.CLOUDFLARE_PAGES_PROJECT_LANDING }}
         run: |
           set -euo pipefail
@@ -1213,9 +1340,11 @@ jobs:
     if: ${{ !cancelled() && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment: dev
+    environment: ${{ inputs.environment || 'dev' }}
+    env:
+      DEPLOY_TARGET_ENV: *deploy-target-env
     concurrency:
-      group: deploy-dev-ingress
+      group: deploy-${{ inputs.environment || 'dev' }}-ingress
       cancel-in-progress: false
     outputs:
       url: ${{ steps.deploy.outputs.url }}
@@ -1224,12 +1353,21 @@ jobs:
       - name: Guard configuration
         id: guard
         env:
-          CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.SUPABASE_PROJECT_REF != '' && vars.CORS_ALLOW_ORIGIN != '' }}
+          CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' && vars.SUPABASE_PROJECT_REF != '' && vars.CORS_ALLOW_ORIGIN != '' }}
         run: |
           case "$DEPLOY_ENV:$GITHUB_REF" in
             dev:refs/heads/main) ;;
-            *) echo '::error::Deployment requires the dev environment and the main branch ref'; exit 1 ;;
+            stg:*)
+              if [[ ! "$GITHUB_REF" =~ $STG_RELEASE_REF_PATTERN ]]; then
+                echo '::error::Staging deployment requires a numbered release candidate tag'
+                exit 1
+              fi
+              ;;
+            *) echo '::error::Deployment requires dev on main or stg on a release candidate tag'; exit 1 ;;
           esac
+          if [[ "$DEPLOY_ENV" != dev && "${DEPLOY_TARGET_ENV:-}" != "$DEPLOY_ENV" ]]; then
+            CONFIGURED=false
+          fi
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
             echo '::notice::ingress skipped: not configured'
@@ -1272,7 +1410,7 @@ jobs:
         if: steps.guard.outputs.configured == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           tooling/apps/deploy/node_modules/.bin/wrangler deploy \
@@ -1287,7 +1425,7 @@ jobs:
           PY
 
   summary:
-    needs: [database, console, portal, landing, ingress]
+    needs: [database, label-render-probe, console, portal, landing, ingress]
     if: ${{ always() && (github.event_name == 'push' || inputs.mode == 'deploy') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1296,7 +1434,13 @@ jobs:
         run: |
           case "$DEPLOY_ENV:$GITHUB_REF" in
             dev:refs/heads/main) ;;
-            *) echo '::error::Deployment requires the dev environment and the main branch ref'; exit 1 ;;
+            stg:*)
+              if [[ ! "$GITHUB_REF" =~ $STG_RELEASE_REF_PATTERN ]]; then
+                echo '::error::Staging deployment requires a numbered release candidate tag'
+                exit 1
+              fi
+              ;;
+            *) echo '::error::Deployment requires dev on main or stg on a release candidate tag'; exit 1 ;;
           esac
       - name: Report deployment URLs and outcomes
         env:

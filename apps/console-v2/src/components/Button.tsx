@@ -3,6 +3,8 @@
 // when a `capability` is required and the current user does not hold it, the
 // button is disabled and a CapabilityLock chip is appended (zero-redundancy:
 // callers never fork their own gate logic).
+// Actions run on click only, never on pointer or mouse down, so a press can be
+// cancelled by releasing outside the button (WCAG 2.5.2, #420).
 import type { ReactNode } from 'react';
 import { Icon } from './Icon';
 import { CapabilityLock } from './CapabilityLock';
@@ -17,8 +19,6 @@ export interface ButtonProps {
   iconName?: string;
   kind?: ButtonKind;
   onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
-  onMouseDown?: (event: React.MouseEvent<HTMLButtonElement>) => void;
-  onPointerDown?: (event: React.PointerEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
   capability?: string;
   capabilities?: string[];
@@ -42,8 +42,6 @@ export function Button({
   iconName,
   kind,
   onClick,
-  onMouseDown,
-  onPointerDown,
   disabled,
   capability,
   capabilities,
@@ -89,23 +87,11 @@ export function Button({
     onClick?.(event);
   };
 
-  const handlePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-    if (blocked) return;
-    onPointerDown?.(event);
-  };
-
-  const handleMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
-    if (blocked) return;
-    onMouseDown?.(event);
-  };
-
   return (
     <button
       type={type}
       className={classes}
       onClick={handleClick}
-      onMouseDown={handleMouseDown}
-      onPointerDown={handlePointerDown}
       disabled={isDisabled}
       aria-disabled={blocked || undefined}
       aria-describedby={paused ? pausedReasonId : undefined}

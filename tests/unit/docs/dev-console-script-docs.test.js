@@ -3,7 +3,7 @@ const path = require('path');
 
 const repoRoot = path.join(__dirname, '..', '..', '..');
 const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
-const DOCS = ['docs/frontend/TESTING.md', 'docs/frontend/ARCHITECTURE.md', 'docs/guides/LOCAL_SETUP.md'];
+const DOCS = ['docs/guides/TESTING_GUIDE.md', 'docs/frontend/ARCHITECTURE.md', 'docs/guides/LOCAL_SETUP.md'];
 
 describe('dev:console docs match the root scripts (#161)', () => {
   const scripts = JSON.parse(read('package.json')).scripts;

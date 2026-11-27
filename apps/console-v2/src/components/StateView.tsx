@@ -8,6 +8,9 @@ import { GENERIC_VIEW_ERROR, sanitizeOperatorNode } from './operatorMessages';
 
 export type StateKind = 'empty' | 'loading' | 'denied' | 'error';
 
+// Live-region role per kind (WCAG 4.1.3): loading is polite, error interrupts.
+const LIVE_ROLE: Partial<Record<StateKind, 'status' | 'alert'>> = { loading: 'status', error: 'alert' };
+
 export interface StateViewProps {
   kind: StateKind;
   title?: ReactNode;
@@ -25,7 +28,7 @@ export function StateView({ kind, title, hint, capability, action, className }: 
   const resolvedHint = sanitizeOperatorNode(hint ?? hintFallback, hintFallback);
   const classes = ['state', `state--${kind}`, className].filter(Boolean).join(' ');
   return (
-    <div className={classes}>
+    <div className={classes} role={LIVE_ROLE[kind]}>
       <h3 className="state__title">{resolvedTitle}</h3>
       {resolvedHint ? <p className="state__hint">{resolvedHint}</p> : null}
       {capability ? <CapabilityLock capability={capability} /> : null}

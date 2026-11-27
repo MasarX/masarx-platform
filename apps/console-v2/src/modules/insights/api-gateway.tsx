@@ -123,7 +123,6 @@ import {
   prettyOperatorJson,
   redactHeader,
   redactSensitiveText,
-  relativeTime,
   shapeRealtimePayload,
   statusClass,
   statusKind,
@@ -131,6 +130,8 @@ import {
 } from './_api-gateway.helpers';
 import { getSupabaseClient } from '@/lib/supabase';
 import { ExternalIntakeWorkspaceToolbar } from '@/modules/integrations/ExternalIntakeWorkspaceToolbar';
+import { fill, useI18n, type Translate } from '@/lib/i18n';
+import { scopeT } from '@/lib/i18n-catalog';
 
 const API_GATEWAY_TEST_UI_TIMEOUT_MS = 35_000;
 const API_GATEWAY_VIEW_KEYS = ['live', 'requests', 'auth', 'routes', 'sources'] as const;
@@ -173,11 +174,11 @@ function apiGatewayFocusRouteFromLocation(): string {
   return new URLSearchParams(window.location.search).get('focusRoute')?.trim() ?? '';
 }
 
-function withApiGatewayTestUiTimeout<T>(promise: Promise<T>): Promise<T> {
+function withApiGatewayTestUiTimeout<T>(promise: Promise<T>, t: Translate): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      reject(new Error('API Gateway test did not finish in the browser; route confirmation was not visible in this scope. Check access or retry with a visible source token.'));
+      reject(new Error(t('insightsApiGateway.withApiGatewayTestUiTimeout.apiGatewayTestDid')));
     }, API_GATEWAY_TEST_UI_TIMEOUT_MS);
   });
   return Promise.race([promise, timeout]).finally(() => {
@@ -456,13 +457,13 @@ interface ApiGatewaySourceControlRow extends Record<string, unknown> {
 
 const STATUS_CLASSES: Array<'2xx' | '3xx' | '4xx' | '5xx'> = ['2xx', '3xx', '4xx', '5xx'];
 
-function requestStatusLabel(code: number | null | undefined, state?: string | null): string {
+function requestStatusLabel(t: Translate, code: number | null | undefined, state?: string | null): string {
   if (typeof code === 'number' && Number.isFinite(code)) {
-    if (code >= 200 && code < 300) return 'Completed';
-    if (code >= 300 && code < 400) return 'Redirected';
-    return 'Needs review';
+    if (code >= 200 && code < 300) return t('insightsApiGateway.requestStatusLabel.completed');
+    if (code >= 300 && code < 400) return t('insightsApiGateway.requestStatusLabel.redirected');
+    return t('insightsApiGateway.requestStatusLabel.needsReview');
   }
-  return requestIntakeLabel(state);
+  return requestIntakeLabel(t, state);
 }
 
 function requestStatusTone(code: number | null | undefined, state?: string | null): ChipKind {
@@ -483,57 +484,59 @@ function requestIntakeTone(state: unknown): ChipKind {
   return 'neutral';
 }
 
-function requestIntakeLabel(state: unknown): string {
+function requestIntakeLabel(t: Translate, state: unknown): string {
+  const tl = scopeT(t, 'insightsApiGateway.requestIntakeLabel');
   switch (state) {
     case 'shipment_materialized':
-      return 'Shipment confirmed';
+      return tl('shipmentConfirmed');
     case 'provider_failed':
-      return 'Provider needs review';
+      return tl('providerNeedsReview');
     case 'source_binding_rejected':
-      return 'Request rejected';
+      return tl('requestRejected');
     case 'workflow_queued':
-      return 'Processing';
+      return tl('processing');
     case 'timeout':
     case 'timed_out':
-      return 'Provider timed out';
+      return tl('providerTimedOut');
     case 'not_dispatched':
-      return 'Not sent';
+      return tl('notSent');
     case 'pending':
-      return 'Pending';
+      return tl('pending');
     default:
-      return state ? 'Request received' : 'Intake';
+      return state ? tl('requestReceived') : tl('intake');
   }
 }
 
-function providerStatusLabel(status: unknown): string {
+function providerStatusLabel(t: Translate, status: unknown): string {
+  const tl = scopeT(t, 'insightsApiGateway.providerStatusLabel');
   switch (status) {
     case 'completed':
-      return 'Completed';
+      return tl('completed');
     case 'failed':
     case 'permanently_failed':
-      return 'Needs review';
+      return tl('needsReview');
     case 'timed_out':
-      return 'Timed out';
+      return tl('timedOut');
     case 'pending':
-      return 'Pending';
+      return tl('pending');
     default:
-      return status ? 'Updated' : '—';
+      return status ? tl('updated') : '—';
   }
 }
 
-function formatOptionalDurationMs(value: unknown): string {
+function formatOptionalDurationMs(value: unknown, t: Translate): string {
   const numeric = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(numeric) ? `${Math.round(numeric)}ms` : '—';
+  return Number.isFinite(numeric) ? fill(t('insightsApiGateway.units.ms'), { ms: String(Math.round(numeric)) }) : '—';
 }
 
 function redactGatewayTokenPath(value: string): string {
   return redactSensitiveText(value);
 }
 
-function parseJsonObjectInput(value: string): Record<string, unknown> {
+function parseJsonObjectInput(value: string, t: Translate): Record<string, unknown> {
   const parsed = JSON.parse(value || '{}') as unknown;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Payload must be a JSON object.');
+    throw new Error(t('insightsApiGateway.parseJsonObjectInput.payloadMustBeA'));
   }
   return parsed as Record<string, unknown>;
 }
@@ -722,41 +725,44 @@ function routeRequestMappingRef(row: ApiRouteRow | null | undefined): {
 }
 
 function apiGatewayRouteScopeLabel(
+  t: Translate,
   route: ApiRouteRow | null | undefined,
   source?: WebhookSourceDirectoryRow | null,
 ): string {
+  const tl = scopeT(t, 'insightsApiGateway.routeScopeLabel');
   const scopeType = stringValue(route?.scope_type).toLowerCase();
   const scopeId = stringValue(route?.scope_id);
-  if (!scopeType || scopeType === 'global') return 'Global default';
-  if (scopeType === 'tenant') return 'Tenant default';
+  if (!scopeType || scopeType === 'global') return tl('globalDefault');
+  if (scopeType === 'tenant') return tl('tenantDefault');
   if (scopeType === 'client') {
     if (source?.client_id && scopeId && source.client_id === scopeId) {
-      return `Client exception: ${source.client_label ?? scopeId}`;
+      return fill(tl('clientException'), { value: String(source.client_label ?? scopeId) });
     }
-    return `Client exception: ${scopeId || 'unscoped'}`;
+    return fill(tl('clientException'), { value: scopeId || tl('unscoped') });
   }
   if (scopeType === 'sender') {
     if (source?.sender_id && scopeId && source.sender_id === scopeId) {
-      return `Sender exception: ${source.sender_label ?? scopeId}`;
+      return fill(tl('senderException'), { value: String(source.sender_label ?? scopeId) });
     }
-    return `Sender exception: ${scopeId || 'unscoped'}`;
+    return fill(tl('senderException'), { value: scopeId || tl('unscoped') });
   }
   if (scopeType === 'source') {
     if (source?.id && scopeId && source.id === scopeId) {
-      return `Source exception: ${source.name ?? source.source_identifier ?? scopeId}`;
+      return fill(tl('sourceException'), { value: String(source.name ?? source.source_identifier ?? scopeId) });
     }
-    return `Source exception: ${scopeId || 'unscoped'}`;
+    return fill(tl('sourceException'), { value: scopeId || tl('unscoped') });
   }
-  return `${scopeType}: ${scopeId || 'unscoped'}`;
+  return `${scopeType}: ${scopeId || tl('unscoped')}`;
 }
 
 function apiGatewayRouteOptionLabel(
+  t: Translate,
   route: ApiRouteRow,
   source?: WebhookSourceDirectoryRow | null,
 ): string {
   const methodPath = `${String(route.method ?? '').toUpperCase()} ${routeDisplayPath(route) || route.id}`.trim();
   const routeName = stringValue(route.route_name) || stringValue(route.name);
-  const scopeLabel = apiGatewayRouteScopeLabel(route, source);
+  const scopeLabel = apiGatewayRouteScopeLabel(t, route, source);
   const parts = [methodPath];
   if (routeName && routeName !== methodPath) parts.push(routeName);
   parts.push(scopeLabel);
@@ -788,7 +794,8 @@ function routeCompatibleMappingRows(
   return mappings.filter((row) => routeAndMappingIntentsCompatible(routeIntent, mappingTargetIntent(row)));
 }
 
-function routeMappingSummaryRows(route: ApiRouteRow | null | undefined): KvRow[] {
+function routeMappingSummaryRows(route: ApiRouteRow | null | undefined, t: Translate): KvRow[] {
+  const tl = scopeT(t, 'insightsApiGateway.routeMappingSummaryRows');
   const postprocess = routePostprocessPolicy(route);
   const extract = postprocess?.extract && typeof postprocess.extract === 'object' && !Array.isArray(postprocess.extract)
     ? (postprocess.extract as Record<string, unknown>)
@@ -796,78 +803,79 @@ function routeMappingSummaryRows(route: ApiRouteRow | null | undefined): KvRow[]
   const routeIntent = route ? routeCanonicalIntent(route) : '';
   const requestMapping = routeRequestMappingRef(route);
   return [
-    { key: 'route_id', label: 'Route ID', value: route?.id ?? 'not projected', mono: true },
-    { key: 'route_path', label: 'Route path', value: routeDisplayPath(route), mono: true },
-    { key: 'intent', label: 'Intent', value: routeIntent || 'not declared', mono: true },
-    { key: 'request_mapping', label: 'Request mapping', value: requestMapping?.id || requestMapping?.key || 'not linked', mono: true },
-    { key: 'request_mapping_type', label: 'Request mapping type', value: requestMapping?.type ?? 'not linked', mono: true },
-    { key: 'request_mapping_target', label: 'Request mapping target', value: requestMapping?.target || 'not declared', mono: true },
-    { key: 'postprocess_mode', label: 'Postprocess mode', value: String(postprocess?.mode ?? 'not declared'), mono: true },
-    { key: 'client_reference_path', label: 'Client reference path', value: String(extract.client_reference_path ?? 'not declared'), mono: true },
-    { key: 'recipient_name_path', label: 'Recipient name path', value: String(extract.recipient_name_path ?? 'not declared'), mono: true },
-    { key: 'recipient_phone_path', label: 'Recipient phone path', value: String(extract.recipient_phone_path ?? 'not declared'), mono: true },
-    { key: 'destination_line1_path', label: 'Address line path', value: String(extract.destination_line1_path ?? extract.address_line1_path ?? 'not declared'), mono: true },
-    { key: 'destination_city_path', label: 'Address city path', value: String(extract.destination_city_path ?? extract.address_city_path ?? 'not declared'), mono: true },
-    { key: 'destination_country_path', label: 'Address country path', value: String(extract.destination_country_path ?? extract.address_country_path ?? 'not declared'), mono: true },
-    { key: 'tracking_path', label: 'Tracking path', value: String(extract.provider_tracking_number_path ?? extract.tracking_number_path ?? 'not declared'), mono: true },
-    { key: 'shipment_identifier_path', label: 'Shipment identifier path', value: String(extract.shipment_id_path ?? extract.shipment_identifier_path ?? extract.provider_shipment_id_path ?? 'not declared'), mono: true },
-    { key: 'status_path', label: 'Status path', value: String(extract.status_path ?? extract.shipment_status_path ?? 'not declared'), mono: true },
-    { key: 'reason_path', label: 'Reason path', value: String(extract.cancel_reason_path ?? extract.delete_reason_path ?? extract.reason_path ?? 'not declared'), mono: true },
-    { key: 'reschedule_path', label: 'Reschedule date path', value: String(extract.reschedule_date_path ?? extract.promised_delivery_date_path ?? 'not declared'), mono: true },
+    { key: 'route_id', label: tl('routeId'), value: route?.id ?? tl('notProjected'), mono: true },
+    { key: 'route_path', label: tl('routePath'), value: routeDisplayPath(route), mono: true },
+    { key: 'intent', label: tl('intent'), value: routeIntent || tl('notDeclared'), mono: true },
+    { key: 'request_mapping', label: tl('requestMapping'), value: requestMapping?.id || requestMapping?.key || tl('notLinked'), mono: true },
+    { key: 'request_mapping_type', label: tl('requestMappingType'), value: requestMapping?.type ?? tl('notLinked'), mono: true },
+    { key: 'request_mapping_target', label: tl('requestMappingTarget'), value: requestMapping?.target || tl('notDeclared'), mono: true },
+    { key: 'postprocess_mode', label: tl('postprocessMode'), value: String(postprocess?.mode ?? tl('notDeclared')), mono: true },
+    { key: 'client_reference_path', label: tl('clientReferencePath'), value: String(extract.client_reference_path ?? tl('notDeclared')), mono: true },
+    { key: 'recipient_name_path', label: tl('recipientNamePath'), value: String(extract.recipient_name_path ?? tl('notDeclared')), mono: true },
+    { key: 'recipient_phone_path', label: tl('recipientPhonePath'), value: String(extract.recipient_phone_path ?? tl('notDeclared')), mono: true },
+    { key: 'destination_line1_path', label: tl('addressLinePath'), value: String(extract.destination_line1_path ?? extract.address_line1_path ?? tl('notDeclared')), mono: true },
+    { key: 'destination_city_path', label: tl('addressCityPath'), value: String(extract.destination_city_path ?? extract.address_city_path ?? tl('notDeclared')), mono: true },
+    { key: 'destination_country_path', label: tl('addressCountryPath'), value: String(extract.destination_country_path ?? extract.address_country_path ?? tl('notDeclared')), mono: true },
+    { key: 'tracking_path', label: tl('trackingPath'), value: String(extract.provider_tracking_number_path ?? extract.tracking_number_path ?? tl('notDeclared')), mono: true },
+    { key: 'shipment_identifier_path', label: tl('shipmentIdentifierPath'), value: String(extract.shipment_id_path ?? extract.shipment_identifier_path ?? extract.provider_shipment_id_path ?? tl('notDeclared')), mono: true },
+    { key: 'status_path', label: tl('statusPath'), value: String(extract.status_path ?? extract.shipment_status_path ?? tl('notDeclared')), mono: true },
+    { key: 'reason_path', label: tl('reasonPath'), value: String(extract.cancel_reason_path ?? extract.delete_reason_path ?? extract.reason_path ?? tl('notDeclared')), mono: true },
+    { key: 'reschedule_path', label: tl('rescheduleDatePath'), value: String(extract.reschedule_date_path ?? extract.promised_delivery_date_path ?? tl('notDeclared')), mono: true },
   ];
 }
 
-function requestMaterializationSummaryRows(row: ApiGatewayRequestRow | ApiGatewayRequestReadback | null | undefined): KvRow[] {
+function requestMaterializationSummaryRows(row: ApiGatewayRequestRow | ApiGatewayRequestReadback | null | undefined, t: Translate): KvRow[] {
+  const tl = scopeT(t, 'insightsApiGateway.requestMaterializationSummaryRows');
   const mappingRef = row?.request_mapping_config_id || row?.request_mapping_key;
   return [
     {
       key: 'idempotency_key',
-      label: 'Retry protection',
-      value: row?.idempotency_key ?? 'not projected',
+      label: tl('retryProtection'),
+      value: row?.idempotency_key ?? tl('notProjected'),
       mono: Boolean(row?.idempotency_key),
     },
     {
       key: 'replay_of_request_id',
-      label: 'Replay of',
-      value: row?.replay_of_request_id ?? 'not replayed',
+      label: tl('replayOf'),
+      value: row?.replay_of_request_id ?? tl('notReplayed'),
       mono: Boolean(row?.replay_of_request_id),
     },
-    { key: 'mutation_intent', label: 'Mutation intent', value: row?.mutation_intent ?? 'not declared', mono: true },
+    { key: 'mutation_intent', label: tl('mutationIntent'), value: row?.mutation_intent ?? tl('notDeclared'), mono: true },
     {
       key: 'request_mapping',
-      label: 'Applied mapping',
-      value: mappingRef ?? 'not linked',
+      label: tl('appliedMapping'),
+      value: mappingRef ?? tl('notLinked'),
       mono: Boolean(mappingRef),
     },
     {
       key: 'request_mapping_state',
-      label: 'Mapping state',
-      value: row?.request_mapping_applied ? 'applied' : 'not applied',
+      label: tl('mappingState'),
+      value: row?.request_mapping_applied ? 'applied' : tl('notApplied'),
       mono: true,
     },
-    { key: 'request_mapping_type', label: 'Mapping type', value: row?.request_mapping_type ?? 'not linked', mono: true },
-    { key: 'request_mapping_target', label: 'Mapping target', value: row?.request_mapping_target ?? 'not declared', mono: true },
+    { key: 'request_mapping_type', label: tl('mappingType'), value: row?.request_mapping_type ?? tl('notLinked'), mono: true },
+    { key: 'request_mapping_target', label: tl('mappingTarget'), value: row?.request_mapping_target ?? tl('notDeclared'), mono: true },
     {
       key: 'materialization_action_id',
-      label: 'Shipment action',
-      value: row?.materialization_action_id ?? 'not created',
+      label: tl('shipmentAction'),
+      value: row?.materialization_action_id ?? tl('notCreated'),
       mono: Boolean(row?.materialization_action_id),
     },
-    { key: 'materialization_operation', label: 'Shipment operation', value: row?.materialization_operation ?? 'not created', mono: true },
+    { key: 'materialization_operation', label: tl('shipmentOperation'), value: row?.materialization_operation ?? tl('notCreated'), mono: true },
     {
       key: 'recipient',
-      label: 'Recipient',
-      value: row?.recipient_label ?? row?.recipient_id ?? 'not projected',
+      label: tl('recipient'),
+      value: row?.recipient_label ?? row?.recipient_id ?? tl('notProjected'),
       mono: Boolean(!row?.recipient_label && row?.recipient_id),
     },
     {
       key: 'recipient_external_id',
-      label: 'Recipient reference',
-      value: row?.recipient_external_id ?? 'not projected',
+      label: tl('recipientReference'),
+      value: row?.recipient_external_id ?? tl('notProjected'),
       mono: Boolean(row?.recipient_external_id),
     },
-    { key: 'destination', label: 'Destination', value: row?.destination_city ?? row?.destination_address_id ?? 'not projected', mono: !row?.destination_city },
-    { key: 'destination_validation_status', label: 'Destination status', value: row?.destination_validation_status ?? 'not projected', mono: true },
+    { key: 'destination', label: tl('destination'), value: row?.destination_city ?? row?.destination_address_id ?? tl('notProjected'), mono: !row?.destination_city },
+    { key: 'destination_validation_status', label: tl('destinationStatus'), value: row?.destination_validation_status ?? tl('notProjected'), mono: true },
   ];
 }
 
@@ -918,6 +926,7 @@ function compareShipmentTestRoutes(
 function apiGatewayRouteSourceMismatchReason(
   route: ApiRouteRow | null | undefined,
   source: WebhookSourceDirectoryRow | null | undefined,
+  t: Translate,
 ): string | null {
   if (!route || !source) return null;
   const scopeType = String(route.scope_type ?? '').trim().toLowerCase();
@@ -934,7 +943,7 @@ function apiGatewayRouteSourceMismatchReason(
 
   const routeLabel = routeDisplayPath(route) || route.route_name || route.id;
   const sourceLabel = source.name || source.source_identifier || source.id;
-  return `Route ${routeLabel} is scoped to ${scopeType} ${scopeId}, but source ${sourceLabel} belongs to a different ${scopeType} context. Choose a matching route or source.`;
+  return fill(t('insightsApiGateway.routeSourceMismatch.reason'), { route: String(routeLabel), scopeType, scopeId, source: String(sourceLabel) });
 }
 
 function requestRowFromGatewayTestResult(
@@ -948,6 +957,7 @@ function apiGatewayRequestIsTerminal(row: ApiGatewayRequestRow): boolean {
 }
 
 function missingGatewayActionDisabledReason(
+  t: Translate,
   row: ApiGatewayRequestRow,
   kind: 'outbound' | 'shipment' | 'workflow',
 ): string | undefined {
@@ -959,15 +969,15 @@ function missingGatewayActionDisabledReason(
         : Boolean(row.outbound_call_id);
   if (hasCanonicalReadback) return undefined;
   if (!apiGatewayRequestIsTerminal(row)) return undefined;
-  if (kind === 'shipment') return 'No shipment confirmation for this terminal API request';
-  if (kind === 'workflow') return 'No workflow confirmation for this terminal API request';
-  return 'No provider handoff confirmation for this terminal API request';
+  if (kind === 'shipment') return t('insightsApiGateway.disabledReason.noShipmentConfirmation');
+  if (kind === 'workflow') return t('insightsApiGateway.disabledReason.noWorkflowConfirmation');
+  return t('insightsApiGateway.disabledReason.noProviderHandoffConfirmation');
 }
 
-function apiGatewayReplayDisabledReason(row: ApiGatewayRequestRow): string | undefined {
-  if (!row.route_id) return 'No route confirmation for this API request';
-  if (!row.source_id) return 'No source confirmation for this API request';
-  if (!row.path) return 'No request path confirmation for this API request';
+function apiGatewayReplayDisabledReason(t: Translate, row: ApiGatewayRequestRow): string | undefined {
+  if (!row.route_id) return t('insightsApiGateway.disabledReason.noRouteConfirmation');
+  if (!row.source_id) return t('insightsApiGateway.disabledReason.noSourceConfirmation');
+  if (!row.path) return t('insightsApiGateway.disabledReason.noRequestPathConfirmation');
   return undefined;
 }
 
@@ -989,40 +999,42 @@ function providerAccountPolicy(row: ApiRouteRow): {
 function routeProviderAccountReadiness(
   row: ApiRouteRow,
   providerAccountValue: ProviderAccountSettingsValue | undefined,
-  credentialReadback?: ProviderCredentialReadback,
+  credentialReadback: ProviderCredentialReadback | undefined,
+  t: Translate,
 ): { label: string; tone: ChipKind; blockingReason?: string } {
+  const tl = scopeT(t, 'insightsApiGateway.routeProviderAccountReadiness');
   const policy = providerAccountPolicy(row);
-  if (!policy) return { label: 'Not required', tone: 'neutral' };
+  if (!policy) return { label: tl('notRequired'), tone: 'neutral' };
   if (policy.category !== 'logestechs_v2_account') {
     return {
       label: policy.category,
       tone: policy.requireAuthConfig ? 'warn' : 'info',
       blockingReason: policy.requireAuthConfig
-        ? `Provider account policy ${policy.category} is required but is not resolved in this Console surface.`
+        ? fill(tl('providerAccountPolicyCategory'), { category: String(policy.category) })
         : undefined,
     };
   }
   const authConfigId = String(providerAccountValue?.auth_config_id ?? '').trim();
   if (policy.requireAuthConfig && !authConfigId) {
     return {
-      label: 'Credential missing',
+      label: tl('credentialMissing'),
       tone: 'warn',
-      blockingReason: 'Bind the delivery API account credential before sending an expected-success shipment test.',
+      blockingReason: tl('bindTheDeliveryApi'),
     };
   }
   if (authConfigId) {
     if (credentialReadback && !credentialReadback.loaded) {
       return {
-        label: 'Checking credential',
+        label: tl('checkingCredential'),
         tone: 'info',
-        blockingReason: 'Credential confirmation is still loading.',
+        blockingReason: tl('credentialConfirmationIsStill'),
       };
     }
     if (credentialReadback?.error) {
       return {
-        label: 'Credential unreadable',
+        label: tl('credentialUnreadable'),
         tone: 'danger',
-        blockingReason: 'Credential confirmation failed; retry before sending an expected-success shipment test.',
+        blockingReason: tl('credentialConfirmationFailedRetry'),
       };
     }
     const credential = credentialReadback?.rows.find((row) => {
@@ -1033,23 +1045,23 @@ function routeProviderAccountReadiness(
     });
     if (credentialReadback?.loaded && !credential) {
       return {
-        label: 'Credential missing',
+        label: tl('credentialMissing'),
         tone: 'danger',
-        blockingReason: 'The selected credential is not available for this route.',
+        blockingReason: tl('theSelectedCredentialIs'),
       };
     }
     const status = String(credential?.status ?? '').trim().toLowerCase();
     if (status === 'expired' || status === 'revoked') {
       return {
-        label: `Credential ${status}`,
+        label: fill(tl('credentialStatus'), { status: String(status) }),
         tone: 'danger',
-        blockingReason: `The selected credential is ${status}; rotate or bind an active credential before testing shipment creation.`,
+        blockingReason: fill(tl('theSelectedCredentialIs2'), { status: String(status) }),
       };
     }
-    if (status === 'expiring') return { label: 'Credential expiring', tone: 'warn' };
-    return { label: 'Credential bound', tone: 'good' };
+    if (status === 'expiring') return { label: tl('credentialExpiring'), tone: 'warn' };
+    return { label: tl('credentialBound'), tone: 'good' };
   }
-  return { label: 'Account configured', tone: 'info' };
+  return { label: tl('accountConfigured'), tone: 'info' };
 }
 
 function operatorReference(kind: string, value: unknown): string {
@@ -1058,12 +1070,12 @@ function operatorReference(kind: string, value: unknown): string {
   return `${kind} ${raw.slice(0, 8)}`;
 }
 
-function sourceDisplayLabel(row: WebhookSourceDirectoryRow | null | undefined): string {
-  if (!row) return 'Select source';
+function sourceDisplayLabel(row: WebhookSourceDirectoryRow | null | undefined, t: Translate): string {
+  if (!row) return t('insightsApiGateway.sourceDisplayLabel.selectSource');
   const name = String(row.name ?? '').trim();
   const identifier = String(row.source_identifier ?? '').trim();
-  if (name && identifier) return `${name} · ${operatorReference('Source', identifier)}`;
-  return name || operatorReference('Source', identifier || row.id);
+  if (name && identifier) return `${name} · ${operatorReference(t('insightsApiGateway.sourceDisplayLabel.source'), identifier)}`;
+  return name || operatorReference(t('insightsApiGateway.sourceDisplayLabel.source'), identifier || row.id);
 }
 
 function isArchivedApiGatewaySource(row: WebhookSourceDirectoryRow | null | undefined): boolean {
@@ -1074,49 +1086,51 @@ function isArchivedApiGatewaySource(row: WebhookSourceDirectoryRow | null | unde
 function apiGatewaySourceReadiness(
   row: WebhookSourceDirectoryRow | null | undefined,
   selectedRoute: ApiRouteRow | null,
+  t: Translate,
 ): { label: string; tone: ChipKind; blockingReason?: string; blockingTitle?: string } {
+  const tl = scopeT(t, 'insightsApiGateway.apiGatewaySourceReadiness');
   if (!row) {
     return {
-      label: 'Source required',
+      label: tl('sourceRequired'),
       tone: 'warn',
-      blockingTitle: 'API source required',
-      blockingReason: 'Choose an intake source before sending an API Gateway shipment test.',
+      blockingTitle: tl('apiSourceRequired'),
+      blockingReason: tl('chooseAnIntakeSource'),
     };
   }
   if (isArchivedApiGatewaySource(row)) {
     return {
-      label: 'Source archived',
+      label: tl('sourceArchived'),
       tone: 'danger',
-      blockingTitle: 'API source archived',
-      blockingReason: 'Archived sources are retained for audit and cannot send API Gateway shipment tests.',
+      blockingTitle: tl('apiSourceArchived'),
+      blockingReason: tl('archivedSourcesAreRetained'),
     };
   }
   if (row.enabled === false) {
     return {
-      label: 'Source disabled',
+      label: tl('sourceDisabled'),
       tone: 'danger',
-      blockingTitle: 'API source disabled',
-      blockingReason: 'Enable the selected source before sending an API Gateway shipment test.',
+      blockingTitle: tl('apiSourceDisabled'),
+      blockingReason: tl('enableTheSelectedSource'),
     };
   }
   if (!String(row.auth_token_masked ?? '').trim()) {
     return {
-      label: 'Token missing',
+      label: tl('tokenMissing'),
       tone: 'danger',
-      blockingTitle: 'API source token missing',
-      blockingReason: 'Rotate or create a source token before sending an API Gateway shipment test.',
+      blockingTitle: tl('apiSourceTokenMissing'),
+      blockingReason: tl('rotateOrCreateA'),
     };
   }
   if (routeIsShipmentMutation(selectedRoute) && (!row.sender_id || !row.client_id)) {
     return {
-      label: 'Sender binding missing',
+      label: tl('senderBindingMissing'),
       tone: 'danger',
-      blockingTitle: 'Sender and client binding required',
-      blockingReason: 'Shipment mutation API routes require the source to be bound to a sender and client.',
+      blockingTitle: tl('senderAndClientBinding'),
+      blockingReason: tl('shipmentMutationApiRoutes'),
     };
   }
   return {
-    label: row.sender_label || row.client_label ? 'Source ready' : 'Source token stored',
+    label: row.sender_label || row.client_label ? tl('sourceReady') : tl('sourceTokenStored'),
     tone: 'good',
   };
 }
@@ -1132,6 +1146,8 @@ function isCapabilityDenied(err: unknown): boolean {
 // ─── Module ──────────────────────────────────────────────────────────────
 
 export function ApiGatewayModule() {
+  const { t, fmtRelative } = useI18n();
+  const tl = useMemo(() => scopeT(t, 'insightsApiGateway.apiGatewayModule'), [t]);
   // Capability gate at the module entry — fail-closed, per AGENTS.md
   // ladder/identity policy. The data-source seam exposes the api_gateway_*
   // resources unconditionally (no per-resource RPC capability check is
@@ -1341,11 +1357,11 @@ export function ApiGatewayModule() {
   const routeMappingLabel = useCallback(
     (route: ApiRouteRow | null | undefined) => {
       const ref = routeRequestMappingRef(route);
-      if (!ref) return 'No request mapping';
+      if (!ref) return tl('noRequestMapping');
       const row = routeMappingDirectoryRow(route);
-      return mappingDirectoryLabel(row) || ref.key || ref.id || 'Request mapping linked';
+      return mappingDirectoryLabel(row) || ref.key || ref.id || tl('requestMappingLinked');
     },
-    [routeMappingDirectoryRow],
+    [routeMappingDirectoryRow, tl],
   );
   const requireRouteMappingVisibleReadback = useCallback(
     async (
@@ -1361,24 +1377,24 @@ export function ApiGatewayModule() {
       ]);
       const route = (routesReadback.data?.rows ?? []).find((candidate) => candidate.id === routeId);
       if (!route) {
-        throw new Error(`API route ${routeId} is not visible after route confirmation.`);
+        throw new Error(fill(tl('apiRouteRouteidIs'), { routeId: String(routeId) }));
       }
       const ref = routeRequestMappingRef(route);
       if (!ref) {
-        throw new Error(`API route ${routeId} route confirmation did not expose a request mapping.`);
+        throw new Error(fill(tl('apiRouteRouteidRoute'), { routeId: String(routeId) }));
       }
       if (ref.id !== expected.mapping_config_id) {
-        throw new Error(`API route ${routeId} route confirmation did not persist the selected mapping.`);
+        throw new Error(fill(tl('apiRouteRouteidRoute2'), { routeId: String(routeId) }));
       }
       const expectedTarget = stringValue(expected.target);
       const actualTarget = stringValue(ref.target);
       if (expectedTarget && actualTarget !== expectedTarget) {
-        throw new Error(`API route ${routeId} route confirmation did not persist the selected mapping target.`);
+        throw new Error(fill(tl('apiRouteRouteidRoute3'), { routeId: String(routeId) }));
       }
       const directoryRows = mappingsReadback.data?.rows ?? [];
       const directory = directoryRows.find((candidate) => candidate.id === expected.mapping_config_id);
       if (!directory) {
-        throw new Error('The selected mapping is not visible in the route directory.');
+        throw new Error(tl('theSelectedMappingIs'));
       }
       return {
         mapping_config_id: ref.id,
@@ -1389,7 +1405,7 @@ export function ApiGatewayModule() {
         route_scope_id: ref.scopeId,
       };
     },
-    [mappingDirectoryQ, routesQ],
+    [mappingDirectoryQ, routesQ, tl],
   );
   const providerCredentialReadback = useMemo<ProviderCredentialReadback>(
     () => ({
@@ -1660,19 +1676,19 @@ export function ApiGatewayModule() {
   // Action handlers ─ Block source + Adjust rate limit (capability-gated).
   const onBlockSource = useCallback(() => {
     modal.open({
-      title: 'Block source',
+      title: tl('blockSource'),
       body: <BlockSourceForm sources={sourceOptions} onClose={() => modal.close()} />,
     });
-  }, [modal, sourceOptions]);
+  }, [modal, sourceOptions, tl]);
 
   const onAdjustRateLimit = useCallback(() => {
     modal.open({
-      title: 'Adjust rate limit',
+      title: tl('adjustRateLimit'),
       body: (
         <AdjustRateLimitForm rateLimits={rateLimitRows} onClose={() => modal.close()} />
       ),
     });
-  }, [modal, rateLimitRows]);
+  }, [modal, rateLimitRows, tl]);
   const isRefreshingGatewayData =
     callsQ.isFetching ||
     requestsQ.isFetching ||
@@ -1697,7 +1713,7 @@ export function ApiGatewayModule() {
       sourceDirectoryQ.refetch(),
       credentialsQ.refetch(),
     ]);
-    pushToast('API gateway data refreshed', 'info');
+    pushToast(tl('apiGatewayDataRefreshed'), 'info');
   }, [
     authRejectionsQ.refetch,
     callsQ.refetch,
@@ -1709,6 +1725,7 @@ export function ApiGatewayModule() {
     routesQ.refetch,
     mappingDirectoryQ.refetch,
     sourceDirectoryQ.refetch,
+    tl,
   ]);
 
   // Drawer body builder. We hand it the related rate-limit + provider-health
@@ -1736,7 +1753,7 @@ export function ApiGatewayModule() {
             .filter((r) => Math.abs(new Date(r.occurred_at).getTime() - new Date(row.occurred_at).getTime()) < corrWindowMs)
             .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())[0] ?? null;
       drawer.open({
-        title: `Request · ${row.request_id ?? row.id}`,
+        title: fill(tl('requestValue'), { value: String(row.request_id ?? row.id) }),
         size: 'lg',
         body: (
           <ApiCallDrawerBody
@@ -1755,14 +1772,14 @@ export function ApiGatewayModule() {
         ),
       });
     },
-    [drawer, rateLimitRows, providerHealthRows, usagePctWarn, apiGwThresholds],
+    [drawer, rateLimitRows, providerHealthRows, usagePctWarn, apiGwThresholds, tl],
   );
 
   const columns = useMemo<Array<DataTableColumn<ApiCallRow>>>(
     () => [
       {
         key: 'request_id',
-        label: 'Request',
+        label: tl('request'),
         mono: true,
         sortable: true,
         filterable: true,
@@ -1777,11 +1794,11 @@ export function ApiGatewayModule() {
             </span>
             {row.synthetic ? (
               <Chip
-                label="test"
+                label={tl('test')}
                 kind="info"
                 size="xs"
                 className="mono"
-                title="Test preview row."
+                title={tl('testPreviewRow')}
               />
             ) : null}
           </span>
@@ -1789,7 +1806,7 @@ export function ApiGatewayModule() {
       },
       {
         key: 'method',
-        label: 'Method',
+        label: tl('method'),
         sortable: true,
         filterable: true,
         render: (raw) => (
@@ -1798,14 +1815,14 @@ export function ApiGatewayModule() {
       },
       {
         key: 'path',
-        label: 'Path',
+        label: tl('path'),
         mono: true,
         sortable: true,
         filterable: true,
       },
       {
         key: 'status_code',
-        label: 'Status',
+        label: tl('status'),
         align: 'right',
         mono: true,
         sortable: true,
@@ -1822,7 +1839,7 @@ export function ApiGatewayModule() {
       },
       {
         key: 'duration_ms',
-        label: 'Duration',
+        label: tl('duration'),
         align: 'right',
         mono: true,
         sortable: true,
@@ -1836,13 +1853,13 @@ export function ApiGatewayModule() {
           const kind = latencyKind(Number(raw), apiGwThresholds ?? null);
           return (
             <Chip
-              label={`${raw}ms`}
+              label={fill(t('insightsApiGateway.units.ms'), { ms: String(raw) })}
               kind={kind ?? 'neutral'}
               size="xs"
               className="mono"
               title={
                 kind === null
-                  ? 'Response timing thresholds are not configured.'
+                  ? tl('responseTimingThresholdsAre')
                   : undefined
               }
             />
@@ -1851,77 +1868,77 @@ export function ApiGatewayModule() {
       },
       {
         key: 'source_label',
-        label: 'Source',
+        label: tl('source'),
         sortable: true,
         filterable: true,
       },
       {
         key: 'occurred_at',
-        label: 'When',
+        label: tl('when'),
         sortable: true,
         format: 'datetime',
         render: (raw) => (
           <span title={String(raw)} className="mono" style={{ fontSize: 11 }}>
-            {relativeTime(String(raw))}
+            {fmtRelative(String(raw))}
           </span>
         ),
       },
     ],
     // W54-D — depend on resolved thresholds so the column tones recompute
     // when the canonical policy resolves after mount.
-    [apiGwThresholds],
+    [apiGwThresholds, t, fmtRelative],
   );
 
   const rowActions = useMemo<Array<DataTableAction<ApiCallRow>>>(
     () => [
-      { label: 'Open detail', icon: 'eye', onClick: openRow },
+      { label: tl('openDetail'), icon: 'eye', onClick: openRow },
       {
-        label: 'Copy tracking key',
+        label: tl('copyTrackingKey'),
         icon: 'copy',
         onClick: (row) => {
           try {
             navigator.clipboard?.writeText(row.request_id ?? row.id);
-            pushToast('Copied tracking key', 'good');
+            pushToast(tl('copiedTrackingKey'), 'good');
           } catch {
-            pushToast('Clipboard blocked', 'warn');
+            pushToast(tl('clipboardBlocked'), 'warn');
           }
         },
       },
     ],
-    [openRow],
+    [openRow, t],
   );
 
   const readGatewayRequestReadback = useCallback(async (row: ApiGatewayRequestRow): Promise<ApiGatewayRequestRow> => {
     const requestId = String(row.request_id ?? '').trim();
     if (!requestId) {
-      throw new Error('Request confirmation is unavailable.');
+      throw new Error(tl('requestConfirmationIsUnavailable'));
     }
     const latest = await ui_get_resource_v1<ApiGatewayRequestRow>('api_gateway_requests', requestId);
     if (!latest?.request_id) {
-      throw new Error('The latest request confirmation is unavailable.');
+      throw new Error(tl('theLatestRequestConfirmation'));
     }
     if (latest.request_id !== requestId) {
-      throw new Error('The latest request confirmation did not match the selected request.');
+      throw new Error(tl('theLatestRequestConfirmation2'));
     }
     return latest;
-  }, []);
+  }, [tl]);
 
   const readAuthRejectionReadback = useCallback(
     async (row: ApiGatewayAuthRejectionRow): Promise<ApiGatewayAuthRejectionRow> => {
       const id = String(row.id ?? '').trim();
       if (!id) {
-        throw new Error('The selected rejected request is unavailable.');
+        throw new Error(tl('theSelectedRejectedRequest'));
       }
       const latest = await ui_get_resource_v1<ApiGatewayAuthRejectionRow>('api_gateway_auth_rejections', id);
       if (!latest?.id) {
-        throw new Error('The selected rejected request is unavailable.');
+        throw new Error(tl('theSelectedRejectedRequest'));
       }
       if (latest.id !== id) {
-        throw new Error('The rejected request confirmation did not match the selected request.');
+        throw new Error(tl('theRejectedRequestConfirmation'));
       }
       return latest;
     },
-    [],
+    [tl],
   );
 
   const openAuthRejectionRow = useCallback(
@@ -1930,33 +1947,33 @@ export function ApiGatewayModule() {
       try {
         latest = await readAuthRejectionReadback(row);
       } catch (err) {
-        pushToast('Could not open the rejected request. Refresh and try again.', 'danger');
+        pushToast(tl('couldNotOpenThe'), 'danger');
         return;
       }
       drawer.open({
-        title: 'Rejected request',
+        title: tl('rejectedRequest'),
         size: 'lg',
         body: <ApiGatewayAuthRejectionDrawerBody row={latest} />,
       });
     },
-    [drawer, readAuthRejectionReadback],
+    [drawer, readAuthRejectionReadback, tl],
   );
 
   const openGatewayWorkflowRun = useCallback(
     async (row: ApiGatewayRequestRow) => {
       if (!canOpenWorkflowContext) {
-        pushToast('Opening workflow context requires workflows.read and observability.read.', 'warn');
+        pushToast(tl('openingWorkflowContextRequires'), 'warn');
         return;
       }
       let latest: ApiGatewayRequestRow;
       try {
         latest = await readGatewayRequestReadback(row);
       } catch (err) {
-        pushToast('Could not open the request confirmation. Refresh and try again.', 'danger');
+        pushToast(tl('couldNotOpenThe2'), 'danger');
         return;
       }
       if (!latest.workflow_run_id) {
-        pushToast('No workflow activity is linked to this API request yet.', 'warn');
+        pushToast(tl('noWorkflowActivityIs'), 'warn');
         return;
       }
       let run: WorkflowRunContextRecord | null = null;
@@ -1972,11 +1989,11 @@ export function ApiGatewayModule() {
         run = runReadback;
         events = eventsReadback.rows ?? [];
       } catch (err) {
-        pushToast('Could not open workflow activity. Refresh and try again.', 'danger');
+        pushToast(tl('couldNotOpenWorkflow'), 'danger');
         return;
       }
       if (!run?.id) {
-        pushToast('Workflow activity is not available for this request.', 'danger');
+        pushToast(tl('workflowActivityIsNot'), 'danger');
         return;
       }
       openWorkflowRunContextDrawer(drawer, {
@@ -1985,16 +2002,16 @@ export function ApiGatewayModule() {
         events,
         contextRows: [
           {
-            label: 'API request',
+            label: tl('apiRequest'),
             value: (
               <>
                 <span className="mono">{latest.request_id}</span> · {latest.path}
               </>
             ),
           },
-          { label: 'Intake state', value: latest.intake_state ?? 'pending confirmation' },
-          { label: 'Provider handoff', value: latest.outbound_call_id ?? 'pending confirmation' },
-          { label: 'Shipment', value: latest.tracking_number ?? latest.shipment_id ?? 'pending confirmation' },
+          { label: tl('intakeState'), value: latest.intake_state ?? tl('pendingConfirmation') },
+          { label: tl('providerHandoff'), value: latest.outbound_call_id ?? tl('pendingConfirmation') },
+          { label: tl('shipment'), value: latest.tracking_number ?? latest.shipment_id ?? tl('pendingConfirmation') },
         ],
         deepLink: `/workflows/runs?focus=${encodeURIComponent(latest.workflow_run_id)}`,
         onOpenTrace: latest.correlation_id
@@ -2005,7 +2022,7 @@ export function ApiGatewayModule() {
         },
       });
     },
-    [canOpenWorkflowContext, drawer, go, readGatewayRequestReadback],
+    [canOpenWorkflowContext, drawer, go, readGatewayRequestReadback, tl],
   );
 
   const openGatewayOutboundLifecycle = useCallback(
@@ -2014,16 +2031,16 @@ export function ApiGatewayModule() {
       try {
         latest = await readGatewayRequestReadback(row);
       } catch (err) {
-        pushToast('Could not open provider activity. Refresh and try again.', 'danger');
+        pushToast(tl('couldNotOpenProvider'), 'danger');
         return;
       }
       if (!latest.outbound_call_id) {
-        pushToast('No provider handoff confirmation is linked to this API request yet.', 'warn');
+        pushToast(tl('noProviderHandoffConfirmation'), 'warn');
         return;
       }
-      openApiGatewayOutboundLifecycleDrawer(drawer, latest);
+      openApiGatewayOutboundLifecycleDrawer(drawer, latest, t);
     },
-    [drawer, readGatewayRequestReadback],
+    [drawer, readGatewayRequestReadback, t, tl],
   );
 
   const openGatewayRoutePlanning = useCallback(
@@ -2032,17 +2049,17 @@ export function ApiGatewayModule() {
       try {
         latest = await readGatewayRequestReadback(row);
       } catch (err) {
-        pushToast('Could not open provider activity. Refresh and try again.', 'danger');
+        pushToast(tl('couldNotOpenProvider'), 'danger');
         return;
       }
       if (!latest.shipment_id) {
-        pushToast('No shipment has materialized for this API request yet.', 'warn');
+        pushToast(tl('noShipmentHasMaterialized'), 'warn');
         return;
       }
       const params = new URLSearchParams({ shipment: latest.shipment_id });
       go(`/operate/route-plans?${params.toString()}`);
     },
-    [go, readGatewayRequestReadback],
+    [go, readGatewayRequestReadback, tl],
   );
 
   const openGatewayRequestRow = useCallback(
@@ -2051,14 +2068,14 @@ export function ApiGatewayModule() {
       try {
         latest = await readGatewayRequestReadback(row);
       } catch (err) {
-        pushToast('Could not open route planning from this request. Refresh and try again.', 'danger');
+        pushToast(tl('couldNotOpenRoute'), 'danger');
         return;
       }
       const footer = (canOpenWorkflowContext && latest.workflow_run_id) || latest.outbound_call_id || latest.route_id || latest.shipment_id ? (
         <>
           {canOpenWorkflowContext && latest.workflow_run_id ? (
             <Button
-              label="Open workflow activity"
+              label={tl('openWorkflowActivity')}
               iconName="history"
               kind="ghost"
               onClick={() => openGatewayWorkflowRun(latest)}
@@ -2066,7 +2083,7 @@ export function ApiGatewayModule() {
           ) : null}
           {latest.outbound_call_id ? (
             <Button
-              label="Open provider activity"
+              label={tl('openProviderActivity')}
               iconName="trace"
               kind="ghost"
               onClick={() => openGatewayOutboundLifecycle(latest)}
@@ -2074,7 +2091,7 @@ export function ApiGatewayModule() {
           ) : null}
           {latest.route_id ? (
             <Button
-              label="Open route mapping"
+              label={tl('openRouteMapping')}
               iconName="route"
               kind="ghost"
               onClick={() => {
@@ -2086,7 +2103,7 @@ export function ApiGatewayModule() {
           ) : null}
           {latest.shipment_id ? (
             <Button
-              label="Plan route"
+              label={tl('planRoute')}
               iconName="route"
               kind="ghost"
               capabilities={[CAP.ROUTE_PLANS_READ, CAP.ROUTE_PLANS_WRITE]}
@@ -2097,7 +2114,7 @@ export function ApiGatewayModule() {
           ) : null}
           {latest.shipment_id ? (
             <Button
-              label="Open shipment context"
+              label={tl('openShipmentContext')}
               iconName="package"
               kind="primary"
               onClick={() => {
@@ -2115,7 +2132,7 @@ export function ApiGatewayModule() {
       ) : undefined;
 
       drawer.open({
-        title: `Gateway request · ${latest.request_id}`,
+        title: fill(tl('gatewayRequestRequestId'), { request_id: String(latest.request_id) }),
         size: 'lg',
         body: (
           <ApiGatewayRequestDrawerBody
@@ -2134,6 +2151,7 @@ export function ApiGatewayModule() {
       openGatewayWorkflowRun,
       readGatewayRequestReadback,
       routeRows,
+      tl,
     ],
   );
 
@@ -2143,11 +2161,11 @@ export function ApiGatewayModule() {
       try {
         latest = await readGatewayRequestReadback(row);
       } catch (err) {
-        pushToast('Could not open this request. Refresh and try again.', 'danger');
+        pushToast(tl('couldNotOpenThis'), 'danger');
         return;
       }
       if (!latest.shipment_id) {
-        pushToast('No shipment has materialized for this API request yet.', 'warn');
+        pushToast(tl('noShipmentHasMaterialized'), 'warn');
         return;
       }
       openShipmentContextDrawer(drawer, latest.shipment_id, {
@@ -2158,7 +2176,7 @@ export function ApiGatewayModule() {
         initialTab: 'timeline',
       });
     },
-    [drawer, readGatewayRequestReadback],
+    [drawer, readGatewayRequestReadback, tl],
   );
 
   const openApiGatewayShipmentTestModal = useCallback((replayRequest?: ApiGatewayRequestRow | null) => {
@@ -2191,7 +2209,7 @@ export function ApiGatewayModule() {
       await openGatewayRoutePlanning(row);
     };
     modal.open({
-      title: 'API Gateway shipment test',
+      title: tl('apiGatewayShipmentTest'),
       body: (
         <ApiGatewayShipmentTestForm
           routes={routeRows}
@@ -2236,6 +2254,7 @@ export function ApiGatewayModule() {
     deliveryProviderAccountValue,
     providerCredentialReadback,
     routeMappingLabel,
+    tl,
   ]);
 
   const onTestApiGatewayShipment = useCallback(() => {
@@ -2244,7 +2263,7 @@ export function ApiGatewayModule() {
 
   const replayGatewayRequestInTester = useCallback(
     async (row: ApiGatewayRequestRow) => {
-      const disabledReason = apiGatewayReplayDisabledReason(row);
+      const disabledReason = apiGatewayReplayDisabledReason(t, row);
       if (disabledReason) {
         pushToast(disabledReason, 'warn');
         return;
@@ -2253,18 +2272,18 @@ export function ApiGatewayModule() {
       try {
         latest = await readGatewayRequestReadback(row);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'API request confirmation unavailable.';
+        const message = err instanceof Error ? err.message : tl('apiRequestConfirmationUnavailable');
         pushToast(message, 'danger');
         return;
       }
-      const latestDisabledReason = apiGatewayReplayDisabledReason(latest);
+      const latestDisabledReason = apiGatewayReplayDisabledReason(t, latest);
       if (latestDisabledReason) {
         pushToast(latestDisabledReason, 'warn');
         return;
       }
       openApiGatewayShipmentTestModal(latest);
     },
-    [openApiGatewayShipmentTestModal, readGatewayRequestReadback],
+    [openApiGatewayShipmentTestModal, readGatewayRequestReadback, t, tl],
   );
 
   const openRouteMappingInStudio = useCallback(
@@ -2272,18 +2291,18 @@ export function ApiGatewayModule() {
       const ref = routeRequestMappingRef(row);
       const focus = ref?.id || ref?.key;
       if (!focus) {
-        pushToast('This API route has no request mapping profile linked yet.', 'warn');
+        pushToast(tl('thisApiRouteHas'), 'warn');
         return;
       }
       go(`/integrations/mapping?focus=${encodeURIComponent(focus)}`);
     },
-    [go],
+    [go, tl],
   );
 
   const openRouteMappingForm = useCallback(
     (row: ApiRouteRow) => {
       modal.open({
-        title: 'Configure route mapping',
+        title: tl('configureRouteMapping'),
         body: (
           <ApiGatewayRouteMappingForm
             route={row}
@@ -2307,7 +2326,7 @@ export function ApiGatewayModule() {
                 ...current,
                 [row.id]: visibleReadback,
               }));
-              pushToast('Route request mapping saved', 'good');
+              pushToast(tl('routeRequestMappingSaved'), 'good');
               modal.close();
             }}
             saving={bindRouteMapping.isPending}
@@ -2326,81 +2345,82 @@ export function ApiGatewayModule() {
       requireRouteMappingVisibleReadback,
       routeMappingDirectoryRow,
       tenantId,
+      tl,
     ],
   );
 
   const routeRowActions = useMemo<Array<DataTableAction<ApiRouteRow>>>(
     () => [
       {
-        label: 'Configure mapping',
+        label: tl('configureMapping'),
         icon: 'settings',
         disabled: () => !canWriteGateway || !canWriteMappings,
         disabledReason: () => (
           !canWriteGateway
-            ? 'Requires api_gateway.write'
+            ? tl('requiresApiGatewayWrite')
             : !canWriteMappings
-              ? 'Requires mappings.write'
+              ? tl('requiresMappingsWrite')
               : undefined
         ),
         onClick: openRouteMappingForm,
       },
       {
-        label: 'Open mapping profile',
+        label: tl('openMappingProfile'),
         icon: 'external',
         disabled: (row) => !routeRequestMappingRef(row),
-        disabledReason: () => 'No request mapping profile is linked to this route',
+        disabledReason: () => tl('noRequestMappingProfile'),
         onClick: openRouteMappingInStudio,
       },
     ],
-    [canWriteGateway, canWriteMappings, openRouteMappingForm, openRouteMappingInStudio],
+    [canWriteGateway, canWriteMappings, openRouteMappingForm, openRouteMappingInStudio, t],
   );
 
   const requestRowActions = useMemo<Array<DataTableAction<ApiGatewayRequestRow>>>(
     () => [
-      { label: 'Open request', icon: 'eye', onClick: openGatewayRequestRow },
+      { label: tl('openRequest'), icon: 'eye', onClick: openGatewayRequestRow },
       {
-        label: 'Open workflow activity',
+        label: tl('openWorkflowActivity'),
         icon: 'history',
         disabled: (row) => (
-          !canOpenWorkflowContext || Boolean(missingGatewayActionDisabledReason(row, 'workflow'))
+          !canOpenWorkflowContext || Boolean(missingGatewayActionDisabledReason(t, row, 'workflow'))
         ),
         disabledReason: (row) => (
           canOpenWorkflowContext
-            ? missingGatewayActionDisabledReason(row, 'workflow')
-            : 'Requires workflows.read and observability.read'
+            ? missingGatewayActionDisabledReason(t, row, 'workflow')
+            : tl('requiresWorkflowsReadAnd')
         ),
         onClick: openGatewayWorkflowRun,
       },
       {
-        label: 'Open provider activity',
+        label: tl('openProviderActivity'),
         icon: 'trace',
-        disabled: (row) => Boolean(missingGatewayActionDisabledReason(row, 'outbound')),
-        disabledReason: (row) => missingGatewayActionDisabledReason(row, 'outbound'),
+        disabled: (row) => Boolean(missingGatewayActionDisabledReason(t, row, 'outbound')),
+        disabledReason: (row) => missingGatewayActionDisabledReason(t, row, 'outbound'),
         onClick: openGatewayOutboundLifecycle,
       },
       {
-        label: 'Open shipment',
+        label: tl('openShipment'),
         icon: 'package',
-        disabled: (row) => Boolean(missingGatewayActionDisabledReason(row, 'shipment')),
-        disabledReason: (row) => missingGatewayActionDisabledReason(row, 'shipment'),
+        disabled: (row) => Boolean(missingGatewayActionDisabledReason(t, row, 'shipment')),
+        disabledReason: (row) => missingGatewayActionDisabledReason(t, row, 'shipment'),
         onClick: openGatewayShipment,
       },
       {
-        label: 'Replay in tester',
+        label: tl('replayInTester'),
         icon: 'plug',
-        disabled: (row) => Boolean(apiGatewayReplayDisabledReason(row)),
-        disabledReason: (row) => apiGatewayReplayDisabledReason(row),
+        disabled: (row) => Boolean(apiGatewayReplayDisabledReason(t, row)),
+        disabledReason: (row) => apiGatewayReplayDisabledReason(t, row),
         onClick: replayGatewayRequestInTester,
       },
       {
-        label: 'Copy tracking key',
+        label: tl('copyTrackingKey'),
         icon: 'copy',
         onClick: (row) => {
           try {
             navigator.clipboard?.writeText(row.correlation_id ?? row.request_id);
-            pushToast('Copied tracking key', 'good');
+            pushToast(tl('copiedTrackingKey'), 'good');
           } catch {
-            pushToast('Clipboard blocked', 'warn');
+            pushToast(tl('clipboardBlocked'), 'warn');
           }
         },
       },
@@ -2412,46 +2432,47 @@ export function ApiGatewayModule() {
       openGatewayShipment,
       openGatewayWorkflowRun,
       replayGatewayRequestInTester,
+      t,
     ],
   );
 
   const authRejectionRowActions = useMemo<Array<DataTableAction<ApiGatewayAuthRejectionRow>>>(
     () => [
-      { label: 'Open rejection', icon: 'eye', onClick: openAuthRejectionRow },
+      { label: tl('openRejection'), icon: 'eye', onClick: openAuthRejectionRow },
       {
-        label: 'Copy tracking key',
+        label: tl('copyTrackingKey'),
         icon: 'copy',
         disabled: (row) => !row.correlation_id,
-        disabledReason: () => 'No tracking key is linked to this rejection.',
+        disabledReason: () => tl('noTrackingKeyIs'),
         onClick: (row) => {
           try {
             navigator.clipboard?.writeText(row.correlation_id ?? row.id);
-            pushToast('Copied tracking key', 'good');
+            pushToast(tl('copiedTrackingKey'), 'good');
           } catch {
-            pushToast('Clipboard blocked', 'warn');
+            pushToast(tl('clipboardBlocked'), 'warn');
           }
         },
       },
     ],
-    [openAuthRejectionRow],
+    [openAuthRejectionRow, t],
   );
 
   const authRejectionColumns = useMemo<Array<DataTableColumn<ApiGatewayAuthRejectionRow>>>(
     () => [
       {
         key: 'occurred_at',
-        label: 'When',
+        label: tl('when'),
         sortable: true,
         format: 'datetime',
         render: (raw) => (
           <span title={String(raw)} className="mono" style={{ fontSize: 11 }}>
-            {relativeTime(String(raw))}
+            {fmtRelative(String(raw))}
           </span>
         ),
       },
       {
         key: 'http_status',
-        label: 'Status',
+        label: tl('status'),
         align: 'right',
         mono: true,
         sortable: true,
@@ -2461,7 +2482,7 @@ export function ApiGatewayModule() {
           const code = typeof raw === 'number' ? raw : Number(raw);
           return (
             <Chip
-              label="Rejected"
+              label={tl('rejected')}
               kind={Number.isFinite(code) ? statusKind(code) : 'danger'}
               size="xs"
             />
@@ -2470,34 +2491,34 @@ export function ApiGatewayModule() {
       },
       {
         key: 'failure_code',
-        label: 'Failure',
+        label: tl('failure'),
         sortable: true,
         filterable: true,
-        render: () => <Chip label="Request rejected" kind="danger" size="xs" />,
+        render: () => <Chip label={tl('requestRejected')} kind="danger" size="xs" />,
       },
       {
         key: 'source_label',
-        label: 'Source',
+        label: tl('source'),
         sortable: true,
         filterable: true,
         render: (raw, row) => (
           <span title={String(row.source_id ?? row.source_identifier ?? '')}>
-            {raw ? String(raw) : row.source_resolved ? String(row.source_id ?? 'Resolved source') : 'Unresolved token'}
+            {raw ? String(raw) : row.source_resolved ? String(row.source_id ?? tl('resolvedSource')) : tl('unresolvedToken')}
           </span>
         ),
       },
-      { key: 'method', label: 'Method', mono: true, sortable: true, filterable: true },
+      { key: 'method', label: tl('method'), mono: true, sortable: true, filterable: true },
       {
         key: 'path',
-        label: 'Path',
+        label: tl('path'),
         mono: true,
         sortable: true,
         filterable: true,
         render: (raw) => redactGatewayTokenPath(String(raw ?? '—')),
       },
-      { key: 'correlation_id', label: 'Tracking key', mono: true, sortable: true, filterable: true },
+      { key: 'correlation_id', label: tl('trackingKey'), mono: true, sortable: true, filterable: true },
     ],
-    [],
+    [t, fmtRelative],
   );
 
   // W7 D1-A: column defs for the api_gateway_requests joined projection.
@@ -2505,38 +2526,38 @@ export function ApiGatewayModule() {
     () => [
       {
         key: 'request_id',
-        label: 'Request confirmation',
+        label: tl('requestConfirmation'),
         mono: true,
         sortable: true,
         filterable: true,
         render: (raw) => (
-          <span>{raw ? 'Available' : '—'}</span>
+          <span>{raw ? tl('available') : '—'}</span>
         ),
       },
       {
         key: 'method',
-        label: 'Method',
+        label: tl('method'),
         sortable: true,
         filterable: true,
         render: (raw) => (
           <Chip label={String(raw)} kind={methodKind(String(raw))} size="xs" className="mono" />
         ),
       },
-      { key: 'path', label: 'Path', mono: true, sortable: true, filterable: true },
+      { key: 'path', label: tl('path'), mono: true, sortable: true, filterable: true },
       {
         key: 'source_label',
-        label: 'Source',
+        label: tl('source'),
         sortable: true,
         filterable: true,
         render: (raw, row) => (
           <span title={String(row.source_id ?? '')}>
-            {raw ? String(raw) : 'Unresolved source'}
+            {raw ? String(raw) : tl('unresolvedSource')}
           </span>
         ),
       },
       {
         key: 'route_name',
-        label: 'Route',
+        label: tl('route'),
         sortable: true,
         filterable: true,
         render: (raw, row) => (
@@ -2547,7 +2568,7 @@ export function ApiGatewayModule() {
       },
       {
         key: 'route_pack_name',
-        label: 'Route pack',
+        label: tl('routePack'),
         sortable: true,
         filterable: true,
         render: (raw, row) => (
@@ -2558,7 +2579,7 @@ export function ApiGatewayModule() {
       },
       {
         key: 'tracking_number',
-        label: 'Shipment',
+        label: tl('shipment'),
         sortable: true,
         filterable: true,
         render: (raw, row) => {
@@ -2579,7 +2600,7 @@ export function ApiGatewayModule() {
                 padding: 0,
                 textDecoration: 'underline',
               }}
-              title={`Open shipment context ${raw ?? row.shipment_id}`}
+              title={fill(tl('openShipmentContextValue'), { value: String(raw ?? row.shipment_id) })}
               onClick={(event) => {
                 event.stopPropagation();
                 openGatewayShipment(row);
@@ -2592,7 +2613,7 @@ export function ApiGatewayModule() {
       },
       {
         key: 'status_code',
-        label: 'Status',
+        label: tl('status'),
         align: 'right',
         mono: true,
         sortable: true,
@@ -2602,7 +2623,7 @@ export function ApiGatewayModule() {
           const code = typeof raw === 'number' ? raw : null;
           return (
           <Chip
-            label={requestStatusLabel(code, row.intake_state)}
+            label={requestStatusLabel(t, code, row.intake_state)}
             kind={requestStatusTone(code, row.intake_state)}
             size="xs"
             className="mono"
@@ -2612,12 +2633,12 @@ export function ApiGatewayModule() {
       },
       {
         key: 'intake_state',
-        label: 'Intake state',
+        label: tl('intakeState'),
         sortable: true,
         filterable: true,
         render: (raw) => (
           <Chip
-            label={requestIntakeLabel(raw)}
+            label={requestIntakeLabel(t, raw)}
             kind={requestIntakeTone(raw)}
             size="xs"
           />
@@ -2625,24 +2646,24 @@ export function ApiGatewayModule() {
       },
       {
         key: 'error_code',
-        label: 'Request outcome',
+        label: tl('requestOutcome'),
         sortable: true,
         filterable: true,
-        render: (raw) => (raw ? <Chip label="Needs review" kind="warn" size="xs" /> : <span>—</span>),
+        render: (raw) => (raw ? <Chip label={tl('needsReview')} kind="warn" size="xs" /> : <span>—</span>),
       },
       {
         key: 'occurred_at',
-        label: 'When',
+        label: tl('when'),
         sortable: true,
         format: 'datetime',
         render: (raw) => (
           <span title={String(raw)} className="mono" style={{ fontSize: 11 }}>
-            {relativeTime(String(raw))}
+            {fmtRelative(String(raw))}
           </span>
         ),
       },
     ],
-    [openGatewayShipment],
+    [openGatewayShipment, t, fmtRelative],
   );
 
   // W7 D1-B: column defs for the api_routes registry.
@@ -2650,17 +2671,17 @@ export function ApiGatewayModule() {
     () => [
       {
         key: 'method',
-        label: 'Method',
+        label: tl('method'),
         sortable: true,
         filterable: true,
         render: (raw) => (
           <Chip label={String(raw)} kind={methodKind(String(raw))} size="xs" className="mono" />
         ),
       },
-      { key: 'path_pattern', label: 'Path pattern', mono: true, sortable: true, filterable: true },
+      { key: 'path_pattern', label: tl('pathPattern'), mono: true, sortable: true, filterable: true },
       {
         key: 'scope_type',
-        label: 'Scope',
+        label: tl('scope'),
         sortable: true,
         filterable: true,
         render: (raw, row) => (
@@ -2674,14 +2695,14 @@ export function ApiGatewayModule() {
       },
       {
         key: 'route_intent',
-        label: 'Intent',
+        label: tl('intent'),
         sortable: false,
         filterable: false,
         render: (_raw, row) => {
           const intent = routeCanonicalIntent(row);
           return (
             <Chip
-              label={intent || 'not declared'}
+              label={intent || tl('notDeclared')}
               kind={routeIsShipmentMutation(row) ? 'good' : 'warn'}
               size="xs"
               className="mono"
@@ -2691,7 +2712,7 @@ export function ApiGatewayModule() {
       },
       {
         key: 'request_mapping',
-        label: 'Request mapping',
+        label: tl('requestMapping'),
         sortable: false,
         filterable: false,
         render: (_raw, row) => {
@@ -2700,24 +2721,24 @@ export function ApiGatewayModule() {
           return (
             <div style={{ display: 'grid', gap: 4 }}>
               <Chip
-                label={ref ? routeMappingLabel(row) : 'not linked'}
+                label={ref ? routeMappingLabel(row) : tl('notLinked')}
                 kind={ref ? 'good' : 'warn'}
                 size="xs"
                 className={ref ? 'mono' : undefined}
               />
               {ref ? (
                 <span className="state__hint">
-                  {directory?.target ?? ref.target ?? 'target pending'} · {ref.scope}
+                  {directory?.target ?? ref.target ?? tl('targetPending')} · {ref.scope}
                 </span>
               ) : null}
             </div>
           );
         },
       },
-      { key: 'route_pack_id', label: 'Route pack', mono: true, sortable: true, filterable: true },
+      { key: 'route_pack_id', label: tl('routePack'), mono: true, sortable: true, filterable: true },
       {
         key: 'provider_account_readiness',
-        label: 'Provider account',
+        label: tl('providerAccount'),
         sortable: false,
         filterable: false,
         render: (_raw, row) => {
@@ -2725,31 +2746,32 @@ export function ApiGatewayModule() {
             row,
             deliveryProviderAccountValue,
             providerCredentialReadback,
+            t,
           );
           return <Chip label={readiness.label} kind={readiness.tone} size="xs" />;
         },
       },
       {
         key: 'deprecated',
-        label: 'Deprecated',
+        label: tl('deprecated'),
         sortable: true,
         filterable: true,
         render: (raw) =>
           raw ? (
-            <Chip label="yes" kind="warn" size="xs" className="mono" />
+            <Chip label={tl('yes')} kind="warn" size="xs" className="mono" />
           ) : (
-            <Chip label="no" kind="neutral" size="xs" className="mono" />
+            <Chip label={tl('no')} kind="neutral" size="xs" className="mono" />
           ),
       },
     ],
-    [deliveryProviderAccountValue, providerCredentialReadback, routeMappingDirectoryRow, routeMappingLabel],
+    [deliveryProviderAccountValue, providerCredentialReadback, routeMappingDirectoryRow, routeMappingLabel, t],
   );
 
   const sourceControlColumns = useMemo<Array<DataTableColumn<ApiGatewaySourceControlRow>>>(
     () => [
       {
         key: 'source_label',
-        label: 'Source',
+        label: tl('source'),
         sortable: true,
         filterable: true,
         render: (raw, row) => (
@@ -2765,31 +2787,31 @@ export function ApiGatewayModule() {
       },
       {
         key: 'enabled',
-        label: 'Status',
+        label: tl('status'),
         sortable: true,
         filterable: true,
         render: (raw, row) => {
-          if (row.archived_at) return <Chip label="Archived" kind="warn" size="xs" />;
-          if (raw === false) return <Chip label="Disabled" kind="danger" size="xs" />;
-          return <Chip label="Enabled" kind="good" size="xs" />;
+          if (row.archived_at) return <Chip label={tl('archived')} kind="warn" size="xs" />;
+          if (raw === false) return <Chip label={tl('disabled')} kind="danger" size="xs" />;
+          return <Chip label={tl('enabled')} kind="good" size="xs" />;
         },
       },
       {
         key: 'provider_type',
-        label: 'Provider',
+        label: tl('provider'),
         sortable: true,
         filterable: true,
         render: (raw) => <span className="mono">{String(raw ?? '—')}</span>,
       },
       {
         key: 'limit_per_min',
-        label: 'Limit / min',
+        label: tl('limitMin'),
         align: 'right',
         sortable: true,
         type: 'number',
         render: (raw) => (
           <Chip
-            label={typeof raw === 'number' ? `${raw}/min` : '—'}
+            label={typeof raw === 'number' ? fill(t('insightsApiGateway.units.perMinute'), { count: String(raw) }) : '—'}
             kind="info"
             size="xs"
             className="mono"
@@ -2798,7 +2820,7 @@ export function ApiGatewayModule() {
       },
       {
         key: 'limit_per_hour',
-        label: 'Limit / hr',
+        label: tl('limitHr'),
         align: 'right',
         sortable: true,
         type: 'number',
@@ -2806,7 +2828,7 @@ export function ApiGatewayModule() {
       },
       {
         key: 'current_usage',
-        label: 'Current usage',
+        label: tl('currentUsage'),
         align: 'right',
         sortable: true,
         type: 'number',
@@ -2819,10 +2841,10 @@ export function ApiGatewayModule() {
           />
         ),
       },
-      { key: 'client_label', label: 'Client', sortable: true, filterable: true },
-      { key: 'sender_label', label: 'Sender', sortable: true, filterable: true },
+      { key: 'client_label', label: tl('client'), sortable: true, filterable: true },
+      { key: 'sender_label', label: tl('sender'), sortable: true, filterable: true },
     ],
-    [],
+    [t, tl],
   );
 
   // Filter requests by route_pack + status class (mirrors live tab where
@@ -2871,16 +2893,16 @@ export function ApiGatewayModule() {
     return (
       <div className="page" data-testid="insights-api-gateway-page">
         <PageHeader
-          eyebrow="External intake"
-          titleAccent="API"
-          titlePlain="request intake"
+          eyebrow={tl('externalIntake')}
+          titleAccent={tl('titleAccent')}
+          titlePlain={tl('titlePlain')}
           pills={[]}
           actions={[]}
         />
         <StateView
           kind="denied"
           capability={CAP.API_GATEWAY_READ}
-          hint="API gateway permission is required to view this surface. Live tail, drawer, and KPI strip remain fail-closed."
+          hint={tl('apiGatewayPermissionIs')}
         />
       </div>
     );
@@ -2890,13 +2912,13 @@ export function ApiGatewayModule() {
     return (
       <div className="page" data-testid="insights-api-gateway-page">
         <PageHeader
-          eyebrow="External intake"
-          titleAccent="API"
-          titlePlain="request intake"
+          eyebrow={tl('externalIntake')}
+          titleAccent={tl('titleAccent')}
+          titlePlain={tl('titlePlain')}
           pills={[]}
           actions={[]}
         />
-        <StateView kind="loading" hint="Loading API gateway policy..." />
+        <StateView kind="loading" hint={tl('loadingApiGatewayPolicy')} />
       </div>
     );
   }
@@ -2905,16 +2927,16 @@ export function ApiGatewayModule() {
     return (
       <div className="page" data-testid="insights-api-gateway-page">
         <PageHeader
-          eyebrow="External intake"
-          titleAccent="API"
-          titlePlain="request intake"
+          eyebrow={tl('externalIntake')}
+          titleAccent={tl('titleAccent')}
+          titlePlain={tl('titlePlain')}
           pills={[]}
           actions={[]}
         />
         <StateView
           kind="error"
-          title="Gateway settings unavailable"
-          hint="Required gateway alert settings are not available yet. Ask an administrator to finish the gateway setup before using this surface."
+          title={tl('gatewaySettingsUnavailable')}
+          hint={tl('requiredGatewayAlertSettings')}
         />
       </div>
     );
@@ -2923,13 +2945,13 @@ export function ApiGatewayModule() {
   return (
     <div className="page" data-testid="insights-api-gateway-page">
       <PageHeader
-        eyebrow="External intake"
-        titleAccent="API"
-        titlePlain="request intake"
+        eyebrow={tl('externalIntake')}
+        titleAccent={tl('titleAccent')}
+        titlePlain={tl('titlePlain')}
         pills={[
           <Chip
             key="src"
-            label="API intake activity"
+            label={tl('apiIntakeActivity')}
             kind="neutral"
             size="xs"
             className="mono"
@@ -2937,42 +2959,42 @@ export function ApiGatewayModule() {
           liveOn ? (
             <Chip
               key="live"
-              label={`Live updates: ${liveCount} new`}
+              label={fill(tl('liveUpdatesLivecountNew'), { liveCount: String(liveCount) })}
               kind="good"
               size="xs"
               className="mono"
             />
           ) : (
-            <Chip key="live" label="Live updates paused" kind="neutral" size="xs" />
+            <Chip key="live" label={tl('liveUpdatesPaused')} kind="neutral" size="xs" />
           ),
           realtimeMode ? (
             <Chip
               key="preview"
-              label="Live updates active"
+              label={tl('liveUpdatesActive')}
               kind="good"
               size="xs"
               className="mono"
-              title="Live updates follow incoming API Gateway requests."
+              title={tl('liveUpdatesFollowIncoming')}
               data-testid="api-gateway-stream-mode"
             />
           ) : syntheticLiveTailAllowed ? (
             <Chip
               key="preview"
-              label="Update checks active"
+              label={tl('updateChecksActive')}
               kind="info"
               size="xs"
               className="mono"
-              title="Update checks are available for this session."
+              title={tl('updateChecksAreAvailable')}
               data-testid="api-gateway-stream-mode"
             />
           ) : (
             <Chip
               key="preview"
-              label="Live updates unavailable"
+              label={tl('liveUpdatesUnavailable')}
               kind="warn"
               size="xs"
               className="mono"
-              title="Live updates are not connected."
+              title={tl('liveUpdatesAreNot')}
               data-testid="api-gateway-stream-mode"
             />
           ),
@@ -2980,7 +3002,7 @@ export function ApiGatewayModule() {
         actions={[
           <Button
             key="refresh"
-            label={isRefreshingGatewayData ? 'Refreshing' : 'Refresh gateway data'}
+            label={isRefreshingGatewayData ? tl('refreshing') : tl('refreshGatewayData')}
             iconName="refresh"
             kind="ghost"
             onClick={() => void refreshGatewayData()}
@@ -2988,7 +3010,7 @@ export function ApiGatewayModule() {
           />,
           <Button
             key="test-api"
-            label="Test shipment API"
+            label={tl('testShipmentApi')}
             iconName="plug"
             kind="primary"
             capability={CAP.API_GATEWAY_WRITE}
@@ -2996,7 +3018,7 @@ export function ApiGatewayModule() {
           />,
           <Button
             key="block"
-            label="Block source"
+            label={tl('blockSource')}
             iconName="shield"
             kind="danger"
             capability={CAP.API_GATEWAY_WRITE}
@@ -3004,7 +3026,7 @@ export function ApiGatewayModule() {
           />,
           <Button
             key="rate"
-            label="Adjust rate limit"
+            label={tl('adjustRateLimit')}
             iconName="bolt"
             kind="ghost"
             capability={CAP.API_GATEWAY_WRITE}
@@ -3041,7 +3063,7 @@ export function ApiGatewayModule() {
       <div
         className="tabs"
         role="tablist"
-        aria-label="API request evidence"
+        aria-label={tl('apiRequestEvidence')}
         data-testid="api-gateway-view-tabs"
         style={{ marginBottom: 12 }}
       >
@@ -3053,7 +3075,7 @@ export function ApiGatewayModule() {
           className={`tabs__tab ${view === 'live' ? 'is-active' : ''}`}
           onClick={() => setView('live')}
         >
-          Live calls · {callRows.length + liveRows.length}
+          {fill(tl('liveCallsCount'), { count: String(callRows.length + liveRows.length) })}
         </button>
         <button
           type="button"
@@ -3063,7 +3085,7 @@ export function ApiGatewayModule() {
           className={`tabs__tab ${view === 'requests' ? 'is-active' : ''}`}
           onClick={() => setView('requests')}
         >
-          Requests · {requestRows.length}
+          {fill(tl('requestsCount'), { count: String(requestRows.length) })}
         </button>
         <button
           type="button"
@@ -3073,7 +3095,7 @@ export function ApiGatewayModule() {
           className={`tabs__tab ${view === 'auth' ? 'is-active' : ''}`}
           onClick={() => setView('auth')}
         >
-          Rejected intake · {authRejectionRows.length}
+          {fill(tl('rejectedIntakeCount'), { count: String(authRejectionRows.length) })}
         </button>
         <button
           type="button"
@@ -3083,7 +3105,7 @@ export function ApiGatewayModule() {
           className={`tabs__tab ${view === 'routes' ? 'is-active' : ''}`}
           onClick={() => setView('routes')}
         >
-          Routes · {routeRows.length}
+          {fill(tl('routesCount'), { count: String(routeRows.length) })}
         </button>
         <button
           type="button"
@@ -3093,7 +3115,7 @@ export function ApiGatewayModule() {
           className={`tabs__tab ${view === 'sources' ? 'is-active' : ''}`}
           onClick={() => setView('sources')}
         >
-          Sources · {sourceControlRows.length}
+          {fill(tl('sourcesCount'), { count: String(sourceControlRows.length) })}
         </button>
       </div>
 
@@ -3103,24 +3125,24 @@ export function ApiGatewayModule() {
             kind="ghost"
             size="sm"
             iconName="refresh"
-            label={authRejectionsQ.isFetching ? 'Refreshing' : 'Refresh rejected requests'}
+            label={authRejectionsQ.isFetching ? tl('refreshing') : tl('refreshRejectedRequests')}
             onClick={() => void authRejectionsQ.refetch()}
             disabled={authRejectionsQ.isFetching}
-            ariaLabel="Refresh rejected API requests"
+            ariaLabel={tl('refreshRejectedApiRequests')}
           />
         </div>
       ) : null}
 
       {view === 'live' ? (
         isError ? (
-          <StateView kind="error" hint="Could not load API gateway requests." />
+          <StateView kind="error" hint={tl('couldNotLoadApi')} />
         ) : isLoading ? (
-          <StateView kind="loading" hint="Loading API gateway requests…" />
+          <StateView kind="loading" hint={tl('loadingApiGatewayRequests')} />
         ) : rows.length === 0 ? (
           <StateView
             kind="empty"
-            title="No matching requests"
-            hint="Try a wider window, clear the source filter, or disable rate-limited only."
+            title={tl('noMatchingRequests')}
+            hint={tl('tryAWiderWindow')}
           />
         ) : (
           <DataTable<ApiCallRow>
@@ -3134,14 +3156,14 @@ export function ApiGatewayModule() {
         )
       ) : view === 'requests' ? (
         requestsQ.isError ? (
-          <StateView kind="error" hint="Could not load saved intake requests." />
+          <StateView kind="error" hint={tl('couldNotLoadSaved')} />
         ) : requestsQ.isLoading ? (
-          <StateView kind="loading" hint="Loading saved intake requests…" />
+          <StateView kind="loading" hint={tl('loadingSavedIntakeRequests')} />
         ) : filteredRequests.length === 0 ? (
           <StateView
             kind="empty"
-            title="No matching requests"
-            hint="Try clearing the route pack or status filter."
+            title={tl('noMatchingRequests')}
+            hint={tl('tryClearingTheRoute')}
           />
         ) : (
           <DataTable<ApiGatewayRequestRow>
@@ -3155,14 +3177,14 @@ export function ApiGatewayModule() {
         )
       ) : view === 'auth' ? (
         authRejectionsQ.isError ? (
-          <StateView kind="error" hint="Could not load rejected intake requests." />
+          <StateView kind="error" hint={tl('couldNotLoadRejected')} />
         ) : authRejectionsQ.isLoading ? (
-          <StateView kind="loading" hint="Loading rejected intake requests…" />
+          <StateView kind="loading" hint={tl('loadingRejectedIntakeRequests')} />
         ) : filteredAuthRejections.length === 0 ? (
           <StateView
             kind="empty"
-            title="No rejected API requests"
-            hint="Invalid or disabled source tokens will appear here after the request is rejected."
+            title={tl('noRejectedApiRequests')}
+            hint={tl('invalidOrDisabledSource')}
           />
         ) : (
           <DataTable<ApiGatewayAuthRejectionRow>
@@ -3176,14 +3198,14 @@ export function ApiGatewayModule() {
         )
       ) : view === 'routes' ? (
         routesQ.isError ? (
-          <StateView kind="error" hint="Could not load API routes." />
+          <StateView kind="error" hint={tl('couldNotLoadApi2')} />
         ) : routesQ.isLoading ? (
-          <StateView kind="loading" hint="Loading API routes…" />
+          <StateView kind="loading" hint={tl('loadingApiRoutes')} />
         ) : filteredRoutes.length === 0 ? (
           <StateView
             kind="empty"
-            title="No matching routes"
-            hint="Try clearing the route pack filter."
+            title={tl('noMatchingRoutes')}
+            hint={tl('tryClearingTheRoute2')}
           />
         ) : (
           <DataTable<ApiRouteRow>
@@ -3196,14 +3218,14 @@ export function ApiGatewayModule() {
         )
       ) : (
         sourceDirectoryQ.isError || rateLimitsQ.isError ? (
-          <StateView kind="error" hint="Could not load API gateway source controls." />
+          <StateView kind="error" hint={tl('couldNotLoadApi3')} />
         ) : sourceDirectoryQ.isLoading || rateLimitsQ.isLoading ? (
-          <StateView kind="loading" hint="Loading API gateway source controls…" />
+          <StateView kind="loading" hint={tl('loadingApiGatewaySource')} />
         ) : sourceControlRows.length === 0 ? (
           <StateView
             kind="empty"
-            title="No API sources"
-            hint="Create or bind an API Gateway source before using operational controls."
+            title={tl('noApiSources')}
+            hint={tl('createOrBindAn')}
           />
         ) : (
           <DataTable<ApiGatewaySourceControlRow>
@@ -3250,18 +3272,21 @@ interface KpiStripProps {
   } | null;
 }
 
-function kpiWindowLabel(windowMs: number | undefined): string {
-  if (windowMs == null) return 'policy window missing';
+function kpiWindowLabel(windowMs: number | undefined, t: Translate): string {
+  const tl = scopeT(t, 'insightsApiGateway.kpiWindowLabel');
+  if (windowMs == null) return tl('policyWindowMissing');
   const minuteMs = 60_000;
   const hourMs = 60 * minuteMs;
   const dayMs = 24 * hourMs;
-  if (windowMs % dayMs === 0) return `last ${windowMs / dayMs}d`;
-  if (windowMs % hourMs === 0) return `last ${windowMs / hourMs}h`;
-  if (windowMs % minuteMs === 0) return `last ${windowMs / minuteMs}m`;
-  return `last ${Math.round(windowMs / 1000)}s`;
+  if (windowMs % dayMs === 0) return fill(tl('lastDays'), { count: String(windowMs / dayMs) });
+  if (windowMs % hourMs === 0) return fill(tl('lastHours'), { count: String(windowMs / hourMs) });
+  if (windowMs % minuteMs === 0) return fill(tl('lastMinutes'), { count: String(windowMs / minuteMs) });
+  return fill(tl('lastSeconds'), { count: String(Math.round(windowMs / 1000)) });
 }
 
 function KpiStrip({ kpi, thresholds }: KpiStripProps) {
+  const { t } = useI18n();
+  const tl = scopeT(t, 'insightsApiGateway.kpiStrip');
   const errorPct = kpi.total === 0 ? 0 : (kpi.errors / kpi.total) * 100;
   // Strict no-fallback: pass thresholds through unchanged. When a
   // boundary is undefined, the corresponding tone falls through to
@@ -3273,7 +3298,7 @@ function KpiStrip({ kpi, thresholds }: KpiStripProps) {
   const rateLimitedDanger = thresholds?.rate_limited_danger_count;
   const latencyWarn = thresholds?.latency_p95_warn_ms;
   const latencyDanger = thresholds?.latency_p95_danger_ms;
-  const windowLabel = kpiWindowLabel(thresholds?.kpi_window_ms);
+  const windowLabel = kpiWindowLabel(thresholds?.kpi_window_ms, t);
 
   const errorTone: KPITone =
     errorWarn == null || errorDanger == null
@@ -3302,20 +3327,20 @@ function KpiStrip({ kpi, thresholds }: KpiStripProps) {
 
   const errorDelta =
     errorWarn == null || errorDanger == null
-      ? `${kpi.errors} of ${kpi.total} · api_gateway_thresholds.error_rate_warn_pct/danger_pct (missing-policy)`
-      : `${kpi.errors} of ${kpi.total}`;
+      ? fill(tl('errorsOfTotalApi'), { errors: String(kpi.errors), total: String(kpi.total) })
+      : fill(tl('errorsOfTotal'), { errors: String(kpi.errors), total: String(kpi.total) });
   const latencyDelta =
     latencyWarn == null || latencyDanger == null
-      ? `api_gateway_thresholds.latency_p95_warn_ms/danger_ms (missing-policy)`
+      ? fill(tl('policySettingMissing'), { setting: 'api_gateway_thresholds.latency_p95_warn_ms/danger_ms' })
       : kpi.p95Latency >= latencyWarn
-        ? `over SLO ${latencyWarn}ms`
-        : 'within SLO';
+        ? fill(tl('overSloLatencywarnMs'), { latencyWarn: String(latencyWarn) })
+        : tl('withinSlo');
   const rateDelta =
     rateLimitedWarn == null || rateLimitedDanger == null
-      ? `api_gateway_thresholds.rate_limited_warn_count/danger_count (missing-policy)`
+      ? fill(tl('policySettingMissing'), { setting: 'api_gateway_thresholds.rate_limited_warn_count/danger_count' })
       : kpi.rateLimited > 0
-        ? '429 responses'
-        : 'no saturation';
+        ? tl('rateLimitedResponses')
+        : tl('noSaturation');
   return (
     <div
       className="kpi-strip"
@@ -3328,25 +3353,25 @@ function KpiStrip({ kpi, thresholds }: KpiStripProps) {
       }}
     >
       <KPICard
-        label={`Requests · ${windowLabel}`}
+        label={fill(tl('requestsWindowlabel'), { windowLabel: String(windowLabel) })}
         value={kpi.total.toLocaleString()}
         tone="info"
-        delta={`${kpi.errors} errors`}
+        delta={fill(tl('errorsCount'), { count: String(kpi.errors) })}
       />
       <KPICard
-        label={`Error rate · ${windowLabel}`}
+        label={fill(tl('errorRateWindowlabel'), { windowLabel: String(windowLabel) })}
         value={pct(kpi.errors, kpi.total)}
         tone={errorTone}
         delta={errorDelta}
       />
       <KPICard
-        label={`p95 latency · ${windowLabel}`}
-        value={`${kpi.p95Latency.toLocaleString()}ms`}
+        label={fill(tl('p95LatencyWindowlabel'), { windowLabel: String(windowLabel) })}
+        value={fill(t('insightsApiGateway.units.ms'), { ms: kpi.p95Latency.toLocaleString() })}
         tone={latencyTone}
         delta={latencyDelta}
       />
       <KPICard
-        label={`Rate-limited · ${windowLabel}`}
+        label={fill(tl('rateLimitedWindowlabel'), { windowLabel: String(windowLabel) })}
         value={kpi.rateLimited.toLocaleString()}
         tone={rateTone}
         delta={rateDelta}
@@ -3401,6 +3426,8 @@ function FilterBar({
   liveTailAvailable,
   realtimeMode,
 }: FilterBarProps) {
+  const { t } = useI18n();
+  const tl = scopeT(t, 'insightsApiGateway.filterBar');
   // W27-cycle-D §7 — derive the FilterBar range options from the canonical
   // `RANGE_OPTIONS` SSOT in `_shared.ts` instead of duplicating the key list +
   // label record inline. Filter to the four windows surfaced by the api-gateway
@@ -3419,8 +3446,8 @@ function FilterBar({
   );
   return (
     <div className="view-bar" data-testid="api-gateway-filter-bar">
-      <div className="view-bar__group" role="group" aria-label="Time range">
-        <span className="eyebrow" aria-hidden>Window</span>
+      <div className="view-bar__group" role="group" aria-label={tl('timeRange')}>
+        <span className="eyebrow" aria-hidden>{tl('window')}</span>
         {ranges.map((r) => (
           <button
             key={r}
@@ -3439,15 +3466,15 @@ function FilterBar({
           </button>
         ))}
       </div>
-      <div className="view-bar__group" role="group" aria-label="Status class">
-        <span className="eyebrow" aria-hidden>Status</span>
+      <div className="view-bar__group" role="group" aria-label={tl('statusClass')}>
+        <span className="eyebrow" aria-hidden>{tl('status')}</span>
         <button
           type="button"
           aria-pressed={statusKlass === ''}
           onClick={() => onStatusChange('')}
           style={CHIP_BTN_STYLE}
         >
-          <Chip label="All" kind={statusKlass === '' ? 'info' : 'neutral'} size="xs" className="mono" />
+          <Chip label={tl('all')} kind={statusKlass === '' ? 'info' : 'neutral'} size="xs" className="mono" />
         </button>
         {STATUS_CLASSES.map((s) => {
           // W27-cycle-D §6 — tone resolves through the canonical
@@ -3472,13 +3499,13 @@ function FilterBar({
         })}
       </div>
       <div className="view-bar__group">
-        <label className="eyebrow" htmlFor="apigw-route-pack">Route pack</label>
+        <label className="eyebrow" htmlFor="apigw-route-pack">{tl('routePack')}</label>
         <select
           id="apigw-route-pack"
           value={routePackId}
           onChange={(e) => onRoutePackChange(e.target.value)}
         >
-          <option value="">— all packs —</option>
+          <option value="">{tl('allPacks')}</option>
           {routePacks.map((p) => (
             <option key={p.id} value={p.id}>
               {/* W13-2: rendered name only — `version` was a fictional FE field. */}
@@ -3488,13 +3515,13 @@ function FilterBar({
         </select>
       </div>
       <div className="view-bar__group">
-        <label className="eyebrow" htmlFor="apigw-source">Source</label>
+        <label className="eyebrow" htmlFor="apigw-source">{tl('source')}</label>
         <select
           id="apigw-source"
           value={sourceFilter}
           onChange={(e) => onSourceChange(e.target.value)}
         >
-          <option value="">— all sources —</option>
+          <option value="">{tl('allSources')}</option>
           {sourceOptions.map((s) => (
             <option key={s.id} value={s.id}>
               {s.label}
@@ -3507,9 +3534,9 @@ function FilterBar({
         className={`btn btn--sm ${rateLimitOnly ? 'btn--primary' : 'btn--ghost'}`}
         aria-pressed={rateLimitOnly}
         onClick={() => onRateLimitOnlyChange(!rateLimitOnly)}
-        title="Filter to rate-limited responses only"
+        title={tl('filterToRateLimited')}
       >
-        {rateLimitOnly ? 'Rate-limited only · on' : 'Rate-limited only'}
+        {rateLimitOnly ? tl('rateLimitedOnlyOn') : tl('rateLimitedOnly')}
       </button>
       <div className="view-bar__spacer" />
       <button
@@ -3523,13 +3550,13 @@ function FilterBar({
         title={
           liveTailAvailable
             ? realtimeMode
-              ? 'Follows incoming API Gateway requests and prepends new rows'
-              : 'Runs update checks'
-            : 'Live updates are not configured for this environment'
+              ? tl('followsIncomingApiGateway')
+              : tl('runsUpdateChecks')
+            : tl('liveUpdatesAreNot')
         }
         data-testid="api-gateway-live-toggle"
       >
-        {liveTailAvailable ? (liveOn ? 'Pause live tail' : 'Start live tail') : 'Live tail unavailable'}
+        {liveTailAvailable ? (liveOn ? tl('pauseLiveTail') : tl('startLiveTail')) : tl('liveTailUnavailable')}
       </button>
     </div>
   );
@@ -3539,13 +3566,16 @@ function FilterBar({
 
 type DrawerTab = 'request' | 'response' | 'latency' | 'rate' | 'replay';
 
-const DRAWER_TABS: Array<{ id: DrawerTab; label: string }> = [
-  { id: 'request', label: 'Request' },
-  { id: 'response', label: 'Response' },
-  { id: 'latency', label: 'Latency' },
-  { id: 'rate', label: 'Rate limit' },
-  { id: 'replay', label: 'Replay' },
-];
+function drawerTabs(t: Translate): Array<{ id: DrawerTab; label: string }> {
+  const tl = scopeT(t, 'insightsApiGateway.drawerTabs');
+  return [
+    { id: 'request', label: tl('request') },
+    { id: 'response', label: tl('response') },
+    { id: 'latency', label: tl('latency') },
+    { id: 'rate', label: tl('rateLimit') },
+    { id: 'replay', label: tl('replay') },
+  ];
+}
 
 interface ApiCallDrawerBodyProps {
   row: ApiCallRow;
@@ -3564,28 +3594,30 @@ interface ApiCallDrawerBodyProps {
 }
 
 function ApiGatewayAuthRejectionDrawerBody({ row }: { row: ApiGatewayAuthRejectionRow }) {
+  const { t } = useI18n();
+  const tl = scopeT(t, 'insightsApiGateway.apiGatewayAuthRejectionDrawerBody');
   const requestPath = redactGatewayTokenPath(
     row.query_string ? `${row.path ?? '—'}?${row.query_string}` : row.path ?? '—',
   );
   const headerEntries = Object.entries(row.request_headers ?? {}).filter(([, value]) => value != null);
   const kvRows: KvRow[] = [
-    { key: 'request_id_value', label: 'Request ID', value: row.request_id ?? '-', mono: true },
-    { key: 'correlation_id_value', label: 'Correlation ID', value: row.correlation_id ?? '-', mono: true },
-    { key: 'id', label: 'Rejection confirmation', value: row.id ? 'Available' : '—' },
-    { key: 'request_id', label: 'Request confirmation', value: row.request_id ? 'Available' : '—' },
-    { key: 'correlation_id', label: 'Tracking key', value: row.correlation_id ? 'Linked' : '—' },
-    { key: 'status', label: 'Status', value: requestStatusLabel(row.http_status, 'rejected') },
-    { key: 'failure_code', label: 'Failure type', value: row.failure_code ? 'Request rejected' : '—' },
-    { key: 'failure_message', label: 'Failure message', value: row.failure_message ? 'Source credential could not be used.' : '—' },
-    { key: 'credential_kind', label: 'Credential', value: row.credential_kind ? 'Source credential checked' : '—' },
-    { key: 'method', label: 'Method', value: row.method ?? '—', mono: true },
-    { key: 'path', label: 'Path', value: requestPath, mono: true },
-    { key: 'source', label: 'Source', value: row.source_label ?? (row.source_id ? 'Linked source' : 'Unresolved source') },
-    { key: 'source_identifier', label: 'Source reference', value: row.source_identifier ? 'Matched' : '—' },
-    { key: 'client', label: 'Client', value: row.client_label ?? (row.client_id ? 'Linked client' : '—') },
-    { key: 'sender', label: 'Sender', value: row.sender_label ?? (row.sender_id ? 'Linked sender' : '—') },
-    { key: 'token_fingerprint', label: 'Token check', value: row.token_fingerprint ? 'Completed' : '—' },
-    { key: 'occurred_at', label: 'Rejected at', value: row.occurred_at, mono: true },
+    { key: 'request_id_value', label: tl('requestId'), value: row.request_id ?? '-', mono: true },
+    { key: 'correlation_id_value', label: tl('correlationId'), value: row.correlation_id ?? '-', mono: true },
+    { key: 'id', label: tl('rejectionConfirmation'), value: row.id ? tl('available') : '—' },
+    { key: 'request_id', label: tl('requestConfirmation'), value: row.request_id ? tl('available') : '—' },
+    { key: 'correlation_id', label: tl('trackingKey'), value: row.correlation_id ? tl('linked') : '—' },
+    { key: 'status', label: tl('status'), value: requestStatusLabel(t, row.http_status, 'rejected') },
+    { key: 'failure_code', label: tl('failureType'), value: row.failure_code ? tl('requestRejected') : '—' },
+    { key: 'failure_message', label: tl('failureMessage'), value: row.failure_message ? tl('sourceCredentialCouldNot') : '—' },
+    { key: 'credential_kind', label: tl('credential'), value: row.credential_kind ? tl('sourceCredentialChecked') : '—' },
+    { key: 'method', label: tl('method'), value: row.method ?? '—', mono: true },
+    { key: 'path', label: tl('path'), value: requestPath, mono: true },
+    { key: 'source', label: tl('source'), value: row.source_label ?? (row.source_id ? tl('linkedSource') : tl('unresolvedSource')) },
+    { key: 'source_identifier', label: tl('sourceReference'), value: row.source_identifier ? tl('matched') : '—' },
+    { key: 'client', label: tl('client'), value: row.client_label ?? (row.client_id ? tl('linkedClient') : '—') },
+    { key: 'sender', label: tl('sender'), value: row.sender_label ?? (row.sender_id ? tl('linkedSender') : '—') },
+    { key: 'token_fingerprint', label: tl('tokenCheck'), value: row.token_fingerprint ? tl('completed') : '—' },
+    { key: 'occurred_at', label: tl('rejectedAt'), value: row.occurred_at, mono: true },
   ];
 
   return (
@@ -3602,57 +3634,59 @@ function ApiGatewayAuthRejectionDrawerBody({ row }: { row: ApiGatewayAuthRejecti
         }}
       >
         <div style={{ flex: 1, minWidth: 180 }}>
-          <div className="eyebrow">Rejected before intake</div>
-          <div className="serif" style={{ fontSize: 18 }}>{row.source_label ?? 'Unresolved source token'}</div>
-          <div className="state__hint">Request was stopped before intake.</div>
+          <div className="eyebrow">{tl('rejectedBeforeIntake')}</div>
+          <div className="serif" style={{ fontSize: 18 }}>{row.source_label ?? tl('unresolvedSourceToken')}</div>
+          <div className="state__hint">{tl('requestWasStoppedBefore')}</div>
         </div>
-        <Chip label="Rejected" kind={statusKind(row.http_status)} size="xs" />
-        <Chip label="Request rejected" kind="danger" size="xs" />
+        <Chip label={tl('rejected')} kind={statusKind(row.http_status)} size="xs" />
+        <Chip label={tl('requestRejected')} kind="danger" size="xs" />
       </div>
 
       <KvGrid rows={kvRows} />
 
-      <h4 className="eyebrow" style={{ marginTop: 14 }}>Request protection</h4>
+      <h4 className="eyebrow" style={{ marginTop: 14 }}>{tl('requestProtection')}</h4>
       <StateView
         kind="empty"
-        title={headerEntries.length ? 'Request details protected' : 'No request details available'}
-        hint="Sensitive request headers and rejection details are hidden in this summary."
+        title={headerEntries.length ? tl('requestDetailsProtected') : tl('noRequestDetailsAvailable')}
+        hint={tl('sensitiveRequestHeadersAnd')}
       />
     </div>
   );
 }
 
 function ApiGatewayRequestDrawerBody({ row, route }: { row: ApiGatewayRequestRow; route?: ApiRouteRow | null }) {
+  const { t } = useI18n();
+  const tl = scopeT(t, 'insightsApiGateway.apiGatewayRequestDrawerBody');
   const headerEntries = Object.entries(row.request_headers ?? {}).filter(([, value]) => value != null);
   const requestPath = redactGatewayTokenPath(row.query_string ? `${row.path}?${row.query_string}` : row.path);
   const isPostprocessFailure =
     row.intake_state === 'provider_failed' &&
     Boolean(row.outbound_error_message);
   const kvRows: KvRow[] = [
-    { key: 'request_id_value', label: 'Request ID', value: row.request_id ?? '-', mono: true },
-    { key: 'correlation_id_value', label: 'Correlation ID', value: row.correlation_id ?? '-', mono: true },
-    { key: 'request_id', label: 'Request confirmation', value: row.request_id ? 'Available' : '—' },
-    { key: 'correlation_id', label: 'Tracking key', value: row.correlation_id ? 'Linked' : '—' },
-    { key: 'method', label: 'Method', value: row.method, mono: true },
-    { key: 'path', label: 'Path', value: requestPath, mono: true },
-    { key: 'source', label: 'Source', value: row.source_label ?? (row.source_id ? 'Linked source' : '—') },
-    { key: 'route', label: 'Route', value: row.route_name ?? (row.route_id ? 'Linked route' : '—') },
-    { key: 'route_pack', label: 'Route pack', value: row.route_pack_name ?? (row.route_pack_id ? 'Linked route pack' : '—') },
-    { key: 'client', label: 'Client', value: row.client_label ?? (row.client_id ? 'Linked client' : '—') },
-    { key: 'sender', label: 'Sender', value: row.sender_label ?? (row.sender_id ? 'Linked sender' : '—') },
-    { key: 'intake_state', label: 'Intake state', value: requestIntakeLabel(row.intake_state) },
-    { key: 'status', label: 'Status', value: requestStatusLabel(row.status_code, row.intake_state) },
-    { key: 'error_code', label: 'Request outcome', value: row.error_code ? 'Needs review' : 'No issue reported' },
-    { key: 'outbound_error_message', label: 'Provider message', value: row.outbound_error_message ? 'Needs review' : '—' },
-    { key: 'workflow_run_id', label: 'Workflow activity', value: row.workflow_run_id ? 'Linked' : '—' },
-    { key: 'outbound_call_id', label: 'Provider activity', value: row.outbound_call_id ? 'Linked' : '—' },
-    { key: 'workflow_run_id_value', label: 'Workflow run ID', value: row.workflow_run_id ?? '-', mono: true },
-    { key: 'outbound_call_id_value', label: 'Provider call ID', value: row.outbound_call_id ?? '-', mono: true },
-    { key: 'outbound_status', label: 'Provider status', value: providerStatusLabel(row.outbound_status) },
-    { key: 'shipment', label: 'Shipment', value: row.tracking_number ?? row.shipment_id ?? '—', mono: !row.tracking_number },
-    { key: 'shipment_status', label: 'Shipment status', value: row.shipment_status ?? '—', mono: true },
-    { key: 'settings_resolution_id', label: 'Settings confirmation', value: row.settings_resolution_id ? 'Confirmed' : '—' },
-    { key: 'occurred_at', label: 'Received', value: row.occurred_at, mono: true },
+    { key: 'request_id_value', label: tl('requestId'), value: row.request_id ?? '-', mono: true },
+    { key: 'correlation_id_value', label: tl('correlationId'), value: row.correlation_id ?? '-', mono: true },
+    { key: 'request_id', label: tl('requestConfirmation'), value: row.request_id ? tl('available') : '—' },
+    { key: 'correlation_id', label: tl('trackingKey'), value: row.correlation_id ? tl('linked') : '—' },
+    { key: 'method', label: tl('method'), value: row.method, mono: true },
+    { key: 'path', label: tl('path'), value: requestPath, mono: true },
+    { key: 'source', label: tl('source'), value: row.source_label ?? (row.source_id ? tl('linkedSource') : '—') },
+    { key: 'route', label: tl('route'), value: row.route_name ?? (row.route_id ? tl('linkedRoute') : '—') },
+    { key: 'route_pack', label: tl('routePack'), value: row.route_pack_name ?? (row.route_pack_id ? tl('linkedRoutePack') : '—') },
+    { key: 'client', label: tl('client'), value: row.client_label ?? (row.client_id ? tl('linkedClient') : '—') },
+    { key: 'sender', label: tl('sender'), value: row.sender_label ?? (row.sender_id ? tl('linkedSender') : '—') },
+    { key: 'intake_state', label: tl('intakeState'), value: requestIntakeLabel(t, row.intake_state) },
+    { key: 'status', label: tl('status'), value: requestStatusLabel(t, row.status_code, row.intake_state) },
+    { key: 'error_code', label: tl('requestOutcome'), value: row.error_code ? tl('needsReview') : tl('noIssueReported') },
+    { key: 'outbound_error_message', label: tl('providerMessage'), value: row.outbound_error_message ? tl('needsReview') : '—' },
+    { key: 'workflow_run_id', label: tl('workflowActivity'), value: row.workflow_run_id ? tl('linked') : '—' },
+    { key: 'outbound_call_id', label: tl('providerActivity'), value: row.outbound_call_id ? tl('linked') : '—' },
+    { key: 'workflow_run_id_value', label: tl('workflowRunId'), value: row.workflow_run_id ?? '-', mono: true },
+    { key: 'outbound_call_id_value', label: tl('providerCallId'), value: row.outbound_call_id ?? '-', mono: true },
+    { key: 'outbound_status', label: tl('providerStatus'), value: providerStatusLabel(t, row.outbound_status) },
+    { key: 'shipment', label: tl('shipment'), value: row.tracking_number ?? row.shipment_id ?? '—', mono: !row.tracking_number },
+    { key: 'shipment_status', label: tl('shipmentStatus'), value: row.shipment_status ?? '—', mono: true },
+    { key: 'settings_resolution_id', label: tl('settingsConfirmation'), value: row.settings_resolution_id ? tl('confirmed') : '—' },
+    { key: 'occurred_at', label: tl('received'), value: row.occurred_at, mono: true },
   ];
 
   return (
@@ -3669,13 +3703,13 @@ function ApiGatewayRequestDrawerBody({ row, route }: { row: ApiGatewayRequestRow
         }}
       >
         <div style={{ flex: 1, minWidth: 180 }}>
-          <div className="eyebrow">Request-first intake</div>
-          <div className="serif" style={{ fontSize: 18 }}>{row.source_label ?? 'Unresolved source'}</div>
-          <div className="state__hint">Saved intake request summary.</div>
+          <div className="eyebrow">{tl('requestFirstIntake')}</div>
+          <div className="serif" style={{ fontSize: 18 }}>{row.source_label ?? tl('unresolvedSource')}</div>
+          <div className="state__hint">{tl('savedIntakeRequestSummary')}</div>
         </div>
         <Chip label={row.method} kind={methodKind(row.method)} size="xs" className="mono" />
         <Chip
-          label={requestStatusLabel(row.status_code, row.intake_state)}
+          label={requestStatusLabel(t, row.status_code, row.intake_state)}
           kind={requestStatusTone(row.status_code, row.intake_state)}
           size="xs"
           className="mono"
@@ -3684,14 +3718,14 @@ function ApiGatewayRequestDrawerBody({ row, route }: { row: ApiGatewayRequestRow
 
       <KvGrid rows={kvRows} />
 
-      <h4 className="eyebrow" style={{ marginTop: 14 }}>Request protection</h4>
+      <h4 className="eyebrow" style={{ marginTop: 14 }}>{tl('requestProtection')}</h4>
       <StateView
         kind="empty"
-        title={headerEntries.length ? 'Request details protected' : 'No request details available'}
-        hint="Sensitive request headers are hidden in this summary."
+        title={headerEntries.length ? tl('requestDetailsProtected') : tl('noRequestDetailsAvailable')}
+        hint={tl('sensitiveRequestHeadersAre')}
       />
 
-      <h4 className="eyebrow" style={{ marginTop: 14 }}>Shipment confirmation</h4>
+      <h4 className="eyebrow" style={{ marginTop: 14 }}>{tl('shipmentConfirmation')}</h4>
       <div
         data-testid="api-gateway-materialization-readback-card"
         style={{
@@ -3703,10 +3737,10 @@ function ApiGatewayRequestDrawerBody({ row, route }: { row: ApiGatewayRequestRow
           background: 'var(--paper-2)',
         }}
       >
-        <KvGrid rows={requestMaterializationSummaryRows(row)} />
+        <KvGrid rows={requestMaterializationSummaryRows(row, t)} />
       </div>
 
-      <h4 className="eyebrow" style={{ marginTop: 14 }}>Route mapping and postprocess</h4>
+      <h4 className="eyebrow" style={{ marginTop: 14 }}>{tl('routeMappingAndPostprocess')}</h4>
       {route ? (
         <div
           data-testid="api-gateway-route-mapping-card"
@@ -3722,42 +3756,43 @@ function ApiGatewayRequestDrawerBody({ row, route }: { row: ApiGatewayRequestRow
           {isPostprocessFailure ? (
             <StateView
               kind="error"
-              title="Postprocess mapping needs attention"
-              hint="The provider response was accepted, but shipment creation needs route review. Fix the provider data or route policy, then rerun the Console tester and a separate external HTTP call before treating this as ready."
+              title={tl('postprocessMappingNeedsAttention')}
+              hint={tl('theProviderResponseWas')}
             />
           ) : null}
-          <KvGrid rows={routeMappingSummaryRows(route)} />
+          <KvGrid rows={routeMappingSummaryRows(route, t)} />
           <StateView
             kind="empty"
-            title="Route settings applied"
-            hint="Route mapping and provider settings are summarized above."
+            title={tl('routeSettingsApplied')}
+            hint={tl('routeMappingAndProvider')}
           />
         </div>
       ) : row.route_id ? (
         <StateView
           kind="error"
-          title="Route mapping not visible"
-          hint="This request references a route, but the API route projection is not visible in the current permission scope. Route mapping remediation stays incomplete until the route policy can be read."
+          title={tl('routeMappingNotVisible')}
+          hint={tl('thisRequestReferencesA')}
         />
       ) : (
         <StateView
           kind="empty"
-          title="No route mapping"
-          hint="This request did not resolve to an API route before it failed."
+          title={tl('noRouteMapping')}
+          hint={tl('thisRequestDidNot')}
         />
       )}
 
-      <h4 className="eyebrow" style={{ marginTop: 14 }}>Request preview</h4>
+      <h4 className="eyebrow" style={{ marginTop: 14 }}>{tl('requestPreview')}</h4>
       <StateView
         kind="empty"
-        title={row.request_body ? 'Request content protected' : 'No request content available'}
-        hint="Sensitive request content is hidden in this summary."
+        title={row.request_body ? tl('requestContentProtected') : tl('noRequestContentAvailable')}
+        hint={tl('sensitiveRequestContentIs')}
       />
     </div>
   );
 }
 
 function ApiCallDrawerBody({ row, rateRow, provider, usagePctWarn, downstreamDominancePct }: ApiCallDrawerBodyProps) {
+  const { t } = useI18n();
   const [tab, setTab] = useState<DrawerTab>('request');
   return (
     <div data-testid="api-gateway-drawer-body">
@@ -3774,7 +3809,7 @@ function ApiCallDrawerBody({ row, rateRow, provider, usagePctWarn, downstreamDom
         }}
       >
         <div style={{ flex: 1, minWidth: 160 }}>
-          <div className="eyebrow">Source</div>
+          <div className="eyebrow">{t('insightsApiGateway.apiCallDrawerBody.source')}</div>
           {/* W14-2: dropped fictional `source_ip` per
               `__audit__/SCHEMA-DRIFT/INSIGHTS.md §1`. The canonical
               `api_call_log` table does not store source IP. */}
@@ -3790,24 +3825,24 @@ function ApiCallDrawerBody({ row, rateRow, provider, usagePctWarn, downstreamDom
         <div style={{ minWidth: 100 }}>
           <Chip label={String(row.status_code)} kind={statusKind(row.status_code)} size="xs" className="mono" />
           <div className="mono" style={{ marginTop: 4, fontSize: 11 }}>
-            {formatOptionalDurationMs(row.duration_ms)}
+            {formatOptionalDurationMs(row.duration_ms, t)}
           </div>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="tabs" role="tablist" aria-label="API request drawer tabs">
-        {DRAWER_TABS.map((t) => (
+      <div className="tabs" role="tablist" aria-label={t('insightsApiGateway.apiCallDrawerBody.apiRequestDrawerTabs')}>
+        {drawerTabs(t).map((entry) => (
           <button
-            key={t.id}
+            key={entry.id}
             type="button"
             role="tab"
-            aria-selected={tab === t.id}
-            data-key={t.id}
-            className={`tabs__tab ${tab === t.id ? 'is-active' : ''}`}
-            onClick={() => setTab(t.id)}
+            aria-selected={tab === entry.id}
+            data-key={entry.id}
+            className={`tabs__tab ${tab === entry.id ? 'is-active' : ''}`}
+            onClick={() => setTab(entry.id)}
           >
-            {t.label}
+            {entry.label}
           </button>
         ))}
       </div>
@@ -3826,29 +3861,31 @@ function ApiCallDrawerBody({ row, rateRow, provider, usagePctWarn, downstreamDom
 // ─── Tab: Request ─────────────────────────────────────────────────────────
 
 function RequestTab({ row }: { row: ApiCallRow }) {
+  const { t } = useI18n();
+  const tl = scopeT(t, 'insightsApiGateway.requestTab');
   // W14-2: dropped fictional `source_ip` + `source_kind` per
   // `__audit__/SCHEMA-DRIFT/INSIGHTS.md §1`. The canonical projection view
   // does not expose these — they were FE-only synthesizer artefacts.
   // `headers` renamed to `request_headers` (canonical column name).
   const kvRows: KvRow[] = [
-    { key: 'request_id', label: 'Request confirmation', value: row.request_id ? 'Available' : '—' },
-    { key: 'method', label: 'Method', value: row.method, mono: true },
-    { key: 'path', label: 'Path', value: row.path, mono: true },
-    { key: 'route_id', label: 'Route', value: row.route_id ? 'Linked route' : '—' },
-    { key: 'route_pack_id', label: 'Route pack', value: row.route_pack_id ? 'Linked route pack' : '—' },
-    { key: 'source_id', label: 'Source', value: row.source_id ? 'Linked source' : '—' },
-    { key: 'occurred_at', label: 'When', value: row.occurred_at, mono: true },
+    { key: 'request_id', label: tl('requestConfirmation'), value: row.request_id ? tl('available') : '—' },
+    { key: 'method', label: tl('method'), value: row.method, mono: true },
+    { key: 'path', label: tl('path'), value: row.path, mono: true },
+    { key: 'route_id', label: tl('route'), value: row.route_id ? tl('linkedRoute') : '—' },
+    { key: 'route_pack_id', label: tl('routePack'), value: row.route_pack_id ? tl('linkedRoutePack') : '—' },
+    { key: 'source_id', label: tl('source'), value: row.source_id ? tl('linkedSource') : '—' },
+    { key: 'occurred_at', label: tl('when'), value: row.occurred_at, mono: true },
   ];
   const hasRequestHeaders = row.has_request_headers
     ?? Object.values(row.request_headers ?? {}).some((value) => value != null);
   return (
     <div data-testid="api-gateway-drawer-request-tab">
       <KvGrid rows={kvRows} />
-      <h4 className="eyebrow" style={{ marginTop: 14 }}>Request protection</h4>
+      <h4 className="eyebrow" style={{ marginTop: 14 }}>{tl('requestProtection')}</h4>
       <StateView
         kind="empty"
-        title={hasRequestHeaders ? 'Request details protected' : 'No request details available'}
-        hint="Sensitive request headers are hidden in this summary."
+        title={hasRequestHeaders ? tl('requestDetailsProtected') : tl('noRequestDetailsAvailable')}
+        hint={tl('sensitiveRequestHeadersAre')}
       />
     </div>
   );
@@ -3857,19 +3894,21 @@ function RequestTab({ row }: { row: ApiCallRow }) {
 // ─── Tab: Response ────────────────────────────────────────────────────────
 
 function ResponseTab({ row }: { row: ApiCallRow }) {
+  const { t } = useI18n();
+  const tl = scopeT(t, 'insightsApiGateway.responseTab');
   const kvRows: KvRow[] = [
-    { key: 'status_code', label: 'Status', value: row.status_code, mono: true },
-    { key: 'error_code', label: 'Request outcome', value: row.error_code ? 'Needs review' : '—' },
-    { key: 'duration_ms', label: 'Duration', value: formatOptionalDurationMs(row.duration_ms), mono: true },
-    { key: 'response_size_bytes', label: 'Response size', value: `${row.response_size_bytes.toLocaleString()} B`, mono: true },
+    { key: 'status_code', label: tl('status'), value: row.status_code, mono: true },
+    { key: 'error_code', label: tl('requestOutcome'), value: row.error_code ? tl('needsReview') : '—' },
+    { key: 'duration_ms', label: tl('duration'), value: formatOptionalDurationMs(row.duration_ms, t), mono: true },
+    { key: 'response_size_bytes', label: tl('responseSize'), value: fill(t('insightsApiGateway.units.bytes'), { count: row.response_size_bytes.toLocaleString() }), mono: true },
   ];
   return (
     <div data-testid="api-gateway-drawer-response-tab">
       <KvGrid rows={kvRows} />
       <StateView
         kind="empty"
-        title={row.response_size_bytes > 0 || row.response_body_sample ? 'Provider response recorded' : 'No provider response available'}
-        hint="Sensitive response content is hidden in this summary."
+        title={row.response_size_bytes > 0 || row.response_body_sample ? tl('providerResponseRecorded') : tl('noProviderResponseAvailable')}
+        hint={tl('sensitiveResponseContentIs')}
       />
     </div>
   );
@@ -3893,6 +3932,8 @@ function LatencyTab({
   // to an inline `?? 30` literal.
   downstreamDominancePct: number | undefined;
 }) {
+  const { t } = useI18n();
+  const tl = scopeT(t, 'insightsApiGateway.latencyTab');
   // Segmented bar — gateway own time vs downstream provider time. The
   // canonical gateway projection does not yet split these explicitly so we
   // attribute provider latency to the most-recent provider_health_logs entry
@@ -3913,17 +3954,17 @@ function LatencyTab({
         : 'var(--good, #48a06a)';
   return (
     <div data-testid="api-gateway-drawer-latency-tab">
-      <div className="eyebrow">Latency breakdown</div>
+      <div className="eyebrow">{tl('latencyBreakdown')}</div>
       {downstreamDominancePct == null ? (
         <Chip
-          label="Gateway timing settings unavailable"
+          label={tl('gatewayTimingSettingsUnavailable')}
           kind="danger"
           size="xs"
           className="mono"
         />
       ) : null}
       <div
-        aria-label="latency breakdown"
+        aria-label={tl('latencyBreakdown2')}
         style={{
           marginTop: 8,
           display: 'flex',
@@ -3938,7 +3979,7 @@ function LatencyTab({
             width: `${ownPct}%`,
             background: 'var(--info, #5b8def)',
           }}
-          title={`Gateway · ${ownMs}ms`}
+          title={fill(tl('gatewayOwnmsMs'), { ownMs: String(ownMs) })}
         />
         <div
           style={{
@@ -3947,7 +3988,7 @@ function LatencyTab({
             // canonical `api_gateway_thresholds.downstream_dominance_pct`.
             background: downstreamBackground,
           }}
-          title={`Provider time · ${downstream}ms`}
+          title={fill(tl('providerTimeDownstreamMs'), { downstream: String(downstream) })}
         />
       </div>
       <div
@@ -3959,24 +4000,24 @@ function LatencyTab({
         }}
         className="mono"
       >
-        <span>Gateway · {ownMs}ms ({ownPct.toFixed(0)}%)</span>
-        <span>Provider time · {downstream}ms ({downPct.toFixed(0)}%)</span>
+        <span>{fill(tl('gatewayOwnmsPct'), { ownMs: String(ownMs), pct: ownPct.toFixed(0) })}</span>
+        <span>{fill(tl('providerTimeDownstreamPct'), { downstream: String(downstream), pct: downPct.toFixed(0) })}</span>
       </div>
 
-      <h4 className="eyebrow" style={{ marginTop: 14 }}>Provider health (last 30 min)</h4>
+      <h4 className="eyebrow" style={{ marginTop: 14 }}>{tl('providerHealthLast30')}</h4>
       {provider ? (
         <KvGrid
           rows={[
-            { key: 'provider_id', label: 'Provider', value: provider.provider_id, mono: true },
-            { key: 'status', label: 'Status', value: provider.status, lookup: 'provider_health_status' },
+            { key: 'provider_id', label: tl('provider'), value: provider.provider_id, mono: true },
+            { key: 'status', label: tl('status'), value: provider.status, lookup: 'provider_health_status' },
             // W13-2: latency lives in `metadata.latency_ms` jsonb on the canonical table.
-            { key: 'latency_ms', label: 'Latency', value: `${latencyOf(provider)}ms`, mono: true },
-            { key: 'occurred_at', label: 'When', value: provider.occurred_at, mono: true },
-            { key: 'error_message', label: 'Note', value: provider.error_message ?? '—' },
+            { key: 'latency_ms', label: tl('latency'), value: fill(t('insightsApiGateway.units.ms'), { ms: String(latencyOf(provider)) }), mono: true },
+            { key: 'occurred_at', label: tl('when'), value: provider.occurred_at, mono: true },
+            { key: 'error_message', label: tl('note'), value: provider.error_message ?? '—' },
           ]}
         />
       ) : (
-        <div className="state__hint">No nearby provider timing record is available.</div>
+        <div className="state__hint">{tl('noNearbyProviderTiming')}</div>
       )}
     </div>
   );
@@ -3985,6 +4026,8 @@ function LatencyTab({
 // ─── Tab: Rate limit ──────────────────────────────────────────────────────
 
 function RateLimitTab({ row, rateRow, usagePctWarn }: { row: ApiCallRow; rateRow: RateLimitRow | null; usagePctWarn: number }) {
+  const { t } = useI18n();
+  const tl = scopeT(t, 'insightsApiGateway.rateLimitTab');
   // W14-2: dropped fictional per-route fields (`route_id`, `route_path`,
   // `route_method`) per `__audit__/SCHEMA-DRIFT/INSIGHTS.md §2`. Canonical
   // `public.api_gateway_rate_limits` is per-source × hour bucket. The
@@ -3994,8 +4037,9 @@ function RateLimitTab({ row, rateRow, usagePctWarn }: { row: ApiCallRow; rateRow
   if (!rateRow) {
     return (
       <div data-testid="api-gateway-drawer-rate-tab" className="state__hint">
-        No api_gateway_rate_limits row exists for this source — the gateway
-        is not currently throttling {row.source_label ?? row.source_id ?? 'this source'}.
+        {fill(tl('noRateLimitRow'), {
+          source: String(row.source_label ?? row.source_id ?? tl('thisSource')),
+        })}
       </div>
     );
   }
@@ -4007,14 +4051,14 @@ function RateLimitTab({ row, rateRow, usagePctWarn }: { row: ApiCallRow; rateRow
     <div data-testid="api-gateway-drawer-rate-tab">
       <KvGrid
         rows={[
-          { key: 'source_label', label: 'Source', value: rateRow.source_label ?? '—' },
-          { key: 'limit_per_min', label: 'Limit / min', value: rateRow.limit_per_min, mono: true },
-          { key: 'limit_per_hour', label: 'Limit / hour', value: rateRow.limit_per_hour ?? rateRow.limit_per_min * 60, mono: true },
-          { key: 'current_usage', label: 'Current usage', value: rateRow.current_usage, mono: true },
-          { key: 'window_start', label: 'Window start', value: rateRow.window_start, mono: true },
+          { key: 'source_label', label: tl('source'), value: rateRow.source_label ?? '—' },
+          { key: 'limit_per_min', label: tl('limitMin'), value: rateRow.limit_per_min, mono: true },
+          { key: 'limit_per_hour', label: tl('limitHour'), value: rateRow.limit_per_hour ?? rateRow.limit_per_min * 60, mono: true },
+          { key: 'current_usage', label: tl('currentUsage'), value: rateRow.current_usage, mono: true },
+          { key: 'window_start', label: tl('windowStart'), value: rateRow.window_start, mono: true },
         ]}
       />
-      <div className="eyebrow" style={{ marginTop: 12 }}>Window saturation</div>
+      <div className="eyebrow" style={{ marginTop: 12 }}>{tl('windowSaturation')}</div>
       <div
         style={{
           marginTop: 6,
@@ -4024,7 +4068,7 @@ function RateLimitTab({ row, rateRow, usagePctWarn }: { row: ApiCallRow; rateRow
         }}
       >
         <div
-          aria-label="rate-limit saturation"
+          aria-label={tl('rateLimitSaturation')}
           style={{
             flex: 1,
             background: 'var(--paper-3)',
@@ -4050,12 +4094,13 @@ function RateLimitTab({ row, rateRow, usagePctWarn }: { row: ApiCallRow; rateRow
 // ─── Tab: Replay (curl) ───────────────────────────────────────────────────
 
 function ReplayTab({ row }: { row: ApiCallRow }) {
+  const { t } = useI18n();
   return (
     <div data-testid="api-gateway-drawer-replay-tab">
       <StateView
         kind="empty"
-        title="Replay available in tester"
-        hint="Open the tester to replay this request with a current source token. Sensitive request details are hidden here."
+        title={t('insightsApiGateway.replayTab.replayAvailableInTester')}
+        hint={t('insightsApiGateway.replayTab.openTheTesterTo')}
       />
     </div>
   );
@@ -4090,6 +4135,8 @@ function ApiGatewayRouteMappingForm({
   onClose: () => void;
   onOpenMappingStudio: (route: ApiRouteRow) => void;
 }) {
+  const { t } = useI18n();
+  const tl = scopeT(t, 'insightsApiGateway.apiGatewayRouteMappingForm');
   const currentRef = routeRequestMappingRef(route);
   const routeIntent = routeCanonicalIntent(route);
   const compatibleMappings = useMemo(
@@ -4122,7 +4169,7 @@ function ApiGatewayRouteMappingForm({
         } catch (err) {
           const message = sanitizeOperatorMessage(
             err instanceof Error ? err.message : '',
-            'Route mapping could not be saved. Check the mapping setup and try again.',
+            tl('routeMappingCouldNotBeSaved'),
           );
           setError(message);
           pushToast(message, 'danger');
@@ -4132,37 +4179,37 @@ function ApiGatewayRouteMappingForm({
     >
       <KvGrid
         rows={[
-          { key: 'route', label: 'Route', value: `${route.method} ${routeDisplayPath(route)}`, mono: true },
-          { key: 'scope', label: 'Scope', value: `${route.scope_type ?? 'global'} ${route.scope_id ?? ''}`.trim(), mono: true },
-          { key: 'intent', label: 'Intent', value: routeIntent || 'not declared', mono: true },
-          { key: 'current', label: 'Current mapping', value: currentRef?.id || currentRef?.key || 'not linked', mono: true },
+          { key: 'route', label: tl('route'), value: `${route.method} ${routeDisplayPath(route)}`, mono: true },
+          { key: 'scope', label: tl('scope'), value: `${route.scope_type ?? 'global'} ${route.scope_id ?? ''}`.trim(), mono: true },
+          { key: 'intent', label: tl('intent'), value: routeIntent || tl('notDeclared'), mono: true },
+          { key: 'current', label: tl('currentMapping'), value: currentRef?.id || currentRef?.key || tl('notLinked'), mono: true },
         ]}
       />
 
       {disabled ? (
         <StateView
           kind="error"
-          title="Mapping write access required"
-          hint="Route mapping changes require API Gateway write and mapping write access."
+          title={tl('mappingWriteAccessRequired')}
+          hint={tl('routeMappingChangesRequire')}
         />
       ) : null}
 
       {mappings.length === 0 ? (
         <StateView
           kind="empty"
-          title="No API Gateway inbound mappings"
-          hint="Create an api_gateway_inbound mapping profile in Mapping Studio before binding this route."
+          title={tl('noApiGatewayInbound')}
+          hint={tl('createAnApiGateway')}
         />
       ) : compatibleMappings.length === 0 ? (
         <StateView
           kind="empty"
-          title="No compatible API Gateway inbound mappings"
-          hint="Only mappings whose target matches this route intent can be bound."
+          title={tl('noCompatibleApiGateway')}
+          hint={tl('onlyMappingsWhoseTarget')}
         />
       ) : (
         <>
           <label className="eyebrow" htmlFor="api-gateway-route-mapping-profile">
-            Mapping profile
+            {tl('mappingProfile')}
           </label>
           <select
             id="api-gateway-route-mapping-profile"
@@ -4183,26 +4230,26 @@ function ApiGatewayRouteMappingForm({
       {selected ? (
         <KvGrid
           rows={[
-            { key: 'mapping_id', label: 'Mapping ID', value: selected.id, mono: true },
-            { key: 'mapping_key', label: 'Mapping key', value: selected.mapping_key ?? '-', mono: true },
-            { key: 'mapping_target', label: 'Target', value: selected.target ?? '-', mono: true },
+            { key: 'mapping_id', label: tl('mappingId'), value: selected.id, mono: true },
+            { key: 'mapping_key', label: tl('mappingKey'), value: selected.mapping_key ?? '-', mono: true },
+            { key: 'mapping_target', label: tl('target'), value: selected.target ?? '-', mono: true },
           ]}
         />
       ) : null}
 
-      {error ? <StateView kind="error" title="Route mapping save failed" hint={error} /> : null}
+      {error ? <StateView kind="error" title={tl('routeMappingSaveFailed')} hint={error} /> : null}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
         <Button
-          label="Open mapping"
+          label={tl('openMapping')}
           iconName="external"
           kind="ghost"
           disabled={!currentRef}
           onClick={() => onOpenMappingStudio(route)}
         />
-        <Button label="Cancel" kind="ghost" onClick={onClose} disabled={saving} />
+        <Button label={tl('cancel')} kind="ghost" onClick={onClose} disabled={saving} />
         <Button
-          label={saving ? 'Saving...' : 'Save mapping'}
+          label={saving ? tl('saving') : tl('saveMapping')}
           iconName="save"
           kind="primary"
           disabled={!canSubmit}
@@ -4252,6 +4299,8 @@ function ApiGatewayShipmentTestForm({
   initialRouteId?: string | null;
   routeMappingLabel?: (route: ApiRouteRow | null | undefined) => string;
 }) {
+  const { t } = useI18n();
+  const tl = useMemo(() => scopeT(t, 'insightsApiGateway.apiGatewayShipmentTestForm'), [t]);
   const go = useConsoleNavigator();
   const allowed = useCapability(CAP.API_GATEWAY_WRITE);
   const testRequest = useRunApiGatewayRequestTest();
@@ -4307,14 +4356,14 @@ function ApiGatewayShipmentTestForm({
   const selectedRoute = selectableRoutes.find((row) => row.id === routeId) ?? selectableRoutes[0] ?? null;
   const preferredSource = useMemo(
     () => (
-      selectableSources.find((row) => !apiGatewaySourceReadiness(row, selectedRoute).blockingReason)
+      selectableSources.find((row) => !apiGatewaySourceReadiness(row, selectedRoute, t).blockingReason)
       ?? selectableSources[0]
       ?? null
     ),
     [selectableSources, selectedRoute],
   );
   const selectedSource = selectedSourceFromId ?? (sourceTouched && sourceId ? null : preferredSource);
-  const selectedSourceReadiness = apiGatewaySourceReadiness(selectedSource, selectedRoute);
+  const selectedSourceReadiness = apiGatewaySourceReadiness(selectedSource, selectedRoute, t);
   const selectedRouteProviderPolicy = selectedRoute ? providerAccountPolicy(selectedRoute) : null;
   const selectedProviderAccountScope = useMemo(
     () => {
@@ -4396,16 +4445,16 @@ function ApiGatewayShipmentTestForm({
     ],
   );
   const selectedRouteReadiness = selectedRoute
-    ? routeProviderAccountReadiness(selectedRoute, selectedProviderAccountValue, selectedCredentialReadback)
+    ? routeProviderAccountReadiness(selectedRoute, selectedProviderAccountValue, selectedCredentialReadback, t)
     : null;
   const selectedRouteRequestMapping = routeRequestMappingRef(selectedRoute);
   const selectedRouteRequestMappingLabel = routeMappingLabel?.(selectedRoute)
-    ?? (selectedRouteRequestMapping?.key || selectedRouteRequestMapping?.id || 'No request mapping');
+    ?? (selectedRouteRequestMapping?.key || selectedRouteRequestMapping?.id || tl('noRequestMapping'));
   const replayRouteBlockedReason = replayRequest
     ? !selectedRoute
-      ? 'The original API route is not visible in this Console session. Replay is blocked so the tester cannot silently switch to another route.'
+      ? tl('theOriginalApiRoute')
       : !routeIsShipmentMutation(selectedRoute)
-        ? 'This API request uses an API route that is not a shipment mutation tester route. Replay preserves the original route and is blocked instead of switching to a different route.'
+        ? tl('thisApiRequestUses')
         : null
     : null;
   const tokenHandoffRef = useRef<ExternalIntakeTokenHandoff | null>(initialTokenHandoff);
@@ -4470,7 +4519,7 @@ function ApiGatewayShipmentTestForm({
       }
       if (!tokenHandoffNotifiedRef.current) {
         tokenHandoffNotifiedRef.current = true;
-        pushToast('One-time source token was not loaded because its source is not visible in this session.', 'warn');
+        pushToast(tl('oneTimeSourceToken'), 'warn');
       }
       return;
     }
@@ -4488,12 +4537,12 @@ function ApiGatewayShipmentTestForm({
       tokenHandoffNotifiedRef.current = true;
       pushToast(
         handoff.source_name
-          ? `Loaded one-time token for ${handoff.source_name}`
-          : 'Loaded one-time source token',
+          ? fill(tl('loadedOneTimeToken'), { source_name: String(handoff.source_name) })
+          : tl('loadedOneTimeSource'),
         'good',
       );
     }
-  }, [preferredSource?.id, requestedInitialRouteId, selectableSources, sourceId, sourceLookupLoaded, token]);
+  }, [preferredSource?.id, requestedInitialRouteId, selectableSources, sourceId, sourceLookupLoaded, token, tl]);
 
   useEffect(() => {
     setExpectShipment(routeIsShipmentMutation(selectedRoute));
@@ -4507,16 +4556,16 @@ function ApiGatewayShipmentTestForm({
   const routePath = routeDisplayPath(selectedRoute);
   const selectedRouteIntent = routeCanonicalIntent(selectedRoute);
   const routeBlockedReason = replayRouteBlockedReason ?? selectedRouteReadiness?.blockingReason;
-  const routeSourceMismatchReason = apiGatewayRouteSourceMismatchReason(selectedRoute, selectedSource);
+  const routeSourceMismatchReason = apiGatewayRouteSourceMismatchReason(selectedRoute, selectedSource, t);
   const sourceBlockedReason =
     !sourceLookupLoaded
-      ? 'Source lookup is still loading.'
+      ? tl('sourceLookupIsStill')
       : sourceLookupError
-        ? 'Source lookup failed; retry before sending an API Gateway shipment test.'
+        ? tl('sourceLookupFailedRetry')
         : selectedSourceReadiness.blockingReason;
   const correlationBlockedReason = isUuid(correlationId)
     ? null
-    : 'Use a valid tracking key so the request can be matched safely.';
+    : tl('useAValidTracking');
   const canSubmit = allowed && Boolean(
     selectedRoute &&
     routePath &&
@@ -4573,16 +4622,16 @@ function ApiGatewayShipmentTestForm({
           });
           if (apiGatewayRequestReadbackIsTerminal(row)) {
             if (row.shipment_id) {
-              pushToast(`API shipment confirmed ${row.tracking_number ?? row.shipment_id}`, 'good');
+              pushToast(fill(tl('apiShipmentConfirmedValue'), { value: String(row.tracking_number ?? row.shipment_id) }), 'good');
             } else {
-              pushToast(`API request confirmation updated: ${requestIntakeLabel(row.intake_state ?? row.outbound_status)}`, row.error_code ? 'warn' : 'info');
+              pushToast(fill(tl('apiRequestConfirmationUpdated'), { value: String(requestIntakeLabel(t, row.intake_state ?? row.outbound_status)) }), row.error_code ? 'warn' : 'info');
             }
             return;
           }
         }
       } catch (err) {
         if (!cancelled) {
-          setErrorMessage('Could not confirm the saved request yet. Try again in a moment.');
+          setErrorMessage(tl('couldNotConfirmSavedRequest'));
         }
         return;
       }
@@ -4597,14 +4646,14 @@ function ApiGatewayShipmentTestForm({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [onRequestReadback, result, resultRow]);
+  }, [onRequestReadback, result, resultRow, t, tl]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canSubmit || !selectedRoute) return;
     setErrorMessage(null);
     try {
-      const payload = parseJsonObjectInput(payloadText);
+      const payload = parseJsonObjectInput(payloadText, t);
       const next = await withApiGatewayTestUiTimeout(
         testRequest.mutateAsync({
           auth_token: token,
@@ -4618,18 +4667,19 @@ function ApiGatewayShipmentTestForm({
           expect_shipment: expectShipment,
           replay_of: replayRequest?.request_id ?? null,
         }),
+        t,
       );
       const nextReadback = requestReadbackFromGatewayTestResult(next);
       setResult(nextReadback ? mergeApiGatewayTestResultWithReadback(next, nextReadback) : next);
       if (nextReadback) void onRequestReadback(nextReadback);
       pushToast(
         next.shipment_id
-          ? `API shipment confirmed ${next.tracking_number ?? next.shipment_id}`
-          : `API request confirmed: ${requestIntakeLabel(next.intake_state)}`,
+          ? fill(tl('apiShipmentConfirmedValue'), { value: String(next.tracking_number ?? next.shipment_id) })
+          : fill(tl('apiRequestConfirmedValue'), { value: String(requestIntakeLabel(t, next.intake_state)) }),
         next.shipment_id ? 'good' : next.error_code ? 'warn' : 'info',
       );
     } catch {
-      const message = 'The shipment test could not be completed. Check the route and source setup, then try again.';
+      const message = tl('shipmentTestCouldNotComplete');
       testRequest.reset();
       setErrorMessage(message);
       pushToast(message, 'danger');
@@ -4647,24 +4697,24 @@ function ApiGatewayShipmentTestForm({
       {selectableRoutes.length === 0 ? (
         <StateView
           kind="empty"
-          title="No API routes are available"
-          hint="Create or enable an API route before sending a hosted shipment intake check."
+          title={tl('noApiRoutesAre')}
+          hint={tl('createOrEnableAn')}
         />
       ) : null}
 
       <div className="state__hint">
-        This Console tester sends through the configured API intake route and waits for the request to appear here.
+        {tl('thisConsoleTesterSends')}
       </div>
 
       {replayRequest ? (
         <StateView
           kind="empty"
-          title="Replay prepared from saved request"
-          hint="The saved route, source, and protected request details are loaded. Paste the current source token to create a new replay request."
+          title={tl('replayPreparedFromSaved')}
+          hint={tl('theSavedRouteSource')}
         />
       ) : null}
 
-      <label className="eyebrow" htmlFor="api-gateway-test-route">Route</label>
+      <label className="eyebrow" htmlFor="api-gateway-test-route">{tl('route')}</label>
       <select
         id="api-gateway-test-route"
         value={routeId}
@@ -4679,61 +4729,61 @@ function ApiGatewayShipmentTestForm({
       >
         {routeId && !selectableRoutes.some((route) => route.id === routeId) ? (
           <option value={routeId}>
-            Original route not visible: {replayRoutePath || routeId}
+            {fill(tl('originalRouteNotVisible'), { route: replayRoutePath || routeId })}
           </option>
         ) : null}
         {selectableRoutes.map((route) => {
           return (
             <option key={route.id} value={route.id}>
-              {apiGatewayRouteOptionLabel(route, selectedSource)}
+              {apiGatewayRouteOptionLabel(t, route, selectedSource)}
             </option>
           );
         })}
       </select>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span className="eyebrow">Shipment intent</span>
+        <span className="eyebrow">{tl('shipmentIntent')}</span>
         <Chip
-          label={selectedRouteIntent || 'not declared'}
+          label={selectedRouteIntent || tl('notDeclared')}
           kind={routeIsShipmentMutation(selectedRoute) ? 'good' : 'warn'}
           size="xs"
           className="mono"
         />
         <span className="state__hint">
-          Tester routes are resolved from API route policy and postprocess rows.
+          {tl('testerRoutesAreResolved')}
         </span>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span className="eyebrow">Route scope</span>
+        <span className="eyebrow">{tl('routeScope')}</span>
         <Chip
-          label={apiGatewayRouteScopeLabel(selectedRoute, selectedSource)}
+          label={apiGatewayRouteScopeLabel(t, selectedRoute, selectedSource)}
           kind={routeSourceMismatchReason ? 'warn' : 'good'}
           size="xs"
         />
         <span className="state__hint">
-          Tenant defaults and client/source exceptions are resolved from route scope and source confirmation.
+          {tl('tenantDefaultsAndClient')}
         </span>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span className="eyebrow">Request mapping</span>
+        <span className="eyebrow">{tl('requestMapping')}</span>
         <Chip
-          label={selectedRouteRequestMapping ? selectedRouteRequestMappingLabel : 'not linked'}
+          label={selectedRouteRequestMapping ? selectedRouteRequestMappingLabel : tl('notLinked')}
           kind={selectedRouteRequestMapping ? 'good' : 'warn'}
           size="xs"
           className={selectedRouteRequestMapping ? 'mono' : undefined}
         />
         {selectedRouteRequestMapping ? (
           <span className="state__hint">
-            {selectedRouteRequestMapping.type} · {selectedRouteRequestMapping.target || 'target pending'}
+            {selectedRouteRequestMapping.type} · {selectedRouteRequestMapping.target || tl('targetPending')}
           </span>
         ) : null}
       </div>
 
       {selectedRouteReadiness ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span className="eyebrow">Provider account</span>
+          <span className="eyebrow">{tl('providerAccount')}</span>
           <Chip label={selectedRouteReadiness.label} kind={selectedRouteReadiness.tone} size="xs" />
         </div>
       ) : null}
@@ -4741,7 +4791,7 @@ function ApiGatewayShipmentTestForm({
       {routeBlockedReason ? (
         <StateView
           kind="error"
-          title={replayRouteBlockedReason ? 'Replay route cannot be sent' : 'Provider credential required'}
+          title={replayRouteBlockedReason ? tl('replayRouteCannotBe') : tl('providerCredentialRequired')}
           hint={routeBlockedReason}
           action={
             !replayRouteBlockedReason && selectedRouteProviderPolicy?.category === 'logestechs_v2_account' ? (
@@ -4752,7 +4802,7 @@ function ApiGatewayShipmentTestForm({
                 capability={CAP.INTEGRATION_PLUGINS_WRITE}
                 onClick={openProviderCredentialSetup}
               >
-                Open provider credentials
+                {tl('openProviderCredentials')}
               </Button>
             ) : null
           }
@@ -4762,12 +4812,12 @@ function ApiGatewayShipmentTestForm({
       {routeSourceMismatchReason ? (
         <StateView
           kind="error"
-          title="Route and source do not match"
+          title={tl('routeAndSourceDo')}
           hint={routeSourceMismatchReason}
         />
       ) : null}
 
-      <label className="eyebrow" htmlFor="api-gateway-source">Source</label>
+      <label className="eyebrow" htmlFor="api-gateway-source">{tl('source')}</label>
       <select
         id="api-gateway-source"
         value={selectedSource?.id ?? ''}
@@ -4781,20 +4831,20 @@ function ApiGatewayShipmentTestForm({
         disabled={testRequest.isPending || !sourceLookupLoaded || selectableSources.length === 0}
       >
         {selectableSources.length === 0 ? (
-          <option value="">No eligible API sources</option>
+          <option value="">{tl('noEligibleApiSources')}</option>
         ) : selectableSources.map((row) => (
           <option key={row.id} value={row.id}>
-            {sourceDisplayLabel(row)}
+            {sourceDisplayLabel(row, t)}
           </option>
         ))}
       </select>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span className="eyebrow">Source confirmation</span>
+        <span className="eyebrow">{tl('sourceConfirmation')}</span>
         <Chip label={selectedSourceReadiness.label} kind={selectedSourceReadiness.tone} size="xs" />
         {selectedSource?.sender_label || selectedSource?.client_label ? (
           <span className="state__hint">
-            {selectedSource.sender_label ?? 'Sender'} · {selectedSource.client_label ?? 'Client'}
+            {selectedSource.sender_label ?? tl('sender')} · {selectedSource.client_label ?? tl('client')}
           </span>
         ) : null}
       </div>
@@ -4802,7 +4852,7 @@ function ApiGatewayShipmentTestForm({
       {sourceBlockedReason ? (
         <StateView
           kind={sourceLookupLoaded && !sourceLookupError ? 'error' : 'empty'}
-          title={selectedSourceReadiness.blockingTitle ?? 'API source lookup required'}
+          title={selectedSourceReadiness.blockingTitle ?? tl('apiSourceLookupRequired')}
           hint={sourceBlockedReason}
           action={
             sourceLookupLoaded && !sourceLookupError ? (
@@ -4813,14 +4863,14 @@ function ApiGatewayShipmentTestForm({
                 capability={CAP.WEBHOOKS_WRITE}
                 onClick={openApiSourceSetup}
               >
-                Open intake sources
+                {tl('openIntakeSources')}
               </Button>
             ) : null
           }
         />
       ) : null}
 
-      <label className="eyebrow" htmlFor="api-gateway-source-token">Source token</label>
+      <label className="eyebrow" htmlFor="api-gateway-source-token">{tl('sourceToken')}</label>
       <input
         id="api-gateway-source-token"
         type="password"
@@ -4829,18 +4879,17 @@ function ApiGatewayShipmentTestForm({
           clearPreviousResult();
           setToken(event.target.value);
         }}
-        placeholder="Paste the API Gateway source token"
+        placeholder={tl('pasteTheApiGateway')}
         required
         disabled={testRequest.isPending}
       />
       <div className="state__hint">
-        Source tokens are secret and returned only on create/rotate. The selector verifies the source context;
-        the pasted token is validated during send and then cleared from this form.
+        {tl('sourceTokensAreSecret')}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <div style={{ display: 'grid', gap: 6 }}>
-          <label className="eyebrow" htmlFor="api-gateway-correlation">Tracking key</label>
+          <label className="eyebrow" htmlFor="api-gateway-correlation">{tl('trackingKey')}</label>
           <input
             id="api-gateway-correlation"
             value={correlationId}
@@ -4856,7 +4905,7 @@ function ApiGatewayShipmentTestForm({
           />
         </div>
         <div style={{ display: 'grid', gap: 6 }}>
-          <label className="eyebrow" htmlFor="api-gateway-idempotency">Idempotency</label>
+          <label className="eyebrow" htmlFor="api-gateway-idempotency">{tl('idempotency')}</label>
           <input
             id="api-gateway-idempotency"
             value={idempotencyKey}
@@ -4873,12 +4922,12 @@ function ApiGatewayShipmentTestForm({
       {correlationBlockedReason ? (
         <StateView
           kind="error"
-          title="Tracking key needs review"
+          title={tl('trackingKeyNeedsReview')}
           hint={correlationBlockedReason}
         />
       ) : null}
 
-      <label className="eyebrow" htmlFor="api-gateway-query-string">Query string</label>
+      <label className="eyebrow" htmlFor="api-gateway-query-string">{tl('queryString')}</label>
       <input
         id="api-gateway-query-string"
         value={queryString}
@@ -4886,14 +4935,14 @@ function ApiGatewayShipmentTestForm({
           clearPreviousResult();
           setQueryString(event.target.value.replace(/^\?+/, ''));
         }}
-        placeholder="channel=console-tester&proof=confirmed"
+        placeholder={tl('channelConsoleTesterProof')}
         disabled={testRequest.isPending}
       />
       <div className="state__hint">
-        Optional request query parameters are sent through the same API intake path and shown on the saved request.
+        {tl('optionalRequestQueryParameters')}
       </div>
 
-      <label className="eyebrow" htmlFor="api-gateway-payload">Request payload</label>
+      <label className="eyebrow" htmlFor="api-gateway-payload">{tl('requestPayload')}</label>
       <textarea
         id="api-gateway-payload"
         value={payloadText}
@@ -4919,13 +4968,13 @@ function ApiGatewayShipmentTestForm({
           }}
           disabled={testRequest.isPending}
         />
-        Require shipment confirmation when intake is materialized
+        {tl('requireShipmentConfirmationWhen')}
       </label>
 
       {errorMessage ? (
         <StateView
           kind="error"
-          title="API Gateway test failed"
+          title={tl('apiGatewayTestFailed')}
           hint={errorMessage}
         />
       ) : null}
@@ -4944,42 +4993,42 @@ function ApiGatewayShipmentTestForm({
         >
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <Chip
-              label={result.diagnostic_only ? 'Check only' : requestIntakeLabel(result.intake_state)}
+              label={result.diagnostic_only ? tl('checkOnly') : requestIntakeLabel(t, result.intake_state)}
               kind={result.diagnostic_only ? 'warn' : requestIntakeTone(result.intake_state)}
               size="xs"
               className="mono"
             />
             {result.shipment_id ? (
-              <Chip label="Shipment confirmed" kind="good" size="xs" />
+              <Chip label={tl('shipmentConfirmed')} kind="good" size="xs" />
             ) : (
-              <Chip label="No shipment proof yet" kind={result.error_code ? 'warn' : 'info'} size="xs" />
+              <Chip label={tl('noShipmentProofYet')} kind={result.error_code ? 'warn' : 'info'} size="xs" />
             )}
           </div>
           <KvGrid
             rows={[
-              { key: 'request', label: 'Request confirmation', value: result.api_gateway_request_id ?? '-', mono: true },
-              { key: 'query_string', label: 'Query string', value: result.query_string ?? '-', mono: true },
-              { key: 'correlation', label: 'Tracking key', value: result.correlation_id ?? '-', mono: true },
-              { key: 'idempotency', label: 'Idempotency', value: result.idempotency_key ?? '-', mono: true },
-              { key: 'workflow', label: 'Workflow activity', value: result.workflow_run_id ?? '-', mono: true },
-              { key: 'outbound', label: 'Provider activity', value: result.outbound_call_id ?? '-', mono: true },
-              { key: 'outbound_status', label: 'Provider status', value: providerStatusLabel(result.outbound_status), mono: true },
-              { key: 'shipment', label: 'Shipment', value: result.tracking_number ?? result.shipment_id ?? '-', mono: true },
-              { key: 'error', label: 'Request outcome', value: result.error_code ? 'Needs review' : '-', mono: true },
-              { key: 'error_detail', label: 'Provider message', value: result.outbound_error_message ? 'Needs review' : '-', mono: true },
-              ...requestMaterializationSummaryRows(resultRow),
+              { key: 'request', label: tl('requestConfirmation'), value: result.api_gateway_request_id ?? '-', mono: true },
+              { key: 'query_string', label: tl('queryString'), value: result.query_string ?? '-', mono: true },
+              { key: 'correlation', label: tl('trackingKey'), value: result.correlation_id ?? '-', mono: true },
+              { key: 'idempotency', label: tl('idempotency'), value: result.idempotency_key ?? '-', mono: true },
+              { key: 'workflow', label: tl('workflowActivity'), value: result.workflow_run_id ?? '-', mono: true },
+              { key: 'outbound', label: tl('providerActivity'), value: result.outbound_call_id ?? '-', mono: true },
+              { key: 'outbound_status', label: tl('providerStatus'), value: providerStatusLabel(t, result.outbound_status), mono: true },
+              { key: 'shipment', label: tl('shipment'), value: result.tracking_number ?? result.shipment_id ?? '-', mono: true },
+              { key: 'error', label: tl('requestOutcome'), value: result.error_code ? tl('needsReview') : '-', mono: true },
+              { key: 'error_detail', label: tl('providerMessage'), value: result.outbound_error_message ? tl('needsReview') : '-', mono: true },
+              ...requestMaterializationSummaryRows(resultRow, t),
             ]}
           />
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
             <Button
-              label="Open request"
+              label={tl('openRequest')}
               iconName="eye"
               kind="ghost"
               disabled={!resultRow}
               onClick={() => { if (resultRow) void onOpenRequest(resultRow); }}
             />
             <Button
-              label="Open workflow activity"
+              label={tl('openWorkflowActivity')}
               iconName="history"
               kind="ghost"
               disabled={!canOpenWorkflowContext || !resultRow?.workflow_run_id}
@@ -4988,14 +5037,14 @@ function ApiGatewayShipmentTestForm({
               }}
             />
             <Button
-              label="Open provider activity"
+              label={tl('openProviderActivity')}
               iconName="trace"
               kind="ghost"
               disabled={!resultRow?.outbound_call_id}
               onClick={() => { if (resultRow?.outbound_call_id) void onOpenOutboundLifecycle(resultRow); }}
             />
             <Button
-              label="Plan route"
+              label={tl('planRoute')}
               iconName="route"
               kind="ghost"
               capabilities={[CAP.ROUTE_PLANS_READ, CAP.ROUTE_PLANS_WRITE]}
@@ -5003,7 +5052,7 @@ function ApiGatewayShipmentTestForm({
               onClick={() => { if (resultRow?.shipment_id) void onOpenRoutePlanning(resultRow); }}
             />
             <Button
-              label="Open shipment context"
+              label={tl('openShipmentContext')}
               iconName="package"
               kind="primary"
               disabled={!resultRow?.shipment_id}
@@ -5012,17 +5061,17 @@ function ApiGatewayShipmentTestForm({
           </div>
           <StateView
             kind="empty"
-            title={result.response ? 'Provider response recorded' : 'No provider response available'}
-            hint="Sensitive response content is hidden in this summary."
+            title={result.response ? tl('providerResponseRecorded') : tl('noProviderResponseAvailable')}
+            hint={tl('sensitiveResponseContentIs')}
           />
         </div>
       ) : null}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <Button label="Close" kind="ghost" onClick={onClose} />
+        <Button label={tl('close')} kind="ghost" onClick={onClose} />
         <Button
           type="submit"
-          label={testRequest.isPending ? 'Sending...' : 'Send API Gateway test'}
+          label={testRequest.isPending ? tl('sending') : tl('sendApiGatewayTest')}
           iconName="plug"
           kind="primary"
           capability={CAP.API_GATEWAY_WRITE}
@@ -5040,6 +5089,8 @@ function BlockSourceForm({
   sources: Array<{ id: string; label: string }>;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
+  const tl = scopeT(t, 'insightsApiGateway.blockSourceForm');
   const allowed = useCapability(CAP.API_GATEWAY_WRITE);
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? '');
   const [reason, setReason] = useState('');
@@ -5055,16 +5106,16 @@ function BlockSourceForm({
             source_id: sourceId,
             reason: reason || undefined,
           });
-          pushToast(`Source blocked · ${sourceId}`, 'good');
+          pushToast(fill(tl('sourceBlockedSourceid'), { sourceId: String(sourceId) }), 'good');
           onClose();
         } catch (err) {
-          const message = err instanceof Error ? err.message : 'Block failed';
+          const message = err instanceof Error ? err.message : tl('blockFailed');
           pushToast(message, 'danger');
         }
       }}
       style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 320 }}
     >
-      <label className="eyebrow" htmlFor="block-source">Source</label>
+      <label className="eyebrow" htmlFor="block-source">{tl('source')}</label>
       <select
         id="block-source"
         value={sourceId}
@@ -5079,25 +5130,25 @@ function BlockSourceForm({
       </select>
       {sources.length === 0 ? (
         <Chip
-          label="No API sources available"
+          label={tl('noApiSourcesAvailable')}
           kind="warn"
           size="xs"
         />
       ) : null}
-      <label className="eyebrow" htmlFor="block-reason">Reason</label>
+      <label className="eyebrow" htmlFor="block-reason">{tl('reason')}</label>
       <textarea
         id="block-reason"
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         rows={3}
-        placeholder="Operator note - recorded with audit and domain events"
+        placeholder={tl('operatorNoteRecordedWith')}
         required
       />
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <Button label="Cancel" kind="ghost" onClick={onClose} disabled={blockSource.isPending} />
+        <Button label={tl('cancel')} kind="ghost" onClick={onClose} disabled={blockSource.isPending} />
         <Button
           type="submit"
-          label={blockSource.isPending ? 'Blocking…' : 'Block source'}
+          label={blockSource.isPending ? tl('blocking') : tl('blockSource')}
           kind="danger"
           capability={CAP.API_GATEWAY_WRITE}
           disabled={blockSource.isPending || !sourceId}
@@ -5126,6 +5177,8 @@ function AdjustRateLimitForm({
   rateLimits: RateLimitRow[];
   onClose: () => void;
 }) {
+  const { t } = useI18n();
+  const tl = scopeT(t, 'insightsApiGateway.adjustRateLimitForm');
   const allowed = useCapability(CAP.API_GATEWAY_WRITE);
   // W77 (Insights Cycle F-R-17 P2) — initial-limit fallback resolves
   // canonically through `api_gateway_thresholds.default_rate_limit_per_min`.
@@ -5163,10 +5216,10 @@ function AdjustRateLimitForm({
             limit_per_min: limit,
             reason: reason || undefined,
           });
-          pushToast(`Rate limit ${bucket.source_label} → ${limit}/min`, 'good');
+          pushToast(fill(tl('rateLimitSourceLabel'), { source_label: String(bucket.source_label), limit: String(limit) }), 'good');
           onClose();
         } catch (err) {
-          const message = err instanceof Error ? err.message : 'Adjust failed';
+          const message = err instanceof Error ? err.message : tl('adjustFailed');
           pushToast(message, 'danger');
         }
       }}
@@ -5174,12 +5227,12 @@ function AdjustRateLimitForm({
     >
       {policyMissing ? (
         <Chip
-          label="Default rate-limit policy missing"
+          label={tl('defaultRateLimitPolicy')}
           kind="danger"
           size="xs"
         />
       ) : null}
-      <label className="eyebrow" htmlFor="rate-bucket">Bucket</label>
+      <label className="eyebrow" htmlFor="rate-bucket">{tl('bucket')}</label>
       <select
         id="rate-bucket"
         value={bucketId}
@@ -5191,11 +5244,11 @@ function AdjustRateLimitForm({
             {/* W14-2: dropped fictional route_method / route_path per
                 `__audit__/SCHEMA-DRIFT/INSIGHTS.md §2`. Canonical bucket
                 is per-source × hour, not per-route. */}
-            {r.source_label ?? r.source_id} · {r.limit_per_min}/min
+            {fill(tl('bucketOption'), { source: String(r.source_label ?? r.source_id), limit: String(r.limit_per_min) })}
           </option>
         ))}
       </select>
-      <label className="eyebrow" htmlFor="rate-limit">Limit / min</label>
+      <label className="eyebrow" htmlFor="rate-limit">{tl('limitMin')}</label>
       <input
         id="rate-limit"
         type="number"
@@ -5204,19 +5257,19 @@ function AdjustRateLimitForm({
         onChange={(e) => setLimit(Number(e.target.value))}
         required
       />
-      <label className="eyebrow" htmlFor="rate-reason">Reason</label>
+      <label className="eyebrow" htmlFor="rate-reason">{tl('reason')}</label>
       <textarea
         id="rate-reason"
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         rows={2}
-        placeholder="Operator note - recorded with audit and domain events"
+        placeholder={tl('operatorNoteRecordedWith')}
       />
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <Button label="Cancel" kind="ghost" onClick={onClose} disabled={adjustRateLimit.isPending} />
+        <Button label={tl('cancel')} kind="ghost" onClick={onClose} disabled={adjustRateLimit.isPending} />
         <Button
           type="submit"
-          label={adjustRateLimit.isPending ? 'Applying…' : 'Apply'}
+          label={adjustRateLimit.isPending ? tl('applying') : tl('apply')}
           kind="primary"
           capability={CAP.API_GATEWAY_WRITE}
           disabled={adjustRateLimit.isPending || policyMissing || limit == null || !bucket}

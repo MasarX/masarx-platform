@@ -49,5 +49,5 @@ test('reads the hosted pgTAP database PID 1 before the suite can run', async () 
 
 test('fails hosted pgTAP startup when the in-container PID 1 is still postgres', async () => {
   await expect(verifyHostedDatabaseInit(jest.fn().mockResolvedValue('postgres\n'), {}, databaseContainer))
-    .rejects.toThrow('Hosted pgTAP database requires docker-init as PID 1');
+    .rejects.toThrow('Hosted database requires docker-init as PID 1');
 });

@@ -11,6 +11,7 @@ import type {
   ServiceOfferingRow,
   ZoneRow,
 } from './service-offerings.types';
+import { fill, useI18n } from '@/lib/i18n';
 
 interface ProductContextSetupDraft {
   service_level_id: string;
@@ -123,6 +124,7 @@ export function ProductContextSetupForm({
   onReady,
   onCancel,
 }: ProductContextSetupFormProps) {
+  const { t } = useI18n();
   const branchTypeOptions = getLookups('branch_type');
   const branchStatusOptions = getLookups('branch_status');
   const zoneColorOptions = getLookups('zone_color_token');
@@ -165,39 +167,39 @@ export function ProductContextSetupForm({
   async function submit() {
     if (pending) return;
     if (createsServiceLevel && !draft.service_level_name.trim()) {
-      pushToast('Service level name is required', 'warn');
+      pushToast(t('catalogProductContextSetup.productContextSetupForm.serviceLevelNameIs'), 'warn');
       return;
     }
     if (createsBranch) {
       if (!draft.branch_name.trim()) {
-        pushToast('Branch name is required', 'warn');
+        pushToast(t('catalogProductContextSetup.productContextSetupForm.branchNameIsRequired'), 'warn');
         return;
       }
       if (!draft.branch_type.trim()) {
-        pushToast('Branch type is required', 'warn');
+        pushToast(t('catalogProductContextSetup.productContextSetupForm.branchTypeIsRequired'), 'warn');
         return;
       }
       if (!draft.branch_status.trim()) {
-        pushToast('Branch status is required', 'warn');
+        pushToast(t('catalogProductContextSetup.productContextSetupForm.branchStatusIsRequired'), 'warn');
         return;
       }
       if (!draft.branch_timezone.trim()) {
-        pushToast('Branch timezone is required', 'warn');
+        pushToast(t('catalogProductContextSetup.productContextSetupForm.branchTimezoneIsRequired'), 'warn');
         return;
       }
     }
     if (createsZone && !draft.zone_name.trim()) {
-      pushToast('Zone name is required', 'warn');
+      pushToast(t('catalogProductContextSetup.productContextSetupForm.zoneNameIsRequired'), 'warn');
       return;
     }
     if (draft.create_zone && !canWriteZones) {
-      pushToast('Zone setup requires zones.write', 'warn');
+      pushToast(t('catalogProductContextSetup.productContextSetupForm.zoneSetupRequiresZones'), 'warn');
       return;
     }
     const displayName = draft.offering_display_name.trim();
     const displaySlug = draft.offering_display_slug.trim() || serviceOfferingSlugFromName(displayName);
     if (!displayName || !displaySlug) {
-      pushToast('Offering display name is required', 'warn');
+      pushToast(t('catalogProductContextSetup.productContextSetupForm.offeringDisplayNameIs'), 'warn');
       return;
     }
 
@@ -207,7 +209,7 @@ export function ProductContextSetupForm({
       if (!resolvedLevelId) {
         const name = draft.service_level_name.trim();
         const key = serviceLevelKeyFromName(name);
-        if (!key) throw new Error('Service level key could not be generated.');
+        if (!key) throw new Error(t('catalogProductContextSetup.productContextSetupForm.serviceLevelKeyCould'));
         const metadata: Record<string, unknown> = {};
         if (draft.service_level_tier.trim()) metadata.tier = draft.service_level_tier.trim();
         const rank = positiveNumber(draft.service_level_priority_rank);
@@ -311,7 +313,7 @@ export function ProductContextSetupForm({
         offeringId: resolvedOfferingId,
       });
       onReady(readback, displayName);
-      pushToast(`Product context ready - ${displayName}`, 'good');
+      pushToast(fill(t('catalogProductContextSetup.productContextSetupForm.productContextReadyDisplayname'), { displayName: String(displayName) }), 'good');
     } catch (err) {
       pushToast((err as Error).message, 'danger');
     } finally {
@@ -333,7 +335,7 @@ export function ProductContextSetupForm({
       >
         {levels.length > 0 ? (
           <>
-            <label className="mono" htmlFor="setup-level">Service level</label>
+            <label className="mono" htmlFor="setup-level">{t('catalogProductContextSetup.productContextSetupForm.serviceLevel')}</label>
             <select
               id="setup-level"
               className="dt-inline-input"
@@ -347,7 +349,7 @@ export function ProductContextSetupForm({
           </>
         ) : (
           <>
-            <label className="mono" htmlFor="setup-level-name">Service level name</label>
+            <label className="mono" htmlFor="setup-level-name">{t('catalogProductContextSetup.productContextSetupForm.serviceLevelName')}</label>
             <input
               id="setup-level-name"
               className="dt-inline-input"
@@ -355,21 +357,21 @@ export function ProductContextSetupForm({
               onChange={(e) => setDraft((s) => ({ ...s, service_level_name: e.target.value }))}
               autoFocus
             />
-            <label className="mono" htmlFor="setup-level-description">Level description</label>
+            <label className="mono" htmlFor="setup-level-description">{t('catalogProductContextSetup.productContextSetupForm.levelDescription')}</label>
             <input
               id="setup-level-description"
               className="dt-inline-input"
               value={draft.service_level_description}
               onChange={(e) => setDraft((s) => ({ ...s, service_level_description: e.target.value }))}
             />
-            <label className="mono" htmlFor="setup-level-tier">Level tier</label>
+            <label className="mono" htmlFor="setup-level-tier">{t('catalogProductContextSetup.productContextSetupForm.levelTier')}</label>
             <input
               id="setup-level-tier"
               className="dt-inline-input"
               value={draft.service_level_tier}
               onChange={(e) => setDraft((s) => ({ ...s, service_level_tier: e.target.value }))}
             />
-            <label className="mono" htmlFor="setup-level-rank">Priority rank</label>
+            <label className="mono" htmlFor="setup-level-rank">{t('catalogProductContextSetup.productContextSetupForm.priorityRank')}</label>
             <input
               id="setup-level-rank"
               type="number"
@@ -377,7 +379,7 @@ export function ProductContextSetupForm({
               value={draft.service_level_priority_rank}
               onChange={(e) => setDraft((s) => ({ ...s, service_level_priority_rank: e.target.value }))}
             />
-            <label className="mono" htmlFor="setup-level-sla-minutes">SLA minutes</label>
+            <label className="mono" htmlFor="setup-level-sla-minutes">{t('catalogProductContextSetup.productContextSetupForm.slaMinutes')}</label>
             <input
               id="setup-level-sla-minutes"
               type="number"
@@ -385,7 +387,7 @@ export function ProductContextSetupForm({
               value={draft.service_level_sla_minutes}
               onChange={(e) => setDraft((s) => ({ ...s, service_level_sla_minutes: e.target.value }))}
             />
-            <label className="mono" htmlFor="setup-level-sla-label">SLA label</label>
+            <label className="mono" htmlFor="setup-level-sla-label">{t('catalogProductContextSetup.productContextSetupForm.slaLabel')}</label>
             <input
               id="setup-level-sla-label"
               className="dt-inline-input"
@@ -397,7 +399,7 @@ export function ProductContextSetupForm({
 
         {branches.length > 0 ? (
           <>
-            <label className="mono" htmlFor="setup-branch">Branch</label>
+            <label className="mono" htmlFor="setup-branch">{t('catalogProductContextSetup.productContextSetupForm.branch')}</label>
             <select
               id="setup-branch"
               className="dt-inline-input"
@@ -411,21 +413,21 @@ export function ProductContextSetupForm({
           </>
         ) : (
           <>
-            <label className="mono" htmlFor="setup-branch-name">Branch name</label>
+            <label className="mono" htmlFor="setup-branch-name">{t('catalogProductContextSetup.productContextSetupForm.branchName')}</label>
             <input
               id="setup-branch-name"
               className="dt-inline-input"
               value={draft.branch_name}
               onChange={(e) => setDraft((s) => ({ ...s, branch_name: e.target.value }))}
             />
-            <label className="mono" htmlFor="setup-branch-code">Branch code</label>
+            <label className="mono" htmlFor="setup-branch-code">{t('catalogProductContextSetup.productContextSetupForm.branchCode')}</label>
             <input
               id="setup-branch-code"
               className="dt-inline-input"
               value={draft.branch_code}
               onChange={(e) => setDraft((s) => ({ ...s, branch_code: e.target.value }))}
             />
-            <label className="mono" htmlFor="setup-branch-type">Branch type</label>
+            <label className="mono" htmlFor="setup-branch-type">{t('catalogProductContextSetup.productContextSetupForm.branchType')}</label>
             {branchTypeOptions.length > 0 ? (
               <select
                 id="setup-branch-type"
@@ -433,7 +435,7 @@ export function ProductContextSetupForm({
                 value={draft.branch_type}
                 onChange={(e) => setDraft((s) => ({ ...s, branch_type: e.target.value }))}
               >
-                <option value="">Select branch type</option>
+                <option value="">{t('catalogProductContextSetup.productContextSetupForm.selectBranchType')}</option>
                 {branchTypeOptions.map((row) => (
                   <option key={row.value} value={row.value}>{row.label}</option>
                 ))}
@@ -446,7 +448,7 @@ export function ProductContextSetupForm({
                 onChange={(e) => setDraft((s) => ({ ...s, branch_type: e.target.value }))}
               />
             )}
-            <label className="mono" htmlFor="setup-branch-status">Branch status</label>
+            <label className="mono" htmlFor="setup-branch-status">{t('catalogProductContextSetup.productContextSetupForm.branchStatus')}</label>
             {branchStatusOptions.length > 0 ? (
               <select
                 id="setup-branch-status"
@@ -454,7 +456,7 @@ export function ProductContextSetupForm({
                 value={draft.branch_status}
                 onChange={(e) => setDraft((s) => ({ ...s, branch_status: e.target.value }))}
               >
-                <option value="">Select branch status</option>
+                <option value="">{t('catalogProductContextSetup.productContextSetupForm.selectBranchStatus')}</option>
                 {branchStatusOptions.map((row) => (
                   <option key={row.value} value={row.value}>{row.label}</option>
                 ))}
@@ -467,28 +469,28 @@ export function ProductContextSetupForm({
                 onChange={(e) => setDraft((s) => ({ ...s, branch_status: e.target.value }))}
               />
             )}
-            <label className="mono" htmlFor="setup-branch-timezone">Branch timezone</label>
+            <label className="mono" htmlFor="setup-branch-timezone">{t('catalogProductContextSetup.productContextSetupForm.branchTimezone')}</label>
             <input
               id="setup-branch-timezone"
               className="dt-inline-input"
               value={draft.branch_timezone}
               onChange={(e) => setDraft((s) => ({ ...s, branch_timezone: e.target.value }))}
             />
-            <label className="mono" htmlFor="setup-branch-city">Branch city</label>
+            <label className="mono" htmlFor="setup-branch-city">{t('catalogProductContextSetup.productContextSetupForm.branchCity')}</label>
             <input
               id="setup-branch-city"
               className="dt-inline-input"
               value={draft.branch_city}
               onChange={(e) => setDraft((s) => ({ ...s, branch_city: e.target.value }))}
             />
-            <label className="mono" htmlFor="setup-branch-address">Branch address</label>
+            <label className="mono" htmlFor="setup-branch-address">{t('catalogProductContextSetup.productContextSetupForm.branchAddress')}</label>
             <input
               id="setup-branch-address"
               className="dt-inline-input"
               value={draft.branch_address}
               onChange={(e) => setDraft((s) => ({ ...s, branch_address: e.target.value }))}
             />
-            <label className="mono" htmlFor="setup-branch-capacity">Daily capacity</label>
+            <label className="mono" htmlFor="setup-branch-capacity">{t('catalogProductContextSetup.productContextSetupForm.dailyCapacity')}</label>
             <input
               id="setup-branch-capacity"
               type="number"
@@ -500,7 +502,7 @@ export function ProductContextSetupForm({
           </>
         )}
 
-        <label className="mono" htmlFor="setup-create-zone">Coverage zone</label>
+        <label className="mono" htmlFor="setup-create-zone">{t('catalogProductContextSetup.productContextSetupForm.coverageZone')}</label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <input
             id="setup-create-zone"
@@ -508,11 +510,11 @@ export function ProductContextSetupForm({
             checked={draft.create_zone}
             onChange={(e) => setDraft((s) => ({ ...s, create_zone: e.target.checked }))}
           />
-          <span className="state__hint">Attach zone coverage</span>
+          <span className="state__hint">{t('catalogProductContextSetup.productContextSetupForm.attachZoneCoverage')}</span>
         </label>
         {draft.create_zone && zones.length > 0 ? (
           <>
-            <label className="mono" htmlFor="setup-zone">Zone</label>
+            <label className="mono" htmlFor="setup-zone">{t('catalogProductContextSetup.productContextSetupForm.zone')}</label>
             <select
               id="setup-zone"
               className="dt-inline-input"
@@ -526,14 +528,14 @@ export function ProductContextSetupForm({
           </>
         ) : draft.create_zone ? (
           <>
-            <label className="mono" htmlFor="setup-zone-name">Zone name</label>
+            <label className="mono" htmlFor="setup-zone-name">{t('catalogProductContextSetup.productContextSetupForm.zoneName')}</label>
             <input
               id="setup-zone-name"
               className="dt-inline-input"
               value={draft.zone_name}
               onChange={(e) => setDraft((s) => ({ ...s, zone_name: e.target.value }))}
             />
-            <label className="mono" htmlFor="setup-zone-color">Zone color</label>
+            <label className="mono" htmlFor="setup-zone-color">{t('catalogProductContextSetup.productContextSetupForm.zoneColor')}</label>
             {zoneColorOptions.length > 0 ? (
               <select
                 id="setup-zone-color"
@@ -541,7 +543,7 @@ export function ProductContextSetupForm({
                 value={draft.zone_color_token}
                 onChange={(e) => setDraft((s) => ({ ...s, zone_color_token: e.target.value }))}
               >
-                <option value="">No color token</option>
+                <option value="">{t('catalogProductContextSetup.productContextSetupForm.noColorToken')}</option>
                 {zoneColorOptions.map((row) => (
                   <option key={row.value} value={row.value}>{row.label}</option>
                 ))}
@@ -557,21 +559,21 @@ export function ProductContextSetupForm({
           </>
         ) : null}
 
-        <label className="mono" htmlFor="setup-offering-name">Offering name</label>
+        <label className="mono" htmlFor="setup-offering-name">{t('catalogProductContextSetup.productContextSetupForm.offeringName')}</label>
         <input
           id="setup-offering-name"
           className="dt-inline-input"
           value={draft.offering_display_name}
           onChange={(e) => setDraft((s) => ({ ...s, offering_display_name: e.target.value }))}
         />
-        <label className="mono" htmlFor="setup-offering-slug">Offering slug</label>
+        <label className="mono" htmlFor="setup-offering-slug">{t('catalogProductContextSetup.productContextSetupForm.offeringSlug')}</label>
         <input
           id="setup-offering-slug"
           className="dt-inline-input"
           value={draft.offering_display_slug}
           onChange={(e) => setDraft((s) => ({ ...s, offering_display_slug: e.target.value }))}
         />
-        <label className="mono" htmlFor="setup-offering-priority">Offering priority</label>
+        <label className="mono" htmlFor="setup-offering-priority">{t('catalogProductContextSetup.productContextSetupForm.offeringPriority')}</label>
         <input
           id="setup-offering-priority"
           type="number"
@@ -579,7 +581,7 @@ export function ProductContextSetupForm({
           value={draft.offering_priority}
           onChange={(e) => setDraft((s) => ({ ...s, offering_priority: e.target.value }))}
         />
-        <label className="mono" htmlFor="setup-offering-price">Base price</label>
+        <label className="mono" htmlFor="setup-offering-price">{t('catalogProductContextSetup.productContextSetupForm.basePrice')}</label>
         <input
           id="setup-offering-price"
           type="number"
@@ -587,14 +589,14 @@ export function ProductContextSetupForm({
           value={draft.offering_base_price}
           onChange={(e) => setDraft((s) => ({ ...s, offering_base_price: e.target.value }))}
         />
-        <label className="mono" htmlFor="setup-offering-currency">Currency</label>
+        <label className="mono" htmlFor="setup-offering-currency">{t('catalogProductContextSetup.productContextSetupForm.currency')}</label>
         <input
           id="setup-offering-currency"
           className="dt-inline-input"
           value={draft.offering_currency}
           onChange={(e) => setDraft((s) => ({ ...s, offering_currency: e.target.value.toUpperCase() }))}
         />
-        <label className="mono" htmlFor="setup-offering-weight">Max weight (kg)</label>
+        <label className="mono" htmlFor="setup-offering-weight">{t('catalogProductContextSetup.productContextSetupForm.maxWeightKg')}</label>
         <input
           id="setup-offering-weight"
           type="number"
@@ -604,9 +606,9 @@ export function ProductContextSetupForm({
         />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-        <Button label="Cancel" kind="ghost" onClick={onCancel} disabled={pending} />
+        <Button label={t('catalogProductContextSetup.productContextSetupForm.cancel')} kind="ghost" onClick={onCancel} disabled={pending} />
         <Button
-          label={pending ? 'Provisioning...' : 'Provision setup'}
+          label={pending ? t('catalogProductContextSetup.productContextSetupForm.provisioning') : t('catalogProductContextSetup.productContextSetupForm.provisionSetup')}
           kind="primary"
           capabilities={[CAP.SERVICE_OFFERINGS_WRITE, CAP.AGREEMENTS_WRITE, CAP.BRANCHES_WRITE]}
           disabled={pending}

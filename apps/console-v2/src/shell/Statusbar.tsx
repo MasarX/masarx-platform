@@ -4,7 +4,7 @@
 // a placeholder toast (until drawers are wired by App).
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from '@tanstack/react-router';
-import { useI18n } from '@/lib/i18n';
+import { englishT, fill, useI18n, type Translate } from '@/lib/i18n';
 import { CAP } from '@/lib/capabilities';
 import { useCapability, useIdentity } from '@/lib/identity';
 import * as api from '@/lib/api';
@@ -150,28 +150,38 @@ export function deriveStatusbarMetrics(input: StatusbarMetricInputs): StatusbarM
   };
 }
 
-export function formatProviderTelemetryLatency(input: TelemetryDisplayInput): string {
-  if (!input.canRead) return 'restricted';
-  if (input.isLoading) return 'loading';
-  if (input.isError) return 'unavailable';
-  if (input.metrics.integrationTotal === 0) return 'not configured';
-  return input.metrics.latencyMs != null ? `${input.metrics.latencyMs}ms` : 'no latency';
+
+/** States both telemetry segments share, or null when live metrics are available. */
+function telemetryState(input: TelemetryDisplayInput, t: Translate): string | null {
+  if (!input.canRead) return t('shell.status.telemetryState.restricted');
+  if (input.isLoading) return t('shell.status.telemetryState.loading');
+  if (input.isError) return t('shell.status.telemetryState.unavailable');
+  return null;
 }
 
-export function formatProviderTelemetryHealth(input: TelemetryDisplayInput): string {
-  if (!input.canRead) return 'restricted';
-  if (input.isLoading) return 'loading';
-  if (input.isError) return 'unavailable';
-  if (input.metrics.integrationTotal === 0) return '0 providers';
-  return `${input.metrics.integrationOk}/${input.metrics.integrationTotal} ok`;
+export function formatProviderTelemetryLatency(input: TelemetryDisplayInput, t: Translate = englishT): string {
+  const state = telemetryState(input, t);
+  if (state) return state;
+  if (input.metrics.integrationTotal === 0) return t('shell.status.telemetryState.notConfigured');
+  return input.metrics.latencyMs != null
+    ? fill(t('shell.status.latencyMs'), { n: input.metrics.latencyMs })
+    : t('shell.status.telemetryState.noLatency');
+}
+
+export function formatProviderTelemetryHealth(input: TelemetryDisplayInput, t: Translate = englishT): string {
+  const state = telemetryState(input, t);
+  if (state) return state;
+  if (input.metrics.integrationTotal === 0) return t('shell.status.noProviders');
+  return fill(t('shell.status.healthOk'), { ok: input.metrics.integrationOk, total: input.metrics.integrationTotal });
 }
 
 export function formatDecisionCategory(
   category: string | null | undefined,
   commandRegistry: CommandRegistryLike = api.getCommandRegistry() as CommandRegistryLike,
+  t: Translate = englishT,
 ): string {
   const raw = String(category ?? '').trim();
-  if (!raw) return 'Decision';
+  if (!raw) return t('shell.status.decision');
   const commands = Array.isArray(commandRegistry)
     ? commandRegistry
     : Array.isArray(commandRegistry?.commands)
@@ -184,13 +194,6 @@ export function formatDecisionCategory(
     .filter(Boolean)
     .map(titleCaseToken)
     .join(' ');
-}
-
-function fmtTimeShort(input: string | number | Date | undefined): string {
-  if (!input) return '—';
-  const d = new Date(input);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 export interface StatusbarProps {
@@ -211,7 +214,7 @@ export function Statusbar({
   onOpenEvidenceTrail,
 }: StatusbarProps) {
   const router = useRouter();
-  const { t } = useI18n();
+  const { t, fmtTime } = useI18n();
   const { scope } = useIdentity();
   const canReadProviderHealth = useCapability(CAP.INTEGRATIONS_READ);
   const [state, setState] = useState<StatusState>(INITIAL_STATE);
@@ -270,7 +273,7 @@ export function Statusbar({
     atRiskTasks.data,
   ]);
 
-  const tenantShort = scope?.tenant?.label?.split(' ')[0] ?? 'Tenant';
+  const tenantShort = scope?.tenant?.label?.split(' ')[0] ?? t('shell.status.tenantFallback');
   const latest: DecisionLogRecent | undefined = state.recent[0];
   // A live page's connection hook is the one clock for "synced" (#405).
   const liveStatus = useLiveStatus();
@@ -292,32 +295,33 @@ export function Statusbar({
       atRiskTasks.refetch(),
     ]).then(() => {
       setState((prev) => ({ ...prev, lastSync: Date.now() }));
-      onToast?.('Refreshed', 'good');
+      onToast?.(t('shell.status.refreshed'), 'good');
     });
   };
 
   const handleLink = () => {
-    const telemetryState = formatProviderTelemetryLatency({
-      canRead: canReadProviderHealth,
-      isLoading: providerHealth.isLoading,
-      isError: providerHealth.isError,
-      metrics,
-    });
-    onToast?.(
-      `Provider telemetry · ${telemetryState} · last readback ${
-        secondsSinceSync != null ? `${secondsSinceSync}s ago` : 'not received'
-      }`,
-      'info'
+    const latency = formatProviderTelemetryLatency(
+      {
+        canRead: canReadProviderHealth,
+        isLoading: providerHealth.isLoading,
+        isError: providerHealth.isError,
+        metrics,
+      },
+      t,
     );
+    const since = secondsSinceSync != null
+      ? fill(t('shell.status.secondsAgo'), { n: secondsSinceSync })
+      : t('shell.status.notReceived');
+    onToast?.(fill(t('shell.status.telemetryToast'), { state: latency, since }), 'info');
   };
 
   const evidenceText = useMemo(() => {
     if (!latest) return null;
     return (
       <span className="status-evidence__text">
-        <span className="mono">{fmtTimeShort(latest.timestamp)}</span>
+        <span className="mono">{fmtTime(latest.timestamp)}</span>
         {' · '}
-        <span className="ev-cat">{formatDecisionCategory(latest.decision_category)}</span>
+        <span className="ev-cat">{formatDecisionCategory(latest.decision_category, undefined, t)}</span>
         {' · '}
         <span className="ev-scope">
           {t('common.resolved_from', 'Resolved from')} {latest.resolved_from ?? ''}
@@ -325,23 +329,23 @@ export function Statusbar({
         {latest.settings_resolution_id ? (
           <>
             {' · '}
-            <span className="ev-srlv">policy evidence</span>
+            <span className="ev-srlv">{t('shell.status.policyEvidence')}</span>
           </>
         ) : null}
       </span>
     );
-  }, [latest, t]);
+  }, [latest, t, fmtTime]);
 
   return (
-    <footer className="statusbar" role="status" aria-label="System status">
+    <footer className="statusbar" role="status" aria-label={t('shell.status.label')}>
       <button
         className="status-seg status-seg--env"
         type="button"
-        title="Environment + tenant scope"
+        title={t('shell.status.envTitle')}
         onClick={onOpenScopePalette}
       >
         <span className="status-seg__dot" aria-hidden="true" data-tone="good" />
-        <span className="status-seg__label mono">dev</span>
+        <span className="status-seg__label mono" dir="ltr">dev</span>{/* i18n-literal-ok environment code */}
         <span className="status-seg__sep">·</span>
         <span className="status-seg__value">{tenantShort}</span>
       </button>
@@ -349,47 +353,53 @@ export function Statusbar({
       <button
         className="status-seg"
         type="button"
-        title="Provider telemetry latency"
+        title={t('shell.status.telemetryTitle')}
         onClick={handleLink}
       >
         <span className="status-seg__dot" aria-hidden="true" data-tone="good" />
-        <span className="status-seg__label mono">telemetry</span>
+        <span className="status-seg__label mono">{t('shell.status.telemetry')}</span>
         <span className="status-seg__value mono">
-          {formatProviderTelemetryLatency({
-            canRead: canReadProviderHealth,
-            isLoading: providerHealth.isLoading,
-            isError: providerHealth.isError,
-            metrics,
-          })}
+          {formatProviderTelemetryLatency(
+            {
+              canRead: canReadProviderHealth,
+              isLoading: providerHealth.isLoading,
+              isError: providerHealth.isError,
+              metrics,
+            },
+            t,
+          )}
         </span>
       </button>
 
       <button
         className="status-seg"
         type="button"
-        title="Integration health · click to open"
+        title={t('shell.status.healthTitle')}
         onClick={() => navigateTo('/integrations/health')}
       >
         <span className="status-seg__icon" aria-hidden="true">⚡</span>
         <span className="status-seg__value mono">
-          {formatProviderTelemetryHealth({
-            canRead: canReadProviderHealth,
-            isLoading: providerHealth.isLoading,
-            isError: providerHealth.isError,
-            metrics,
-          })}
+          {formatProviderTelemetryHealth(
+            {
+              canRead: canReadProviderHealth,
+              isLoading: providerHealth.isLoading,
+              isError: providerHealth.isError,
+              metrics,
+            },
+            t,
+          )}
         </span>
       </button>
 
       <button
         className="status-seg"
         type="button"
-        title="Open exceptions / SLA-at-risk · click to open"
+        title={t('shell.status.exceptionsTitle')}
         onClick={() => navigateTo('/operate/exceptions')}
       >
         <span className="status-seg__icon" aria-hidden="true">⚠</span>
         <span className="status-seg__value mono">
-          {metrics.ndrTasks} NDR · {metrics.atRiskTasks} at-risk
+          {fill(t('shell.status.exceptions'), { ndr: metrics.ndrTasks, atRisk: metrics.atRiskTasks })}
         </span>
       </button>
 
@@ -404,23 +414,23 @@ export function Statusbar({
       <button
         className="status-seg"
         type="button"
-        title="Outbox / sync state"
+        title={t('shell.status.outboxTitle')}
         onClick={() => navigateTo('/integrations/intake')}
       >
         <span className="status-seg__icon" aria-hidden="true">↻</span>
         <span className="status-seg__value mono">
-          {metrics.queuedComms} queued · synced {secondsSinceSync != null ? `${secondsSinceSync}s` : '—'}
+          {fill(t('shell.status.outbox'), { queued: metrics.queuedComms, synced: secondsSinceSync != null ? fill(t('shell.status.seconds'), { n: secondsSinceSync }) : '—' })}
         </span>
       </button>
 
       <button
         className="status-seg"
         type="button"
-        title="Background workflow runs · click to open log"
+        title={t('shell.status.runsTitle')}
         onClick={() => navigateTo('/workflows/runs')}
       >
         <span className="status-seg__icon" aria-hidden="true">▷</span>
-        <span className="status-seg__value mono">{metrics.activeWorkflowRuns} runs</span>
+        <span className="status-seg__value mono">{fill(t('shell.status.runs'), { n: metrics.activeWorkflowRuns })}</span>
       </button>
 
       <div className="statusbar__spacer" />
@@ -429,7 +439,7 @@ export function Statusbar({
         className="status-evidence mono"
         role="button"
         tabIndex={0}
-        title="Latest decision evidence · click to expand"
+        title={t('shell.status.evidenceTitle')}
         onClick={() =>
           onOpenEvidenceTrail
             ? onOpenEvidenceTrail(state.recent)
@@ -443,23 +453,23 @@ export function Statusbar({
         }}
       >
         <span className="status-evidence__dot" aria-hidden="true" />
-        {evidenceText ?? <span className="status-evidence__text">awaiting…</span>}
+        {evidenceText ?? <span className="status-evidence__text">{t('shell.status.awaiting')}</span>}
       </span>
 
       <button
         className="status-seg"
         type="button"
-        title="Data freshness · click to refresh"
+        title={t('shell.status.freshnessTitle')}
         onClick={handleRefresh}
       >
         <span className="status-seg__icon" aria-hidden="true">⟳</span>
-        <span className="status-seg__value mono">as of {fmtTimeShort(state.lastSync)}</span>
+        <span className="status-seg__value mono">{fill(t('shell.status.asOf'), { time: state.lastSync ? fmtTime(state.lastSync) : '—' })}</span>
       </button>
 
       <button
         className="status-seg"
         type="button"
-        title="Keyboard shortcuts (?)"
+        title={t('shell.status.shortcutsTitle')}
         onClick={onOpenShortcuts}
       >
         <span className="status-seg__value mono">⌘K · ?</span>

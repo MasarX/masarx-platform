@@ -54,13 +54,14 @@ describe('StaleBanner and StaleLabel', () => {
         <StaleBanner live={make(state)} />
         <StaleLabel live={make(state)} />
       </>,
+      { locale: 'en' },
     );
     expect(screen.queryByTestId('stale-banner')).toBeNull();
     expect(screen.queryByText(/Data from/)).toBeNull();
   });
 
   it('reconnecting: paused banner, not a live region', () => {
-    renderWithProviders(<StaleBanner live={make('reconnecting')} />);
+    renderWithProviders(<StaleBanner live={make('reconnecting')} />, { locale: 'en' });
     const banner = screen.getByTestId('stale-banner');
     expect(banner).toHaveTextContent(/^Live updates are paused\. Data shown is from .+ and may be out of date\.$/);
     expect(banner).not.toHaveClass('stale-banner--danger');
@@ -75,6 +76,7 @@ describe('StaleBanner and StaleLabel', () => {
         <StaleBanner live={make('offline')} />
         <StaleLabel live={make('offline')} />
       </>,
+      { locale: 'en' },
     );
     const banner = screen.getByTestId('stale-banner');
     expect(banner).toHaveClass('stale-banner--danger');
@@ -109,7 +111,7 @@ describe('NewRowsStrip', () => {
     [3, '3 new runs'],
   ])('EN %i: "%s" and Show', async (count, text) => {
     const onShow = vi.fn();
-    renderWithProviders(<NewRowsStrip count={count} path="live.newRuns" onShow={onShow} />);
+    renderWithProviders(<NewRowsStrip count={count} path="live.newRuns" onShow={onShow} />, { locale: 'en' });
     const strip = screen.getByTestId('new-rows');
     expect(within(strip).getByRole('status')).toHaveTextContent(new RegExp(`^${text}$`));
     await userEvent.setup().click(within(strip).getByRole('button', { name: 'Show' }));
@@ -142,7 +144,7 @@ describe('useWritePause', () => {
   it('offline: the write stays focusable, is aria-disabled, explains why and does nothing', async () => {
     const user = userEvent.setup();
     const onClick = vi.fn();
-    renderWithProviders(<WriteHarness state="offline" onClick={onClick} />, { capabilities: ['all'] });
+    renderWithProviders(<WriteHarness state="offline" onClick={onClick} />, { capabilities: ['all'], locale: 'en' });
     const btn = screen.getByRole('button', { name: 'Create shipment' });
     expect(btn).not.toBeDisabled();
     expect(btn).toHaveAttribute('aria-disabled', 'true');
@@ -161,7 +163,7 @@ describe('useWritePause', () => {
 
   it.each(['live', 'reconnecting', 'polling'] as const)('%s: writes are not paused', async (state) => {
     const onClick = vi.fn();
-    renderWithProviders(<WriteHarness state={state} onClick={onClick} />, { capabilities: ['all'] });
+    renderWithProviders(<WriteHarness state={state} onClick={onClick} />, { capabilities: ['all'], locale: 'en' });
     const btn = screen.getByRole('button', { name: 'Create shipment' });
     expect(btn).not.toHaveAttribute('aria-disabled');
     expect(btn).not.toHaveAttribute('aria-describedby');

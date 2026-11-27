@@ -198,13 +198,13 @@ describe('target-neutral label artifact contract', () => {
         `SELECT public.request_label_generation_target_v1(
            $1::text,
            $2::uuid,
-           'shipping',
+           $3::text,
            NULL,
            'label_target_artifact_contract',
            NULL,
            'primary'
          ) AS job_id`,
-        [target.inputType, target.targetId],
+        [target.inputType, target.targetId, target.inputType],
       );
 
       await client.query(
