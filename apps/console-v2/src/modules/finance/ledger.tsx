@@ -42,7 +42,7 @@ import { pushToast } from '@/components/toastStore';
 import { useIdentity, useCapability } from '@/lib/identity';
 import { useModal } from '@/hooks/useOverlay';
 import { CAP } from '@/lib/capabilities';
-import { useI18n } from '@/lib/i18n';
+import { fill, useI18n, type Translate } from '@/lib/i18n';
 import { lookupRow } from '@/lib/api';
 import { getSupabaseClient } from '@/lib/supabase';
 import { ledgerBalance } from './_matcher';
@@ -161,9 +161,9 @@ function isReversalEvent(row: FinanceEventRow): boolean {
   );
 }
 
-function reverseDisabledReason(row: FinanceEventRow): string | undefined {
-  if (isReversalEvent(row)) return 'This ledger row is already a reversal event.';
-  if (isSettlementLinked(row)) return 'Use the settlement batch workflow for linked settlement events.';
+function reverseDisabledReason(row: FinanceEventRow, t: Translate): string | undefined {
+  if (isReversalEvent(row)) return t('ledger.disabled.alreadyReversal');
+  if (isSettlementLinked(row)) return t('ledger.disabled.settlementLinked');
   return undefined;
 }
 
@@ -182,7 +182,7 @@ export function LedgerModule() {
   // AGENTS.md §7 (CAPABILITY-GATED UI for reads): page-level fail-closed gate.
   const canRead = useCapability(CAP.FINANCE_READ);
   const { scope, currentTenantId } = useIdentity();
-  const { fmtCurrency } = useI18n();
+  const { t, fmtCurrency } = useI18n();
   const modal = useModal();
   const [recentReversal, setRecentReversal] = useState<ReversalReadback | null>(null);
   const urlScope = readFinanceUrlScope();
@@ -258,15 +258,15 @@ export function LedgerModule() {
   );
 
   function reverseDisabledReasonForRow(row: FinanceEventRow): string | undefined {
-    const baseReason = reverseDisabledReason(row);
+    const baseReason = reverseDisabledReason(row, t);
     if (baseReason) return baseReason;
     const rowTenantId = typeof row.organization_id === 'string' && row.organization_id.trim()
       ? row.organization_id.trim()
       : null;
     if (rowTenantId && activeTenantId && rowTenantId !== activeTenantId) {
-      return "Switch to this ledger row's tenant before reversing.";
+      return t('ledger.disabled.otherTenant');
     }
-    if (reversedSourceIds.has(row.id)) return 'This ledger row already has a recorded reversal.';
+    if (reversedSourceIds.has(row.id)) return t('ledger.disabled.alreadyReversed');
     return undefined;
   }
 
@@ -280,7 +280,7 @@ export function LedgerModule() {
   const downloadAnchorRef = useRef<HTMLAnchorElement | null>(null);
   function exportLedgerCsv(selected: FinanceEventRow[]) {
     if (selected.length === 0) {
-      pushToast('Select at least one row to export', 'warn');
+      pushToast(t('ledger.toast.selectRows'), 'warn');
       return;
     }
     const header = ['id', 'occurred_at', 'account_id', 'direction', 'amount', 'event_type', 'batch_id'];
@@ -319,7 +319,7 @@ export function LedgerModule() {
         window.setTimeout(revoke, 0);
       }
     }
-    pushToast(`Exported ${selected.length} ledger rows to CSV`, 'good');
+    pushToast(fill(t('ledger.toast.exported'), { n: selected.length }), 'good');
   }
 
   async function reverseEvent(row: FinanceEventRow, reason: string): Promise<boolean> {
@@ -329,7 +329,7 @@ export function LedgerModule() {
     try {
       const trimmedReason = reason.trim();
       if (!trimmedReason) {
-        pushToast('Ledger reversal reason is required', 'warn');
+        pushToast(t('ledger.toast.reasonRequired'), 'warn');
         return false;
       }
       const res = await reverseMutation.mutateAsync({
@@ -339,14 +339,14 @@ export function LedgerModule() {
         reason: trimmedReason,
       });
       setRecentReversal({
-        financeEventId: res.finance_event_id ?? '(pending)',
+        financeEventId: res.finance_event_id ?? t('ledger.toast.pending'),
         reversedFinanceEventId: res.reversed_finance_event_id ?? row.id,
         reason: trimmedReason,
       });
-      pushToast(`Ledger reversal recorded - ${res.finance_event_id ?? '(pending)'}`, 'good');
+      pushToast(fill(t('ledger.toast.recorded'), { id: res.finance_event_id ?? t('ledger.toast.pending') }), 'good');
       return true;
     } catch (err) {
-      pushToast(`Ledger reversal failed - ${(err as Error)?.message ?? 'unknown error'}`, 'danger');
+      pushToast(fill(t('ledger.toast.failed'), { error: (err as Error)?.message ?? t('ledger.toast.unknownError') }), 'danger');
       return false;
     } finally {
       actionLocks.current.delete(lockKey);
@@ -358,15 +358,15 @@ export function LedgerModule() {
       const [reason, setReason] = useState('');
       const trimmedReason = reason.trim();
       const submitDisabledReason = reverseMutation.isPending
-        ? 'Ledger reversal is already running.'
+        ? t('ledger.reversal.running')
         : trimmedReason
           ? undefined
-          : 'Enter a reversal reason before submitting.';
+          : t('ledger.reversal.reasonMissing');
 
       return (
         <div>
           <p className="state__hint">
-            Record a ledger reversal while preserving the original event.
+            {t('ledger.reversal.intro')}
           </p>
           <div
             style={{
@@ -378,26 +378,26 @@ export function LedgerModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="ledger-reversal-event">Finance event</label>
+            <label className="mono" htmlFor="ledger-reversal-event">{t('ledger.reversal.financeEvent')}</label>
             <input id="ledger-reversal-event" className="dt-inline-input" value={row.id} readOnly />
-            <label className="mono" htmlFor="ledger-reversal-account">Account</label>
+            <label className="mono" htmlFor="ledger-reversal-account">{t('ledger.reversal.account')}</label>
             <input id="ledger-reversal-account" className="dt-inline-input" value={row.account_id} readOnly />
-            <label className="mono" htmlFor="ledger-reversal-amount">Amount</label>
+            <label className="mono" htmlFor="ledger-reversal-amount">{t('ledger.reversal.amount')}</label>
             <input id="ledger-reversal-amount" className="dt-inline-input" value={fmtCurrency(row.amount)} readOnly />
-            <label className="mono" htmlFor="ledger-reversal-reason">Reason</label>
+            <label className="mono" htmlFor="ledger-reversal-reason">{t('ledger.reversal.reason')}</label>
             <input
               id="ledger-reversal-reason"
               data-testid="ledger-reversal-reason"
               className="dt-inline-input"
-              placeholder="e.g. Duplicate ledger event"
+              placeholder={t('ledger.reversal.reasonPlaceholder')}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Reverse event"
+              label={t('ledger.reversal.submit')}
               kind="danger"
               capability={CAP.FINANCE_WRITE}
               disabled={Boolean(submitDisabledReason)}
@@ -412,16 +412,16 @@ export function LedgerModule() {
       );
     }
 
-    modal.open({ title: `Reverse ledger event - ${row.id}`, body: <LedgerReversalForm /> });
+    modal.open({ title: fill(t('ledger.reversal.title'), { id: row.id }), body: <LedgerReversalForm /> });
   }
 
   const columns: Array<DataTableColumn<FinanceEventRow>> = [
-    { key: 'occurred_at', label: 'When', format: 'datetime', sortable: true },
-    { key: 'event_type', label: 'Event', sortable: true, filterable: true },
-    { key: 'account_id', label: 'Account', mono: true, sortable: true, filterable: true },
+    { key: 'occurred_at', label: t('ledger.columns.when'), format: 'datetime', sortable: true },
+    { key: 'event_type', label: t('ledger.columns.event'), sortable: true, filterable: true },
+    { key: 'account_id', label: t('ledger.columns.account'), mono: true, sortable: true, filterable: true },
     {
       key: 'direction',
-      label: 'Dir',
+      label: t('ledger.columns.direction'),
       sortable: true,
       filterable: true,
       render: (_raw: unknown, row: FinanceEventRow): ReactNode => {
@@ -448,14 +448,14 @@ export function LedgerModule() {
     // via helpers from canonical direction+amount. Render-only columns.
     {
       key: 'debit',
-      label: 'Debit',
+      label: t('ledger.columns.debit'),
       align: 'right',
       sortable: true,
       render: (_raw, row) => fmtCurrency(debitOf(row)),
     },
     {
       key: 'credit',
-      label: 'Credit',
+      label: t('ledger.columns.credit'),
       align: 'right',
       sortable: true,
       render: (_raw, row) => fmtCurrency(creditOf(row)),
@@ -465,7 +465,7 @@ export function LedgerModule() {
     // `settlement_batch_finance_events` join.
     {
       key: 'metadata.batch_id',
-      label: 'Batch',
+      label: t('ledger.columns.batch'),
       mono: true,
       sortable: false,
       filterable: false,
@@ -482,23 +482,23 @@ export function LedgerModule() {
       ? [
           <Chip
             key="url-scope"
-            label={financeUrlScopeLabel(urlScope, scopeLabelRows)}
+            label={financeUrlScopeLabel(urlScope, scopeLabelRows, t)}
             kind="info"
             size="xs"
           />,
         ]
       : []),
-    <span key="seam" className="chip chip--xs mono">finance ledger</span>,
+    <span key="seam" className="chip chip--xs mono">{t('ledger.seamChip')}</span>,
     <Chip
       key="balance"
       label={
         balance.balanced
-          ? `balanced · ${fmtCurrency(balance.total_debit)}`
-          : `drift ${fmtCurrency(balance.drift)}`
+          ? fill(t('ledger.balance.balanced'), { amount: fmtCurrency(balance.total_debit) })
+          : fill(t('ledger.balance.drift'), { amount: fmtCurrency(balance.drift) })
       }
       kind={balance.balanced ? 'good' : 'danger'}
       size="xs"
-      title={`Sum debits ${fmtCurrency(balance.total_debit)} · Sum credits ${fmtCurrency(balance.total_credit)}`}
+      title={fill(t('ledger.balance.sums'), { debit: fmtCurrency(balance.total_debit), credit: fmtCurrency(balance.total_credit) })}
     />,
   ];
 
@@ -507,14 +507,11 @@ export function LedgerModule() {
       <div className="page">
         <PageHeader
           moduleKey="ledger"
-          eyebrow="Finance"
-          titleAccent="Ledger"
-          titlePlain="— event sourcing"
         />
         <StateView
           kind="denied"
           capability={CAP.FINANCE_READ}
-          hint="You do not have permission to view the financial ledger (finance.read)."
+          hint={t('ledger.denied')}
         />
       </div>
     );
@@ -524,14 +521,11 @@ export function LedgerModule() {
       <div className="page">
         <PageHeader
           moduleKey="ledger"
-          eyebrow="Finance"
-          titleAccent="Ledger"
-          titlePlain="— event sourcing"
           pills={pills}
         />
         <StateView
           kind="error"
-          title="Unable to load finance ledger"
+          title={t('ledger.loadError')}
           hint={(readError as Error).message}
         />
       </div>
@@ -542,23 +536,20 @@ export function LedgerModule() {
     <div className="page">
       <PageHeader
         moduleKey="ledger"
-        eyebrow="Finance"
-        titleAccent="Ledger"
-        titlePlain="— event sourcing"
         pills={pills}
       />
 
       {recentReversal ? (
         <div className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
-          <div className="section-title">Reversal confirmed</div>
+          <div className="section-title">{t('ledger.confirmed.title')}</div>
           <div className="state__hint">
-            The reversal was recorded as event{' '}
-            <span className="mono">{recentReversal.financeEventId}</span> for source{' '}
-            <span className="mono">{recentReversal.reversedFinanceEventId}</span>.
+            {t('ledger.confirmed.event')}{' '}
+            <bdi className="mono">{recentReversal.financeEventId}</bdi> {t('ledger.confirmed.source')}{' '}
+            <bdi className="mono">{recentReversal.reversedFinanceEventId}</bdi>.
           </div>
-          <div className="mono" style={{ fontSize: 12, marginTop: 6 }}>
+          <bdi className="mono" style={{ display: 'block', fontSize: 12, marginTop: 6 }}>
             {recentReversal.reason}
-          </div>
+          </bdi>
         </div>
       ) : null}
 
@@ -573,7 +564,7 @@ export function LedgerModule() {
             entityKind="finance_event"
             rowActions={[
               {
-                label: 'Reverse',
+                label: t('ledger.actions.reverse'),
                 icon: 'rotate',
                 kind: 'danger',
                 capability: CAP.FINANCE_WRITE,
@@ -584,7 +575,7 @@ export function LedgerModule() {
             ]}
             bulkActions={[
               {
-                label: 'Export ledger',
+                label: t('ledger.actions.exportLedger'),
                 icon: 'download',
                 kind: 'ghost',
                 onClick: exportLedgerCsv,
@@ -608,13 +599,13 @@ export function LedgerModule() {
               alignItems: 'center',
             }}
           >
-            <span style={{ color: 'var(--ink-3)' }}>Σ debit</span>
+            <span style={{ color: 'var(--ink-3)' }}>{t('ledger.balance.sumDebit')}</span>
             <span style={{ fontWeight: 600 }}>{fmtCurrency(balance.total_debit)}</span>
-            <span style={{ color: 'var(--ink-3)' }}>Σ credit</span>
+            <span style={{ color: 'var(--ink-3)' }}>{t('ledger.balance.sumCredit')}</span>
             <span style={{ fontWeight: 600 }}>{fmtCurrency(balance.total_credit)}</span>
             <span style={{ flex: 1 }} />
             <Chip
-              label={balance.balanced ? 'balanced ✓' : `drift ${fmtCurrency(balance.drift)}`}
+              label={balance.balanced ? t('ledger.balance.balancedMark') : fill(t('ledger.balance.drift'), { amount: fmtCurrency(balance.drift) })}
               kind={balance.balanced ? 'good' : 'danger'}
               size="xs"
             />

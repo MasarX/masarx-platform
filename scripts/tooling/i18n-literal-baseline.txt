@@ -23,12 +23,6 @@ apps/console-v2/src/modules/customers/clients.tsx 70
 apps/console-v2/src/modules/customers/recipients.tsx 98
 apps/console-v2/src/modules/customers/related-shipments.tsx 9
 apps/console-v2/src/modules/customers/senders.tsx 60
-apps/console-v2/src/modules/finance/bank-recon.tsx 126
-apps/console-v2/src/modules/finance/billing.tsx 153
-apps/console-v2/src/modules/finance/cod.tsx 97
-apps/console-v2/src/modules/finance/disputes.tsx 75
-apps/console-v2/src/modules/finance/ledger.tsx 39
-apps/console-v2/src/modules/finance/settlements.tsx 42
 apps/console-v2/src/modules/insights/_components.tsx 5
 apps/console-v2/src/modules/insights/_hooks.ts 1
 apps/console-v2/src/modules/insights/_shared.ts 1
