@@ -591,8 +591,6 @@ async function qualify(diagnostic) {
     const { apiPort, dbPort, mailPort } = summary.stackPorts;
     const edge = disposableShard ? integrationEdgeEnvironment(apiPort) : undefined;
     if (edge) {
-      // PostgREST needs the empty schema for startup, before the tracked migrations replay.
-      fs.writeFileSync(path.join(sb, 'seed.sql'), 'CREATE SCHEMA IF NOT EXISTS api;\n', { mode: 0o600 });
       Object.assign(env, edge.vars);
       // The Edge worker reaches Kong on the stack network.
       cliEnv = { ...cliEnv, ...edge.vars, EDGE_SUPABASE_URL: 'http://kong:8000',
@@ -604,12 +602,14 @@ async function qualify(diagnostic) {
         '[edge_runtime]', 'enabled = true', 'policy = "per_worker"', 'deno_version = 2',
         '[edge_runtime.secrets]', ...Object.keys(edge.vars).map(name => `${name} = "env(${name})"`),
         ...integrationFunctionConfig(), '[local_smtp]', 'enabled = true', `port = ${mailPort}`] : []),
-    ], Boolean(edge));
-    diagnostic.stage = 'stack-start';
+    ]);
+    const startStack = (name, excludedServices) => {
+      const exclude = excludedServices.join(',');
+      console.log(`Stack service exclusions: ${exclude}`);
+      return timed(name, () => checked(cli, ['start', '--debug', '--workdir', temp, '-x', exclude], cliEnv, 6 * 60000));
+    };
     started = true; // A partial start must also be stopped.
-    const exclude = lane.exclude.filter(service => !edge || !Object.hasOwn(integrationImages, service)).join(',');
-    console.log(`Stack service exclusions: ${exclude}`);
-    await timed('stack-start', () => checked(cli, ['start', '--debug', '--workdir', temp, '-x', exclude], cliEnv, 6 * 60000));
+    await startStack('stack-start', lane.exclude);
     if (useDatabaseInit) {
       summary.databasePid1 = await timed('database-init', () => verifyHostedDatabaseInit(checked, env, databaseContainer));
     }
@@ -700,6 +700,13 @@ async function qualify(diagnostic) {
       const templateAdmin = (...commands) => stackAdminFor('template1', 15000, ...commands);
       const integrationOid = edge && await timed('integration-database-snapshot', () =>
         snapshotIntegrationDatabase({ checked, env, admin: templateAdmin, dockerRoot, project }));
+      if (edge) {
+        // Keep the replayed volume and let the CLI start and health-check PostgREST against it.
+        await timed('integration-stack-stop', () => checked(cli, ['stop', '--workdir', temp], cliEnv, 120000));
+        const integrationExclude = lane.exclude.filter(service => !Object.hasOwn(integrationImages, service));
+        await startStack('integration-stack-start', integrationExclude);
+        await timed('integration-database-init', () => verifyHostedDatabaseInit(checked, env, databaseContainer));
+      }
       if (selected.includes('0zz_label_renderer_url_policy_v1.sql')) {
         // Only the disposable stack administrator can persist custom database settings.
         await stackAdmin(`DO $fixture$
@@ -774,7 +781,7 @@ async function qualify(diagnostic) {
     if (summary.integration === 'running') summary.integration = 'failed';
     if (guard && fs.existsSync(guard.policyFile)) diagnostic.imagePolicy = { ...diagnostic.imagePolicy, ...JSON.parse(fs.readFileSync(guard.policyFile, 'utf8')) };
     saveFailure(diagnostic, error, environmentSecrets(env)); // Persist before stack teardown and temporary-file removal.
-    if (started && diagnostic.stage === 'stack-start') {
+    if (started && ['stack-start', 'integration-stack-start'].includes(diagnostic.stage)) {
       diagnostic.startupDiagnostics = await stage(summary, 'stack-diagnostics', () => collectStackDiagnostics({
         project, env, dockerRoot, imagePolicy: diagnostic.imagePolicy, logFile,
       })).catch(diagnosticError => ({ error: sanitize(diagnosticError.message) }));
