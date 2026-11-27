@@ -38,6 +38,7 @@ function loadWorker({ payload, status, body, headers }) {
     url: endpoint, method: 'POST', headers: {}, body: payload, renderer_credential_ref: randomUUID(),
   };
   const send = jest.fn(async () => Response.json(body, { status, headers }));
+  const logStructured = jest.fn();
   const edgeModule = { exports: {} };
   const deps = {
     [supabaseImport.fileName]: {
@@ -58,6 +59,7 @@ function loadWorker({ payload, status, body, headers }) {
     './proxy.mjs': { createGuardedProxyFetch: () => undefined },
     './egress.mjs': { executeBoundedEgress: (args) => egress.executeBoundedEgress({ ...args, directFetch: send }) },
     './_shared/mod.mjs': {
+      logStructured,
       readEnv: (key) => ({
         EDGE_SUPABASE_URL: origin.origin,
         EDGE_SUPABASE_ANON_KEY: buildSupabaseApiKeys({ secret: projectSecret }).anon,
@@ -73,18 +75,23 @@ function loadWorker({ payload, status, body, headers }) {
     console: { ...console, warn: jest.fn(), error: jest.fn() },
     require: (name) => deps[name], Deno: { serve: () => {} },
   });
-  return { requests, send, execute: edgeModule.exports.executeClaimedJobById };
+  return { requests, send, execute: edgeModule.exports.executeClaimedJobById, logStructured };
 }
 
 test.each([
   ['render', { max_jobs: 1 }],
   ['print', { mode: 'print' }],
 ])('defers a queued %s after the legacy renderer rejects the signed transport', async (_kind, payload) => {
-  const { execute, requests, send } = loadWorker({ payload, status: 403, body: legacyBody, headers: rendererHeader });
+  const { execute, requests, send, logStructured } = loadWorker({
+    payload, status: 403, body: legacyBody, headers: rendererHeader,
+  });
   const job = { p_job_id: randomUUID(), p_lease_token: randomUUID() };
   await expect(execute(job.p_job_id, job.p_lease_token)).resolves.toMatchObject({
     success: false, result: { status: 503, completed: false, error: 'renderer_transport_deferred' },
   });
+  expect(logStructured.mock.calls).toEqual([['warn', 'api_caller.renderer_transport_deferred', {
+    service: 'api-caller', code: 'renderer_transport_deferred', job_id: job.p_job_id,
+  }]]);
   expect(send).toHaveBeenCalledTimes(1);
   expect(send.mock.calls[0][1]).toMatchObject({
     body: JSON.stringify(payload),

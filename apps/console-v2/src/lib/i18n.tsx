@@ -63,8 +63,21 @@ function lookup(catalog: Catalog, path: string): string | undefined {
   return typeof cur === 'string' ? cur : undefined;
 }
 
+function readConsoleLocale(): Locale {
+  return globalThis.localStorage?.getItem('console-v2.locale') === 'ar' ? 'ar' : 'en';
+}
+
+function translate(catalog: Locale, path: string, fallback?: string): string {
+  const fromActive = lookup(CATALOGS[catalog], path);
+  return fromActive || (lookup(CATALOGS.en, path) ?? fallback ?? path);
+}
+
+export function translateAdapterMessage(path: string, locale = readConsoleLocale()): string {
+  return translate(locale, path);
+}
+
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(() => (localStorage.getItem('console-v2.locale') as Locale) || 'en');
+  const [locale, setLocaleState] = useState<Locale>(readConsoleLocale);
   const dir = locale === 'ar' ? 'rtl' : 'ltr';
   const intlLocale = useMemo(() => resolveIntlLocale(locale), [locale]);
   const [tenantTimeZone, setTenantTimeZone] = useState<string | null>(null);
@@ -77,12 +90,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   }, [locale, dir]);
 
   const t = useCallback(
-    (path: string, fallback?: string) => {
-      const fromActive = lookup(CATALOGS[locale]!, path);
-      if (fromActive) return fromActive;
-      const fromEn = lookup(CATALOGS.en!, path);
-      return fromEn ?? fallback ?? path;
-    },
+    (path: string, fallback?: string) => translate(locale, path, fallback),
     [locale]
   );
 

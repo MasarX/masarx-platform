@@ -8,6 +8,22 @@
     ]
   },
   {
+    "name": "Hosted Console V2 seed browser configuration",
+    "reason": "The hosted browser job owns its seed-mode Vite server and egress guard. Nightly runs the same seed specs through the Console V2 workspace command.",
+    "covered_by": "Console V2 seed-mode E2E in .github/workflows/public-ci.yml.",
+    "suites": [
+      "scripts/ci-hosted/playwright.console-seed.config.cjs"
+    ]
+  },
+  {
+    "name": "Hosted application speed checks",
+    "reason": "The hosted CI build jobs own the production builds, synthetic fixture and browser measurement.",
+    "covered_by": "Build (console) and Build (portal and landing) in .github/workflows/public-ci.yml.",
+    "suites": [
+      "scripts/ci-hosted/playwright.app-speed.config.cjs"
+    ]
+  },
+  {
     "name": "Deployed full-app browser tests",
     "reason": "Requires deployed application endpoints and environment-specific test identities.",
     "covered_by": "Post-deploy browser work tracked in #130.",

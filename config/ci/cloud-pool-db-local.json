@@ -17,7 +17,7 @@
     "kong",
     "realtime"
   ],
-  "rationale": "Migrations and pgTAP use gotrue-managed auth tables (auth.sessions, auth.identities, auth.mfa_factors) and storage-api-managed storage.objects/storage.buckets, so gotrue and storage-api run with the db. vault, pg_cron and pg_net are extensions inside the Postgres image. On a fresh volume the CLI creates the config.toml storage buckets through the storage API behind kong (127.0.0.1:54321), so kong runs too. Bucket creation is served by storage-api itself. Realtime initializes its schema before the Console live broadcast migration and authorization tests. The suite does not need REST, studio, mail, edge functions, logs or the pooler.",
+  "rationale": "Migrations and pgTAP use gotrue-managed auth tables (auth.sessions, auth.identities, auth.mfa_factors) and storage-api-managed storage.objects/storage.buckets, so gotrue and storage-api run with the db. vault, pg_cron and pg_net are extensions inside the Postgres image. On a fresh volume the CLI creates the config.toml storage buckets through the storage API behind kong (127.0.0.1:54321), so kong runs too. Bucket creation is served by storage-api itself, not PostgREST. Realtime initializes its schema before the Console live broadcast migration and authorization tests. The standalone pgTAP lane excludes REST, studio, mail, edge functions, logs and the pooler. Hosted integration enables PostgREST, Edge Runtime and Mailpit through the hosted image inventory.",
   "image_source": {
     "mode": "registry",
     "registry": "public.ecr.aws",

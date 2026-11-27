@@ -298,6 +298,14 @@ const normalizeErrorCode = (value, fallback = "edge.request.failed") => {
     .replace(/^_+|_+$/g, "") || "edge.request.failed";
 };
 
+const LOGGABLE_DATABASE_ERROR_CODES = new Set([
+  "23505", "42501", "57014", "P0001",
+  "PGRST116", "PGRST202", "PGRST301", "PGRST302",
+]);
+
+export const databaseErrorCodeForLog = (code) =>
+  LOGGABLE_DATABASE_ERROR_CODES.has(code) ? code : null;
+
 export const buildErrorEnvelope = ({
   status,
   code,
