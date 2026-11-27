@@ -5,7 +5,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { renderWithProviders } from '@/test/render';
-import { ar } from '@/lib/seed-raw/i18n/areas/fleet';
+import ar from '@/lib/seed-raw/i18n/areas/ar/fleet';
 import { PerformanceTab } from '../drivers';
 
 type Props = ComponentProps<typeof PerformanceTab>;

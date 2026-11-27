@@ -51,7 +51,7 @@ import type { RoutePlanConstraintCheck, RoutePlanRebalanceInput } from '@/lib/ap
 import { useDrawer, useModal } from '@/hooks/useOverlay';
 import { pushToast } from '@/components/toastStore';
 import { useCapability, useIdentity } from '@/lib/identity';
-import { englishT, fill, useI18n, type Translate } from '@/lib/i18n';
+import { useI18n } from '@/lib/i18n';
 import { CAP } from '@/lib/capabilities';
 import { openShipmentContextDrawer, type Shipment } from '@/modules/operate/shipments';
 // W54-C — strict canonical lookup resolver (NO inline status→stage map).
@@ -240,22 +240,18 @@ export interface RoutePlanDirectoryRow extends Record<string, unknown> {
   is_applied?: boolean;
 }
 
-function focusedShipmentCandidateMissingReasons(
-  shipment: Shipment | null,
-  promisedDate: string | null,
-  t: Translate = englishT,
-): string[] {
-  if (!shipment) return [t('routePlans.missing.loading')];
+function focusedShipmentCandidateMissingReasons(shipment: Shipment | null, promisedDate: string | null): string[] {
+  if (!shipment) return ['shipment status is still loading'];
   const metadata = recordOrNull(shipment.metadata);
   const reasons: string[] = [];
   if (!stringOrNull(shipment.branch_id) && !stringOrNull(metadata?.service_offering_branch_id)) {
-    reasons.push(t('routePlans.missing.branch'));
+    reasons.push('branch/service offering match');
   }
-  if (!promisedDate) reasons.push(t('routePlans.missing.promisedDate'));
+  if (!promisedDate) reasons.push('promised delivery date');
   if (!stringOrNull(shipment.service_level) && !stringOrNull(metadata?.service_level_key)) {
-    reasons.push(t('routePlans.missing.serviceLevel'));
+    reasons.push('service level');
   }
-  if (!stringOrNull(shipment.destination_address_id)) reasons.push(t('routePlans.missing.destination'));
+  if (!stringOrNull(shipment.destination_address_id)) reasons.push('destination address');
   return reasons;
 }
 
@@ -297,16 +293,16 @@ type BulkRoutePlanActionLabel = {
   partial: string;
 };
 
-function routePlanBulkErrorMessage(reason: unknown, t: Translate = englishT): string {
+function routePlanBulkErrorMessage(reason: unknown): string {
   if (reason instanceof Error && reason.message) return reason.message;
   if (typeof reason === 'string' && reason.trim()) return reason;
-  return t('routePlans.bulk.unknownError');
+  return 'Unknown error';
 }
 
-function routePlanReadErrorMessage(reason: unknown, t: Translate = englishT): string {
+function routePlanReadErrorMessage(reason: unknown): string {
   return reason instanceof Error && reason.message
     ? reason.message
-    : t('routePlans.readError');
+    : 'Route plans did not load.';
 }
 
 function routePlanDisplayId(plan: RoutePlanRow): string {
@@ -317,46 +313,29 @@ async function runBulkRoutePlanAction<T>(
   plans: RoutePlanRow[],
   labels: BulkRoutePlanActionLabel,
   run: (plan: RoutePlanRow) => Promise<T>,
-  t: Translate = englishT,
 ): Promise<void> {
   if (plans.length === 0) return;
   const results = await Promise.allSettled(plans.map((plan) => run(plan)));
   const failures = results.flatMap((result, index) => {
     if (result.status === 'fulfilled') return [];
     const plan = plans[index];
-    const planLabel = plan ? routePlanDisplayId(plan) : fill(t('routePlans.bulk.planFallback'), { n: index + 1 });
-    return [`${planLabel}: ${routePlanBulkErrorMessage(result.reason, t)}`];
+    return [`${plan ? routePlanDisplayId(plan) : `Plan ${index + 1}`}: ${routePlanBulkErrorMessage(result.reason)}`];
   });
   const successCount = results.length - failures.length;
   const failureSummary = failures.slice(0, 2).join(' · ');
-  const overflow = failures.length > 2 ? fill(t('routePlans.bulk.overflow'), { n: failures.length - 2 }) : '';
+  const overflow = failures.length > 2 ? ` · +${failures.length - 2} more` : '';
   if (failures.length === 0) {
-    pushToast(
-      fill(t(successCount === 1 ? 'routePlans.bulk.completeOne' : 'routePlans.bulk.completeOther'), {
-        label: labels.complete,
-        n: successCount,
-      }),
-      'good',
-    );
+    pushToast(`${labels.complete} · ${successCount} ${successCount === 1 ? 'plan' : 'plans'}`, 'good');
     return;
   }
   if (successCount > 0) {
     pushToast(
-      fill(t('routePlans.bulk.partial'), {
-        label: labels.partial,
-        ok: successCount,
-        failed: failures.length,
-        summary: failureSummary,
-        overflow,
-      }),
+      `${labels.partial} · ${successCount} succeeded, ${failures.length} failed · ${failureSummary}${overflow}`,
       'warn',
     );
     return;
   }
-  pushToast(
-    fill(t('routePlans.bulk.failed'), { label: labels.failed, failed: failures.length, summary: failureSummary, overflow }),
-    'danger',
-  );
+  pushToast(`${labels.failed} · ${failures.length} failed · ${failureSummary}${overflow}`, 'danger');
 }
 
 function recordOrNull(value: unknown): Record<string, unknown> | null {
@@ -382,12 +361,11 @@ function routePlansShareOrganization(left: RoutePlanRow, right: RoutePlanRow): b
 function routePlanTenantLifecycleDisabledReason(
   plan: RoutePlanRow,
   activeTenantId: string | null | undefined,
-  t: Translate = englishT,
 ): string | undefined {
   const planOrgId = routePlanOrganizationId(plan);
   const activeId = stringOrNull(activeTenantId);
   if (planOrgId && (!activeId || planOrgId !== activeId)) {
-    return t('routePlans.tenant.plan');
+    return "Switch to this route plan's tenant before changing route-plan lifecycle.";
   }
   return undefined;
 }
@@ -395,10 +373,9 @@ function routePlanTenantLifecycleDisabledReason(
 function routePlanBulkTenantLifecycleDisabledReason(
   plans: RoutePlanRow[],
   activeTenantId: string | null | undefined,
-  t: Translate = englishT,
 ): string | undefined {
-  return plans.some((plan) => routePlanTenantLifecycleDisabledReason(plan, activeTenantId, t))
-    ? t('routePlans.tenant.bulk')
+  return plans.some((plan) => routePlanTenantLifecycleDisabledReason(plan, activeTenantId))
+    ? "Switch to each selected route plan's tenant before changing route-plan lifecycle."
     : undefined;
 }
 
@@ -408,12 +385,8 @@ function compactRoutePlanShipmentId(shipmentId: string): string {
   return `${value.slice(0, 10)}...${value.slice(-6)}`;
 }
 
-function routePlanShipmentReferenceLabel(
-  shipmentId: string,
-  trackingNumber?: string | null,
-  t: Translate = englishT,
-): string {
-  return stringOrNull(trackingNumber) ?? fill(t('routePlans.shipmentRef'), { id: compactRoutePlanShipmentId(shipmentId) });
+function routePlanShipmentReferenceLabel(shipmentId: string, trackingNumber?: string | null): string {
+  return stringOrNull(trackingNumber) ?? `Shipment ${compactRoutePlanShipmentId(shipmentId)}`;
 }
 
 function routePlanShipmentContextFallback(
@@ -480,28 +453,28 @@ function normalizeCandidateRow(row: RoutePlanCandidateRow): RoutePlanCandidateRo
   };
 }
 
-function routePlanCandidateLabel(candidate: RoutePlanCandidateRow, t: Translate = englishT): string {
+function routePlanCandidateLabel(candidate: RoutePlanCandidateRow): string {
   return (
     stringOrNull(candidate.tracking_number) ??
     stringOrNull(candidate.shipment_id) ??
     stringOrNull(candidate.id) ??
-    t('routePlans.candidate.unlabeled')
+    'unlabeled candidate'
   );
 }
 
-function routePlanCandidateSubLabel(candidate: RoutePlanCandidateRow, t: Translate = englishT): string {
+function routePlanCandidateSubLabel(candidate: RoutePlanCandidateRow): string {
   const parts = [
     stringOrNull(candidate.service_level),
-    stringOrNull(candidate.zone_id) ? fill(t('routePlans.candidate.zone'), { zone: String(candidate.zone_id) }) : null,
+    stringOrNull(candidate.zone_id) ? `zone ${candidate.zone_id}` : null,
   ].filter((part): part is string => Boolean(part));
-  return parts.length > 0 ? parts.join(' · ') : t('routePlans.candidate.detailsPending');
+  return parts.length > 0 ? parts.join(' · ') : 'candidate details pending';
 }
 
-function routePlanCandidateWindowLabel(candidate: RoutePlanCandidateRow, t: Translate = englishT): string {
+function routePlanCandidateWindowLabel(candidate: RoutePlanCandidateRow): string {
   const start = stringOrNull(candidate.promised_window_start_at);
   const end = stringOrNull(candidate.promised_window_end_at);
   if (start && end) return `${start} -> ${end}`;
-  return start ?? end ?? t('routePlans.candidate.windowPending');
+  return start ?? end ?? 'window pending';
 }
 
 function routePlanStopShipmentTrackingNumber(stop: unknown): string | null {
@@ -510,8 +483,8 @@ function routePlanStopShipmentTrackingNumber(stop: unknown): string | null {
   return stringOrNull(metadata?.tracking_number);
 }
 
-function routePlanStopShipmentReferenceLabel(stop: { shipment_id: string }, t: Translate = englishT): string {
-  return routePlanShipmentReferenceLabel(stop.shipment_id, routePlanStopShipmentTrackingNumber(stop), t);
+function routePlanStopShipmentReferenceLabel(stop: { shipment_id: string }): string {
+  return routePlanShipmentReferenceLabel(stop.shipment_id, routePlanStopShipmentTrackingNumber(stop));
 }
 
 function routePlanStopFromCandidate(candidate: RoutePlanCandidateRow, index: number): RoutePlanInputStop | null {
@@ -643,7 +616,6 @@ function RoutePlanMapPanel({
   tileProvider: RouteStopMapTileProvider | null;
   bounds: MapPolicyValue['default_viewport'] | null;
 }) {
-  const { t } = useI18n();
   const { planStops, isLoading: stopsLoading, isError: stopsError } = useExactPlanStops(plan);
   const shipmentIds = useMemo(
     () =>
@@ -692,14 +664,14 @@ function RoutePlanMapPanel({
     return (
       <StateView
         kind="error"
-        title={t('routePlans.map.unavailableTitle')}
-        hint={t('routePlans.map.unavailableHint')}
+        title="Route plan map unavailable"
+        hint="Could not load the selected plan stops, shipments, or geocodes."
       />
     );
   }
 
   if (isLoading) {
-    return <StateView kind="loading" hint={t('routePlans.map.loading')} />;
+    return <StateView kind="loading" hint="Loading selected route plan map..." />;
   }
 
   return (
@@ -711,8 +683,8 @@ function RoutePlanMapPanel({
       tileProvider={tileProvider}
       bounds={bounds}
       height={240}
-      title={t('routePlans.map.title')}
-      emptyLabel={t('routePlans.map.empty')}
+      title="Route plan stop map"
+      emptyLabel="No geocoded stops for this plan yet."
     />
   );
 }
@@ -729,20 +701,19 @@ interface RoutePlanDrawerSnapshot {
   driversNotifiedLabel: string;
 }
 
-function routePlanStatusLabel(status: string, t: Translate = englishT): string {
+function routePlanStatusLabel(status: string): string {
   const row = lookupRow('route_plan_status', status) as { label?: string } | null;
   if (row?.label) return row.label;
   return status
     .split(/[_\s-]+/)
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ') || t('routePlans.statusUnknown');
+    .join(' ') || 'Unknown';
 }
 
 function routePlanWithDirectory(
   plan: RoutePlanRow,
   directory: RoutePlanDirectoryRow | null | undefined,
-  t: Translate = englishT,
 ): RoutePlanRow {
   return {
     ...plan,
@@ -753,8 +724,8 @@ function routePlanWithDirectory(
     wave_label:
       directory?.wave_label ??
       plan.wave_label ??
-      String((plan.metadata as { wave_label?: string } | undefined)?.wave_label ?? t('routePlans.unassignedWave')),
-    hub: directory?.branch_label ?? directory?.branch_code ?? plan.hub ?? t('routePlans.unassignedHub'),
+      String((plan.metadata as { wave_label?: string } | undefined)?.wave_label ?? 'Unassigned wave'),
+    hub: directory?.branch_label ?? directory?.branch_code ?? plan.hub ?? 'Unassigned hub',
     status: directory?.status ?? plan.status,
     stops: directory?.stop_count ?? plan.stops ?? 0,
     runs: directory?.run_count ?? plan.runs ?? 0,
@@ -773,7 +744,6 @@ function routePlanWithPreservedStops(plan: RoutePlanRow, fallbackPlan: RoutePlan
 }
 
 function useRoutePlanDrawerSnapshot(planId: string, fallbackPlan: RoutePlanRow): RoutePlanDrawerSnapshot {
-  const { t } = useI18n();
   const planQuery = useResourceRowsByIds<RoutePlanRow>('route_plans', [planId], { enabled: Boolean(planId) });
   const directoryQuery = useResourceRowsByIds<RoutePlanDirectoryRow>('route_plan_directory', [planId], {
     enabled: Boolean(planId),
@@ -790,14 +760,14 @@ function useRoutePlanDrawerSnapshot(planId: string, fallbackPlan: RoutePlanRow):
         solution: livePlan.solution ?? fallbackPlan.solution,
       }
     : fallbackPlan;
-  const plan = routePlanWithDirectory(routePlanWithPreservedStops(basePlan, fallbackPlan), directory, t);
+  const plan = routePlanWithDirectory(routePlanWithPreservedStops(basePlan, fallbackPlan), directory);
   return {
     plan,
     stage: mapDbStatusToStage(plan.status),
     planDisplay: directory?.plan_display_id ?? plan.plan_id,
     waveLabel: directory?.wave_label ?? plan.wave_label,
     branchLabel: directory?.branch_label ?? directory?.branch_code ?? plan.hub,
-    statusLabel: routePlanStatusLabel(plan.status, t),
+    statusLabel: routePlanStatusLabel(plan.status),
     stopsLabel: String(directory?.stop_count ?? plan.stops ?? 0),
     runsLabel: String(directory?.run_count ?? plan.runs ?? 0),
     driversNotifiedLabel: String(directory?.drivers_notified_count ?? plan.drivers_notified ?? 0),
@@ -820,7 +790,6 @@ function RoutePlanDrawerBody({
   mapTileProvider: RouteStopMapTileProvider | null;
   mapDefaultViewport: MapPolicyValue['default_viewport'] | null;
 }) {
-  const { t } = useI18n();
   const snapshot = useRoutePlanDrawerSnapshot(planId, fallbackPlan);
   const validateMutation = useValidateRoutePlanConstraints();
   return (
@@ -828,11 +797,11 @@ function RoutePlanDrawerBody({
       <Stepper stages={getPlanLifecycleStages()} current={snapshot.stage} />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '14px' }}>
-        <InfoCard label={t('routePlans.info.status')} value={snapshot.statusLabel} />
-        <InfoCard label={t('routePlans.info.hub')} value={snapshot.branchLabel} />
-        <InfoCard label={t('routePlans.info.stops')} value={snapshot.stopsLabel} />
-        <InfoCard label={t('routePlans.info.runs')} value={snapshot.runsLabel} />
-        <InfoCard label={t('routePlans.info.driversNotified')} value={snapshot.driversNotifiedLabel} />
+        <InfoCard label="Status" value={snapshot.statusLabel} />
+        <InfoCard label="Hub" value={snapshot.branchLabel} />
+        <InfoCard label="Stops" value={snapshot.stopsLabel} />
+        <InfoCard label="Runs" value={snapshot.runsLabel} />
+        <InfoCard label="Drivers notified" value={snapshot.driversNotifiedLabel} />
       </div>
 
       <div style={{ marginTop: '14px' }}>
@@ -845,17 +814,17 @@ function RoutePlanDrawerBody({
 
       <ExecutionPackPanel planId={planId} enabled={snapshot.stage === 'published' || snapshot.stage === 'applied'} />
 
-      <h4 className="eyebrow" style={{ marginTop: '16px' }}>{t('routePlans.workflow.title')}</h4>
+      <h4 className="eyebrow" style={{ marginTop: '16px' }}>Planning workflow</h4>
       <div className="card" style={{ fontSize: '11px', lineHeight: 1.6 }}>
-        <SeamLine k={t('routePlans.actions.solve')} v={t('routePlans.workflow.solve')} />
-        <SeamLine k={t('routePlans.actions.validate')} v={t('routePlans.workflow.validate')} />
-        <SeamLine k={t('routePlans.actions.freeze')} v={t('routePlans.workflow.freeze')} />
-        <SeamLine k={t('routePlans.actions.publish')} v={t('routePlans.workflow.publish')} />
-        <SeamLine k={t('routePlans.actions.apply')} v={t('routePlans.workflow.apply')} />
-        <SeamLine k={t('routePlans.actions.rebalance')} v={t('routePlans.workflow.rebalance')} />
+        <SeamLine k="Solve" v="Optimize stop order" />
+        <SeamLine k="Validate" v="Check capacity and service constraints" />
+        <SeamLine k="Freeze" v="Lock the reviewed plan" />
+        <SeamLine k="Publish" v="Create the execution package" />
+        <SeamLine k="Apply" v="Create dispatch-ready route runs" />
+        <SeamLine k="Rebalance" v="Move stops before dispatch" />
       </div>
 
-      <h4 className="eyebrow" style={{ marginTop: '16px' }}>{t('routePlans.actions.validateConstraints')}</h4>
+      <h4 className="eyebrow" style={{ marginTop: '16px' }}>Validate constraints</h4>
       <PlanValidatePanel planId={planId} run={(id) => validateMutation.mutateAsync(id)} />
     </div>
   );
@@ -870,7 +839,6 @@ function RoutePlanDrawerFooter({
   fallbackPlan: RoutePlanRow;
   onRebalance: (plan: RoutePlanRow) => void;
 }) {
-  const { t } = useI18n();
   const snapshot = useRoutePlanDrawerSnapshot(planId, fallbackPlan);
   const solveMutation = useSolveRoutePlan();
   const freezeMutation = useFreezeRoutePlan();
@@ -878,7 +846,7 @@ function RoutePlanDrawerFooter({
   const applyMutation = useApplyRoutePlan();
   const { scope, currentTenantId } = useIdentity();
   const activeTenantId = scope.tenant?.id ?? currentTenantId() ?? null;
-  const tenantLifecycleDisabledReason = routePlanTenantLifecycleDisabledReason(snapshot.plan, activeTenantId, t);
+  const tenantLifecycleDisabledReason = routePlanTenantLifecycleDisabledReason(snapshot.plan, activeTenantId);
   const { planStops: scopedPlanStops } = useExactPlanStops(snapshot.plan);
   const rebalancePlan = useMemo(() => {
     if (scopedPlanStops.length === 0) {
@@ -899,7 +867,7 @@ function RoutePlanDrawerFooter({
   return (
     <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
       <Button
-        label={t('routePlans.actions.solve')}
+        label="Solve"
         iconName="play"
         kind="ghost"
         capability={CAP.ROUTE_PLANS_WRITE}
@@ -912,14 +880,14 @@ function RoutePlanDrawerFooter({
           }
           try {
             await solveMutation.mutateAsync(planId);
-            pushToast(fill(t('routePlans.toast.solvedDash'), { plan: snapshot.planDisplay }), 'good');
+            pushToast(`Solved - ${snapshot.planDisplay}`, 'good');
           } catch {
-            pushToast(t('routePlans.toast.solveFailed'), 'danger');
+            pushToast('Solve could not be completed. Try again.', 'danger');
           }
         }}
       />
       <Button
-        label={t('routePlans.actions.freeze')}
+        label="Freeze"
         iconName="lock"
         kind="ghost"
         capability={CAP.ROUTE_PLANS_WRITE}
@@ -933,17 +901,17 @@ function RoutePlanDrawerFooter({
           try {
             const res = await freezeMutation.mutateAsync(planId);
             pushToast(
-              fill(t('routePlans.toast.frozenDash'), { plan: snapshot.planDisplay, n: res.constraint_validation.fail_count }),
+              `Frozen - ${snapshot.planDisplay} - ${res.constraint_validation.fail_count} fails`,
               res.constraint_validation.fail_count > 0 ? 'warn' : 'good',
             );
           } catch {
-            pushToast(t('routePlans.toast.freezeFailed'), 'danger');
+            pushToast('Freeze could not be completed. Try again.', 'danger');
           }
         }}
       />
       <div style={{ flex: 1 }} />
       <Button
-        label={t('routePlans.actions.rebalanceFooter')}
+        label="Rebalance..."
         iconName="rotate"
         kind="ghost"
         capability={CAP.ROUTE_PLANS_WRITE}
@@ -958,7 +926,7 @@ function RoutePlanDrawerFooter({
         }}
       />
       <Button
-        label={t('routePlans.actions.publish')}
+        label="Publish"
         iconName="bolt"
         kind="ghost"
         capability={CAP.ROUTE_PLANS_WRITE}
@@ -971,14 +939,14 @@ function RoutePlanDrawerFooter({
           }
           try {
             const res = await publishMutation.mutateAsync(planId);
-            pushToast(fill(t('routePlans.toast.publishedDash'), { hash: res.execution_pack_hash ?? '-' }), 'good');
+            pushToast(`Published - pack ${res.execution_pack_hash ?? '-'}`, 'good');
           } catch {
-            pushToast(t('routePlans.toast.publishFailed'), 'danger');
+            pushToast('Publish could not be completed. Try again.', 'danger');
           }
         }}
       />
       <Button
-        label={t('routePlans.actions.apply')}
+        label="Apply"
         iconName="check"
         kind="primary"
         capability={CAP.ROUTE_PLANS_WRITE}
@@ -991,9 +959,9 @@ function RoutePlanDrawerFooter({
           }
           try {
             const res = await applyMutation.mutateAsync(planId);
-            pushToast(fill(t('routePlans.toast.appliedDash'), { n: res.runs_materialized }), 'good');
+            pushToast(`Applied - ${res.runs_materialized} runs`, 'good');
           } catch {
-            pushToast(t('routePlans.toast.applyFailed'), 'danger');
+            pushToast('Apply could not be completed. Try again.', 'danger');
           }
         }}
       />
@@ -1076,8 +1044,8 @@ export function RoutePlansModule() {
   const rawRows = useMemo(() => data?.rows ?? [], [data]);
   const rows = useMemo<RoutePlanRow[]>(
     () =>
-      rawRows.map((plan) => routePlanWithDirectory(plan, planDirectoryById.get(plan.id), t)),
-    [rawRows, planDirectoryById, t],
+      rawRows.map((plan) => routePlanWithDirectory(plan, planDirectoryById.get(plan.id))),
+    [rawRows, planDirectoryById],
   );
   const hubs = useMemo(() => hubsData?.rows ?? [], [hubsData]);
   const routeRuns = useMemo(() => routeRunsData?.rows ?? [], [routeRunsData]);
@@ -1096,7 +1064,7 @@ export function RoutePlansModule() {
 
   function openValidateAllDrawer() {
     drawer.open({
-      title: t('routePlans.actions.validateAllTitle'),
+      title: 'Validate constraints · all visible plans',
       size: 'md',
       body: (
         <ValidateAllPanel
@@ -1221,8 +1189,8 @@ export function RoutePlansModule() {
         [focusedCandidate, shipmentCandidates],
       );
       const focusedCandidateMissing = useMemo(
-        () => focusedShipmentCandidateMissingReasons(focusShipment, focusPromisedDate, t),
-        [focusPromisedDate, focusShipment, t],
+        () => focusedShipmentCandidateMissingReasons(focusShipment, focusPromisedDate),
+        [focusPromisedDate, focusShipment],
       );
       const focusedCandidateUnavailable =
         Boolean(focusShipmentId) &&
@@ -1365,19 +1333,13 @@ export function RoutePlansModule() {
       function hubDisplay(hubRow: HubRow): string {
         const readyCount = hubReadyCount(hubRow);
         const base = `${hubRow.code} · ${hubRow.name}`;
-        return readyCount > 0 ? fill(t('routePlans.form.hubReady'), { hub: base, n: readyCount }) : base;
+        return readyCount > 0 ? `${base} · ${readyCount} ready` : base;
       }
 
       function hubSubLabel(hubRow: HubRow): string {
         const branchId = stringOrNull(hubRow.id);
-        const branchToken = branchId
-          ? fill(t('routePlans.form.branchToken'), { id: branchId.slice(0, 8) })
-          : t('routePlans.form.branchPending');
-        return fill(t('routePlans.form.hubSub'), {
-          city: hubRow.city ?? t('routePlans.form.cityPending'),
-          branch: branchToken,
-          cutoff: String(hubRow.cutoff_time),
-        });
+        const branchToken = branchId ? `branch ${branchId.slice(0, 8)}` : 'branch pending';
+        return `${hubRow.city ?? 'city pending'} · ${branchToken} · cutoff ${hubRow.cutoff_time}`;
       }
 
       const hubsForPicker = [...hubs].sort((a, b) => {
@@ -1393,46 +1355,47 @@ export function RoutePlansModule() {
         display: (h) => hubDisplay(h as unknown as HubRow),
         value: (h) => (h as unknown as HubRow).id,
         sub: (h) => hubSubLabel(h as unknown as HubRow),
-        section: t('routePlans.form.hubsSection'),
+        section: 'Hubs',
       };
       const waveReference: Omit<ReferenceSource, 'kind'> = {
         items: formWavePresets as unknown as Array<Record<string, unknown>>,
         display: (w) => (w as unknown as { label: string }).label,
         value: (w) => (w as unknown as { id: string }).id,
-        section: t('routePlans.form.wavesSection'),
+        section: 'Waves',
       };
 
       return (
         <>
           <p className="state__hint">
-            {t('routePlans.form.intro')}
+            Creates a draft route plan. Use Solve, Freeze, Publish, and Apply after the
+            plan is reviewed.
           </p>
           {focusShipmentId ? (
             <div className="card" style={{ marginBottom: '12px', display: 'grid', gap: '6px' }}>
-              <Chip size="xs" kind="info" label={t('routePlans.form.handoff')} />
-              <div className="mono"><bdi>{focusShipment?.tracking_number ?? focusShipmentId}</bdi></div>
+              <Chip size="xs" kind="info" label="API shipment handoff" />
+              <div className="mono">{focusShipment?.tracking_number ?? focusShipmentId}</div>
               <div className="state__hint">
-                {t('routePlans.form.handoffHint')}
+                Route plans is reading the shipment and selecting it when it is eligible for the chosen date and hub.
               </div>
             </div>
           ) : null}
           <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px', alignItems: 'center', padding: '4px 4px' }}>
-            <label className="mono">{t('routePlans.form.hub')}</label>
+            <label className="mono">Hub</label>
             <button
               type="button"
               className="dt-inline-input"
               style={{ textAlign: 'left' }}
               onClick={() => setPickerOpen('hub')}
-              aria-label={t('routePlans.form.pickHub')}
+              aria-label="Pick hub"
             >
-              {hub ? <bdi>{hubDisplay(hub)}</bdi> : t('routePlans.form.pickHubPlaceholder')}
+              {hub ? hubDisplay(hub) : 'Pick hub…'}
             </button>
-            <label className="mono">{t('routePlans.form.wave')}</label>
+            <label className="mono">Wave</label>
             {wavePresetsEmpty ? (
               <StateView
                 kind="error"
-                title={t('routePlans.form.wavesMissingTitle')}
-                hint={t('routePlans.form.wavesMissingHint')}
+                title="Wave presets not configured"
+                hint="Configure pickup and delivery wave presets before creating a new route plan."
               />
             ) : (
               <button
@@ -1440,38 +1403,35 @@ export function RoutePlansModule() {
                 className="dt-inline-input"
                 style={{ textAlign: 'left' }}
                 onClick={() => setPickerOpen('wave')}
-                aria-label={t('routePlans.form.pickWave')}
+                aria-label="Pick wave"
               >
-                {wave?.label ? <bdi>{wave.label}</bdi> : t('routePlans.form.pickWavePlaceholder')}
+                {wave?.label ?? 'Pick wave…'}
               </button>
             )}
-            <label className="mono">{t('routePlans.form.date')}</label>
+            <label className="mono">Date</label>
             <input
               className="dt-inline-input"
               type="date"
               value={date}
               onChange={(e) => setPlanDate(e.target.value)}
               onInput={(e) => setPlanDate(e.currentTarget.value)}
-              aria-label={t('routePlans.form.planDate')}
+              aria-label="Plan date"
             />
           </div>
           <div className="field" style={{ marginTop: '12px' }}>
-            <label className="field__label">{fill(t('routePlans.form.shipmentsToPlan'), { n: selectedStops.length })}</label>
+            <label className="field__label">Shipments to plan ({selectedStops.length} selected)</label>
             {focusedCandidateUnavailable ? (
               <div style={{ display: 'grid', gap: 8, marginBottom: 10 }}>
                 <StateView
                   kind="error"
-                  title={t('routePlans.form.focusedTitle')}
-                  hint={fill(t('routePlans.form.focusedHint'), {
-                    tracking: focusShipment?.tracking_number ?? focusShipmentId ?? '',
-                    missing: focusedCandidateMissing.join(t('routePlans.listSeparator')),
-                  })}
+                  title="Focused API shipment is not route-ready"
+                  hint={`Shipment ${focusShipment?.tracking_number ?? focusShipmentId} was found, but it is not in the route-plan candidate list yet. Missing: ${focusedCandidateMissing.join(', ')}.`}
                 />
                 <Button
                   size="sm"
                   kind="ghost"
                   iconName="eye"
-                  label={t('routePlans.form.openShipmentContext')}
+                  label="Open shipment context"
                   capability={CAP.SHIPMENTS_READ}
                   onClick={() => {
                     if (!focusShipmentId) return;
@@ -1490,23 +1450,23 @@ export function RoutePlansModule() {
             {candidateQuery.isLoading ? (
               <StateView
                 kind="loading"
-                title={t('routePlans.form.candidatesLoadingTitle')}
-                hint={t('routePlans.form.candidatesLoadingHint')}
+                title="Loading route-plan candidates"
+                hint="Reading eligible shipment candidates for this plan."
               />
             ) : candidateQuery.isError ? (
               <StateView
                 kind="error"
-                title={t('routePlans.form.candidatesErrorTitle')}
-                hint={t('routePlans.form.candidatesErrorHint')}
+                title="Candidate source unavailable"
+                hint="No eligible shipment rows were returned for this plan."
               />
             ) : displayedShipmentCandidates.length === 0 ? (
               <StateView
                 kind="error"
-                title={t('routePlans.form.noCandidatesTitle')}
+                title="No eligible route-plan candidates"
                 hint={
                   focusShipmentId
-                    ? t('routePlans.form.noCandidatesFocusedHint')
-                    : t('routePlans.form.noCandidatesHint')
+                    ? 'The focused API shipment is not eligible for this hub/date yet. Confirm promised delivery date, branch, geocode, and service offering details.'
+                    : 'No candidate shipments matched this hub and date selection.'
                 }
               />
             ) : (
@@ -1522,24 +1482,24 @@ export function RoutePlansModule() {
                 <table className="dt__table" style={{ width: '100%' }}>
                   <thead>
                     <tr>
-                      <th aria-label={t('routePlans.form.colSelect')}>{}</th>
-                      <th>{t('routePlans.form.colCandidate')}</th>
-                      <th>{t('routePlans.form.colPromise')}</th>
-                      <th>{t('routePlans.form.colPlanning')}</th>
+                      <th aria-label="Select">{}</th>
+                      <th>Candidate</th>
+                      <th>Promise</th>
+                      <th>Planning</th>
                     </tr>
                   </thead>
                   <tbody>
                     {displayedShipmentCandidates.map((candidate) => {
                       const shipmentId = candidate.shipment_id;
-                      const candidateLabel = routePlanCandidateLabel(candidate, t);
-                      const referenceLabel = routePlanShipmentReferenceLabel(shipmentId, candidate.tracking_number, t);
+                      const candidateLabel = routePlanCandidateLabel(candidate);
+                      const referenceLabel = routePlanShipmentReferenceLabel(shipmentId, candidate.tracking_number);
                       const checked = selectedShipmentIds.has(shipmentId);
                       return (
                         <tr key={shipmentId} className={checked ? 'is-selected' : undefined}>
                           <td className="dt-checkbox">
                             <input
                               type="checkbox"
-                              aria-label={fill(t('routePlans.form.selectCandidate'), { label: candidateLabel })}
+                              aria-label={`Select candidate ${candidateLabel}`}
                               checked={checked}
                               onChange={() => toggleShipment(shipmentId)}
                             />
@@ -1551,7 +1511,7 @@ export function RoutePlansModule() {
                               iconName="eye"
                               label={referenceLabel}
                               capability={CAP.SHIPMENTS_READ}
-                              ariaLabel={fill(t('routePlans.form.openShipmentContextFor'), { label: candidateLabel })}
+                              ariaLabel={`Open shipment context ${candidateLabel}`}
                               title={shipmentId}
                               onClick={() => {
                                 openRoutePlanShipmentContext(
@@ -1564,17 +1524,17 @@ export function RoutePlansModule() {
                                 );
                               }}
                             />
-                            <div className="state__hint"><bdi>{routePlanCandidateSubLabel(candidate, t)}</bdi></div>
+                            <div className="state__hint">{routePlanCandidateSubLabel(candidate)}</div>
                           </td>
                           <td>
-                            <div className="mono">{candidate.promised_delivery_date ?? t('routePlans.candidate.datePending')}</div>
-                            <div className="state__hint">{routePlanCandidateWindowLabel(candidate, t)}</div>
+                            <div className="mono">{candidate.promised_delivery_date ?? 'date pending'}</div>
+                            <div className="state__hint">{routePlanCandidateWindowLabel(candidate)}</div>
                           </td>
                           <td>
-                            <Chip size="xs" kind="good" label={fill(t('routePlans.candidate.eligible'), { seq: candidate.sequence_order ?? '-' })} />
+                            <Chip size="xs" kind="good" label={`eligible #${candidate.sequence_order ?? '-'}`} />
                             {candidate.priority_score != null ? (
                               <span className="state__hint" style={{ marginLeft: '6px' }}>
-                                {fill(t('routePlans.candidate.priority'), { score: candidate.priority_score })}
+                                priority {candidate.priority_score}
                               </span>
                             ) : null}
                           </td>
@@ -1589,7 +1549,7 @@ export function RoutePlansModule() {
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
             <Button label={t('common.cancel', 'Cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label={t('common.create')}
+              label="Create"
               kind="primary"
               capability={CAP.ROUTE_PLANS_WRITE}
               disabled={!hubId || !waveId || !date || selectedStops.length === 0 || wavePresetsEmpty || createMutation.isPending}
@@ -1613,9 +1573,9 @@ export function RoutePlansModule() {
                     },
                   });
                   modal.close();
-                  pushToast(fill(t('routePlans.toast.planCreated'), { plan: res.plan_id }), 'good');
+                  pushToast(`Plan created · ${res.plan_id}`, 'good');
                 } catch {
-                  pushToast(t('routePlans.toast.createFailed'), 'danger');
+                  pushToast('Route plan could not be created. Try again.', 'danger');
                 }
               }}
             />
@@ -1624,7 +1584,7 @@ export function RoutePlansModule() {
           {pickerOpen === 'hub' ? (
             <ReferencePicker
               open
-              title={t('routePlans.form.hub')}
+              title="Hub"
               source={{ kind: 'reference', ...hubReference }}
               onClose={() => setPickerOpen(null)}
               onPick={(val) => {
@@ -1636,7 +1596,7 @@ export function RoutePlansModule() {
           {pickerOpen === 'wave' ? (
             <ReferencePicker
               open
-              title={t('routePlans.form.wave')}
+              title="Wave"
               source={{ kind: 'reference', ...waveReference }}
               onClose={() => setPickerOpen(null)}
               onPick={(val) => {
@@ -1648,15 +1608,15 @@ export function RoutePlansModule() {
         </>
       );
     }
-    modal.open({ title: t('routePlans.form.title'), body: <NewPlanForm /> });
+    modal.open({ title: 'New route plan', body: <NewPlanForm /> });
   }
 
   function lifecycleDisabledReasonForPlan(plan: RoutePlanRow): string | undefined {
-    return routePlanTenantLifecycleDisabledReason(plan, activeTenantId, t);
+    return routePlanTenantLifecycleDisabledReason(plan, activeTenantId);
   }
 
   function lifecycleDisabledReasonForSelectedPlans(plans: RoutePlanRow[]): string | undefined {
-    return routePlanBulkTenantLifecycleDisabledReason(plans, activeTenantId, t);
+    return routePlanBulkTenantLifecycleDisabledReason(plans, activeTenantId);
   }
 
   function runIfRoutePlanLifecycleAllowed(
@@ -1740,8 +1700,8 @@ export function RoutePlansModule() {
         ? lifecycleDisabledReasonForPlan(target) ??
           (routePlansShareOrganization(plan, target)
             ? undefined
-            : t('routePlans.tenant.target'))
-        : t('routePlans.tenant.targetMissing');
+            : "Pick a target route plan from this route plan's tenant.")
+        : 'Pick a target route plan before rebalancing.';
 
       function toggle(id: string) {
         setSelected((prev) => {
@@ -1799,18 +1759,19 @@ export function RoutePlansModule() {
           const status = dir?.status ?? r.status;
           const stops = dir?.stop_count ?? r.stops;
           const runs = dir?.run_count ?? r.runs;
-          return fill(t('routePlans.rebalance.planSub'), { status, stops: stops ?? 0, runs: runs ?? 0 });
+          return `${status} · ${stops} stops · ${runs} runs`;
         },
-        section: t('routePlans.rebalance.plansSection'),
+        section: 'Plans',
       };
 
       return (
         <>
           <p className="state__hint">
-            {t('routePlans.rebalance.intro')}
+            Move stops between plans. Affected plans return to planning state so they can
+            be solved and published again.
           </p>
           <div className="field" style={{ marginTop: '10px' }}>
-            <label className="field__label">{fill(t('routePlans.rebalance.stopsToMove'), { n: selected.size })}</label>
+            <label className="field__label">Stops to move ({selected.size} selected)</label>
             <div
               className="dt"
               style={{
@@ -1823,23 +1784,23 @@ export function RoutePlansModule() {
               <table className="dt__table" style={{ width: '100%' }}>
                 <thead>
                   <tr>
-                    <th aria-label={t('routePlans.form.colSelect')}>{}</th>
+                    <th aria-label="Select">{}</th>
                     <th>#</th>
-                    <th>{t('routePlans.rebalance.colShipment')}</th>
-                    <th>{t('routePlans.rebalance.colSla')}</th>
+                    <th>Shipment</th>
+                    <th>SLA</th>
                   </tr>
                 </thead>
                 <tbody>
                   {planStops.slice(0, 30).map((s) => {
                     const checked = selected.has(s.id);
                     const trackingNumber = routePlanStopShipmentTrackingNumber(s);
-                    const referenceLabel = routePlanStopShipmentReferenceLabel(s, t);
+                    const referenceLabel = routePlanStopShipmentReferenceLabel(s);
                     return (
                       <tr key={s.id} className={checked ? 'is-selected' : undefined}>
                         <td className="dt-checkbox">
                           <input
                             type="checkbox"
-                            aria-label={fill(t('routePlans.rebalance.selectStop'), { id: s.shipment_id })}
+                            aria-label={`Select stop ${s.shipment_id}`}
                             checked={checked}
                             onChange={() => toggle(s.id)}
                           />
@@ -1852,7 +1813,7 @@ export function RoutePlansModule() {
                             iconName="eye"
                             label={referenceLabel}
                             capability={CAP.SHIPMENTS_READ}
-                            ariaLabel={fill(t('routePlans.form.openShipmentContextFor'), { label: s.shipment_id })}
+                            ariaLabel={`Open shipment context ${s.shipment_id}`}
                             title={s.shipment_id}
                             onClick={() => {
                               openRoutePlanShipmentContext(
@@ -1875,7 +1836,7 @@ export function RoutePlansModule() {
                                 <Chip
                                   size="xs"
                                   kind="danger"
-                                  label={fill(t('routePlans.rebalance.missingMarker'), { token: 'stop_sla_tone/(empty)' })}
+                                  label="stop_sla_tone/(empty) (missing)"
                                 />
                               );
                             }
@@ -1887,7 +1848,7 @@ export function RoutePlansModule() {
                                 <Chip
                                   size="xs"
                                   kind="danger"
-                                  label={fill(t('routePlans.rebalance.missingMarker'), { token: `stop_sla_tone/${s.sla_tone}` })}
+                                  label={`stop_sla_tone/${s.sla_tone} (missing)`}
                                 />
                               );
                             }
@@ -1908,24 +1869,21 @@ export function RoutePlansModule() {
             </div>
           </div>
           <div className="field" style={{ marginTop: '10px' }}>
-            <label className="field__label">{t('routePlans.rebalance.moveToPlan')}</label>
+            <label className="field__label">Move to plan</label>
             <button
               type="button"
               className="dt-inline-input"
               style={{ textAlign: 'left', width: '100%' }}
               onClick={() => setPickerOpen(true)}
-              aria-label={t('routePlans.rebalance.pickTarget')}
+              aria-label="Pick target plan"
             >
-              {target ? <bdi>{`${target.plan_id} · ${target.wave_label}`}</bdi> : t('routePlans.rebalance.pickTargetPlaceholder')}
+              {target ? `${target.plan_id} · ${target.wave_label}` : 'Pick target plan…'}
             </button>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
             <Button label={t('common.cancel', 'Cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label={fill(
-                t(selectedShipmentIds.length === 1 ? 'routePlans.rebalance.submitOne' : 'routePlans.rebalance.submitOther'),
-                { n: selectedShipmentIds.length },
-              )}
+              label={`Rebalance · ${selectedShipmentIds.length} stop${selectedShipmentIds.length === 1 ? '' : 's'}`}
               kind="primary"
               capability={CAP.ROUTE_PLANS_WRITE}
               disabled={!canSubmit}
@@ -1938,9 +1896,9 @@ export function RoutePlansModule() {
                 try {
                   const res = await rebalanceMutation.mutateAsync(rebalanceInput);
                   modal.close();
-                  pushToast(fill(t('routePlans.toast.rebalanced'), { n: res.moves_applied }), 'good');
+                  pushToast(`Rebalanced · ${res.moves_applied} moves applied`, 'good');
                 } catch {
-                  pushToast(t('routePlans.toast.rebalanceFailed'), 'danger');
+                  pushToast('Rebalance could not be completed. Try again.', 'danger');
                 }
               }}
             />
@@ -1948,7 +1906,7 @@ export function RoutePlansModule() {
           {pickerOpen ? (
             <ReferencePicker
               open
-              title={t('routePlans.rebalance.targetPlan')}
+              title="Target plan"
               source={{ kind: 'reference', ...targetReference }}
               onClose={() => setPickerOpen(false)}
               onPick={(val) => {
@@ -1960,7 +1918,7 @@ export function RoutePlansModule() {
         </>
       );
     }
-    modal.open({ title: fill(t('routePlans.rebalance.title'), { plan: plan.plan_id }), body: <RebalanceForm /> });
+    modal.open({ title: `Rebalance ${plan.plan_id}`, body: <RebalanceForm /> });
   }
 
   function openPlanDrawer(plan: RoutePlanRow) {
@@ -1986,25 +1944,25 @@ export function RoutePlansModule() {
   }
 
   const columns: Array<DataTableColumn<RoutePlanRow>> = [
-    { key: 'plan_id', label: t('routePlans.columns.plan'), mono: true, sortable: true },
-    { key: 'wave_label', label: t('routePlans.columns.wave'), sortable: true, filterable: true },
-    { key: 'hub', label: t('routePlans.columns.hub'), sortable: true, filterable: true },
-    { key: 'status', label: t('routePlans.columns.status'), lookup: 'route_plan_status', sortable: true, filterable: true },
-    { key: 'stops', label: t('routePlans.columns.stops'), align: 'right', sortable: true },
-    { key: 'runs', label: t('routePlans.columns.runs'), align: 'right', sortable: true },
+    { key: 'plan_id', label: 'Plan', mono: true, sortable: true },
+    { key: 'wave_label', label: 'Wave', sortable: true, filterable: true },
+    { key: 'hub', label: 'Hub', sortable: true, filterable: true },
+    { key: 'status', label: 'Status', lookup: 'route_plan_status', sortable: true, filterable: true },
+    { key: 'stops', label: 'Stops', align: 'right', sortable: true },
+    { key: 'runs', label: 'Runs', align: 'right', sortable: true },
     {
       key: 'sla',
-      label: t('routePlans.columns.sla'),
+      label: 'SLA',
       sortable: false,
       filterable: false,
       render: (_v, r) =>
         isSlaBreach(r, wavePromiseWindowSeconds) ? (
-          <Chip size="xs" kind="warn" label={t('routePlans.columns.breach')} />
+          <Chip size="xs" kind="warn" label="breach" />
         ) : (
           <span className="mono" style={{ color: 'var(--ink-3)' }}>—</span>
         ),
     },
-    { key: 'updated_at', label: t('routePlans.columns.updated'), format: 'datetime', sortable: true },
+    { key: 'updated_at', label: 'Updated', format: 'datetime', sortable: true },
   ];
 
   const pills: ReactNode[] = [
@@ -2012,17 +1970,22 @@ export function RoutePlansModule() {
     // (route_plans scope via current_user_org_id()). `scopeId` is identity-derived.
     // See shipments.tsx top-of-file ScopePill SSOT note.
     <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
-    <Chip key="count" size="xs" label={<span className="mono">{fill(t('routePlans.plansCount'), { n: rows.length })}</span>} />,
+    <Chip key="count" size="xs" label={<span className="mono">{`${rows.length} plans`}</span>} />,
   ];
 
   if (!canRead) {
     return (
       <div className="page">
-        <PageHeader moduleKey="routePlans" />
+        <PageHeader
+          moduleKey="routePlans"
+          eyebrow="Operate"
+          titleAccent="Route"
+          titlePlain="plans"
+        />
         <StateView
           kind="denied"
           capability={CAP.ROUTE_PLANS_READ}
-          hint={t('routePlans.denied')}
+          hint="You do not have permission to view route plans."
         />
       </div>
     );
@@ -2031,11 +1994,16 @@ export function RoutePlansModule() {
   if (failCountWarn == null) {
     return (
       <div className="page">
-        <PageHeader moduleKey="routePlans" />
+        <PageHeader
+          moduleKey="routePlans"
+          eyebrow="Operate"
+          titleAccent="Route"
+          titlePlain="plans"
+        />
         <StateView
           kind="error"
-          title={t('routePlans.thresholdsTitle')}
-          hint={t('routePlans.thresholdsHint')}
+          title="Route-plan thresholds are not configured"
+          hint="The warning threshold for failed plans is missing. Finish route planning policy setup before using this surface."
         />
       </div>
     );
@@ -2044,11 +2012,16 @@ export function RoutePlansModule() {
   if (routePlanReadError) {
     return (
       <div className="page">
-        <PageHeader moduleKey="routePlans" />
+        <PageHeader
+          moduleKey="routePlans"
+          eyebrow="Operate"
+          titleAccent="Route"
+          titlePlain="plans"
+        />
         <StateView
           kind="error"
-          title={t('routePlans.inventoryFailed')}
-          hint={routePlanReadErrorMessage(routePlanReadError, t)}
+          title="Route-plan inventory failed"
+          hint={routePlanReadErrorMessage(routePlanReadError)}
         />
       </div>
     );
@@ -2058,11 +2031,14 @@ export function RoutePlansModule() {
     <div className="page">
       <PageHeader
         moduleKey="routePlans"
+        eyebrow="Operate"
+        titleAccent="Route"
+        titlePlain="plans"
         pills={pills}
         actions={[
           <Button
             key="validate"
-            label={t('routePlans.actions.validateConstraints')}
+            label="Validate constraints"
             iconName="check"
             kind="ghost"
             capability={CAP.ROUTE_PLANS_READ}
@@ -2070,7 +2046,7 @@ export function RoutePlansModule() {
           />,
           <Button
             key="new"
-            label={t('routePlans.actions.newPlan')}
+            label="New plan"
             iconName="plus"
             kind="primary"
             capability={CAP.ROUTE_PLANS_WRITE}
@@ -2091,7 +2067,7 @@ export function RoutePlansModule() {
           getRowClass={(r) => (isSlaBreach(r, wavePromiseWindowSeconds) ? 'is-risk' : undefined)}
           bulkActions={[
             {
-              label: t('routePlans.actions.solveSequence'),
+              label: 'Solve sequence',
               icon: 'play',
               kind: 'primary',
               capability: CAP.ROUTE_PLANS_WRITE,
@@ -2100,15 +2076,15 @@ export function RoutePlansModule() {
               onClick: async (rs) => {
                 await runIfSelectedRoutePlansLifecycleAllowed(rs, async () => {
                   await runBulkRoutePlanAction(rs, {
-                    complete: t('routePlans.bulk.solved'),
-                    partial: t('routePlans.bulk.solvedPartial'),
-                    failed: t('routePlans.bulk.solveFailed'),
-                  }, (r) => solveMutation.mutateAsync(r.id), t);
+                    complete: 'Solved',
+                    partial: 'Solved partially',
+                    failed: 'Solve failed',
+                  }, (r) => solveMutation.mutateAsync(r.id));
                 });
               },
             },
             {
-              label: t('routePlans.actions.freeze'),
+              label: 'Freeze',
               icon: 'lock',
               capability: CAP.ROUTE_PLANS_WRITE,
               disabled: (rs) => Boolean(lifecycleDisabledReasonForSelectedPlans(rs)),
@@ -2116,15 +2092,15 @@ export function RoutePlansModule() {
               onClick: async (rs) => {
                 await runIfSelectedRoutePlansLifecycleAllowed(rs, async () => {
                   await runBulkRoutePlanAction(rs, {
-                    complete: t('routePlans.bulk.frozen'),
-                    partial: t('routePlans.bulk.frozenPartial'),
-                    failed: t('routePlans.bulk.freezeFailed'),
-                  }, (r) => freezeMutation.mutateAsync(r.id), t);
+                    complete: 'Frozen',
+                    partial: 'Frozen partially',
+                    failed: 'Freeze failed',
+                  }, (r) => freezeMutation.mutateAsync(r.id));
                 });
               },
             },
             {
-              label: t('routePlans.actions.publish'),
+              label: 'Publish',
               icon: 'bolt',
               capability: CAP.ROUTE_PLANS_WRITE,
               disabled: (rs) => Boolean(lifecycleDisabledReasonForSelectedPlans(rs)),
@@ -2132,15 +2108,15 @@ export function RoutePlansModule() {
               onClick: async (rs) => {
                 await runIfSelectedRoutePlansLifecycleAllowed(rs, async () => {
                   await runBulkRoutePlanAction(rs, {
-                    complete: t('routePlans.bulk.published'),
-                    partial: t('routePlans.bulk.publishedPartial'),
-                    failed: t('routePlans.bulk.publishFailed'),
-                  }, (r) => publishMutation.mutateAsync(r.id), t);
+                    complete: 'Published',
+                    partial: 'Published partially',
+                    failed: 'Publish failed',
+                  }, (r) => publishMutation.mutateAsync(r.id));
                 });
               },
             },
             {
-              label: t('routePlans.actions.apply'),
+              label: 'Apply',
               icon: 'check',
               capability: CAP.ROUTE_PLANS_WRITE,
               disabled: (rs) => Boolean(lifecycleDisabledReasonForSelectedPlans(rs)),
@@ -2148,18 +2124,18 @@ export function RoutePlansModule() {
               onClick: async (rs) => {
                 await runIfSelectedRoutePlansLifecycleAllowed(rs, async () => {
                   await runBulkRoutePlanAction(rs, {
-                    complete: t('routePlans.bulk.applied'),
-                    partial: t('routePlans.bulk.appliedPartial'),
-                    failed: t('routePlans.bulk.applyFailed'),
-                  }, (r) => applyMutation.mutateAsync(r.id), t);
+                    complete: 'Applied',
+                    partial: 'Applied partially',
+                    failed: 'Apply failed',
+                  }, (r) => applyMutation.mutateAsync(r.id));
                 });
               },
             },
           ]}
           rowActions={[
-            { label: t('routePlans.actions.openPlan'), icon: 'eye', onClick: openPlanDrawer },
+            { label: 'Open plan', icon: 'eye', onClick: openPlanDrawer },
             {
-              label: t('routePlans.actions.solve'),
+              label: 'Solve',
               icon: 'play',
               capability: CAP.ROUTE_PLANS_WRITE,
               disabled: (r) => Boolean(lifecycleDisabledReasonForPlan(r)),
@@ -2168,15 +2144,15 @@ export function RoutePlansModule() {
                 await runIfRoutePlanLifecycleAllowed(r, async () => {
                   try {
                     await solveMutation.mutateAsync(r.id);
-                    pushToast(fill(t('routePlans.toast.solvedDot'), { plan: r.plan_id }), 'good');
+                    pushToast(`Solved · ${r.plan_id}`, 'good');
                   } catch {
-                    pushToast(t('routePlans.toast.solveFailed'), 'danger');
+                    pushToast('Solve could not be completed. Try again.', 'danger');
                   }
                 });
               },
             },
             {
-              label: t('routePlans.actions.freeze'),
+              label: 'Freeze',
               icon: 'lock',
               capability: CAP.ROUTE_PLANS_WRITE,
               disabled: (r) => Boolean(lifecycleDisabledReasonForPlan(r)),
@@ -2186,17 +2162,17 @@ export function RoutePlansModule() {
                   try {
                     const res = await freezeMutation.mutateAsync(r.id);
                     pushToast(
-                      fill(t('routePlans.toast.frozenDot'), { plan: r.plan_id, n: res.constraint_validation.fail_count }),
+                      `Frozen · ${r.plan_id} · ${res.constraint_validation.fail_count} fails`,
                       res.constraint_validation.fail_count > 0 ? 'warn' : 'good',
                     );
                   } catch {
-                    pushToast(t('routePlans.toast.freezeFailed'), 'danger');
+                    pushToast('Freeze could not be completed. Try again.', 'danger');
                   }
                 });
               },
             },
             {
-              label: t('routePlans.actions.publish'),
+              label: 'Publish',
               icon: 'bolt',
               capability: CAP.ROUTE_PLANS_WRITE,
               disabled: (r) => Boolean(lifecycleDisabledReasonForPlan(r)),
@@ -2205,15 +2181,15 @@ export function RoutePlansModule() {
                 await runIfRoutePlanLifecycleAllowed(r, async () => {
                   try {
                     const res = await publishMutation.mutateAsync(r.id);
-                    pushToast(fill(t('routePlans.toast.publishedDot'), { hash: res.execution_pack_hash ?? '—' }), 'good');
+                    pushToast(`Published · pack ${res.execution_pack_hash ?? '—'}`, 'good');
                   } catch {
-                    pushToast(t('routePlans.toast.publishFailed'), 'danger');
+                    pushToast('Publish could not be completed. Try again.', 'danger');
                   }
                 });
               },
             },
             {
-              label: t('routePlans.actions.apply'),
+              label: 'Apply',
               icon: 'check',
               kind: 'primary',
               capability: CAP.ROUTE_PLANS_WRITE,
@@ -2223,15 +2199,15 @@ export function RoutePlansModule() {
                 await runIfRoutePlanLifecycleAllowed(r, async () => {
                   try {
                     const res = await applyMutation.mutateAsync(r.id);
-                    pushToast(fill(t('routePlans.toast.appliedDot'), { n: res.runs_materialized }), 'good');
+                    pushToast(`Applied · ${res.runs_materialized} runs`, 'good');
                   } catch {
-                    pushToast(t('routePlans.toast.applyFailed'), 'danger');
+                    pushToast('Apply could not be completed. Try again.', 'danger');
                   }
                 });
               },
             },
             {
-              label: t('routePlans.actions.rebalanceRow'),
+              label: 'Rebalance…',
               icon: 'rotate',
               capability: CAP.ROUTE_PLANS_WRITE,
               disabled: (r) => Boolean(lifecycleDisabledReasonForPlan(r)),
@@ -2261,12 +2237,11 @@ function InfoCard({ label, value }: InfoCardProps) {
 }
 
 function ExecutionPackPanel({ planId, enabled }: { planId: string; enabled: boolean }) {
-  const { t } = useI18n();
   const pack = useRoutePlanExecutionPack(planId, enabled);
   if (!enabled) {
     return (
       <div className="card mono" style={{ marginTop: '14px', fontSize: '11px', color: 'var(--ink-3)' }}>
-        {t('routePlans.pack.afterPublish')}
+        execution pack available after publish
       </div>
     );
   }
@@ -2280,7 +2255,7 @@ function ExecutionPackPanel({ planId, enabled }: { planId: string; enabled: bool
   if (pack.isError) {
     return (
       <div style={{ marginTop: '14px' }}>
-        <StateView kind="error" hint={(pack.error as Error)?.message ?? t('routePlans.pack.readFailed')} />
+        <StateView kind="error" hint={(pack.error as Error)?.message ?? 'execution pack read failed'} />
       </div>
     );
   }
@@ -2288,15 +2263,15 @@ function ExecutionPackPanel({ planId, enabled }: { planId: string; enabled: bool
   if (!data) {
     return (
       <div className="card mono" style={{ marginTop: '14px', fontSize: '11px', color: 'var(--danger-ink)' }}>
-        {t('routePlans.pack.none')}
+        No execution package is available for this route plan yet.
       </div>
     );
   }
   return (
     <div className="card mono" style={{ marginTop: '14px', fontSize: '11px', lineHeight: 1.6 }}>
-      <SeamLine k={t('routePlans.pack.pack')} v={data.execution_pack_hash ?? t('routePlans.pack.missingHash')} />
-      <SeamLine k={t('routePlans.pack.stops')} v={String(data.stop_count ?? 0)} />
-      <SeamLine k={t('routePlans.pack.shipments')} v={String(data.shipment_count ?? 0)} />
+      <SeamLine k="Pack" v={data.execution_pack_hash ?? 'missing hash'} />
+      <SeamLine k="Stops" v={String(data.stop_count ?? 0)} />
+      <SeamLine k="Shipments" v={String(data.shipment_count ?? 0)} />
     </div>
   );
 }
@@ -2318,7 +2293,6 @@ interface PlanValidatePanelProps {
   run: (planId: string) => Promise<{ items: RoutePlanConstraintCheck[]; fail_count: number }>;
 }
 function PlanValidatePanel({ planId, run }: PlanValidatePanelProps) {
-  const { t } = useI18n();
   const [state, setState] = useState<
     | { kind: 'idle' }
     | { kind: 'loading' }
@@ -2332,16 +2306,16 @@ function PlanValidatePanel({ planId, run }: PlanValidatePanelProps) {
       const res = await run(planId);
       setState({ kind: 'ready', items: res.items, fail_count: res.fail_count });
     } catch {
-      setState({ kind: 'error', message: t('routePlans.validate.failed') });
+      setState({ kind: 'error', message: 'Constraint check could not be completed. Try again.' });
     }
   }
 
   if (state.kind === 'idle') {
     return (
       <div>
-        <p className="state__hint">{t('routePlans.validate.idle')}</p>
+        <p className="state__hint">Run the validator to see driver/vehicle/window/hub policy results.</p>
         <Button
-          label={t('routePlans.actions.runValidation')}
+          label="Run validation"
           iconName="check"
           kind="ghost"
           capability={CAP.ROUTE_PLANS_READ}
@@ -2372,15 +2346,15 @@ function PlanValidatePanel({ planId, run }: PlanValidatePanelProps) {
           >
             <Dot kind={dotKind} />
             <span style={{ flex: 1 }}>
-              <bdi>{c.name}</bdi>
+              {c.name}
               {!row ? (
                 <span className="mono" style={{ marginLeft: '6px', color: 'var(--danger-ink)' }}>
-                  {t('routePlans.validate.missing')}
+                  (missing)
                 </span>
               ) : null}
             </span>
             <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-3)' }}>
-              {fill(t('routePlans.validate.passFail'), { passed: c.passed, failed: c.failed })}
+              {c.passed} pass · {c.failed} fail
             </span>
           </div>
         );
@@ -2388,10 +2362,10 @@ function PlanValidatePanel({ planId, run }: PlanValidatePanelProps) {
       {state.fail_count > 0 ? (
         <div className="card" style={{ background: 'var(--warn-soft)', marginTop: '10px' }}>
           <div className="mono" style={{ fontSize: '10.5px', color: 'var(--warn-ink)' }}>
-            {fill(t(state.fail_count === 1 ? 'routePlans.validate.warningOne' : 'routePlans.validate.warningOther'), { n: state.fail_count })}
+            {state.fail_count} WARNING{state.fail_count === 1 ? '' : 'S'}
           </div>
           <div style={{ fontSize: '12px', marginTop: '4px' }}>
-            <bdi>{state.items.filter((i) => i.detail).map((i) => i.detail).join(' · ')}</bdi>
+            {state.items.filter((i) => i.detail).map((i) => i.detail).join(' · ')}
           </div>
         </div>
       ) : null}
@@ -2408,7 +2382,6 @@ interface ValidateAllPanelProps {
   failCountWarn: number;
 }
 function ValidateAllPanel({ plans, run, failCountWarn }: ValidateAllPanelProps) {
-  const { t } = useI18n();
   const [state, setState] = useState<
     | { kind: 'idle' }
     | { kind: 'running'; current: number }
@@ -2426,7 +2399,7 @@ function ValidateAllPanel({ plans, run, failCountWarn }: ValidateAllPanelProps) 
         const res = await run(p.id);
         out.push({ plan_id: p.plan_id, fail_count: res.fail_count });
       } catch {
-        setState({ kind: 'error', message: t('routePlans.validate.allFailed') });
+        setState({ kind: 'error', message: 'Constraint checks could not be completed. Try again.' });
         return;
       }
     }
@@ -2437,10 +2410,10 @@ function ValidateAllPanel({ plans, run, failCountWarn }: ValidateAllPanelProps) 
     return (
       <div>
         <p className="state__hint">
-          {t('routePlans.validate.allIdle')}
+          Checks capacity, skill, and service-window constraints for each visible plan.
         </p>
         <Button
-          label={fill(t('routePlans.validate.runAll'), { n: plans.length })}
+          label={`Run validation · ${plans.length} plans`}
           iconName="check"
           kind="primary"
           onClick={handleRun}
@@ -2451,7 +2424,7 @@ function ValidateAllPanel({ plans, run, failCountWarn }: ValidateAllPanelProps) 
   if (state.kind === 'running') {
     return (
       <div>
-        <p className="state__hint">{fill(t('routePlans.validate.running'), { i: state.current + 1, n: plans.length })}</p>
+        <p className="state__hint">Validating {state.current + 1}/{plans.length}…</p>
         <StateView kind="loading" />
       </div>
     );
@@ -2463,7 +2436,7 @@ function ValidateAllPanel({ plans, run, failCountWarn }: ValidateAllPanelProps) 
   return (
     <div className="card" style={{ marginTop: '8px' }}>
       <div className="mono" style={{ fontSize: '10.5px', color: 'var(--ink-3)', marginBottom: '6px' }}>
-        {fill(t('routePlans.validate.total'), { n: state.results.length, total: totalFails })}
+        Total fails across {state.results.length} plans: {totalFails}
       </div>
       {state.results.map((r) => (
         <div
@@ -2472,7 +2445,7 @@ function ValidateAllPanel({ plans, run, failCountWarn }: ValidateAllPanelProps) 
         >
           <Dot kind={r.fail_count === 0 ? 'good' : r.fail_count <= failCountWarn ? 'warn' : 'danger'} />
           <span className="mono" style={{ flex: 1, fontSize: '11px' }}>{r.plan_id}</span>
-          <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-3)' }}>{fill(t('routePlans.validate.fails'), { n: r.fail_count })}</span>
+          <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-3)' }}>{r.fail_count} fails</span>
         </div>
       ))}
     </div>

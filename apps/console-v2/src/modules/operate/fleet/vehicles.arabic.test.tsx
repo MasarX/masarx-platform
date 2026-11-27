@@ -5,7 +5,7 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { englishT } from '@/lib/i18n';
 import * as api from '@/lib/api';
-import { ar } from '@/lib/seed-raw/i18n/areas/fleet';
+import ar from '@/lib/seed-raw/i18n/areas/ar/fleet';
 import { VehiclesModule } from './vehicles';
 
 // Same identity and readiness wait as the trunk vehicles test, in Arabic.

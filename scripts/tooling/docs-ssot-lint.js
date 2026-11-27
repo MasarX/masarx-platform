@@ -4,7 +4,16 @@ const fs = require('fs');
 const path = require('path');
 
 const DEFAULT_CONFIG_PATH = 'config/docs/ssot-critical-docs.json';
+const REQUIRED_DOCS = [
+  'AGENTS.md',
+  'DELIVERY.md',
+  'DESIGN.md',
+  'docs/product/mission.md',
+  'docs/guides/TESTING_GUIDE.md',
+  'docs/guides/LOCAL_SETUP.md',
+];
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MARKDOWN_INLINE_PARTS = /(?<comment><!--.*?(?:-->|$))|(?<tag><[^<>]*>)|(?<text>[^<]+|<)/g;
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -60,7 +69,8 @@ function extractMarkdownLinks(content) {
 
 function resolveLocalLink(rootDir, sourceFile, rawTarget) {
   const target = normalizeLinkTarget(rawTarget);
-  if (!target || target.startsWith('#') || isExternalLink(target)) return null;
+  if (!target || isExternalLink(target)) return null;
+  if (target.startsWith('#')) return sourceFile;
   const [pathPart] = target.split('#', 1);
   if (!pathPart) return null;
 
@@ -83,6 +93,57 @@ function linkExists(resolvedPath) {
     return true;
   }
   return false;
+}
+
+function markdownAnchors(content) {
+  const anchors = new Set();
+  const headings = new Set();
+  let fence = '';
+  let inComment = false;
+  // shortcut: top-level ATX headings and named anchors, use a GFM parser for nested or Setext headings.
+  for (let line of content.split(/\r?\n/)) {
+    if (inComment) {
+      const commentEnd = line.indexOf('-->');
+      if (commentEnd === -1) continue;
+      inComment = false;
+      line = line.slice(commentEnd + 3);
+    }
+    const delimiter = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (delimiter?.[1][0] === fence[0] && delimiter[1].length >= fence.length && !delimiter[2].trim()) {
+        fence = '';
+      }
+      continue;
+    }
+    if (delimiter) {
+      fence = delimiter[1];
+      continue;
+    }
+
+    for (const { groups: { comment, tag } } of line.matchAll(MARKDOWN_INLINE_PARTS)) {
+      if (comment) inComment = !comment.endsWith('-->');
+      const name = tag && /^<a\s+[^>]*?\bname=(["'])([^"']+)\1/i.exec(tag)?.[2];
+      if (name) anchors.add(name);
+    }
+    const heading = /^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line)?.[1];
+    if (!heading) continue;
+
+    const headingParts = heading.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').matchAll(MARKDOWN_INLINE_PARTS);
+    const slug = Array.from(headingParts, ({ groups: { text } }) => text || '')
+      .join('')
+      .replace(/(^|\W)(_+)([^_]+)\2(?=\W|$)/g, '$1$3')
+      .trim()
+      .toLowerCase()
+      .replace(/[^\p{L}\p{M}\p{N}_ -]/gu, '')
+      .replaceAll(' ', '-');
+    let anchor = slug;
+    for (let occurrence = 1; headings.has(anchor); occurrence++) {
+      anchor = `${slug}-${occurrence}`;
+    }
+    headings.add(anchor);
+    anchors.add(anchor);
+  }
+  return anchors;
 }
 
 function lintDocEntry(rootDir, docEntry, options = {}) {
@@ -131,13 +192,44 @@ function lintDocEntry(rootDir, docEntry, options = {}) {
     const links = extractMarkdownLinks(content);
     for (const rawTarget of links) {
       const resolved = resolveLocalLink(rootDir, fullPath, rawTarget);
+      const fragment = normalizeLinkTarget(rawTarget).split('#', 2)[1];
+      if (resolved && fragment && !/^L\d/.test(fragment)) {
+        const target = !path.extname(resolved) && !fs.existsSync(resolved) ? `${resolved}.md` : resolved;
+        if (/\.md$/i.test(target) && fs.statSync(target, { throwIfNoEntry: false })?.isFile()) {
+          const markdown = target === fullPath ? content : fs.readFileSync(target, 'utf8');
+          if (!markdownAnchors(markdown).has(decodeURIComponent(fragment))) {
+            issues.push(`${relPath}: broken_section_link "${rawTarget}"`);
+          }
+        }
+      }
       if (!linkExists(resolved)) {
         issues.push(`${relPath}: broken_local_link "${rawTarget}"`);
+        continue;
+      }
+      const lineFragment = normalizeLinkTarget(rawTarget).split('#', 2)[1];
+      if (resolved && /^L\d/.test(lineFragment ?? '') && !validLineRange(resolved, lineFragment)) {
+        issues.push(`${relPath}: broken_line_link "${rawTarget}"`);
       }
     }
   }
 
   return issues;
+}
+
+function validLineRange(file, fragment) {
+  // shortcut: check bounds only. Pin a revision when the link must identify the same code.
+  const target = !path.extname(file) && !fs.existsSync(file) ? `${file}.md` : file;
+  const range = /^L(\d+)(?:-L(\d+))?$/.exec(fragment);
+  if (!range || !fs.statSync(target, { throwIfNoEntry: false })?.isFile()) return false;
+  const start = Number(range[1]);
+  const end = Number(range[2] ?? range[1]);
+  if (start < 1 || start > end) return false;
+
+  const content = fs.readFileSync(target, 'utf8');
+  if (!content) return false;
+  const lines = content.split(/\r\n|\n|\r/);
+  const count = lines.length - Number(lines.at(-1) === '');
+  return end <= count;
 }
 
 function runLint(opts = {}) {
@@ -148,7 +240,18 @@ function runLint(opts = {}) {
   const now = opts.now || new Date();
 
   const issues = [];
-  for (const docEntry of config.docs || []) {
+  const docs = config.docs;
+  if (!Array.isArray(docs) || docs.length === 0) {
+    return { issues: ['critical_docs_registry_empty'], configPath };
+  }
+  if (configPath === path.resolve(rootDir, DEFAULT_CONFIG_PATH)) {
+    for (const requiredDoc of REQUIRED_DOCS) {
+      if (!docs.some(entry => entry?.path === requiredDoc && entry.checkLinks === true)) {
+        issues.push(`missing_required_link_check "${requiredDoc}"`);
+      }
+    }
+  }
+  for (const docEntry of docs) {
     issues.push(...lintDocEntry(rootDir, docEntry, { now, maxAgeDays }));
   }
   return { issues, configPath };

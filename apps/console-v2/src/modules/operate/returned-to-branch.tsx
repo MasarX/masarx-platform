@@ -35,7 +35,6 @@ import { CAP } from '@/lib/capabilities';
 import { lookupRow } from '@/lib/api';
 import { useResolveSettings } from '@/lib/queries';
 import { openShipmentContextDrawer } from '@/modules/operate/shipments';
-import { englishT, fill, useT, type Translate } from '@/lib/i18n';
 
 const DAY_MS = 86_400_000;
 
@@ -73,15 +72,15 @@ function reschedulePayload(slotDate: string, source: string): Record<string, str
   return { slot_date: slotDate, source };
 }
 
-function recoveryActionErrorMessage(error: unknown, t: Translate = englishT): string {
+function recoveryActionErrorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error ?? '');
   if (/branch_unmapped/i.test(raw)) {
-    return t('returnedToBranch.errors.branchUnmapped');
+    return 'Delivery slot policy could not map this returned shipment to an active branch. No recovery action was applied.';
   }
   if (/policy|configured|settings/i.test(raw)) {
-    return t('returnedToBranch.errors.policy');
+    return 'Recovery policy is not configured for this returned shipment. No recovery action was applied.';
   }
-  return t('returnedToBranch.errors.generic');
+  return 'Recovery action could not be completed. No recovery action was applied.';
 }
 
 // Wave 6 schema-drift remediation (OPERATIONS Section 11), W10-5 update:
@@ -117,7 +116,6 @@ interface ReturnActionReadback {
 }
 
 export function ReturnedToBranchModule() {
-  const t = useT();
   const { scope } = useIdentity();
   const canRead = useCapability(CAP.SHIPMENTS_READ);
   const { data, isLoading, refetch } = useReturnToBranch();
@@ -140,17 +138,17 @@ export function ReturnedToBranchModule() {
 
   const columns: Array<DataTableColumn<ReturnedRow>> = useMemo(
     () => [
-      { key: 'tracking_number', label: t('returnedToBranch.columns.tracking'), mono: true, sortable: true, filterable: true },
-      { key: 'destination_city', label: t('returnedToBranch.columns.destination'), sortable: true, filterable: true },
-      { key: 'cod_amount', label: t('returnedToBranch.columns.cod'), align: 'right', format: 'currency', type: 'number', sortable: true },
-      { key: 'service_type', label: t('returnedToBranch.columns.service'), lookup: 'service_type', sortable: true, filterable: true },
+      { key: 'tracking_number', label: 'Tracking', mono: true, sortable: true, filterable: true },
+      { key: 'destination_city', label: 'Destination', sortable: true, filterable: true },
+      { key: 'cod_amount', label: 'COD', align: 'right', format: 'currency', type: 'number', sortable: true },
+      { key: 'service_type', label: 'Service', lookup: 'service_type', sortable: true, filterable: true },
       // CLAIM-OPERATIONS-WIRING (Phase C1) — recommendation chip sourced from
       // the canonical resolve_ndr_branch_next_action_v1 RPC. Closes the P2 gap
       // row in __audit__/CROSSWALK/OPERATIONS.md (operators previously had no
       // hint for which lever to pull on a returned-to-branch shipment).
       {
         key: 'recommended',
-        label: t('returnedToBranch.columns.recommended'),
+        label: 'Recommended',
         sortable: false,
         filterable: false,
         render: (_raw, row) => (
@@ -160,9 +158,9 @@ export function ReturnedToBranchModule() {
           />
         ),
       },
-      { key: 'updated_at', label: t('returnedToBranch.columns.updated'), format: 'datetime', sortable: true },
+      { key: 'updated_at', label: 'Updated', format: 'datetime', sortable: true },
     ],
-    [scope.tenant?.id, t],
+    [scope.tenant?.id],
   );
 
   function openShipmentContext(row: ReturnedRow) {
@@ -215,25 +213,25 @@ export function ReturnedToBranchModule() {
     // (return-to-branch handover scopes via current_user_org_id()).
     // `scopeId` is identity-derived. See shipments.tsx top-of-file SSOT note.
     <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
-    <Chip key="seam" size="xs" label={<span>{t('returnedToBranch.seamChip')}</span>} />,
+    <Chip key="seam" size="xs" label={<span>Returned shipments queue</span>} />,
   ];
 
   function openIntakeScanModal() {
     modal.open({
-      title: t('returnedToBranch.intake.title'),
+      title: 'Intake scan · return to branch',
       body: <IntakeScanBody scan={scan} onDone={() => { modal.close(); refetch(); }} />,
     });
   }
 
   function openRescheduleModal(r: ReturnedRow) {
     modal.open({
-      title: fill(t('returnedToBranch.reschedule.title'), { tracking: r.tracking_number }),
+      title: `Reschedule delivery · ${r.tracking_number}`,
       body: (
         <RescheduleBody
           shipment={r}
           amend={amend}
           onApplied={(result) =>
-            recordActionReadback(r, t('returnedToBranch.actions.reschedule'), 'shipment_amend_cancel_v1', 'Returned shipment', result)
+            recordActionReadback(r, 'Reschedule delivery', 'shipment_amend_cancel_v1', 'Returned shipment', result)
           }
           onDone={() => { modal.close(); }}
         />
@@ -243,31 +241,34 @@ export function ReturnedToBranchModule() {
 
   function openReattemptDrawer(r: ReturnedRow) {
     drawer.open({
-      title: fill(t('returnedToBranch.reattempt.title'), { tracking: r.tracking_number }),
+      title: `Re-attempt · ${r.tracking_number}`,
       size: 'md',
       body: (
         <div>
-          <p className="state__hint">{t('returnedToBranch.reattempt.hint')}</p>
+          <p className="state__hint">
+            Queue a delivery re-attempt with the next available window. Use the
+            shipment drawer for richer slot selection.
+          </p>
           <div className="card" style={{ marginTop: '12px' }}>
-            <Kv k={t('returnedToBranch.columns.tracking')} v={<span className="mono">{r.tracking_number}</span>} />
-            <Kv k={t('returnedToBranch.columns.destination')} v={<bdi>{r.destination_city ?? '—'}</bdi>} />
-            <Kv k={t('returnedToBranch.columns.service')} v={<bdi>{r.service_type}</bdi>} />
+            <Kv k="Tracking" v={<span className="mono">{r.tracking_number}</span>} />
+            <Kv k="Destination" v={r.destination_city ?? '—'} />
+            <Kv k="Service" v={r.service_type} />
           </div>
         </div>
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
           <div style={{ flex: 1 }} />
-          <Button label={t('common.cancel')} kind="ghost" onClick={() => drawer.close()} />
+          <Button label="Cancel" kind="ghost" onClick={() => drawer.close()} />
           <Button
-            label={t('returnedToBranch.reattempt.queue')}
+            label="Queue re-attempt"
             iconName="rotate"
             kind="primary"
             capability={CAP.SHIPMENTS_WRITE}
             onClick={async () => {
               const slotDate = await resolveNextSlotDate();
               if (!slotDate) {
-                pushToast(t('returnedToBranch.reattempt.policyMissing'), 'warn');
+                pushToast('Delivery reschedule policy is not configured - re-attempt not queued', 'warn');
                 return;
               }
               const result = await amend.mutateAsync({
@@ -277,12 +278,12 @@ export function ReturnedToBranchModule() {
               });
               await recordActionReadback(
                 r,
-                t('returnedToBranch.actions.reattempt'),
+                'Re-attempt now',
                 'shipment_amend_cancel_v1',
                 'Returned shipment',
                 result,
               );
-              pushToast(fill(t('returnedToBranch.reattempt.queued'), { tracking: r.tracking_number }), 'good');
+              pushToast(`Delivery re-attempt queued - ${r.tracking_number}`, 'good');
               drawer.close();
             }}
           />
@@ -294,11 +295,16 @@ export function ReturnedToBranchModule() {
   if (!canRead) {
     return (
       <div className="page">
-        <PageHeader moduleKey="returnedToBranch" />
+        <PageHeader
+          moduleKey="returnedToBranch"
+          eyebrow="Operate"
+          titleAccent="Returned"
+          titlePlain="to branch"
+        />
         <StateView
           kind="denied"
           capability={CAP.SHIPMENTS_READ}
-          hint={t('returnedToBranch.denied')}
+          hint="You do not have permission to view returned-to-branch."
         />
       </div>
     );
@@ -308,11 +314,14 @@ export function ReturnedToBranchModule() {
     <div className="page">
       <PageHeader
         moduleKey="returnedToBranch"
+        eyebrow="Operate"
+        titleAccent="Returned"
+        titlePlain="to branch"
         pills={pills}
         actions={[
           <Button
             key="intake"
-            label={t('returnedToBranch.intakeScan')}
+            label="Intake scan"
             iconName="scan"
             kind="primary"
             capability={CAP.WAREHOUSE_SCAN}
@@ -329,39 +338,39 @@ export function ReturnedToBranchModule() {
           rows={rows}
           viewKey="returned_to_branch"
           entityKind="shipment"
-          emptyText={t('returnedToBranch.empty')}
+          emptyText="No shipments currently in return-to-branch state. Return inventory history remains available from each shipment and warehouse view."
           onRowClick={openShipmentContext}
           rowDeepLink={(r) => `/operate/shipments?focus=${encodeURIComponent(r.tracking_number)}`}
           rowActions={[
             {
-              label: t('returnedToBranch.actions.reschedule'),
+              label: 'Reschedule delivery',
               icon: 'history',
               kind: 'primary',
               capability: CAP.SHIPMENTS_WRITE,
               onClick: openRescheduleModal,
             },
             {
-              label: t('returnedToBranch.actions.reattempt'),
+              label: 'Re-attempt now',
               icon: 'rotate',
               capability: CAP.SHIPMENTS_WRITE,
               onClick: openReattemptDrawer,
             },
             {
-              label: t('returnedToBranch.actions.openShipment'),
+              label: 'Open shipment',
               icon: 'eye',
               onClick: openShipmentContext,
             },
           ]}
           bulkActions={[
             {
-              label: t('returnedToBranch.actions.bulkReschedule'),
+              label: 'Bulk reschedule (preview)',
               icon: 'history',
               kind: 'primary',
               capability: CAP.SHIPMENTS_WRITE,
               onClick: async (rs) => {
                 const slotDate = await resolveNextSlotDate();
                 if (!slotDate) {
-                  pushToast(t('returnedToBranch.bulk.previewPolicyMissing'), 'warn');
+                  pushToast('Delivery reschedule policy is not configured - bulk preview not queued', 'warn');
                   return;
                 }
                 await batchOp.mutateAsync({
@@ -370,17 +379,17 @@ export function ReturnedToBranchModule() {
                   payload: reschedulePayload(slotDate, 'returned_to_branch_bulk_reschedule'),
                   dryRun: true,
                 });
-                pushToast(fill(t('returnedToBranch.bulk.previewPassed'), { n: rs.length }), 'info');
+                pushToast(`Bulk re-attempt preview passed - ${rs.length} shipments`, 'info');
               },
             },
             {
-              label: t('returnedToBranch.actions.bulkReattempt'),
+              label: 'Bulk re-attempt',
               icon: 'rotate',
               capability: CAP.SHIPMENTS_WRITE,
               onClick: async (rs) => {
                 const slotDate = await resolveNextSlotDate();
                 if (!slotDate) {
-                  pushToast(t('returnedToBranch.bulk.reattemptPolicyMissing'), 'warn');
+                  pushToast('Delivery reschedule policy is not configured - bulk re-attempts not queued', 'warn');
                   return;
                 }
               const result = await batchOp.mutateAsync({
@@ -392,13 +401,13 @@ export function ReturnedToBranchModule() {
               if (firstRow) {
                 await recordActionReadback(
                   firstRow,
-                  fill(t('returnedToBranch.actions.bulkReattemptCount'), { n: rs.length }),
+                  `Bulk re-attempt (${rs.length})`,
                   'ui_execute_shipment_batch_operation_v1',
                   'returned_to_branch_reattempt',
                   result,
                 );
               }
-              pushToast(fill(t('returnedToBranch.bulk.queued'), { n: rs.length }), 'good');
+              pushToast(`Bulk re-attempts queued - ${rs.length} shipments`, 'good');
             },
           },
           ]}
@@ -414,27 +423,24 @@ export function ReturnedToBranchModule() {
 }
 
 function ReturnActionReadbackPanel({ readback }: { readback: ReturnActionReadback }) {
-  const t = useT();
   return (
     <section
       className="panel"
-      aria-label={t('returnedToBranch.readback.label')}
+      aria-label="Return action status"
       style={{ marginTop: '14px', display: 'grid', gap: '10px' }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 14px' }}>
-        <Chip size="sm" kind="good" label={t('returnedToBranch.readback.label')} />
-        <span className="state__hint">{t('returnedToBranch.readback.done')}</span>
+        <Chip size="sm" kind="good" label="Return action status" />
+        <span className="state__hint">Action completed and the returned-to-branch queue was refreshed</span>
       </div>
       <div className="card">
-        <Kv k={t('returnedToBranch.columns.tracking')} v={<span className="mono">{readback.trackingNumber}</span>} />
-        <Kv k={t('returnedToBranch.readback.action')} v={readback.action} />
-        <Kv k={t('returnedToBranch.readback.workflow')} v={readback.workflowRunId ? t('returnedToBranch.readback.started') : t('returnedToBranch.readback.pending')} />
-        <Kv k={t('returnedToBranch.readback.policyCheck')} v={readback.settingsResolutionId ? t('returnedToBranch.readback.passed') : t('returnedToBranch.readback.pending')} />
+        <Kv k="Tracking" v={<span className="mono">{readback.trackingNumber}</span>} />
+        <Kv k="Action" v={readback.action} />
+        <Kv k="Workflow" v={readback.workflowRunId ? 'Started' : 'Pending'} />
+        <Kv k="Policy check" v={readback.settingsResolutionId ? 'Passed' : 'Pending'} />
         <Kv
-          k={t('returnedToBranch.readback.queueStatus')}
-          v={readback.rowPresent
-            ? fill(t('returnedToBranch.readback.queueUpdated'), { n: readback.queueCount, at: readback.rowUpdatedAt })
-            : fill(t('returnedToBranch.readback.queueAwaiting'), { n: readback.queueCount })}
+          k="Queue status"
+          v={`${readback.queueCount} shipments; selected shipment ${readback.rowPresent ? `updated (${readback.rowUpdatedAt})` : 'awaiting refresh'}`}
         />
       </div>
     </section>
@@ -448,7 +454,6 @@ function IntakeScanBody({
   scan: ReturnType<typeof useScanEvent>;
   onDone: () => void;
 }) {
-  const t = useT();
   const branchesQuery = useResourceList<{ id: string; code?: string; name?: string }>('branches');
   const branches = branchesQuery.data?.rows ?? [];
   const [tracking, setTracking] = useState<string>('');
@@ -472,10 +477,10 @@ function IntakeScanBody({
           tracking_number: cleanTracking,
         },
       });
-      pushToast(fill(t('returnedToBranch.intake.recorded'), { tracking: tracking.trim() }), 'good');
+      pushToast(`Return intake scan recorded - ${tracking.trim()}`, 'good');
       onDone();
     } catch {
-      pushToast(t('returnedToBranch.intake.failed'), 'warn');
+      pushToast('Return intake scan could not be recorded. Try again.', 'warn');
     } finally {
       setBusy(false);
     }
@@ -483,9 +488,12 @@ function IntakeScanBody({
 
   return (
     <div>
-      <p className="state__hint">{t('returnedToBranch.intake.hint')}</p>
+      <p className="state__hint">
+        Scan or type a tracking number. The scan recorder captures return intake
+        and moves the shipment into the returned-to-branch workflow.
+      </p>
       <div className="field" style={{ marginTop: '12px' }}>
-        <label className="field__label">{t('returnedToBranch.intake.branch')}</label>
+        <label className="field__label">Branch</label>
         <select
           value={effectiveBranchId}
           onChange={(e) => setBranchId(e.target.value)}
@@ -493,26 +501,25 @@ function IntakeScanBody({
         >
           {branches.length === 0 ? (
             <option value="" disabled>
-              {branchesQuery.isLoading ? t('returnedToBranch.intake.loadingBranches') : t('returnedToBranch.intake.noBranches')}
+              {branchesQuery.isLoading ? 'Loading branchesâ€¦' : 'No branches configured'}
             </option>
           ) : (
             branches.map((branch) => (
               <option key={branch.id} value={branch.id}>
-                {branch.code && branch.name ? `${branch.code} · ${branch.name}` : branch.name ?? branch.code ?? branch.id}
+                {branch.code && branch.name ? `${branch.code} Â· ${branch.name}` : branch.name ?? branch.code ?? branch.id}
               </option>
             ))
           )}
         </select>
       </div>
       <div className="field" style={{ marginTop: '12px' }}>
-        <label className="field__label">{t('returnedToBranch.intake.trackingNumber')}</label>
+        <label className="field__label">Tracking number</label>
         <input
           autoFocus
           type="text"
           value={tracking}
           onChange={(e) => setTracking(e.target.value)}
-          dir="ltr"
-          placeholder="SHP-9381201" /* i18n-literal-ok: tracking-number format example */
+          placeholder="SHP-9381201"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && valid && !busy) {
               void submit();
@@ -521,9 +528,9 @@ function IntakeScanBody({
         />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
+        <Button label="Cancel" kind="ghost" onClick={onDone} />
         <Button
-          label={t('returnedToBranch.intake.recordScan')}
+          label="Record scan"
           iconName="scan"
           kind="primary"
           capability={CAP.WAREHOUSE_SCAN}
@@ -549,7 +556,6 @@ function RescheduleBody({
   // W54-C — reschedule offsets resolved strictly from canonical
   // `delivery_slot_policy.default_reschedule_offsets`. Replaces inline
   // ±1/2/3 day offset literals.
-  const t = useT();
   const slotPolicy = useResolveSettings('delivery_slot_policy', undefined);
   const offsets = defaultRescheduleOffsets(slotPolicy.data?.value);
   const dateOpts = offsets.map((offset) => slotDateFromOffset(offset));
@@ -563,25 +569,27 @@ function RescheduleBody({
     return (
       <StateView
         kind="error"
-        title={t('returnedToBranch.reschedule.policyMissingTitle')}
-        hint={t('returnedToBranch.reschedule.policyMissingHint')}
+        title="Delivery reschedule policy is not configured"
+        hint="Seed the reschedule offsets policy before opening the reschedule picker."
       />
     );
   }
   return (
     <div>
-      <p className="state__hint">{t('returnedToBranch.reschedule.hint')}</p>
+      <p className="state__hint">
+        Choose a new delivery date. The shipment and time window are checked before the reschedule is saved.
+      </p>
       {error ? (
         <div style={{ marginTop: '12px' }}>
           <StateView
             kind="error"
-            title={t('returnedToBranch.reschedule.blocked')}
+            title="Recovery action blocked"
             hint={error}
           />
         </div>
       ) : null}
       <div className="field" style={{ marginTop: '12px' }}>
-        <label className="field__label">{t('returnedToBranch.reschedule.to')}</label>
+        <label className="field__label">Reschedule to</label>
         <select value={effectivePickedDate} onChange={(e) => setPickedDate(e.target.value)}>
           {dateOpts.map((iso) => (
             <option key={iso} value={iso}>{iso}</option>
@@ -589,9 +597,9 @@ function RescheduleBody({
         </select>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
+        <Button label="Cancel" kind="ghost" onClick={onDone} />
         <Button
-          label={t('returnedToBranch.reschedule.apply')}
+          label="Apply reschedule"
           kind="primary"
           capability={CAP.SHIPMENTS_WRITE}
           disabled={amend.isPending}
@@ -606,12 +614,12 @@ function RescheduleBody({
               {
                 onSuccess: async (result) => {
                   await onApplied?.(result);
-                  pushToast(fill(t('returnedToBranch.reschedule.done'), { tracking: shipment.tracking_number, date: effectivePickedDate }), 'good');
+                  pushToast(`Delivery rescheduled - ${shipment.tracking_number} - ${effectivePickedDate}`, 'good');
                   onDone();
                 },
                 onError: (err) => {
-                  setError(recoveryActionErrorMessage(err, t));
-                  pushToast(t('returnedToBranch.reschedule.blockedToast'), 'warn');
+                  setError(recoveryActionErrorMessage(err));
+                  pushToast('Recovery action blocked - no shipment change was applied', 'warn');
                 },
               },
             );
@@ -634,7 +642,6 @@ function RecommendedReturnChip({
   shipment: ReturnedRow;
   organizationId: string | null;
 }) {
-  const t = useT();
   const { data, isLoading } = useNdrBranchNextAction(
     {
       organization_id: organizationId,
@@ -648,7 +655,7 @@ function RecommendedReturnChip({
     return <span className="state__hint" style={{ fontSize: '11px' }}>—</span>;
   }
   if (isLoading || !data) {
-    return <span className="state__hint" style={{ fontSize: '11px' }}>{t('returnedToBranch.resolving')}</span>;
+    return <span className="state__hint" style={{ fontSize: '11px' }}>resolving…</span>;
   }
   // W54-C — tone via canonical `ndr_branch_next_action` lookup_values.
   // metadata.tone (NO inline ternary). Chip label keeps the raw canonical

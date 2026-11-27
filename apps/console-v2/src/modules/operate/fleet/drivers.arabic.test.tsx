@@ -6,7 +6,7 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import * as api from '@/lib/api';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/fleet';
+import ar from '@/lib/seed-raw/i18n/areas/ar/fleet';
 import { DriversModule } from './drivers';
 
 // ScopePill is shared chrome owned elsewhere, so the header pills are limited to `.chip`.

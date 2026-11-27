@@ -6,7 +6,7 @@ import { renderWithProviders, type RenderWithProvidersOptions } from '@/test/ren
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { englishT } from '@/lib/i18n';
 import { CAP } from '@/lib/capabilities';
-import { ar } from '@/lib/seed-raw/i18n/areas/fleet';
+import ar from '@/lib/seed-raw/i18n/areas/ar/fleet';
 import { DriverApplicationsModule } from '@/modules/operate/fleet/driver-applications';
 
 const identity: RenderWithProvidersOptions['identity'] = {

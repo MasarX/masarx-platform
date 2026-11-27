@@ -27,8 +27,6 @@ const forcedCoreToggleDefaults = {
   RUN_LIVE_WEBHOOK_TESTS: 'false',
   RUN_LABELS_WEBHOOK_TESTS: 'false',
   RUN_EDGE_E2E: 'false',
-  RUN_RLS_INTEGRATION_TESTS: 'false',
-  RUN_MATRIX_E2E: 'false',
   RUN_LIVE_COMMS_TESTS: 'false',
   RUN_LIVE_3PL_TESTS: 'false',
 };

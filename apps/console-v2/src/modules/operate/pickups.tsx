@@ -52,7 +52,7 @@ import * as api from '@/lib/api';
 import { lookupRow } from '@/lib/api';
 import { CAP } from '@/lib/capabilities';
 import { localDateTimeInputToUtc, toDateTimeInputValue } from '@/lib/date-input';
-import { englishT, fill, useT, type Translate } from '@/lib/i18n';
+import { useI18n } from '@/lib/i18n';
 import { useConsoleNavigator } from '@/lib/useConsoleNavigator';
 import { openShipmentContextDrawer } from '@/modules/operate/shipments';
 
@@ -164,7 +164,6 @@ interface PickupSenderLookupRow extends Record<string, unknown> {
 }
 
 export function PickupsModule() {
-  const t = useT();
   const { scope } = useIdentity();
   const canRead = useCapability(CAP.PICKUPS_READ);
   const [activeTab, setActiveTab] = useState<TabId>('requests');
@@ -199,7 +198,7 @@ export function PickupsModule() {
     // (pickups scope via current_user_org_id()). `scopeId` is identity-derived.
     // See shipments.tsx top-of-file ScopePill SSOT note.
     <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
-    <Chip key="policy" size="xs" label={<span>{t('pickups.policyConfigured')}</span>} />,
+    <Chip key="policy" size="xs" label={<span>Pickup policy configured</span>} />,
   ];
 
   if (!canRead) {
@@ -207,11 +206,14 @@ export function PickupsModule() {
       <div className="page">
         <PageHeader
           moduleKey="pickups"
+          eyebrow="Operate"
+          titleAccent="Pickups"
+          titlePlain="— first-mile orchestration"
         />
         <StateView
           kind="denied"
           capability={CAP.PICKUPS_READ}
-          hint={t('pickups.denied')}
+          hint="You do not have permission to view pickups."
         />
       </div>
     );
@@ -221,11 +223,14 @@ export function PickupsModule() {
     <div className="page">
       <PageHeader
         moduleKey="pickups"
+        eyebrow="Operate"
+        titleAccent="Pickups"
+        titlePlain="— first-mile orchestration"
         pills={pills}
         actions={[
           <Button
             key="create-request"
-            label={t('pickups.createRequest')}
+            label="Create request"
             iconName="plus"
             kind="primary"
             capability={CAP.SHIPMENTS_WRITE}
@@ -233,7 +238,7 @@ export function PickupsModule() {
             onClick={() => {
               setActiveTab('requests');
               modal.open({
-                title: t('pickups.createRequestTitle'),
+                title: 'Create pickup request',
                 body: (
                   <CreatePickupRequestBody
                     orgId={orgId}
@@ -254,7 +259,7 @@ export function PickupsModule() {
           />,
           <Button
             key="create"
-            label={t('pickups.createWave')}
+            label="Create wave"
             iconName="plus"
             kind="primary"
             capability={CAP.FLEET_WRITE}
@@ -264,7 +269,7 @@ export function PickupsModule() {
               // routes to the Requests tab so the operator can pick which
               // requests to bundle into the new wave.
               setActiveTab('requests');
-              pushToast(t('pickups.createWaveHint'), 'info');
+              pushToast('Select pickup requests below, then "Create wave from selected"', 'info');
             }}
           />,
         ]}
@@ -278,7 +283,7 @@ export function PickupsModule() {
             onClick={() => setActiveTab(id)}
             data-key={id}
           >
-            {t(`pickups.tabs.${id}`)}
+            {id.charAt(0).toUpperCase() + id.slice(1)}
           </div>
         ))}
       </div>
@@ -463,12 +468,12 @@ async function createPickupRequestStrict(payload: unknown): Promise<CreatePickup
   return { ...rec, ...body, shipment_id: shipmentId };
 }
 
-function pushPickupWaveFailure(error: unknown, t: Translate = englishT) {
-  pushToast(t('pickups.toast.waveFailed'), 'danger');
+function pushPickupWaveFailure(error: unknown) {
+  pushToast('Pickup wave could not be created. Try again.', 'danger');
 }
 
-function pushPickupRequestFailure(error: unknown, t: Translate = englishT) {
-  pushToast(t('pickups.toast.requestFailed'), 'danger');
+function pushPickupRequestFailure(error: unknown) {
+  pushToast('Pickup request could not be created. Try again.', 'danger');
 }
 
 function datetimeLocalOffset(minutesFromNow: number): string {
@@ -488,7 +493,7 @@ function CreatePickupRequestBody({
   existingRequests: PickupRequestRow[];
   onCreated: (readback: PickupRequestReadback) => Promise<void>;
 }) {
-  const t = useT();
+  const { t } = useI18n();
   const clientsQuery = useCompleteResourceList<PickupClientLookupRow>('clients');
   const sendersQuery = useCompleteResourceList<PickupSenderLookupRow>('senders');
   const clients = (clientsQuery.data?.rows ?? []) as PickupClientLookupRow[];
@@ -518,7 +523,7 @@ function CreatePickupRequestBody({
 
   async function submit() {
     if (!orgId) {
-      setError(t('pickups.form.noTenant'));
+      setError('No tenant scope available.');
       return;
     }
     let originAddress: Record<string, unknown>;
@@ -527,11 +532,11 @@ function CreatePickupRequestBody({
       if (!isRecord(parsed)) throw new Error('Origin address must be a JSON object.');
       originAddress = parsed;
     } catch {
-      setError(t('pickups.form.originInvalid'));
+      setError('Origin address must be valid JSON.');
       return;
     }
     if (!clientId || !windowStart || !windowEnd) {
-      setError(t('pickups.form.required'));
+      setError('Client and pickup window are required.');
       return;
     }
     const start = localDateTimeInputToUtc(windowStart);
@@ -564,10 +569,10 @@ function CreatePickupRequestBody({
         rpc: 'create_pickup_request_v1',
         refreshedAt: new Date().toISOString(),
       });
-      pushToast(res.tracking_number ? fill(t('pickups.toast.requestCreatedTracking'), { tracking: res.tracking_number }) : t('pickups.toast.requestCreated'), 'good');
+      pushToast(res.tracking_number ? `Pickup request created - ${res.tracking_number}` : 'Pickup request created', 'good');
     } catch (err) {
-      setError(t('pickups.form.failed'));
-      pushPickupRequestFailure(err, t);
+      setError('Pickup request could not be created. Check the form and try again.');
+      pushPickupRequestFailure(err);
     } finally {
       setSubmitting(false);
     }
@@ -576,52 +581,52 @@ function CreatePickupRequestBody({
   return (
     <div>
       <p className="state__hint">
-        {t('pickups.form.intro')}
+        Creates a pickup request and refreshes this list before success is shown.
       </p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px', marginTop: '12px' }}>
         <div className="field">
-          <label className="field__label">{t('pickups.form.client')}</label>
+          <label className="field__label">Client</label>
           <select data-testid="pickup-create-request-client" value={clientId} onChange={(e) => setClientId(e.target.value)}>
             {defaultClientId && clients.length === 0 ? <option value={defaultClientId}>{defaultClientId}</option> : null}
             {clients.map((client) => <option key={client.id} value={client.id}>{lookupLabel(client)}</option>)}
           </select>
         </div>
         <div className="field">
-          <label className="field__label">{t('pickups.form.sender')}</label>
+          <label className="field__label">Sender</label>
           <select data-testid="pickup-create-request-sender" value={senderId} onChange={(e) => setSenderId(e.target.value)}>
-            <option value="">{t('pickups.form.noSender')}</option>
+            <option value="">No sender</option>
             {defaultSenderId && senders.length === 0 ? <option value={defaultSenderId}>{defaultSenderId}</option> : null}
             {senders.map((sender) => <option key={sender.id} value={sender.id}>{lookupLabel(sender)}</option>)}
           </select>
         </div>
         <div className="field">
-          <label className="field__label">{t('pickups.form.windowStart')}</label>
+          <label className="field__label">Window start</label>
           <input data-testid="pickup-create-request-window-start" type="datetime-local" value={windowStart} onChange={(e) => setWindowStart(e.target.value)} />
         </div>
         <div className="field">
-          <label className="field__label">{t('pickups.form.windowEnd')}</label>
+          <label className="field__label">Window end</label>
           <input data-testid="pickup-create-request-window-end" type="datetime-local" value={windowEnd} onChange={(e) => setWindowEnd(e.target.value)} />
         </div>
         <div className="field">
-          <label className="field__label">{t('pickups.form.boxes')}</label>
+          <label className="field__label">Boxes</label>
           <input data-testid="pickup-create-request-box-count" type="number" min={1} value={boxCount} onChange={(e) => setBoxCount(e.target.value)} />
         </div>
         <div className="field">
-          <label className="field__label">{t('pickups.form.trackingNumber')}</label>
-          <input data-testid="pickup-create-request-tracking" value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} placeholder={t('pickups.form.optional')} />
+          <label className="field__label">Tracking number</label>
+          <input data-testid="pickup-create-request-tracking" value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} placeholder="Optional" />
         </div>
         <div className="field" style={{ gridColumn: '1 / -1' }}>
-          <label className="field__label">{t('pickups.form.clientReference')}</label>
+          <label className="field__label">Client reference</label>
           <input data-testid="pickup-create-request-client-reference" value={clientReferenceNumber} onChange={(e) => setClientReferenceNumber(e.target.value)} />
         </div>
         <div className="field" style={{ gridColumn: '1 / -1' }}>
-          <label className="field__label">{t('pickups.form.originAddress')}</label>
+          <label className="field__label">Origin address JSON</label>
           <textarea data-testid="pickup-create-request-origin-address" rows={8} value={originAddressJson} onChange={(e) => setOriginAddressJson(e.target.value)} />
         </div>
       </div>
-      {error ? <StateView kind="error" title={t('pickups.form.failedTitle')} hint={error} /> : null}
+      {error ? <StateView kind="error" title="Pickup request creation failed" hint={error} /> : null}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-        <Button label={t('pickups.createRequestTitle')} kind="primary" capability={CAP.SHIPMENTS_WRITE} disabled={submitting} onClick={() => void submit()} testId="pickup-create-request-submit" />
+        <Button label="Create pickup request" kind="primary" capability={CAP.SHIPMENTS_WRITE} disabled={submitting} onClick={() => void submit()} testId="pickup-create-request-submit" />
       </div>
     </div>
   );
@@ -648,26 +653,25 @@ function RequestsTab({
   onOpenShipment: (shipmentId: string) => void;
   requestReadback: PickupRequestReadback | null;
 }) {
-  const t = useT();
   const go = useConsoleNavigator();
   const [waveReadback, setWaveReadback] = useState<PickupWaveReadback | null>(null);
   const columns: Array<DataTableColumn<PickupRequestRow>> = useMemo(
     () => [
       // W17-3: column keys aligned to canonical pickup_requests_list_v1 columns.
-      { key: 'shipment_id', label: t('pickups.columns.request'), mono: true, sortable: true, filterable: true },
-      { key: 'sender_id', label: t('pickups.columns.sender'), sortable: true, filterable: true },
-      { key: 'client_id', label: t('pickups.columns.client'), sortable: true, filterable: true },
-      { key: 'requested_window_start_at', label: t('pickups.columns.expected'), format: 'datetime', sortable: true },
-      { key: 'box_count', label: t('pickups.columns.packages'), align: 'right', type: 'number', sortable: true },
+      { key: 'shipment_id', label: 'Request', mono: true, sortable: true, filterable: true },
+      { key: 'sender_id', label: 'Sender', sortable: true, filterable: true },
+      { key: 'client_id', label: 'Client', sortable: true, filterable: true },
+      { key: 'requested_window_start_at', label: 'Expected', format: 'datetime', sortable: true },
+      { key: 'box_count', label: 'Packages', align: 'right', type: 'number', sortable: true },
       {
         key: 'status',
-        label: t('pickups.columns.status'),
+        label: 'Status',
         sortable: true,
         filterable: true,
         lookup: 'pickup_request_status',
       },
     ],
-    [t],
+    [],
   );
 
   function openAddToWavePicker(rs: PickupRequestRow[]) {
@@ -680,7 +684,7 @@ function RequestsTab({
       (w) => lookupRow('pickup_wave_status', w.status)?.metadata?.is_assignable === true,
     );
     modal.open({
-      title: fill(t('pickups.requests.addToWaveTitle'), { n: rs.length }),
+      title: `Add ${rs.length} request(s) to wave`,
       body: (
         <AddToWaveBody
           requests={rs}
@@ -699,7 +703,7 @@ function RequestsTab({
   function openReschedulePickup(r: PickupRequestRow) {
     modal.open({
       // W17-3: display canonical shipment_id chip in modal title.
-      title: fill(t('pickups.requests.rescheduleTitle'), { id: r.shipment_id }),
+      title: `Reschedule pickup · ${r.shipment_id}`,
       body: (
         <ReschedulePickupBody
           request={r}
@@ -721,25 +725,25 @@ function RequestsTab({
   ) {
     await onChanged();
     setWaveReadback({
-      title: t('pickups.waveStatus'),
+      title: 'Pickup wave status',
       waveId: res.wave_id,
       shipmentCount,
       rpc: 'create_pickup_wave_v1',
       source,
-      result: res.created === false ? t('pickups.waveReused') : t('pickups.waveCreated'),
+      result: res.created === false ? 'Existing wave reused' : 'Wave created',
       refreshedAt: new Date().toISOString(),
     });
   }
   return (
     <>
     {requestReadback ? (
-      <div className="card" aria-label={t('pickups.requests.status')} style={{ marginBottom: '12px' }}>
-        <div className="eyebrow">{t('pickups.requests.status')}</div>
-        <div className="state__hint">{t('pickups.requests.createdRefreshed')}</div>
+      <div className="card" aria-label="Pickup request status" style={{ marginBottom: '12px' }}>
+        <div className="eyebrow">Pickup request status</div>
+        <div className="state__hint">Request created and the pickup queue was refreshed</div>
         <div className="state__hint" style={{ marginTop: '6px' }}>
-          <bdi>{requestReadback.trackingNumber ?? requestReadback.clientReferenceNumber ?? t('pickups.requests.created')}</bdi>
+          {requestReadback.trackingNumber ?? requestReadback.clientReferenceNumber ?? 'Request created'}
         </div>
-        <div className="state__hint">{t('pickups.requests.updated')} <bdi>{requestReadback.refreshedAt}</bdi></div>
+        <div className="state__hint">Updated {requestReadback.refreshedAt}</div>
       </div>
     ) : null}
     {waveReadback ? <PickupWaveReadbackPanel readback={waveReadback} /> : null}
@@ -752,20 +756,20 @@ function RequestsTab({
       rowDeepLink={(r) => `/operate/shipments?focus=${encodeURIComponent(r.shipment_id)}`}
       rowActions={[
         {
-          label: t('pickups.requests.addToWave'),
+          label: 'Add to wave…',
           icon: 'plus',
           kind: 'primary',
           capability: CAP.FLEET_WRITE,
           onClick: (r) => openAddToWavePicker([r]),
         },
         {
-          label: t('pickups.requests.reschedule'),
+          label: 'Reschedule pickup',
           icon: 'history',
           capability: CAP.SHIPMENTS_WRITE,
           onClick: openReschedulePickup,
         },
         {
-          label: t('pickups.requests.viewSender'),
+          label: 'View sender',
           icon: 'right',
           onClick: () => {
             go('/customers/senders');
@@ -774,13 +778,13 @@ function RequestsTab({
       ]}
       bulkActions={[
         {
-          label: t('pickups.requests.createFromSelected'),
+          label: 'Create wave from selected',
           icon: 'plus',
           kind: 'primary',
           capability: CAP.FLEET_WRITE,
           onClick: async (rs) => {
             if (!orgId) {
-              pushToast(t('pickups.toast.tenantRequiredWave'), 'warn');
+              pushToast('Tenant context is required to create a pickup wave.', 'warn');
               return;
             }
             // Canonical key is `shipment_ids` (migration 202603191130
@@ -794,14 +798,14 @@ function RequestsTab({
                 shipment_ids: rs.map((r) => r.shipment_id),
               });
               await recordWaveReadback(res, rs.length, 'request_bulk_create_wave');
-              pushToast(fill(t('pickups.toast.waveCreatedCount'), { n: rs.length }), 'good');
+              pushToast(`Pickup wave created - ${rs.length} requests`, 'good');
             } catch (err) {
-              pushPickupWaveFailure(err, t);
+              pushPickupWaveFailure(err);
             }
           },
         },
         {
-          label: t('pickups.requests.addToExisting'),
+          label: 'Add to existing wave…',
           icon: 'plus',
           capability: CAP.FLEET_WRITE,
           onClick: openAddToWavePicker,
@@ -827,14 +831,13 @@ function AddToWaveBody({
   // 202603191130 line 1940). The synthesized `wave_id` display label was
   // dropped; we now use `route_run_id` as the radio value SSOT and format
   // the visible label via `waveDisplayLabel(w)`.
-  const t = useT();
   const [pickedWave, setPickedWave] = useState<string>(assignableWaves[0]?.route_run_id ?? '__new__');
   const shipmentIds = requests.map((r) => r.shipment_id);
 
   return (
     <div>
       <p className="state__hint">
-        {t('pickups.addToWave.intro')}
+        Either create a new wave from the selected requests, or attach them to an existing planned wave.
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '12px' }}>
         <label className="card" style={{ cursor: 'pointer' }}>
@@ -844,14 +847,14 @@ function AddToWaveBody({
             value="__new__"
             checked={pickedWave === '__new__'}
             onChange={() => setPickedWave('__new__')}
-            style={{ marginInlineEnd: '8px' }}
+            style={{ marginRight: '8px' }}
           />
-          <strong>{t('pickups.addToWave.createNew')}</strong>
-          <span className="mono" style={{ marginInlineStart: '8px', color: 'var(--ink-3)' }}>{fill(t('pickups.addToWave.requestCount'), { n: shipmentIds.length })}</span>
+          <strong>Create new wave</strong>
+          <span className="mono" style={{ marginLeft: '8px', color: 'var(--ink-3)' }}>{`· ${shipmentIds.length} requests`}</span>
         </label>
         {assignableWaves.map((w) => {
           const value = w.route_run_id ?? w.id;
-          const label = waveDisplayLabel(w, t);
+          const label = waveDisplayLabel(w);
           return (
             <label key={value} className="card" style={{ cursor: 'pointer' }}>
               <input
@@ -860,24 +863,24 @@ function AddToWaveBody({
                 value={value}
                 checked={pickedWave === value}
                 onChange={() => setPickedWave(value)}
-                style={{ marginInlineEnd: '8px' }}
+                style={{ marginRight: '8px' }}
               />
               <strong>{label}</strong>
-              <bdi style={{ marginInlineStart: '8px' }}>{waveBranchLabel(w, undefined, t)}</bdi>
-              <span className="mono" style={{ marginInlineStart: '8px', color: 'var(--ink-3)' }}>{fill(t('pickups.addToWave.waveCounts'), { req: w.pickup_stop_count, pkgs: w.total_box_count })}</span>
+              <span style={{ marginLeft: '8px' }}>{waveBranchLabel(w)}</span>
+              <span className="mono" style={{ marginLeft: '8px', color: 'var(--ink-3)' }}>{`· ${w.pickup_stop_count} req · ${w.total_box_count} pkgs`}</span>
             </label>
           );
         })}
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-        <Button label={t('common.cancel')} kind="ghost" onClick={() => void onDone()} />
+        <Button label="Cancel" kind="ghost" onClick={() => void onDone()} />
         <Button
-          label={t('common.confirm')}
+          label="Confirm"
           kind="primary"
           capability={CAP.FLEET_WRITE}
           onClick={async () => {
             if (!orgId) {
-              pushToast(t('pickups.toast.tenantRequiredWave'), 'warn');
+              pushToast('Tenant context is required to create a pickup wave.', 'warn');
               void onDone();
               return;
             }
@@ -891,20 +894,20 @@ function AddToWaveBody({
             try {
               const res = await createPickupWaveStrict(payload);
               pushToast(
-                fill(t(res.created === false ? 'pickups.toast.waveReusedCount' : 'pickups.toast.waveCreatedCount'), { n: shipmentIds.length }),
+                `Pickup wave ${res.created === false ? 'reused' : 'created'} - ${shipmentIds.length} requests`,
                 'good',
               );
               await onDone({
-                title: t('pickups.waveStatus'),
+                title: 'Pickup wave status',
                 waveId: res.wave_id,
                 shipmentCount: shipmentIds.length,
                 rpc: 'create_pickup_wave_v1',
                 source: pickedWave === '__new__' ? 'request_create_wave' : 'request_add_to_existing_wave',
-                result: res.created === false ? t('pickups.waveReused') : t('pickups.waveCreated'),
+                result: res.created === false ? 'Existing wave reused' : 'Wave created',
                 refreshedAt: new Date().toISOString(),
               });
             } catch (err) {
-              pushPickupWaveFailure(err, t);
+              pushPickupWaveFailure(err);
             }
           }}
         />
@@ -917,8 +920,9 @@ function AddToWaveBody({
 // `wave_id` was a synthesized FE-only display string; the canonical SSOT is
 // `route_run_id` (uuid). This helper preserves the operator-facing chip text
 // without re-introducing the dropped column.
-function waveDisplayLabel(w: PickupWaveRow, t: Translate = englishT): string {
-  return fill(t('pickups.waves.label'), { id: w.route_run_id ? `${w.route_run_id.slice(0, 8)}…` : w.id });
+function waveDisplayLabel(w: PickupWaveRow): string {
+  if (w.route_run_id) return `wave · ${w.route_run_id.slice(0, 8)}…`;
+  return `wave · ${w.id}`;
 }
 
 function branchLabelMap(rows: BranchLookupRow[]): Map<string, string> {
@@ -936,17 +940,17 @@ function branchLabelMap(rows: BranchLookupRow[]): Map<string, string> {
   return map;
 }
 
-function waveBranchLabel(w: PickupWaveRow, branchLabelById?: Map<string, string>, t: Translate = englishT): string {
+function waveBranchLabel(w: PickupWaveRow, branchLabelById?: Map<string, string>): string {
   const projected = String(w.branch_label ?? '').trim();
   if (projected) return projected;
   const branchId = String(w.branch_id ?? '').trim();
-  if (!branchId) return t('pickups.waves.unassignedHub');
-  return branchLabelById?.get(branchId) ?? branchLabelById?.get(branchId.toUpperCase()) ?? branchLabelById?.get(branchId.toLowerCase()) ?? fill(t('pickups.waves.branchFallback'), { id: branchId });
+  if (!branchId) return 'Unassigned hub';
+  return branchLabelById?.get(branchId) ?? branchLabelById?.get(branchId.toUpperCase()) ?? branchLabelById?.get(branchId.toLowerCase()) ?? `Branch ${branchId}`;
 }
 
-function waveDriverLabel(w: PickupWaveRow, driverLabelById?: Map<string, string>, t: Translate = englishT): string {
-  if (!w.driver_user_id) return t('pickups.waves.unassigned');
-  return w.driver_label || driverLabelById?.get(w.driver_user_id) || fill(t('pickups.waves.driverFallback'), { id: w.driver_user_id });
+function waveDriverLabel(w: PickupWaveRow, driverLabelById?: Map<string, string>): string {
+  if (!w.driver_user_id) return 'Unassigned';
+  return w.driver_label || driverLabelById?.get(w.driver_user_id) || `Driver ${w.driver_user_id}`;
 }
 
 function ReschedulePickupBody({
@@ -965,7 +969,6 @@ function ReschedulePickupBody({
   // strictly from canonical `pickup_policy`. Replaces inline `[+1, +2, +3]`
   // day-offset literals. Surfaces a fail-loud StateView when the policy
   // row is missing (no neutral default — operators see the gap).
-  const t = useT();
   const pickupPolicy = useResolveSettings('pickup_policy', undefined);
   const policyValue = pickupPolicy.data?.value as
     | {
@@ -985,8 +988,8 @@ function ReschedulePickupBody({
     return (
       <StateView
         kind="error"
-        title={t('pickups.reschedule.policyMissing')}
-        hint={t('pickups.reschedule.policyMissingHint')}
+        title="Pickup reschedule policy is not configured"
+        hint="Seed the pickup reschedule offsets before rendering the date picker."
       />
     );
   }
@@ -994,10 +997,10 @@ function ReschedulePickupBody({
   return (
     <div>
       <p className="state__hint">
-        {t('pickups.reschedule.intro')}
+        Preview or apply a pickup reschedule with the selected service window.
       </p>
       <div className="field" style={{ marginTop: '12px' }}>
-        <label className="field__label">{t('pickups.reschedule.newDate')}</label>
+        <label className="field__label">New pickup date</label>
         <select value={pickedDate} onChange={(e) => setPickedDate(e.target.value)}>
           {dateOpts.map((d) => {
             const iso = d.toISOString().slice(0, 10);
@@ -1007,18 +1010,18 @@ function ReschedulePickupBody({
       </div>
       <div style={{ display: 'flex', gap: '8px' }}>
         <div className="field" style={{ flex: 1 }}>
-          <label className="field__label">{t('pickups.form.windowStart')}</label>
+          <label className="field__label">Window start</label>
           <input type="time" value={windowStart} onChange={(e) => setWindowStart(e.target.value)} />
         </div>
         <div className="field" style={{ flex: 1 }}>
-          <label className="field__label">{t('pickups.form.windowEnd')}</label>
+          <label className="field__label">Window end</label>
           <input type="time" value={windowEnd} onChange={(e) => setWindowEnd(e.target.value)} />
         </div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
+        <Button label="Cancel" kind="ghost" onClick={onDone} />
         <Button
-          label={t('common.preview')}
+          label="Preview"
           kind="ghost"
           onClick={async () => {
             // W17-3: canonical FK is `shipment_id` (migration line 69).
@@ -1028,11 +1031,11 @@ function ReschedulePickupBody({
               payload: { window: { start: `${pickedDate}T${windowStart}:00Z`, end: `${pickedDate}T${windowEnd}:00Z` } },
               dryRun: true,
             });
-            pushToast(t('pickups.toast.reschedulePreview'), 'info');
+            pushToast('Pickup reschedule preview passed', 'info');
           }}
         />
         <Button
-          label={t('pickups.reschedule.apply')}
+          label="Apply reschedule"
           kind="primary"
           capability={CAP.SHIPMENTS_WRITE}
           onClick={async () => {
@@ -1047,10 +1050,10 @@ function ReschedulePickupBody({
             // and abort so operators see the gap loudly.
             const wf = (res as { workflow_run_id?: string }).workflow_run_id;
             if (!wf) {
-            pushToast(t('pickups.toast.workflowFailed'), 'danger');
+            pushToast('Pickup workflow could not be started. Try again.', 'danger');
               return;
             }
-            pushToast(t('pickups.toast.workflowStarted'), 'good');
+            pushToast('Pickup workflow started', 'good');
             onDone();
           }}
         />
@@ -1079,7 +1082,6 @@ function WavesTab({
   onChanged: () => void;
   drawer: ReturnType<typeof useDrawer>;
 }) {
-  const t = useT();
   const driversQuery = useCompleteResourceList<DriverRow>('drivers');
   const drivers = (driversQuery.data?.rows ?? []) as DriverRow[];
   const branchesQuery = useCompleteResourceList<BranchLookupRow>('branches');
@@ -1090,10 +1092,10 @@ function WavesTab({
     () =>
       (data?.rows ?? []).map((wave) => ({
         ...wave,
-        branch_label: waveBranchLabel(wave, branchLabelById, t),
-        driver_label: waveDriverLabel(wave, driverLabelById, t),
+        branch_label: waveBranchLabel(wave, branchLabelById),
+        driver_label: waveDriverLabel(wave, driverLabelById),
       })),
-    [data?.rows, branchLabelById, driverLabelById, t],
+    [data?.rows, branchLabelById, driverLabelById],
   );
   const [assignTarget, setAssignTarget] = useState<AssignTarget | null>(null);
   const [assignmentReadback, setAssignmentReadback] = useState<PickupWaveReadback | null>(null);
@@ -1103,20 +1105,20 @@ function WavesTab({
       // W17-3: column keys aligned to canonical pickup_waves_list_v1 columns.
       // `wave_id` was dropped (display label only); the canonical SSOT chip is
       // route_run_id (uuid) — surfaced in the Wave column with mono formatting.
-      { key: 'route_run_id', label: t('pickups.columns.wave'), mono: true, sortable: true, filterable: true },
-      { key: 'branch_label', label: t('pickups.columns.hub'), sortable: true, filterable: true },
-      { key: 'driver_label', label: t('pickups.columns.driver'), sortable: true, filterable: true },
-      { key: 'pickup_stop_count', label: t('pickups.columns.requests'), align: 'right', type: 'number', sortable: true },
-      { key: 'total_box_count', label: t('pickups.columns.packages'), align: 'right', type: 'number', sortable: true },
+      { key: 'route_run_id', label: 'Wave', mono: true, sortable: true, filterable: true },
+      { key: 'branch_label', label: 'Hub', sortable: true, filterable: true },
+      { key: 'driver_label', label: 'Driver', sortable: true, filterable: true },
+      { key: 'pickup_stop_count', label: 'Requests', align: 'right', type: 'number', sortable: true },
+      { key: 'total_box_count', label: 'Packages', align: 'right', type: 'number', sortable: true },
       {
         key: 'status',
-        label: t('pickups.columns.status'),
+        label: 'Status',
         sortable: true,
         filterable: true,
         lookup: 'pickup_wave_status',
       },
     ],
-    [t],
+    [],
   );
 
   // Canonical assign payload per migration 202603191130 line 1940-1985.
@@ -1125,17 +1127,17 @@ function WavesTab({
   // deterministic idempotency_key for the visible assignment transition.
   async function applyAssign(wave: PickupWaveRow, driverId: string) {
     if (!orgId) {
-      pushToast(t('pickups.toast.tenantRequiredAssign'), 'warn');
+      pushToast('Tenant context is required to assign a driver.', 'warn');
       return null;
     }
     const routeRunId = wave.route_run_id;
     if (!routeRunId) {
       // W17-3: display label is now derived from route_run_id (canonical).
-      pushToast(fill(t('pickups.toast.noRouteRun'), { wave: waveDisplayLabel(wave, t) }), 'warn');
+      pushToast(`Wave ${waveDisplayLabel(wave)} has no route run yet - cannot assign`, 'warn');
       return null;
     }
     if (wave.driver_user_id === driverId) {
-      pushToast(fill(t('pickups.toast.alreadyAssigned'), { wave: waveDisplayLabel(wave, t), driver: driverLabelById.get(driverId) ?? t('pickups.toast.selectedDriver') }), 'good');
+      pushToast(`Pickup wave already assigned - ${waveDisplayLabel(wave)} - ${driverLabelById.get(driverId) ?? 'selected driver'}`, 'good');
       return null;
     }
     const fromDriver = wave.driver_user_id || 'unassigned';
@@ -1155,17 +1157,17 @@ function WavesTab({
       if (result) {
         await onChanged();
         setAssignmentReadback({
-          title: t('pickups.waves.assignmentStatus'),
+          title: 'Pickup assignment status',
           waveId: result.wave_id,
           waveCount: 1,
           driverLabel: driverLabelById.get(driverId) ?? driverId,
           rpc: 'assign_pickup_wave_v1',
           source: 'wave_assign_driver',
-          result: t('pickups.waves.confirmed'),
+          result: 'Driver assignment confirmed',
           refreshedAt: new Date().toISOString(),
         });
         // W17-3: derive display label from canonical route_run_id.
-        pushToast(fill(t('pickups.toast.assigned'), { wave: waveDisplayLabel(w, t), driver: driverLabelById.get(driverId) ?? t('pickups.toast.assignedDriver') }), 'good');
+        pushToast(`Pickup wave assigned - ${waveDisplayLabel(w)} - ${driverLabelById.get(driverId) ?? 'assigned driver'}`, 'good');
         drawer.close();
       }
     } else {
@@ -1178,43 +1180,43 @@ function WavesTab({
       if (okCount > 0) {
         await onChanged();
         setAssignmentReadback({
-          title: t('pickups.waves.assignmentStatus'),
-          waveId: fill(t('pickups.waves.count'), { n: okCount }),
+          title: 'Pickup assignment status',
+          waveId: `${okCount} waves`,
           waveCount: okCount,
           driverLabel: driverLabelById.get(driverId) ?? driverId,
           rpc: 'assign_pickup_wave_v1',
           source: 'wave_bulk_assign_driver',
-          result: t('pickups.waves.confirmed'),
+          result: 'Driver assignment confirmed',
           refreshedAt: new Date().toISOString(),
         });
       }
-      pushToast(fill(t('pickups.toast.bulkAssigned'), { ok: okCount, total: ws.length, driver: driverLabelById.get(driverId) ?? t('pickups.toast.assignedDriver') }), 'good');
+      pushToast(`Pickup waves assigned - ${okCount}/${ws.length} - ${driverLabelById.get(driverId) ?? 'assigned driver'}`, 'good');
     }
     setAssignTarget(null);
   }
 
   function openWaveDetail(w: PickupWaveRow) {
-    const hubLabel = waveBranchLabel(w, branchLabelById, t);
-    const driverLabel = waveDriverLabel(w, driverLabelById, t);
+    const hubLabel = waveBranchLabel(w, branchLabelById);
+    const driverLabel = waveDriverLabel(w, driverLabelById);
     drawer.open({
       // W17-3: title resolves canonical branch_id chip (display via branches join
       // is deferred to G1 paired registry projection).
-      title: `${waveDisplayLabel(w, t)} · ${hubLabel}`,
+      title: `${waveDisplayLabel(w)} · ${hubLabel}`,
       size: 'lg',
       body: (
         <div>
-          <h4 className="eyebrow">{t('pickups.waves.summary')}</h4>
+          <h4 className="eyebrow">Wave summary</h4>
           <div className="card">
-            <Kv k={t('pickups.columns.wave')} v={<span className="mono">{waveDisplayLabel(w, t)}</span>} />
-            <Kv k={t('pickups.waves.routeRun')} v={<span className="mono">{w.route_run_id ?? '—'}</span>} />
-            <Kv k={t('pickups.columns.hub')} v={<bdi>{hubLabel}</bdi>} />
-            <Kv k={t('pickups.columns.driver')} v={w.driver_user_id ? <bdi>{driverLabel}</bdi> : <span className="state__hint">{t('pickups.waves.unassigned')}</span>} />
-            <Kv k={t('pickups.columns.requests')} v={String(w.pickup_stop_count)} />
-            <Kv k={t('pickups.columns.packages')} v={String(w.total_box_count)} />
-            <Kv k={t('pickups.columns.status')} v={<Chip size="xs" label={w.status} />} />
+            <Kv k="Wave" v={<span className="mono">{waveDisplayLabel(w)}</span>} />
+            <Kv k="Route run" v={<span className="mono">{w.route_run_id ?? '—'}</span>} />
+            <Kv k="Hub" v={<span>{hubLabel}</span>} />
+            <Kv k="Driver" v={w.driver_user_id ? <span>{driverLabel}</span> : <span className="state__hint">Unassigned</span>} />
+            <Kv k="Requests" v={String(w.pickup_stop_count)} />
+            <Kv k="Packages" v={String(w.total_box_count)} />
+            <Kv k="Status" v={<Chip size="xs" label={w.status} />} />
           </div>
           <p className="state__hint" style={{ marginTop: '10px' }}>
-            {t('pickups.waves.reviewHint')}
+            Review pickup wave stops, assigned driver, and route status before dispatch.
           </p>
         </div>
       ),
@@ -1222,7 +1224,7 @@ function WavesTab({
         <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
           <div style={{ flex: 1 }} />
           <Button
-            label={t('pickups.waves.assignDriverMenu')}
+            label="Assign driver…"
             iconName="user"
             kind="primary"
             capability={CAP.FLEET_WRITE}
@@ -1236,7 +1238,7 @@ function WavesTab({
   if (loading) return <StateView kind="loading" />;
   return (
     <>
-      {assignmentReadback ? <PickupWaveReadbackPanel readback={assignmentReadback} ariaLabel={t('pickups.waves.assignmentStatus')} /> : null}
+      {assignmentReadback ? <PickupWaveReadbackPanel readback={assignmentReadback} ariaLabel="Pickup assignment status" /> : null}
       <DataTable<PickupWaveRow>
         columns={columns}
         rows={waveRows}
@@ -1245,17 +1247,17 @@ function WavesTab({
         onRowClick={openWaveDetail}
         rowActions={[
           {
-            label: t('pickups.waves.assignDriverMenu'),
+            label: 'Assign driver…',
             icon: 'user',
             kind: 'primary',
             capability: CAP.FLEET_WRITE,
             onClick: (r) => setAssignTarget({ kind: 'single', wave: r }),
           },
-          { label: t('pickups.waves.openDetail'), icon: 'eye', onClick: openWaveDetail },
+          { label: 'Open wave detail', icon: 'eye', onClick: openWaveDetail },
         ]}
         bulkActions={[
           {
-            label: t('pickups.waves.bulkAssign'),
+            label: 'Bulk assign',
             icon: 'user',
             kind: 'primary',
             capability: CAP.FLEET_WRITE,
@@ -1268,10 +1270,10 @@ function WavesTab({
         title={
           assignTarget?.kind === 'single'
             // W17-3: derive display label from canonical route_run_id.
-            ? fill(t('pickups.waves.assignTitle'), { wave: waveDisplayLabel(assignTarget.wave, t) })
+            ? `Assign driver · ${waveDisplayLabel(assignTarget.wave)}`
             : assignTarget?.kind === 'bulk'
-              ? fill(t('pickups.waves.assignTitleBulk'), { n: assignTarget.waves.length })
-              : t('pickups.waves.assignDriver')
+              ? `Assign driver · ${assignTarget.waves.length} waves`
+              : 'Assign driver'
         }
         source={{
           kind: 'reference',
@@ -1282,9 +1284,9 @@ function WavesTab({
             // W13-2: keep the picker subtitle operator-facing while the
             // selected value remains the canonical driver UUID.
             const d = r as DriverRow;
-            return d.vehicle_id ? t('pickups.waves.vehicleAssigned') : t('pickups.waves.noVehicle');
+            return d.vehicle_id ? 'Vehicle assigned' : 'No vehicle assigned';
           },
-          section: t('pickups.waves.driversSection'),
+          section: 'Drivers',
         }}
         onClose={() => setAssignTarget(null)}
         onPick={(val) => {
@@ -1308,21 +1310,20 @@ function FailuresTab({
   onChanged: () => void | Promise<unknown>;
   onOpenShipment: (shipmentId: string) => void;
 }) {
-  const t = useT();
   const [retryReadback, setRetryReadback] = useState<PickupRetryReadback | null>(null);
   const columns: Array<DataTableColumn<PickupFailureRow>> = useMemo(
     () => [
       // W17-3: column keys aligned to canonical pickup_failures_list_v1 columns.
-      { key: 'shipment_id', label: t('pickups.columns.request'), mono: true, sortable: true, filterable: true },
-      { key: 'failure_reason', label: t('pickups.columns.reason'), sortable: true, filterable: true, lookup: 'pickup_failure_reason' },
-      { key: 'failed_at', label: t('pickups.columns.failedAt'), format: 'datetime', sortable: true },
+      { key: 'shipment_id', label: 'Request', mono: true, sortable: true, filterable: true },
+      { key: 'failure_reason', label: 'Reason', sortable: true, filterable: true, lookup: 'pickup_failure_reason' },
+      { key: 'failed_at', label: 'Failed at', format: 'datetime', sortable: true },
       // W13-2: `retry_strategy` column dropped — fictional FE-only field.
       // Retry policy is resolved per-failure via the canonical `pickup_policy`
       // settings ladder (see `__audit__/SCHEMA-DRIFT/OPERATIONS.md` §10);
       // operator action (Retry now / bulk retry) already triggers
       // `create_pickup_wave_v1` so the column was advisory only.
     ],
-    [t],
+    [],
   );
   if (loading) return <StateView kind="loading" />;
   async function recordRetryReadback(
@@ -1350,13 +1351,13 @@ function FailuresTab({
       rowDeepLink={(r) => `/operate/shipments?focus=${encodeURIComponent(r.shipment_id)}`}
       rowActions={[
         {
-          label: t('pickups.failures.retryNow'),
+          label: 'Retry now',
           icon: 'rotate',
           kind: 'primary',
           capability: CAP.FLEET_WRITE,
           onClick: async (r) => {
             if (!orgId) {
-              pushToast(t('pickups.toast.tenantRequiredWave'), 'warn');
+              pushToast('Tenant context is required to create a pickup wave.', 'warn');
               return;
             }
             // Canonical key is `shipment_ids` (migration 202603191130
@@ -1368,27 +1369,27 @@ function FailuresTab({
                 shipment_ids: [r.shipment_id],
               });
               await recordRetryReadback(res, 1, 'failure_retry');
-              pushToast(t('pickups.toast.retryCreated'), 'good');
+              pushToast('Pickup retry wave created', 'good');
             } catch (err) {
-              pushPickupWaveFailure(err, t);
+              pushPickupWaveFailure(err);
             }
           },
         },
         {
-          label: t('pickups.failures.openOriginal'),
+          label: 'Open original request',
           icon: 'right',
           onClick: (r) => onOpenShipment(r.shipment_id),
         },
       ]}
       bulkActions={[
         {
-          label: t('pickups.failures.bulkRetry'),
+          label: 'Bulk retry',
           icon: 'rotate',
           kind: 'primary',
           capability: CAP.FLEET_WRITE,
           onClick: async (rs) => {
             if (!orgId) {
-              pushToast(t('pickups.toast.tenantRequiredWave'), 'warn');
+              pushToast('Tenant context is required to create a pickup wave.', 'warn');
               return;
             }
             // Canonical key is `shipment_ids` (migration 202603191130
@@ -1400,9 +1401,9 @@ function FailuresTab({
                 shipment_ids: rs.map((r) => r.shipment_id),
               });
               await recordRetryReadback(res, rs.length, 'failure_bulk_retry');
-              pushToast(fill(t('pickups.toast.retryQueued'), { n: rs.length }), 'good');
+              pushToast(`Pickup retry waves queued - ${rs.length} retries`, 'good');
             } catch (err) {
-              pushPickupWaveFailure(err, t);
+              pushPickupWaveFailure(err);
             }
           },
         },
@@ -1414,64 +1415,78 @@ function FailuresTab({
 }
 
 function PickupRetryReadbackPanel({ readback }: { readback: PickupRetryReadback }) {
-  const t = useT();
   return (
     <PickupWaveReadbackPanel
       readback={{
-        title: t('pickups.failures.retryStatus'),
+        title: 'Pickup retry status',
         waveId: readback.waveId,
         shipmentCount: readback.shipmentCount,
         rpc: readback.rpc,
         source: readback.source,
-        result: t('pickups.failures.queued'),
+        result: 'Queued for pickup',
         refreshedAt: readback.refreshedAt,
       }}
-      ariaLabel={t('pickups.failures.retryStatus')}
+      ariaLabel="Pickup retry status"
     />
   );
 }
 
 function PickupWaveReadbackPanel({
   readback,
-  ariaLabel,
+  ariaLabel = 'Pickup wave status',
 }: {
   readback: PickupWaveReadback;
   ariaLabel?: string;
 }) {
-  const t = useT();
   const isAssignment = readback.source.includes('assign');
-  const actionLabel = pickupActionLabel(readback.source, t);
+  const actionLabel = pickupActionLabel(readback.source);
   const recordedBy =
     readback.rpc === 'assign_pickup_wave_v1'
-      ? t('pickups.readback.fleetAssignment')
-      : t('pickups.readback.orchestration');
+      ? 'Fleet assignment'
+      : 'Pickup orchestration';
   return (
     <section
       className="panel"
-      aria-label={ariaLabel ?? t('pickups.waveStatus')}
+      aria-label={ariaLabel}
       style={{ marginTop: '14px', display: 'grid', gap: '10px' }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 14px' }}>
         <Chip size="sm" kind="good" label={readback.title} />
-        <span className="state__hint">{t('pickups.readback.saved')}</span>
+        <span className="state__hint">Confirmation saved and pickup queues refreshed</span>
       </div>
       <div className="card">
-        <Kv k={isAssignment ? t('pickups.readback.assignmentRef') : t('pickups.readback.waveRef')} v={<span className="mono">{readback.waveId}</span>} />
-        {readback.shipmentCount != null ? <Kv k={t('pickups.readback.shipments')} v={String(readback.shipmentCount)} /> : null}
-        {readback.waveCount != null ? <Kv k={t('pickups.readback.waves')} v={String(readback.waveCount)} /> : null}
-        {readback.driverLabel ? <Kv k={t('pickups.readback.driver')} v={<bdi>{readback.driverLabel}</bdi>} /> : null}
-        <Kv k={t('pickups.readback.action')} v={actionLabel} />
-        <Kv k={t('pickups.readback.recordedBy')} v={recordedBy} />
-        <Kv k={t('pickups.readback.confirmation')} v={readback.result} />
-        <Kv k={t('pickups.readback.queueRefresh')} v={fill(t('pickups.readback.refreshedAt'), { time: readback.refreshedAt })} />
+        <Kv k={isAssignment ? 'Assignment reference' : 'Wave reference'} v={<span className="mono">{readback.waveId}</span>} />
+        {readback.shipmentCount != null ? <Kv k="Shipments" v={String(readback.shipmentCount)} /> : null}
+        {readback.waveCount != null ? <Kv k="Waves" v={String(readback.waveCount)} /> : null}
+        {readback.driverLabel ? <Kv k="Driver" v={readback.driverLabel} /> : null}
+        <Kv k="Action" v={actionLabel} />
+        <Kv k="Recorded by" v={recordedBy} />
+        <Kv k="Confirmation" v={readback.result} />
+        <Kv k="Queue refresh" v={`Pickup queues refreshed at ${readback.refreshedAt}`} />
       </div>
     </section>
   );
 }
 
-// Catalog keys under pickups.actions are the readback source ids; unknown ids read as a generic update.
-function pickupActionLabel(source: string, t: Translate = englishT): string {
-  return t(`pickups.actions.${source}`, t('pickups.actions.default'));
+function pickupActionLabel(source: string): string {
+  switch (source) {
+    case 'request_bulk_create_wave':
+      return 'Create wave from selected requests';
+    case 'request_create_wave':
+      return 'Create new pickup wave';
+    case 'request_add_to_existing_wave':
+      return 'Add requests to existing wave';
+    case 'failure_retry':
+      return 'Retry failed pickup';
+    case 'failure_bulk_retry':
+      return 'Bulk retry failed pickups';
+    case 'wave_assign_driver':
+      return 'Assign driver';
+    case 'wave_bulk_assign_driver':
+      return 'Bulk assign driver';
+    default:
+      return 'Pickup update';
+  }
 }
 
 interface KvProps { k: string; v: ReactNode }

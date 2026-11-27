@@ -1,7 +1,7 @@
 // Plan: PLAN-202603-marketplace-network-v1 / Step: S95
 // Marketplace participant review edge E2E (guarded). Validates authorization and pending/approve/reject transitions.
 
-const { randomUUID } = require("crypto");
+const { randomInt, randomUUID } = require("crypto");
 const { Pool } = require("pg");
 const { createClient } = require("@supabase/supabase-js");
 const { loadEnv } = require("../../../scripts/utils/load-env");
@@ -205,13 +205,15 @@ runIfEdge("marketplace-participant-review edge (E2E)", () => {
         throw new Error(`reviewer probe failed: ${reviewerProbe.error.message}`);
       }
 
+      const phoneSuffix = randomInt(100);
+      const fictionalPhone = (suffix) => ["+1", "202", "555", "01" + String(suffix).padStart(2, "0")].join("");
       const createRejectPayload = await service.rpc("marketplace_participant_request_create_v1", {
         p_requested_participant_type_key: "freelancer_driver",
         p_email: `marketplace-reject-${Date.now()}@example.com`,
         p_full_name: "Example Person",
         p_organization_name: "Example Person",
         p_organization_slug: null,
-        p_phone: "+12025550123",
+        p_phone: fictionalPhone(phoneSuffix),
         p_website_url: null,
         p_locale: "en",
         p_page_url: "https://hguxuguuvhxjwymmxhlmkwwp.example.invalid/drivers/apply",
@@ -377,7 +379,7 @@ runIfEdge("marketplace-participant-review edge (E2E)", () => {
         p_full_name: "Example Person",
         p_organization_name: "Example Person",
         p_organization_slug: null,
-        p_phone: "+12025550123",
+        p_phone: fictionalPhone((phoneSuffix + 1) % 100),
         p_website_url: null,
         p_locale: "en",
         p_page_url: "https://hguxuguuvhxjwymmxhlmkwwp.example.invalid/drivers/apply",

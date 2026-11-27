@@ -6,10 +6,10 @@ const yaml = require('yaml');
 
 const root = path.resolve(__dirname, '../../..');
 const script = 'scripts/edge/verify-frozen-lock.cjs';
+const installer = 'scripts/edge/install-pinned-deno.sh';
 const name = 'fixture-edge';
 const npmEntry = 'qrcode-generator@1.5.2';
 const deno = spawnSync('deno', ['--version'], { stdio: 'ignore' });
-const withDeno = deno.error?.code === 'ENOENT' ? test.skip : test;
 
 test.each(['database', 'database-dry-run'])('%s checks the prepared Edge tree before using DEV credentials', jobName => {
   const workflow = yaml.parse(fs.readFileSync(path.join(root, '.github/workflows/deploy.yml'), 'utf8'));
@@ -25,8 +25,10 @@ test.each(['database', 'database-dry-run'])('%s checks the prepared Edge tree be
   expect(gate['continue-on-error']).toBeUndefined();
   expect(workflow.permissions).toEqual({ contents: 'read' });
   expect(before).toContain(install);
-  expect(install.run).toMatch(/\/v2\.9\.6\/deno-.*\.zip/);
-  expect(install.run).toContain('sha256sum --check');
+  expect(install.run).toBe(`bash ${installer}`);
+  const installScript = fs.readFileSync(path.join(root, installer), 'utf8');
+  expect(installScript).toMatch(/\/v2\.9\.6\/deno-.*\.zip/);
+  expect(installScript).toContain('sha256sum --check');
   expect(prepare.run).toContain('npm run edge:sync-shared\nnpm run edge:prepare-resource-import-exceljs');
   expect(job.steps.indexOf(dev)).toBeGreaterThan(job.steps.indexOf(gate));
   expect(dev.run).toContain(' link --project-ref ');
@@ -48,13 +50,14 @@ test.each(['database', 'database-dry-run'])('%s checks the prepared Edge tree be
   }
 });
 
-withDeno.each([
+test.each([
   ['clean lock', () => {}, null],
   ['missing npm entry', lock => { delete lock.npm[npmEntry]; }, /Could not find 'qrcode-generator@1\.5\.2' in the list of packages/],
   ['changed integrity hash', lock => {
     lock.npm[npmEntry].integrity = 'sha512-' + Buffer.alloc(64).toString('base64');
   }, /Tarball checksum did not match/],
-])('checks the frozen Edge lock with a %s', (_label, changeLock, errorPattern) => {
+])('checks the frozen Edge lock with a %s', (label, changeLock, errorPattern) => {
+  if (deno.status !== 0) throw new Error('Deno is required on PATH for the Edge frozen-lock tests.');
   const fixture = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'edge-lock-test-'));
   const write = (file, contents) => {
     const target = path.join(fixture, file);
@@ -62,11 +65,15 @@ withDeno.each([
     fs.writeFileSync(target, contents);
   };
   try {
-    write(script, fs.readFileSync(path.join(root, script)));
-    write('config/edge/functions.json', JSON.stringify({ functions: [
-      { name, enabled: true },
-      { name: 'fixture-disabled', enabled: false },
-    ] }));
+    const verifier = fs.readFileSync(path.join(root, script), 'utf8');
+    write(script, verifier);
+    write('config/edge/functions.json', JSON.stringify({
+      use_api_bundle_limit_bytes: require('../../../config/edge/functions.json').use_api_bundle_limit_bytes,
+      functions: [
+        { name, enabled: true },
+        { name: 'fixture-disabled', enabled: false },
+      ],
+    }));
     write(`supabase/functions/${name}/index.ts`, 'import "fixture-import";\n');
     write(`supabase/functions/${name}/deno.json`, JSON.stringify({
       imports: { 'fixture-import': `npm:${npmEntry}` },
@@ -75,14 +82,26 @@ withDeno.each([
     changeLock(lock);
     write('deno.lock', JSON.stringify(lock, null, 2) + '\n');
 
-    const result = spawnSync(process.execPath, [script], {
+    const runVerifier = () => spawnSync(process.execPath, [script], {
       cwd: fixture, encoding: 'utf8', timeout: 20000,
     });
+    const result = runVerifier();
     expect(result.error).toBeUndefined();
     if (errorPattern) {
-      expect(result.stderr).toMatch(new RegExp(`^${name}: error:`, 'm'));
-      expect(result.stderr).toMatch(errorPattern);
-      expect(result.status).toBeGreaterThan(0);
+      const expectRejectedLock = ({ stderr, status }) => {
+        expect(status).toBeGreaterThan(0);
+        expect(stderr).toMatch(new RegExp(`^${name}: error:`, 'm'));
+        expect(stderr).toMatch(errorPattern);
+      };
+      expectRejectedLock(result);
+      if (label === 'changed integrity hash') {
+        write(script, verifier.replace('process.exitCode = verify();', 'verify();'));
+        const broken = runVerifier();
+        expect(broken.error).toBeUndefined();
+        expect(broken.stderr).toMatch(errorPattern);
+        expect(broken.status).toBe(0);
+        expect(() => expectRejectedLock(broken)).toThrow();
+      }
     } else {
       expect(result.stderr).toBe('');
       expect(result.stdout).toContain('Enabled functions: 1.');
