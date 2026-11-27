@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { englishT, fill, useT, type Translate } from '@/lib/i18n';
 import { Button } from '@/components/Button';
 import { KvGrid, type KvRow } from '@/components/KvGrid';
 import { StateView } from '@/components/StateView';
@@ -89,9 +90,9 @@ function firstBoolean(...values: unknown[]): boolean | null {
   return null;
 }
 
-function titleCaseKey(raw: unknown, fallback = 'Not recorded'): string {
+function titleCaseKey(raw: unknown, fallback?: string, t: Translate = englishT): string {
   const value = String(raw ?? '').trim();
-  if (!value) return fallback;
+  if (!value) return fallback ?? t('shipments.common.notRecorded');
   return value
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -163,9 +164,9 @@ function latestAddressReviewTask(
   ))[0] ?? null;
 }
 
-function confidenceDisplay(value: unknown): string {
+function confidenceDisplay(value: unknown, t: Translate = englishT): string {
   const score = firstNumber(value);
-  if (score == null) return 'Not recorded';
+  if (score == null) return t('shipments.common.notRecorded');
   const percent = score <= 1 ? score * 100 : score;
   return `${Math.round(percent)}%`;
 }
@@ -180,84 +181,84 @@ function addressGeocodeReadbackRows({
   latestGeocodeRow: ShipmentAddressGeocodeRow | null;
   latestAttempt: ShipmentAddressGeocodingAttemptRow | null;
   latestReview: ShipmentAddressReviewTaskRow | null;
-}): KvRow[] {
+}, t: Translate = englishT): KvRow[] {
   const attemptMetadata = asRecord(latestAttempt?.metadata);
   return [
     {
       key: 'geocode_provider',
-      label: 'Geocode provider',
-      value: titleCaseKey(firstText(latestGeocodeRow?.provider_name, latestAttempt?.provider_name), 'Not recorded'),
+      label: t('shipments.address.geocodeProvider'),
+      value: titleCaseKey(firstText(latestGeocodeRow?.provider_name, latestAttempt?.provider_name), t('shipments.common.notRecorded')),
       editable: false,
     },
     {
       key: 'geocode_confidence',
-      label: 'Confidence',
+      label: t('shipments.address.confidence'),
       value: confidenceDisplay(firstText(
         latestGeocodeRow?.confidence_score,
         latestAttempt?.confidence_score,
         latestAttempt?.confidence,
-      )),
+      ), t),
       mono: true,
       editable: false,
     },
     {
       key: 'geocode_accuracy',
-      label: 'Accuracy',
-      value: titleCaseKey(latestGeocodeRow?.accuracy_type, 'Not recorded'),
+      label: t('shipments.address.accuracy'),
+      value: titleCaseKey(latestGeocodeRow?.accuracy_type, t('shipments.common.notRecorded')),
       editable: false,
     },
     {
       key: 'geocode_attempt',
-      label: 'Last attempt',
+      label: t('shipments.address.lastAttempt'),
       value: titleCaseKey(
         firstText(latestAttempt?.status, latestAttempt?.decision_outcome, address.validation_status),
-        'Not recorded',
+        t('shipments.common.notRecorded'),
       ),
       editable: false,
     },
     {
       key: 'geocode_attempt_type',
-      label: 'Attempt type',
-      value: titleCaseKey(firstText(latestAttempt?.attempt_type, attemptMetadata?.attempt_type), 'Not recorded'),
+      label: t('shipments.address.attemptType'),
+      value: titleCaseKey(firstText(latestAttempt?.attempt_type, attemptMetadata?.attempt_type), t('shipments.common.notRecorded')),
       editable: false,
     },
     {
       key: 'geocoded_at',
-      label: 'Geocoded at',
-      value: firstText(latestGeocodeRow?.geocoded_at, latestAttempt?.created_at) ?? 'Not recorded',
+      label: t('shipments.address.geocodedAt'),
+      value: firstText(latestGeocodeRow?.geocoded_at, latestAttempt?.created_at) ?? t('shipments.common.notRecorded'),
       mono: Boolean(firstText(latestGeocodeRow?.geocoded_at, latestAttempt?.created_at)),
       editable: false,
     },
     {
       key: 'review_status',
-      label: 'Review status',
-      value: latestReview ? titleCaseKey(latestReview.status, 'Not recorded') : 'No review task',
+      label: t('shipments.address.reviewStatus'),
+      value: latestReview ? titleCaseKey(latestReview.status, t('shipments.common.notRecorded')) : t('shipments.address.noReviewTask'),
       editable: false,
     },
     {
       key: 'review_queue',
-      label: 'Review queue',
-      value: latestReview ? titleCaseKey(latestReview.queue_assignment, 'Not recorded') : 'Not queued',
+      label: t('shipments.address.reviewQueue'),
+      value: latestReview ? titleCaseKey(latestReview.queue_assignment, t('shipments.common.notRecorded')) : t('shipments.address.notQueued'),
       editable: false,
     },
     {
       key: 'review_reason',
-      label: 'Review reason',
-      value: latestReview ? titleCaseKey(latestReview.reason, 'Not recorded') : 'Not recorded',
+      label: t('shipments.address.reviewReason'),
+      value: latestReview ? titleCaseKey(latestReview.reason, t('shipments.common.notRecorded')) : t('shipments.common.notRecorded'),
       editable: false,
     },
     {
       key: 'review_outcome',
-      label: 'Review outcome',
+      label: t('shipments.address.reviewOutcome'),
       value: latestReview && firstText(latestReview.resolution_outcome)
-        ? titleCaseKey(latestReview.resolution_outcome, 'Not resolved')
-        : latestReview ? 'Not Resolved' : 'Not recorded',
+        ? titleCaseKey(latestReview.resolution_outcome, t('shipments.address.notResolved'))
+        : latestReview ? t('shipments.address.notResolved2') : t('shipments.common.notRecorded'),
       editable: false,
     },
     {
       key: 'reviewed_at',
-      label: 'Reviewed at',
-      value: latestReview ? firstText(latestReview.resolved_at, latestReview.reviewed_at) ?? 'Not recorded' : 'Not recorded',
+      label: t('shipments.address.reviewedAt'),
+      value: latestReview ? firstText(latestReview.resolved_at, latestReview.reviewed_at) ?? t('shipments.common.notRecorded') : t('shipments.common.notRecorded'),
       mono: Boolean(latestReview && firstText(latestReview.resolved_at, latestReview.reviewed_at)),
       editable: false,
     },
@@ -265,6 +266,7 @@ function addressGeocodeReadbackRows({
 }
 
 export function AddressTab({ shipment }: { shipment: Shipment }) {
+  const t = useT();
   const latestShipmentQuery = useResource<Shipment>('shipments', shipment.id);
   const latestShipment = latestShipmentQuery.data ?? shipment;
   const destinationAddressId = (latestShipment as { destination_address_id?: string }).destination_address_id;
@@ -318,13 +320,13 @@ export function AddressTab({ shipment }: { shipment: Shipment }) {
     return (
       <StateView
         kind="error"
-        title="Address unavailable"
+        title={t('shipments.address.addressUnavailable')}
         hint={(addressesQuery.error as Error).message}
       />
     );
   }
   if (address === undefined) return <StateView kind="loading" />;
-  if (!address) return <div className="state__hint">No address on this shipment.</div>;
+  if (!address) return <div className="state__hint">{t('shipments.address.noAddressOnThisShipment')}</div>;
 
   const lineageLoading = geocodesQuery.isLoading || attemptsQuery.isLoading || reviewTasksQuery.isLoading;
   const lineageError = geocodesQuery.error ?? attemptsQuery.error ?? reviewTasksQuery.error;
@@ -340,29 +342,29 @@ export function AddressTab({ shipment }: { shipment: Shipment }) {
   const rows: KvRow[] = [
     {
       key: 'line1',
-      label: 'Street',
+      label: t('shipments.address.street'),
       value: addressText(address, ['normalized_line1', 'line1', 'street', 'street_line_1']),
       editable: true,
     },
-    { key: 'district', label: 'District', value: address.district, editable: true },
-    { key: 'city', label: 'City', value: address.city, editable: true },
-    { key: 'country', label: 'Country', value: address.country, editable: true },
-    { key: 'postal_code', label: 'Postal', value: address.postal_code, mono: true, editable: true },
+    { key: 'district', label: t('shipments.common.district'), value: address.district, editable: true },
+    { key: 'city', label: t('shipments.common.city'), value: address.city, editable: true },
+    { key: 'country', label: t('shipments.common.country'), value: address.country, editable: true },
+    { key: 'postal_code', label: t('shipments.address.postal'), value: address.postal_code, mono: true, editable: true },
     {
       key: 'sa_short_code',
-      label: 'Saudi short address',
+      label: t('shipments.address.saudiShortAddress'),
       value: addressText(address, ['sa_short_code', 'short_national_address', 'short_address']) || '\u2014',
       mono: true,
       editable: false,
     },
     {
       key: 'coordinates',
-      label: 'Coordinates',
+      label: t('shipments.address.coordinates'),
       value: formatCoordinatePair(address.coordinates) || '\u2014',
       mono: true,
       editable: false,
     },
-    { key: 'validation_status', label: 'Validation', value: address.validation_status, editable: false },
+    { key: 'validation_status', label: t('shipments.address.validation'), value: address.validation_status, editable: false },
   ];
   return (
     <div style={{ display: 'grid', gap: '14px' }}>
@@ -380,9 +382,9 @@ export function AddressTab({ shipment }: { shipment: Shipment }) {
                       source: 'console.shipments_drawer.address_tab',
                     },
                   });
-                  pushToast(`Address ${key} updated`, 'good');
+                  pushToast(fill(t('shipments.address.addressKeyUpdated'), { key: String(key) }), 'good');
                 } catch {
-                  pushToast('Address details could not be updated. Try again.', 'danger');
+                  pushToast(t('shipments.address.addressDetailsCouldNotBe'), 'danger');
                 }
               }
             : undefined
@@ -391,26 +393,26 @@ export function AddressTab({ shipment }: { shipment: Shipment }) {
       {lineageError ? (
         <StateView
           kind="error"
-          title="Geocode state unavailable"
-          hint="Could not load shipment address geocoding readback."
+          title={t('shipments.address.geocodeStateUnavailable')}
+          hint={t('shipments.address.couldNotLoadShipmentAddress')}
         />
       ) : lineageLoading ? (
-        <StateView kind="loading" title="Loading geocode state" />
+        <StateView kind="loading" title={t('shipments.address.loadingGeocodeState')} />
       ) : (
-        <section aria-label="Address geocoding readback">
-          <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>Geocoding readback</h4>
+        <section aria-label={t('shipments.address.addressGeocodingReadback')}>
+          <h4 style={{ margin: '0 0 8px', fontSize: 13 }}>{t('shipments.address.geocodingReadback')}</h4>
           <KvGrid
             rows={addressGeocodeReadbackRows({
               address,
               latestGeocodeRow,
               latestAttempt,
               latestReview,
-            })}
+            }, t)}
           />
           {pendingGeocodeReview && canResolveReview ? (
             <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
               <Button
-                label="Approve review"
+                label={t('shipments.address.approveReview')}
                 iconName="check"
                 size="sm"
                 disabled={resolveReview.isPending}
@@ -421,9 +423,9 @@ export function AddressTab({ shipment }: { shipment: Shipment }) {
                       resolution_outcome: 'approved',
                       resolution_notes: `Approved from shipment ${latestShipment.tracking_number ?? latestShipment.id} address review.`,
                     });
-                    pushToast('Address review approved', 'good');
+                    pushToast(t('shipments.address.addressReviewApproved'), 'good');
                   } catch {
-                    pushToast('Address review could not be approved. Try again.', 'danger');
+                    pushToast(t('shipments.address.addressReviewCouldNotBe'), 'danger');
                   }
                 }}
               />

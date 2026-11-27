@@ -44,6 +44,7 @@ import { CAP } from '@/lib/capabilities';
 import { lookupRow } from '@/lib/api';
 import { readUrlParam } from '@/lib/url-params';
 import { openShipmentContextDrawer } from '@/modules/operate/shipments';
+import { englishT, fill, useT, type Translate } from '@/lib/i18n';
 
 // Wave 6 schema-drift remediation (OPERATIONS Section 4):
 // FE TaskRow annotated against canonical `public.tasks` (registry projection
@@ -84,6 +85,7 @@ function ExceptionActionButton({
   canWrite,
   onClick,
 }: ExceptionActionButtonProps) {
+  const t = useT();
   const isDisabled = !!disabled || !canWrite;
   const classes = ['btn', kind ? `btn--${kind}` : '', size === 'sm' ? 'btn--sm' : '']
     .filter(Boolean)
@@ -94,7 +96,7 @@ function ExceptionActionButton({
       className={classes}
       disabled={isDisabled}
       aria-disabled={isDisabled || undefined}
-      title={!canWrite ? 'Requires tasks.write' : title}
+      title={!canWrite ? t('exceptions.requiresTasksWrite') : title}
       onClick={() => {
         if (isDisabled) return;
         onClick();
@@ -117,17 +119,18 @@ function ExceptionActionButton({
 function formatSlaCountdown(
   iso: string,
   warnMinutesBeforeBreach: number,
+  t: Translate = englishT,
 ): { label: string; tone: 'good' | 'warn' | 'danger' } {
   const ms = new Date(iso).getTime() - Date.now();
   if (ms < 0) {
     const m = Math.max(1, Math.floor(-ms / 60000));
-    return { label: `${m}m overdue`, tone: 'danger' };
+    return { label: fill(t('exceptions.sla.overdue'), { n: m }), tone: 'danger' };
   }
   const warnMs = warnMinutesBeforeBreach * 60_000;
-  if (ms < warnMs) return { label: `in ${Math.floor(ms / 60000)}m`, tone: 'warn' };
-  if (ms < 3_600_000) return { label: `in ${Math.floor(ms / 60000)}m`, tone: 'good' };
-  if (ms < 86_400_000) return { label: `in ${Math.floor(ms / 3_600_000)}h`, tone: 'good' };
-  return { label: `in ${Math.floor(ms / 86_400_000)}d`, tone: 'good' };
+  if (ms < warnMs) return { label: fill(t('exceptions.sla.inMinutes'), { n: Math.floor(ms / 60000) }), tone: 'warn' };
+  if (ms < 3_600_000) return { label: fill(t('exceptions.sla.inMinutes'), { n: Math.floor(ms / 60000) }), tone: 'good' };
+  if (ms < 86_400_000) return { label: fill(t('exceptions.sla.inHours'), { n: Math.floor(ms / 3_600_000) }), tone: 'good' };
+  return { label: fill(t('exceptions.sla.inDays'), { n: Math.floor(ms / 86_400_000) }), tone: 'good' };
 }
 
 interface BulkSummaryRow extends Record<string, unknown> {
@@ -182,8 +185,8 @@ function taskActionNextStatus(kind: string): string {
 
 const NDR_RETURN_TO_BRANCH_ACTION = 'hold_at_branch';
 
-function ndrActionLabel(action: string): string {
-  if (action === NDR_RETURN_TO_BRANCH_ACTION) return 'Return to branch';
+function ndrActionLabel(action: string, t: Translate = englishT): string {
+  if (action === NDR_RETURN_TO_BRANCH_ACTION) return t('exceptions.returnToBranch');
   const row = lookupRow('ndr_action', action) as { label?: string } | null;
   return row?.label ?? action.replace(/_/g, ' ');
 }
@@ -203,6 +206,7 @@ function ndrActionLabel(action: string): string {
 // and the chip tone resolves via the canonical `ndr_branch_next_action`
 // lookup_values metadata.tone (NO inline ternary).
 function RecommendedChip({ task }: { task: TaskRow }) {
+  const t = useT();
   const { scope } = useIdentity();
   const meta = (task.metadata ?? {}) as { dispatch_exception_reason?: string };
   const reason = meta.dispatch_exception_reason ?? null;
@@ -217,13 +221,13 @@ function RecommendedChip({ task }: { task: TaskRow }) {
     !!orgId && !!reason,
   );
   if (!reason) {
-    return <Chip size="xs" kind="warn" label="(metadata missing)" />;
+    return <Chip size="xs" kind="warn" label={t('exceptions.metadataMissing')} />;
   }
   if (!orgId) {
     return <span className="state__hint" style={{ fontSize: '11px' }}>—</span>;
   }
   if (isLoading || !data) {
-    return <span className="state__hint" style={{ fontSize: '11px' }}>resolving…</span>;
+    return <span className="state__hint" style={{ fontSize: '11px' }}>{t('exceptions.resolving')}</span>;
   }
   const row = lookupRow('ndr_branch_next_action', data) as { tone?: string; label?: string } | null;
   const tone = (row?.tone as 'good' | 'warn' | 'danger' | 'info' | undefined) ?? 'danger';
@@ -233,6 +237,7 @@ function RecommendedChip({ task }: { task: TaskRow }) {
 }
 
 export function ExceptionsModule() {
+  const t = useT();
   const { scope } = useIdentity();
   const canRead = useCapability(CAP.SHIPMENTS_READ);
   const canWriteTasks = useCapability(CAP.TASKS_WRITE);
@@ -254,12 +259,12 @@ export function ExceptionsModule() {
 
   const columns: Array<DataTableColumn<TaskRow>> = useMemo(
     () => [
-      { key: 'task_id', label: 'Task', mono: true, sortable: true },
-      { key: 'subject', label: 'Subject', sortable: true, filterable: true },
-      { key: 'attempt_count', label: 'Attempts', align: 'right', sortable: true, type: 'number' },
+      { key: 'task_id', label: t('exceptions.columns.task'), mono: true, sortable: true },
+      { key: 'subject', label: t('exceptions.columns.subject'), sortable: true, filterable: true },
+      { key: 'attempt_count', label: t('exceptions.columns.attempts'), align: 'right', sortable: true, type: 'number' },
       {
         key: 'sla_due_at',
-        label: 'SLA',
+        label: t('exceptions.columns.sla'),
         sortable: true,
         // Render the absolute timestamp + a relative countdown chip so operators
         // can scan urgency without doing the math. Datatype stays datetime so
@@ -268,9 +273,9 @@ export function ExceptionsModule() {
           const iso = String(raw ?? '');
           if (!iso) return <span className="state__hint">—</span>;
           if (slaWarnMinutes == null) {
-            return <span className="state__hint" title="SLA timing settings are unavailable">—</span>;
+            return <span className="state__hint" title={t('exceptions.sla.unavailable')}>—</span>;
           }
-          const { label, tone } = formatSlaCountdown(iso, slaWarnMinutes);
+          const { label, tone } = formatSlaCountdown(iso, slaWarnMinutes, t);
           return (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
               <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-3)' }}>
@@ -287,14 +292,14 @@ export function ExceptionsModule() {
       // operator the policy-resolved next action so they don't have to guess.
       {
         key: 'recommended',
-        label: 'Recommended',
+        label: t('exceptions.columns.recommended'),
         sortable: false,
         filterable: false,
         render: (_raw, row) => <RecommendedChip task={row} />,
       },
-      { key: 'status', label: 'Status', lookup: 'task_status', sortable: true, filterable: true, editable: true },
+      { key: 'status', label: t('exceptions.columns.status'), lookup: 'task_status', sortable: true, filterable: true, editable: true },
     ],
-    [slaWarnMinutes],
+    [slaWarnMinutes, t],
   );
 
   function openShipmentContext(shipmentId: string) {
@@ -355,7 +360,7 @@ export function ExceptionsModule() {
   }
 
   function notifyExceptionResolutionError(err: unknown) {
-    pushToast('Exception resolution could not be completed. Try again.', 'danger');
+    pushToast(t('exceptions.errors.resolution'), 'danger');
   }
 
   function openExceptionDrawer(task: TaskRow) {
@@ -384,6 +389,7 @@ export function ExceptionsModule() {
   // Resolution controls are rendered in the drawer body so Browser/IAB clicks
   // exercise the same visible workflow without competing with the status rail.
   function ExceptionResolutionControls({ task }: { task: TaskRow }) {
+    const t = useT();
     const allowed = task.allowed_actions ?? [];
     const status = String(task.status ?? '').toLowerCase();
     const isTerminal = ['completed', 'resolved', 'closed', 'cancelled', 'canceled'].includes(status);
@@ -406,8 +412,8 @@ export function ExceptionsModule() {
       return (
         <StateView
           kind="empty"
-          title="Resolved"
-          hint={`Recovery action is already resolved for this task (${status}).`}
+          title={t('exceptions.resolution.resolvedTitle')}
+          hint={fill(t('exceptions.resolution.resolvedHint'), { status })}
         />
       );
     }
@@ -416,7 +422,7 @@ export function ExceptionsModule() {
       return (
         <StateView
           kind="error"
-          hint="No recovery actions are configured for this exception."
+          hint={t('exceptions.resolution.noActions')}
         />
       );
     }
@@ -431,10 +437,10 @@ export function ExceptionsModule() {
           resolution_action: chosen,
           notes: notes.trim() || null,
         });
-        pushToast(`Resolution applied - ${ndrActionLabel(chosen)}`, 'good');
+        pushToast(fill(t('exceptions.toast.applied'), { action: ndrActionLabel(chosen, t) }), 'good');
         drawer.close();
       } catch (err) {
-        setError('Exception resolution could not be completed. Try again.');
+        setError(t('exceptions.errors.resolution'));
         notifyExceptionResolutionError(err);
       } finally {
         applyingRef.current = false;
@@ -473,10 +479,10 @@ export function ExceptionsModule() {
           applyStatus: 'preview',
           resultCount: Array.isArray(rec.results) ? rec.results.length : 0,
         });
-        pushToast(`Preview ready - ${ndrActionLabel(chosen)}`, 'info');
+        pushToast(fill(t('exceptions.toast.previewReady'), { action: ndrActionLabel(chosen, t) }), 'info');
       } catch (err) {
         setPreviewReadback(null);
-        setError('Preview could not be prepared. Try again.');
+        setError(t('exceptions.errors.preview'));
         notifyExceptionResolutionError(err);
       } finally {
         previewingRef.current = false;
@@ -496,16 +502,16 @@ export function ExceptionsModule() {
               title={a}
               onClick={() => setChosen(a)}
             >
-              {ndrActionLabel(a)}
+              {ndrActionLabel(a, t)}
             </button>
           ))}
         </div>
         <div className="field">
           <label className="field__label">
-            Notes
+            {t('exceptions.resolution.notes')}
             {task.evidence_required ? (
-              <span className="mono" style={{ color: 'var(--ink-3)', marginLeft: '6px' }}>
-                - required
+              <span className="mono" style={{ color: 'var(--ink-3)', marginInlineStart: '6px' }}>
+                {t('exceptions.resolution.required')}
               </span>
             ) : null}
           </label>
@@ -513,24 +519,28 @@ export function ExceptionsModule() {
             rows={2}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="Driver verified address with recipient. Reschedule to tomorrow 14:00–16:00."
+            placeholder={t('exceptions.resolution.notesPlaceholder')}
           />
         </div>
         <div style={{ display: 'flex', gap: '8px', width: '100%', flexWrap: 'wrap' }}>
           <ExceptionActionButton
-            label="Escalate"
+            label={t('common.escalate')}
             iconName="warn"
             kind="ghost"
             size="sm"
             canWrite={canWriteTasks}
             onClick={async () => {
               await transition.mutateAsync({ taskId: task.id, transition: { next_status: taskActionNextStatus('escalate') } });
-              pushToast('Exception escalated', 'warn');
+              pushToast(t('exceptions.toast.escalated'), 'warn');
               drawer.close();
             }}
           />
           <ExceptionActionButton
-            label={chosen ? (previewing ? `Previewing ${ndrActionLabel(chosen)}` : `Preview ${ndrActionLabel(chosen)}`) : 'Preview'}
+            label={
+              chosen
+                ? fill(previewing ? t('exceptions.resolution.previewing') : t('exceptions.resolution.previewAction'), { action: ndrActionLabel(chosen, t) })
+                : t('common.preview')
+            }
             iconName="play"
             kind="ghost"
             size="sm"
@@ -539,7 +549,11 @@ export function ExceptionsModule() {
             onClick={() => void previewCurrentResolution()}
           />
           <ExceptionActionButton
-            label={chosen ? (applying ? `Applying ${ndrActionLabel(chosen)}` : `Apply ${ndrActionLabel(chosen)}`) : 'Apply'}
+            label={
+              chosen
+                ? fill(applying ? t('exceptions.resolution.applying') : t('exceptions.resolution.applyAction'), { action: ndrActionLabel(chosen, t) })
+                : t('common.apply')
+            }
             iconName="check"
             kind="primary"
             size="sm"
@@ -547,9 +561,9 @@ export function ExceptionsModule() {
             disabled={applying || evidenceMissing || !chosen}
             title={
               !chosen
-                ? 'Select an action before apply'
+                ? t('exceptions.resolution.selectAction')
                 : evidenceMissing
-                  ? 'Evidence required: add notes before apply'
+                  ? t('exceptions.resolution.evidenceButton')
                   : undefined
             }
             onClick={() => void applyCurrentResolution()}
@@ -558,30 +572,30 @@ export function ExceptionsModule() {
         {evidenceMissing ? (
           <StateView
             kind="error"
-            title="Evidence required"
-            hint="Evidence required: add notes before apply."
+            title={t('exceptions.resolution.evidenceTitle')}
+            hint={t('exceptions.resolution.evidenceHint')}
           />
         ) : null}
         {previewReadback ? (
           <section
             className="panel"
-            aria-label="Exception resolution preview"
+            aria-label={t('exceptions.preview.label')}
             style={{ display: 'grid', gap: '8px', padding: '10px' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Chip size="sm" kind="info" label="Preview ready" />
+              <Chip size="sm" kind="info" label={t('exceptions.preview.ready')} />
               <span className="state__hint">
-                {ndrActionLabel(previewReadback.action)} will be applied through the canonical NDR path.
+                {fill(t('exceptions.preview.willApply'), { action: ndrActionLabel(previewReadback.action, t) })}
               </span>
             </div>
             <div className="card">
-              <Kv k="Task" v={<span className="mono">{previewReadback.taskLabel}</span>} />
-              <Kv k="Action" v={ndrActionLabel(previewReadback.action)} />
-              <Kv k="Canonical path" v={previewReadback.canonicalEntrypoint} />
-              <Kv k="Policy" v={previewReadback.policy} />
-              <Kv k="Policy check" v={previewReadback.settingsResolutionId !== '-' ? 'Passed' : 'Pending'} />
-              <Kv k="Preview status" v={previewReadback.applyStatus || 'preview'} />
-              <Kv k="Rows affected after commit" v={String(previewReadback.resultCount)} />
+              <Kv k={t('exceptions.kv.task')} v={<span className="mono">{previewReadback.taskLabel}</span>} />
+              <Kv k={t('exceptions.kv.action')} v={ndrActionLabel(previewReadback.action, t)} />
+              <Kv k={t('exceptions.kv.canonicalPath')} v={previewReadback.canonicalEntrypoint} />
+              <Kv k={t('exceptions.kv.policy')} v={previewReadback.policy} />
+              <Kv k={t('exceptions.kv.policyCheck')} v={previewReadback.settingsResolutionId !== '-' ? t('exceptions.values.passed') : t('exceptions.values.pending')} />
+              <Kv k={t('exceptions.kv.previewStatus')} v={previewReadback.applyStatus || 'preview' /* i18n-literal-ok: apply_status token */} />
+              <Kv k={t('exceptions.kv.rowsAffected')} v={String(previewReadback.resultCount)} />
             </div>
           </section>
         ) : null}
@@ -591,20 +605,21 @@ export function ExceptionsModule() {
   }
 
   function ExceptionDetail({ task }: { task: TaskRow }) {
+    const t = useT();
     const openLinkedShipment = () => {
       if (!task.shipment_id) {
-        pushToast('No shipment is linked to this exception task.', 'warn');
+        pushToast(t('exceptions.errors.noShipment'), 'warn');
         return;
       }
       openShipmentContext(task.shipment_id);
     };
     const summaryRows: KvRow[] = [
-      { key: 'task_id', label: 'Task ID', value: task.task_id, mono: true, editable: false },
-      { key: 'task_type', label: 'Type', value: task.task_type, lookup: 'task_type' },
-      { key: 'shipment_id', label: 'Shipment', value: task.shipment_id ?? '—', mono: true },
-      { key: 'attempt_count', label: 'Attempt #', value: String(task.attempt_count ?? 0), mono: true },
-      { key: 'sla_due_at', label: 'SLA due', value: new Date(task.sla_due_at).toLocaleString() },
-      { key: 'status', label: 'Status', value: task.status, lookup: 'task_status' },
+      { key: 'task_id', label: t('exceptions.detail.taskId'), value: task.task_id, mono: true, editable: false },
+      { key: 'task_type', label: t('exceptions.detail.type'), value: task.task_type, lookup: 'task_type' },
+      { key: 'shipment_id', label: t('exceptions.detail.shipment'), value: task.shipment_id ?? '—', mono: true },
+      { key: 'attempt_count', label: t('exceptions.detail.attempt'), value: String(task.attempt_count ?? 0), mono: true },
+      { key: 'sla_due_at', label: t('exceptions.detail.slaDue'), value: new Date(task.sla_due_at).toLocaleString() },
+      { key: 'status', label: t('exceptions.detail.status'), value: task.status, lookup: 'task_status' },
     ];
 
     const tabs: RelatedTab[] = [
@@ -612,41 +627,40 @@ export function ExceptionsModule() {
       // (ShipmentSnapshotTab) that consumes the canonical
       // `useResourceList<Record<string, unknown>>('shipments')` registry seam
       // instead of `api.seed.shipments()`.
-      { id: 'shipment', label: 'Shipment', count: 1, render: () => <ShipmentSnapshotTab task={task} /> },
+      { id: 'shipment', label: t('exceptions.tabs.shipment'), count: 1, render: () => <ShipmentSnapshotTab task={task} /> },
       // CLAIM-OPERATIONS-WIRING (Phase C1) — Attempts + Events tabs now use
       // canonical resource registry (`useResourceList('task_events')`) instead
       // of `api.seed.taskEvents()`. Both surfaces are React components so the
       // hook can subscribe to the correct query key.
-      { id: 'attempts', label: 'Attempts', count: task.attempt_count ?? 0, render: () => <AttemptsTab task={task} /> },
-      { id: 'task_events', label: 'Events', render: () => <TaskEventsTab task={task} /> },
-      { id: 'related', label: 'Related tasks', render: () => renderRelatedTasksTab(task) },
-      { id: 'decisions', label: 'Decisions', render: () => renderDecisionsTab(task) },
-      { id: 'audit', label: 'Audit', render: () => renderAuditTab(task) },
+      { id: 'attempts', label: t('exceptions.tabs.attempts'), count: task.attempt_count ?? 0, render: () => <AttemptsTab task={task} /> },
+      { id: 'task_events', label: t('exceptions.tabs.events'), render: () => <TaskEventsTab task={task} /> },
+      { id: 'related', label: t('exceptions.tabs.related'), render: () => renderRelatedTasksTab(task, t) },
+      { id: 'decisions', label: t('exceptions.tabs.decisions'), render: () => renderDecisionsTab(task, t) },
+      { id: 'audit', label: t('exceptions.tabs.audit'), render: () => renderAuditTab(task, t) },
     ];
 
     const summary: ReactNode = (
       <div className="rail-body" style={{ paddingBottom: 0 }}>
-        <h4 className="eyebrow">Task</h4>
+        <h4 className="eyebrow">{t('exceptions.detail.task')}</h4>
         <KvGrid
           rows={summaryRows}
           onEdit={async (key, value) => {
             if (key === 'status') {
               await transition.mutateAsync({ taskId: task.id, transition: { next_status: String(value) } });
             }
-            pushToast(`Saved · ${key}`, 'good');
+            pushToast(fill(t('exceptions.toast.saved'), { key }), 'good');
           }}
         />
         <h4 className="eyebrow" style={{ marginTop: '14px' }}>
-          Resolution options
+          {t('exceptions.resolution.options')}
         </h4>
         <p className="state__hint" style={{ marginTop: '6px' }}>
-          Pick an action and notes below. Preview checks the recommendation without changing state.
-          Apply records the final decision and evidence trail.
+          {t('exceptions.resolution.optionsHint')}
         </p>
         <ExceptionResolutionControls task={task} />
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
           <Button
-            label="Open shipment"
+            label={t('exceptions.actions.openShipment')}
             iconName="package"
             kind="ghost"
             capability={CAP.SHIPMENTS_READ}
@@ -673,35 +687,35 @@ export function ExceptionsModule() {
         .filter((r): r is TaskRow => Boolean(r));
       try {
         await Promise.all(okRows.map((r) => applyExceptionResolutionWithReadback(r, resolution)));
-        pushToast(`Bulk resolution applied - ${okRows.length} exceptions`, 'good');
+        pushToast(fill(t('exceptions.toast.bulkApplied'), { n: okRows.length }), 'good');
         modal.close();
       } catch (err) {
         notifyExceptionResolutionError(err);
       }
     };
     modal.open({
-      title: `Bulk ${ndrActionLabel(resolution)} · preview`,
+      title: fill(t('exceptions.bulk.title'), { action: ndrActionLabel(resolution, t) }),
       body: (
         <div>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-            <Chip size="sm" kind="good" label={`${okCount} ok`} />
-            {blockedCount > 0 ? <Chip size="sm" kind="warn" label={`${blockedCount} blocked`} /> : null}
-            {errorCount > 0 ? <Chip size="sm" kind="danger" label={`${errorCount} error`} /> : null}
+            <Chip size="sm" kind="good" label={fill(t('exceptions.bulk.ok'), { n: okCount })} />
+            {blockedCount > 0 ? <Chip size="sm" kind="warn" label={fill(t('exceptions.bulk.blocked'), { n: blockedCount })} /> : null}
+            {errorCount > 0 ? <Chip size="sm" kind="danger" label={fill(t('exceptions.bulk.error'), { n: errorCount })} /> : null}
           </div>
           <DataTable
             columns={[
-              { key: 'task_id', label: 'Task', mono: true },
-              { key: 'shipment_id', label: 'Shipment', mono: true },
-              { key: 'outcome', label: 'Outcome' },
-              { key: 'reason', label: 'Reason' },
+              { key: 'task_id', label: t('exceptions.columns.task'), mono: true },
+              { key: 'shipment_id', label: t('exceptions.columns.shipment'), mono: true },
+              { key: 'outcome', label: t('exceptions.columns.outcome') },
+              { key: 'reason', label: t('exceptions.columns.reason') },
             ]}
             rows={results}
             allowSelection={false}
           />
           <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '14px' }}>
-            <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('shell.close')} kind="ghost" onClick={() => modal.close()} />
             <ExceptionActionButton
-              label={`Confirm apply · ${okCount}`}
+              label={fill(t('exceptions.bulk.confirm'), { n: okCount })}
               iconName="play"
               kind="primary"
               canWrite={canWriteTasks}
@@ -726,7 +740,7 @@ export function ExceptionsModule() {
             task_id: r.id,
             shipment_id: r.shipment_id,
             outcome: 'blocked',
-            reason: 'This action is not available for the selected exception.',
+            reason: t('exceptions.errors.notAvailable'),
           };
         }
         try {
@@ -753,7 +767,7 @@ export function ExceptionsModule() {
     <Chip
       key="seam"
       size="xs"
-      label="Exception recovery policy"
+      label={t('exceptions.seamChip')}
     />,
   ];
 
@@ -762,14 +776,11 @@ export function ExceptionsModule() {
       <div className="page">
         <PageHeader
           moduleKey="exceptions"
-          eyebrow="Operate"
-          titleAccent="Exceptions"
-          titlePlain="queue (NDR)"
         />
         <StateView
           kind="denied"
           capability={CAP.SHIPMENTS_READ}
-          hint="You do not have permission to view the exceptions queue."
+          hint={t('exceptions.denied')}
         />
       </div>
     );
@@ -779,9 +790,6 @@ export function ExceptionsModule() {
     <div className="page">
       <PageHeader
         moduleKey="exceptions"
-        eyebrow="Operate"
-        titleAccent="Exceptions"
-        titlePlain="queue (NDR)"
         pills={pills}
       />
 
@@ -805,122 +813,122 @@ export function ExceptionsModule() {
             // or driven by policy resolution and have no safe direct-write
             // mutator). Failures roll back the optimistic edit.
             if (key !== 'status') {
-              return { ok: false, message: `Field ${key} is read-only` };
+              return { ok: false, message: fill(t('exceptions.cellReadOnly'), { key }) };
             }
             try {
               await transition.mutateAsync({
                 taskId: row.id,
                 transition: { next_status: String(value) },
               });
-              pushToast('Status saved', 'good');
+              pushToast(t('exceptions.toast.statusSaved'), 'good');
               return { ok: true };
             } catch {
-              pushToast('Status could not be saved. Try again.', 'danger');
-              return { ok: false, message: 'Status could not be saved. Try again.' };
+              pushToast(t('exceptions.errors.statusSave'), 'danger');
+              return { ok: false, message: t('exceptions.errors.statusSave') };
             }
           }}
           bulkActions={[
             {
-              label: 'Bulk reschedule (preview)',
+              label: t('exceptions.actions.bulkReschedule'),
               icon: 'history',
               kind: 'primary',
               capability: CAP.TASKS_WRITE,
               onClick: (rs) => runBulkPreview(rs, 'reschedule'),
             },
             {
-              label: 'Return to branch (preview)',
+              label: t('exceptions.actions.bulkReturn'),
               icon: 'rotate',
               capability: CAP.TASKS_WRITE,
               onClick: (rs) => runBulkPreview(rs, NDR_RETURN_TO_BRANCH_ACTION),
             },
             {
-              label: 'Escalate',
+              label: t('common.escalate'),
               icon: 'warn',
               capability: CAP.TASKS_WRITE,
               onClick: async (rs) => {
                 const nextStatus = taskActionNextStatus('escalate');
                 if (!nextStatus) {
-                  pushToast('task_action_kind.escalate next_status missing', 'danger');
+                  pushToast(t('exceptions.errors.escalateMissing'), 'danger');
                   return;
                 }
                 await Promise.all(
                   rs.map((r) => transition.mutateAsync({ taskId: r.id, transition: { next_status: nextStatus } })),
                 );
-                pushToast(`Escalated ${rs.length} tasks`, 'warn');
+                pushToast(fill(t('exceptions.toast.escalatedMany'), { n: rs.length }), 'warn');
               },
             },
           ]}
           rowActions={[
-            { label: 'Open task', icon: 'eye', onClick: openExceptionDrawer },
+            { label: t('exceptions.actions.openTask'), icon: 'eye', onClick: openExceptionDrawer },
             {
-              label: 'Open shipment',
+              label: t('exceptions.actions.openShipment'),
               icon: 'package',
               capability: CAP.SHIPMENTS_READ,
               onClick: (r) => {
                 if (!r.shipment_id) {
-                  pushToast('No shipment is linked to this exception task.', 'warn');
+                  pushToast(t('exceptions.errors.noShipment'), 'warn');
                   return;
                 }
                 openShipmentContext(r.shipment_id);
               },
             },
             {
-              label: 'Preview reschedule',
+              label: t('exceptions.actions.previewReschedule'),
               icon: 'check',
               capability: CAP.TASKS_WRITE,
               onClick: async (r) => {
                 if (!(r.allowed_actions ?? []).includes('reschedule')) {
-                  pushToast('Reschedule is not available for this exception.', 'warn');
+                  pushToast(t('exceptions.errors.rescheduleUnavailable'), 'warn');
                   return;
                 }
                 await resolveExc.mutateAsync({ taskId: r.id, resolution: 'reschedule', dryRun: true });
-                pushToast('Preview · ok', 'info');
+                pushToast(t('exceptions.toast.previewOk'), 'info');
               },
             },
             {
-              label: 'Apply (reschedule)',
+              label: t('exceptions.actions.applyReschedule'),
               icon: 'play',
               kind: 'primary',
               capability: CAP.TASKS_WRITE,
               onClick: async (r) => {
                 if (!(r.allowed_actions ?? []).includes('reschedule')) {
-                  pushToast('Reschedule is not available for this exception.', 'warn');
+                  pushToast(t('exceptions.errors.rescheduleUnavailable'), 'warn');
                   return;
                 }
                 try {
                   await applyExceptionResolutionWithReadback(r, 'reschedule');
-                  pushToast('Applied | reschedule', 'good');
+                  pushToast(t('exceptions.toast.appliedReschedule'), 'good');
                 } catch (err) {
                   notifyExceptionResolutionError(err);
                 }
               },
             },
             {
-              label: 'Preview cancel',
+              label: t('exceptions.actions.previewCancel'),
               icon: 'close',
               capability: CAP.TASKS_WRITE,
               onClick: async (r) => {
                 if (!(r.allowed_actions ?? []).includes('cancel')) {
-                  pushToast('Cancel is not available for this exception.', 'warn');
+                  pushToast(t('exceptions.errors.cancelUnavailable'), 'warn');
                   return;
                 }
                 await resolveExc.mutateAsync({ taskId: r.id, resolution: 'cancel', dryRun: true });
-                pushToast('Cancel preview - ok', 'warn');
+                pushToast(t('exceptions.toast.cancelPreviewOk'), 'warn');
               },
             },
             {
-              label: 'Apply cancel',
+              label: t('exceptions.actions.applyCancel'),
               icon: 'close',
               kind: 'danger',
               capability: CAP.TASKS_WRITE,
               onClick: async (r) => {
                 if (!(r.allowed_actions ?? []).includes('cancel')) {
-                  pushToast('Cancel is not available for this exception.', 'warn');
+                  pushToast(t('exceptions.errors.cancelUnavailable'), 'warn');
                   return;
                 }
                 try {
                   await applyExceptionResolutionWithReadback(r, 'cancel');
-                  pushToast('Applied - cancel', 'good');
+                  pushToast(t('exceptions.toast.appliedCancel'), 'good');
                 } catch (err) {
                   notifyExceptionResolutionError(err);
                 }
@@ -939,27 +947,32 @@ export function ExceptionsModule() {
 }
 
 function ExceptionResolutionReadbackPanel({ readback }: { readback: ExceptionResolutionReadback }) {
+  const t = useT();
   return (
     <section
       className="panel"
-      aria-label="Exception resolution status"
+      aria-label={t('exceptions.readback.label')}
       style={{ marginTop: '14px', display: 'grid', gap: '10px' }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 14px' }}>
-        <Chip size="sm" kind="good" label="Exception resolution updated" />
-        <span className="state__hint">Action completed and the exception queue was refreshed</span>
+        <Chip size="sm" kind="good" label={t('exceptions.readback.chip')} />
+        <span className="state__hint">{t('exceptions.readback.done')}</span>
       </div>
       <div className="card">
-        <Kv k="Task" v={<span className="mono">{readback.taskLabel}</span>} />
-        <Kv k="Subject" v={readback.subject || '-'} />
-        <Kv k="Action" v={ndrActionLabel(readback.action)} />
-        <Kv k="Policy check" v={readback.settingsResolutionId ? 'Passed' : 'Pending'} />
-        <Kv k="Result" v={readback.applyStatus ? 'Applied' : 'Pending'} />
-        <Kv k="Activity" v={readback.taskEventId || readback.shipmentActionId ? 'Recorded' : 'Pending'} />
-        <Kv k="Workflow" v={readback.workflowRunId ? 'Updated' : 'Pending'} />
+        <Kv k={t('exceptions.kv.task')} v={<span className="mono">{readback.taskLabel}</span>} />
+        <Kv k={t('exceptions.kv.subject')} v={readback.subject ? <bdi>{readback.subject}</bdi> : '-'} />
+        <Kv k={t('exceptions.kv.action')} v={ndrActionLabel(readback.action, t)} />
+        <Kv k={t('exceptions.kv.policyCheck')} v={readback.settingsResolutionId ? t('exceptions.values.passed') : t('exceptions.values.pending')} />
+        <Kv k={t('exceptions.kv.result')} v={readback.applyStatus ? t('exceptions.values.applied') : t('exceptions.values.pending')} />
+        <Kv k={t('exceptions.kv.activity')} v={readback.taskEventId || readback.shipmentActionId ? t('exceptions.values.recorded') : t('exceptions.values.pending')} />
+        <Kv k={t('exceptions.kv.workflow')} v={readback.workflowRunId ? t('exceptions.values.updated') : t('exceptions.values.pending')} />
         <Kv
-          k="Queue status"
-          v={`${readback.queueCount} tasks; selected exception ${readback.rowVisible ? `updated (${readback.rowStatus})` : 'awaiting refresh'}`}
+          k={t('exceptions.kv.queueStatus')}
+          v={
+            readback.rowVisible
+              ? fill(t('exceptions.readback.queueUpdated'), { n: readback.queueCount, status: readback.rowStatus })
+              : fill(t('exceptions.readback.queueAwaiting'), { n: readback.queueCount })
+          }
         />
       </div>
     </section>
@@ -984,12 +997,13 @@ function Kv({ k, v }: KvProps) {
 // shipment row is filtered client-side because the task surface holds a
 // shipment id OR a tracking number (legacy projection).
 function ShipmentSnapshotTab({ task }: { task: TaskRow }): ReactNode {
+  const t = useT();
   const shipmentsQuery = useCompleteResourceList<Record<string, unknown>>('shipments');
-  if (!task.shipment_id) return <div className="state__hint">No shipment linked.</div>;
+  if (!task.shipment_id) return <div className="state__hint">{t('exceptions.snapshot.noShipment')}</div>;
   if (shipmentsQuery.isLoading) return <StateView kind="loading" />;
   const ships = shipmentsQuery.data?.rows ?? [];
   const s = ships.find((sh) => sh.id === task.shipment_id || sh.tracking_number === task.shipment_id);
-  if (!s) return <div className="state__hint">{`Shipment ${task.shipment_id} not found through shipment registry.`}</div>;
+  if (!s) return <div className="state__hint">{fill(t('exceptions.snapshot.notFound'), { id: task.shipment_id })}</div>;
   // W13-5 — closes OPERATIONS D3 §6 (Exceptions ShipmentSnapshotTab orphan-toast).
   // Per the deferred decision doc (`__audit__/DECISIONS/SHIPMENTS-DRAWER-CELL-EDITS.md`
   // §5), the exceptions surface is a read-only context panel; per-field
@@ -998,17 +1012,16 @@ function ShipmentSnapshotTab({ task }: { task: TaskRow }): ReactNode {
   // `editable: false` removes the orphan-toast affordance and forces the
   // canonical write path through the shipments surface.
   const rows: KvRow[] = [
-    { key: 'tracking_number', label: 'Tracking', value: s.tracking_number, mono: true, editable: false },
-    { key: 'status', label: 'Status', value: s.status, lookup: 'shipment_status', editable: false },
-    { key: 'service_type', label: 'Service', value: s.service_type, lookup: 'service_type', editable: false },
-    { key: 'destination_city', label: 'Destination', value: s.destination_city, editable: false },
-    { key: 'cod_amount', label: 'COD', value: s.cod_amount, editable: false },
+    { key: 'tracking_number', label: t('exceptions.snapshot.tracking'), value: s.tracking_number, mono: true, editable: false },
+    { key: 'status', label: t('exceptions.snapshot.status'), value: s.status, lookup: 'shipment_status', editable: false },
+    { key: 'service_type', label: t('exceptions.snapshot.service'), value: s.service_type, lookup: 'service_type', editable: false },
+    { key: 'destination_city', label: t('exceptions.snapshot.destination'), value: s.destination_city, editable: false },
+    { key: 'cod_amount', label: t('exceptions.snapshot.cod'), value: s.cod_amount, editable: false },
   ];
   return (
     <div>
       <div className="state__hint" style={{ padding: '6px 14px' }}>
-        Read-only shipment snapshot. Edit fields on the Shipments surface
-        drawer to route through `shipment_amend_cancel_v1` policy/lock gates.
+        {t('exceptions.snapshot.hint')}
       </div>
       <KvGrid rows={rows} />
     </div>
@@ -1022,6 +1035,7 @@ function ShipmentSnapshotTab({ task }: { task: TaskRow }): ReactNode {
 // would have returned empty rows on production swap (gap row in
 // __audit__/CROSSWALK/OPERATIONS.md).
 function AttemptsTab({ task }: { task: TaskRow }) {
+  const t = useT();
   const { data, isLoading } = useCompleteResourceList<Record<string, unknown>>('task_events', {
     filter: { task_id: task.id },
     sort: { key: 'occurred_at', dir: 'asc' },
@@ -1031,7 +1045,7 @@ function AttemptsTab({ task }: { task: TaskRow }) {
   if (events.length === 0) {
     return (
       <div className="state__hint">
-        No activity has been recorded for this task yet. Driver attempt outcomes will appear here when delivery attempts are completed.
+        {t('exceptions.attempts.empty')}
       </div>
     );
   }
@@ -1056,6 +1070,7 @@ function AttemptsTab({ task }: { task: TaskRow }) {
 }
 
 function TaskEventsTab({ task }: { task: TaskRow }) {
+  const t = useT();
   const { data, isLoading } = useCompleteResourceList<Record<string, unknown>>('task_events', {
     filter: { task_id: task.id },
   });
@@ -1063,37 +1078,37 @@ function TaskEventsTab({ task }: { task: TaskRow }) {
   return (
     <DataTable
       columns={[
-        { key: 'occurred_at', label: 'When', format: 'datetime' },
-        { key: 'event', label: 'Event' },
-        { key: 'actor', label: 'Actor', mono: true },
-        { key: 'notes', label: 'Notes' },
+        { key: 'occurred_at', label: t('exceptions.columns.when'), format: 'datetime' },
+        { key: 'event', label: t('exceptions.columns.event') },
+        { key: 'actor', label: t('exceptions.columns.actor'), mono: true },
+        { key: 'notes', label: t('exceptions.columns.notes') },
       ]}
       rows={data?.rows ?? []}
       allowSelection={false}
-      emptyText="No activity recorded yet."
+      emptyText={t('exceptions.events.empty')}
     />
   );
 }
 
-async function renderRelatedTasksTab(task: TaskRow): Promise<ReactNode> {
+async function renderRelatedTasksTab(task: TaskRow, t: Translate = englishT): Promise<ReactNode> {
   const all = (await api.listTasks()) as TaskRow[];
   const related = all.filter((tt) => tt.shipment_id === task.shipment_id && tt.id !== task.id);
   return (
     <DataTable
       columns={[
-        { key: 'task_id', label: 'Task', mono: true },
-        { key: 'task_type', label: 'Type', lookup: 'task_type' },
-        { key: 'subject', label: 'Subject' },
-        { key: 'status', label: 'Status', lookup: 'task_status' },
+        { key: 'task_id', label: t('exceptions.columns.task'), mono: true },
+        { key: 'task_type', label: t('exceptions.columns.type'), lookup: 'task_type' },
+        { key: 'subject', label: t('exceptions.columns.subject') },
+        { key: 'status', label: t('exceptions.columns.status'), lookup: 'task_status' },
       ]}
       rows={related}
       allowSelection={false}
-      emptyText="No other tasks for this shipment."
+      emptyText={t('exceptions.related.empty')}
     />
   );
 }
 
-async function renderDecisionsTab(task: TaskRow): Promise<ReactNode> {
+async function renderDecisionsTab(task: TaskRow, t: Translate = englishT): Promise<ReactNode> {
   const all = await api.listDecisionLog({});
   // W71-Operate (Cycle F-R-11) closure — NDR-related decision filter
   // resolves through canonical `decision_category.metadata.is_ndr_related`
@@ -1110,10 +1125,10 @@ async function renderDecisionsTab(task: TaskRow): Promise<ReactNode> {
   return (
     <DataTable
       columns={[
-        { key: 'occurred_at', label: 'When', format: 'datetime' },
-        { key: 'decision_category', label: 'Category', lookup: 'decision_category' },
-        { key: 'resolved_from', label: 'Scope' },
-        { key: 'settings_resolution_id', label: 'Resolution', mono: true },
+        { key: 'occurred_at', label: t('exceptions.columns.when'), format: 'datetime' },
+        { key: 'decision_category', label: t('exceptions.columns.category'), lookup: 'decision_category' },
+        { key: 'resolved_from', label: t('exceptions.columns.scope') },
+        { key: 'settings_resolution_id', label: t('exceptions.columns.resolution'), mono: true },
       ]}
       rows={rows.length ? rows : all.slice(0, 4)}
       allowSelection={false}
@@ -1121,7 +1136,7 @@ async function renderDecisionsTab(task: TaskRow): Promise<ReactNode> {
   );
 }
 
-async function renderAuditTab(task: TaskRow): Promise<ReactNode> {
+async function renderAuditTab(task: TaskRow, t: Translate = englishT): Promise<ReactNode> {
   try {
     const all = await api.listAuditLog({});
     const rows = (all as Array<Record<string, unknown>>)
@@ -1130,9 +1145,9 @@ async function renderAuditTab(task: TaskRow): Promise<ReactNode> {
     return (
       <DataTable
         columns={[
-          { key: 'occurred_at', label: 'When', format: 'datetime' },
-          { key: 'op', label: 'Op' },
-          { key: 'actor', label: 'Actor', mono: true },
+          { key: 'occurred_at', label: t('exceptions.columns.when'), format: 'datetime' },
+          { key: 'op', label: t('exceptions.columns.op') },
+          { key: 'actor', label: t('exceptions.columns.actor'), mono: true },
         ]}
         rows={rows.length ? rows : (all as Array<Record<string, unknown>>).slice(0, 4)}
         allowSelection={false}
@@ -1141,8 +1156,8 @@ async function renderAuditTab(task: TaskRow): Promise<ReactNode> {
   } catch {
     return (
       <div className="state state--denied">
-        <h3 className="state__title">Audit access denied</h3>
-        <p className="state__hint">Audit activity permission is required.</p>
+        <h3 className="state__title">{t('exceptions.audit.deniedTitle')}</h3>
+        <p className="state__hint">{t('exceptions.audit.deniedHint')}</p>
       </div>
     );
   }
