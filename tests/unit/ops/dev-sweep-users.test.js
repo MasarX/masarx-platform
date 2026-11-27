@@ -13,9 +13,11 @@ const helperPath = 'scripts/dev/fetch-sweep-credentials.mjs';
 const read = path => readFileSync(join(root, path), 'utf8');
 const workflow = parse(read(workflowPath));
 const job = workflow.jobs.provision;
-const pin = job.steps.find(step => step.run).env.SWEEP_RECIPIENT_SHA256;
+const { SWEEP_RECIPIENT_SHA256: pin, SWEEP_RECIPIENT_HOSTED_SHA256: hostedPin } = job.steps.find(step => step.run).env;
 const roles = JSON.parse(read('config/dev/sweep-roles.json'));
-const certificate = read('config/dev/sweep-recipient.crt');
+const localCertName = 'sweep-recipient.crt';
+const hostedCertName = 'sweep-recipient-hosted.crt';
+const certificate = read(`config/dev/${localCertName}`);
 const dispatch = {
   GITHUB_ACTIONS: 'true', DEPLOY_ENV: 'dev', GITHUB_EVENT_NAME: 'workflow_dispatch',
   GITHUB_REF: 'refs/heads/main', GITHUB_REPOSITORY: 'MasarX/masarx-platform',
@@ -99,6 +101,35 @@ test('sweep recipient certificate is public and matches the workflow fingerprint
   expect(new X509Certificate(certificate).fingerprint256).toBe(pin);
 });
 
+test('hosted sweep recipient is a distinct public RSA-4096 certificate that matches its workflow pin', () => {
+  const hostedCertificate = read(`config/dev/${hostedCertName}`);
+  expect(hostedCertificate.match(/-----BEGIN CERTIFICATE-----/g)).toHaveLength(1);
+  expect(hostedCertificate).not.toContain('PRIVATE KEY');
+  const cert = new X509Certificate(hostedCertificate);
+  expect(cert.publicKey.asymmetricKeyType).toBe('rsa');
+  expect(cert.publicKey.asymmetricKeyDetails.modulusLength).toBe(4096);
+  expect(cert.fingerprint256).toBe(hostedPin);
+  expect(hostedPin).not.toBe(pin);
+});
+
+test.each([
+  ['local', hostedPin, hostedPin],
+  ['hosted', pin, pin],
+])('sweep provisioning rejects a mismatched %s recipient pin before provisioning', (_, localPin, otherPin) => {
+  const projectRef = 'a'.repeat(20);
+  const result = spawnSync(process.execPath, [scriptPath], {
+    cwd: root, env: {
+      ...process.env, ...dispatch, SUPABASE_PROJECT_REF: projectRef,
+      NEXT_PUBLIC_SUPABASE_URL: buildSupabaseProjectUrl(projectRef),
+      SUPABASE_ACCESS_TOKEN: '', SUPABASE_MGMT_URL: '', RUNNER_TEMP: tmpdir(),
+      SWEEP_RECIPIENT_SHA256: localPin, SWEEP_RECIPIENT_HOSTED_SHA256: otherPin,
+    }, encoding: 'utf8', windowsHide: true,
+  });
+  expect(result.status).toBe(1);
+  expect(result.stdout).toBe('');
+  expect(result.stderr.trim()).toBe('sweep_error=recipient_fingerprint');
+});
+
 test('sweep fetch helper refuses a repository output before invoking the caller GitHub CLI', () => {
   const result = spawnSync(process.execPath, [helperPath, '--run', '1', '--key', 'unused', '--out', 'config/dev/output.json'], {
     cwd: root, env: { ...process.env, GH_CLI: 'unavailable' }, encoding: 'utf8', windowsHide: true,
@@ -126,7 +157,7 @@ test('sweep fetch helper accepts a new output path outside the checkout across v
 });
 
 test('sweep provisioner masks generated passwords before use and emits fixed labels after CMS encryption', async () => {
-  const { provisionSweep } = await import('../../../scripts/deploy/dev-sweep-users.mjs');
+  const { provisionSweep: runProvisionSweep } = await import('../../../scripts/deploy/dev-sweep-users.mjs');
   const directory = mkdtempSync(join(tmpdir(), 'masarx-sweep-test-'));
   const projectRef = 'a'.repeat(20);
   const projectUrl = buildSupabaseProjectUrl(projectRef);
@@ -214,12 +245,25 @@ test('sweep provisioner masks generated passwords before use and emits fixed lab
     }
     throw new Error('unexpected simulated request');
   });
+  const recipientDirectory = mkdtempSync(join(tmpdir(), 'masarx-sweep-recipients-'));
   try {
+    const recipients = [localCertName, hostedCertName].map(filename => {
+      const cert = join(recipientDirectory, filename);
+      const key = `${cert}.key`;
+      const generated = spawnSync('openssl', [
+        'req', '-new', '-x509', '-newkey', 'rsa:2048', '-noenc', '-days', '1',
+        '-subj', `/CN=${filename}`, '-keyout', key, '-out', cert,
+      ], { stdio: 'ignore', windowsHide: true });
+      expect(generated.status).toBe(0);
+      return { cert, key, pin: new X509Certificate(readFileSync(cert)).fingerprint256 };
+    });
     const env = {
       ...dispatch, SUPABASE_PROJECT_REF: projectRef, NEXT_PUBLIC_SUPABASE_URL: projectUrl,
-      SUPABASE_ACCESS_TOKEN: token, SWEEP_RECIPIENT_SHA256: pin, RUNNER_TEMP: directory,
+      SUPABASE_ACCESS_TOKEN: token, RUNNER_TEMP: directory,
+      SWEEP_RECIPIENT_SHA256: recipients[0].pin, SWEEP_RECIPIENT_HOSTED_SHA256: recipients[1].pin,
     };
     const artifact = join(directory, 'dev-sweep-credentials.cms');
+    const provisionSweep = options => runProvisionSweep(options, recipientDirectory);
     await expect(provisionSweep(env)).rejects.toBeDefined();
     expect(labels.splice(0)).toEqual(['password_sign_in=disabled']);
     expect(request).toHaveBeenCalledTimes(1);
@@ -243,6 +287,20 @@ test('sweep provisioner masks generated passwords before use and emits fixed lab
       expect(spawnSync('openssl', ['cms', '-cmsout', '-inform', 'DER', '-in', artifact], {
         stdio: 'ignore', windowsHide: true,
       }).status).toBe(0);
+      const roleKeys = Object.keys(roles);
+      const runPasswords = passwords.slice(-roleKeys.length);
+      const expected = Object.fromEntries(roleKeys.map((role, index) => {
+        const { email } = [...users.values()].find(user => user.app_metadata.dev_design_sweep === role);
+        return [role, { email, password: runPasswords[index] }];
+      }));
+      for (const { cert, key } of recipients) {
+        const decrypted = spawnSync('openssl', [
+          'cms', '-decrypt', '-binary', '-inform', 'DER', '-in', artifact,
+          '-inkey', key, '-recip', cert,
+        ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+        expect(decrypted.status).toBe(0);
+        expect(JSON.parse(decrypted.stdout)).toEqual(expected);
+      }
       rmSync(artifact);
     }
     expect(users.size).toBe(3);
@@ -265,5 +323,6 @@ test('sweep provisioner masks generated passwords before use and emits fixed lab
     request.mockRestore();
     log.mockRestore();
     rmSync(directory, { recursive: true, force: true });
+    rmSync(recipientDirectory, { recursive: true, force: true });
   }
 });

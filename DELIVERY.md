@@ -101,7 +101,7 @@ Use fine-grained tokens scoped to the single DEV project. The DEV environment se
 
 ### Signed-in DEV sweep
 
-Dispatch [DEV design sweep users](.github/workflows/dev-sweep-users.yml) from `main` with `environment=dev`. Each successful dispatch refreshes the passwords for all three accounts. Use the successful run ID before the encrypted artifact expires after one day.
+Dispatch [DEV design sweep users](.github/workflows/dev-sweep-users.yml) from `main` with `environment=dev`. Each successful dispatch refreshes the passwords for all three accounts. The workflow checks both recipient certificate fingerprints before provisioning and produces one CMS artifact encrypted for the local and hosted recipients. Use the successful run ID before the encrypted artifact expires after one day.
 
 Run `node scripts/dev/fetch-sweep-credentials.mjs --run <id> --key <path> --out <path>` with an authorized GitHub CLI and OpenSSL on `PATH`. Set `GH_CLI` to the GitHub CLI executable if needed. Choose a new output file outside Git worktrees, feed it directly to the sweep runner and remove it after the sweep. Keep credential entry and the file out of logs, captures and issues.
 
