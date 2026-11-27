@@ -32,7 +32,7 @@ import { StateView } from '@/components/StateView';
 import { useTrace } from '@/lib/queries';
 import { useCapability } from '@/lib/identity';
 import { CAP } from '@/lib/capabilities';
-import { useI18n } from '@/lib/i18n';
+import { fill, useI18n, type Translate } from '@/lib/i18n';
 import { useDrawer } from '@/hooks/useOverlay';
 import { pushToast } from '@/components/toastStore';
 import { lookupRow } from '@/lib/api';
@@ -100,6 +100,7 @@ interface ObservabilityRowProps {
 }
 
 function ObservabilityRow({ row, totalMs, fmtNumber, onSelect }: ObservabilityRowProps) {
+  const { t } = useI18n();
   const startPct = totalMs > 0 ? (row.startMs / totalMs) * 100 : 0;
   // Render at minimum 2px-equivalent so zero-duration markers stay visible.
   const durPct = totalMs > 0 ? Math.max((row.durMs / totalMs) * 100, 1) : 0;
@@ -135,7 +136,7 @@ function ObservabilityRow({ row, totalMs, fmtNumber, onSelect }: ObservabilityRo
           onSelect(row);
         }
       }}
-      aria-label={`Event ${row.ev.event_type}, ${row.durMs} ms`}
+      aria-label={fill(t('insightsTraces.observabilityRow.eventEventTypeDurms'), { event_type: String(row.ev.event_type), durMs: String(row.durMs) })}
     >
       <Chip
         label={row.ev.event_source}
@@ -153,44 +154,44 @@ function ObservabilityRow({ row, totalMs, fmtNumber, onSelect }: ObservabilityRo
         className="mono"
         style={{ fontSize: '10.5px', color: 'var(--ink-3)', textAlign: 'right' }}
       >
-        {row.durMs > 0 ? `${fmtNumber(row.durMs)}ms` : '—'}
+        {row.durMs > 0 ? fill(t('insightsTraces.observabilityRow.durationMs'), { ms: fmtNumber(row.durMs) }) : '—'}
       </span>
     </div>
   );
 }
 
-function eventDrawerBody(row: TimelineRow): ReactNode {
+function eventDrawerBody(row: TimelineRow, t: Translate): ReactNode {
   const meta = row.ev.metadata ?? {};
   const metaKeys = Object.keys(meta);
   return (
     <div data-testid="traces-event-drawer">
-      <h4 className="eyebrow">Activity event</h4>
+      <h4 className="eyebrow">{t('insightsTraces.eventDrawerBody.activityEvent')}</h4>
       <div style={{ display: 'grid', gap: '6px', fontSize: '12px' }}>
-        <div>{`Event: ${row.ev.event_type}`}</div>
-        <div>{`Source: ${row.ev.event_source}`}</div>
-        <div>{`Resource: ${row.ev.resource_type}`}</div>
-        <div>{`Status: ${row.ev.status}`}</div>
-        <div>{`Event time: ${row.ev.event_time}`}</div>
-        <div>{`Duration: ${row.durMs > 0 ? `${row.durMs}ms` : 'Not available'}`}</div>
+        <div>{fill(t('insightsTraces.eventDrawerBody.event'), { value: String(row.ev.event_type) })}</div>
+        <div>{fill(t('insightsTraces.eventDrawerBody.source'), { value: String(row.ev.event_source) })}</div>
+        <div>{fill(t('insightsTraces.eventDrawerBody.resource'), { value: String(row.ev.resource_type) })}</div>
+        <div>{fill(t('insightsTraces.eventDrawerBody.status'), { value: String(row.ev.status) })}</div>
+        <div>{fill(t('insightsTraces.eventDrawerBody.eventTime'), { value: String(row.ev.event_time) })}</div>
+        <div>{fill(t('insightsTraces.eventDrawerBody.duration'), { value: row.durMs > 0 ? fill(t('insightsTraces.eventDrawerBody.durationMs'), { ms: String(row.durMs) }) : t('insightsTraces.eventDrawerBody.notAvailable') })}</div>
       </div>
       {metaKeys.length > 0 && (
         <>
-          <h4 className="eyebrow" style={{ marginTop: '12px' }}>Additional details</h4>
+          <h4 className="eyebrow" style={{ marginTop: '12px' }}>{t('insightsTraces.eventDrawerBody.additionalDetails')}</h4>
           <p className="state__hint">
-            {`${metaKeys.length} additional detail${metaKeys.length === 1 ? '' : 's'} recorded for support review.`}
+            {fill(t(metaKeys.length === 1 ? 'insightsTraces.eventDrawerBody.additionalDetailsCountOne' : 'insightsTraces.eventDrawerBody.additionalDetailsCount'), { count: String(metaKeys.length) })}
           </p>
         </>
       )}
-      <h4 className="eyebrow" style={{ marginTop: '12px' }}>Activity history</h4>
+      <h4 className="eyebrow" style={{ marginTop: '12px' }}>{t('insightsTraces.eventDrawerBody.activityHistory')}</h4>
       <p className="state__hint">
-        This lookup returns timeline events, domain events, and workflow runs for
-        the selected activity reference.
+        {t('insightsTraces.eventDrawerBody.thisLookupReturnsTimeline')}
       </p>
     </div>
   );
 }
 
 function DomainEventCard({ ev }: { ev: UiTraceDomainEvent }) {
+  const { t } = useI18n();
   return (
     <div
       className="card"
@@ -206,7 +207,7 @@ function DomainEventCard({ ev }: { ev: UiTraceDomainEvent }) {
     >
       <Chip label={ev.event_type} kind="info" size="xs" className="mono" />
       <span className="mono" style={{ fontSize: '11px' }}>
-        {`${ev.resource_type}: ${ev.resource_id ? 'Recorded' : 'Not available'}`}
+        {`${ev.resource_type}: ${ev.resource_id ? t('insightsTraces.domainEventCard.recorded') : t('insightsTraces.domainEventCard.notAvailable')}`}
       </span>
       <span
         className="mono"
@@ -219,6 +220,7 @@ function DomainEventCard({ ev }: { ev: UiTraceDomainEvent }) {
 }
 
 function WorkflowRunCard({ wr }: { wr: UiTraceWorkflowRun }) {
+  const { t } = useI18n();
   return (
     <div
       className="card"
@@ -247,7 +249,7 @@ function WorkflowRunCard({ wr }: { wr: UiTraceWorkflowRun }) {
         className="mono"
       />
       <span className="mono" style={{ fontSize: '11px' }}>
-        {`Workflow: Recorded · Template: ${wr.workflow_template_id ? 'Recorded' : 'Not available'}`}
+        {fill(t('insightsTraces.workflowRunCard.workflowTemplate'), { value: wr.workflow_template_id ? t('insightsTraces.workflowRunCard.recorded') : t('insightsTraces.workflowRunCard.notAvailable') })}
       </span>
       <span
         className="mono"
@@ -262,7 +264,7 @@ function WorkflowRunCard({ wr }: { wr: UiTraceWorkflowRun }) {
 export function TracesModule() {
   // AGENTS.md §7 (CAPABILITY-GATED UI for reads): page-level fail-closed gate.
   const canRead = useCapability(CAP.OBSERVABILITY_READ);
-  const { fmtNumber } = useI18n();
+  const { t, fmtNumber } = useI18n();
   const drawer = useDrawer();
   const search = useInsightsSearch();
   const updateSearch = useUpdateSearch();
@@ -314,11 +316,11 @@ export function TracesModule() {
   const onCopyCorrelation = useCallback(() => {
     try {
       navigator.clipboard?.writeText(activeId);
-      pushToast(`Copied · ${activeId}`, 'good');
+      pushToast(fill(t('insightsTraces.tracesModule.copiedActiveid'), { activeId: String(activeId) }), 'good');
     } catch {
-      pushToast('Clipboard blocked', 'warn');
+      pushToast(t('insightsTraces.tracesModule.clipboardBlocked'), 'warn');
     }
-  }, [activeId]);
+  }, [activeId, t]);
 
   const onOpenNewTab = useCallback(() => {
     const url = `${window.location.pathname}?cor=${encodeURIComponent(activeId)}`;
@@ -328,19 +330,19 @@ export function TracesModule() {
   const onSelectRow = useCallback(
     (row: TimelineRow) => {
       drawer.open({
-        title: `Event · ${row.ev.event_type}`,
+        title: fill(t('insightsTraces.tracesModule.eventEventType'), { event_type: String(row.ev.event_type) }),
         size: 'md',
-        body: eventDrawerBody(row),
+        body: eventDrawerBody(row, t),
       });
     },
-    [drawer, activeId],
+    [drawer, activeId, t],
   );
 
   const headerPills = useMemo<ReactNode[]>(() => {
     const list: ReactNode[] = [
       <Chip
         key="src"
-        label="Activity history"
+        label={t('insightsTraces.tracesModule.activityHistory')}
         kind="neutral"
         size="xs"
         className="mono"
@@ -350,7 +352,7 @@ export function TracesModule() {
       list.push(
         <Chip
           key="total"
-          label={`total · ${fmtNumber(totalMs)}ms`}
+          label={fill(t('insightsTraces.tracesModule.totalMs'), { ms: fmtNumber(totalMs) })}
           kind="info"
           size="xs"
           className="mono"
@@ -361,7 +363,11 @@ export function TracesModule() {
       list.push(
         <Chip
           key="evcount"
-          label={`${observabilityEvents.length} events · ${domainEvents.length} domain · ${workflowRuns.length} workflows`}
+          label={fill(t('insightsTraces.tracesModule.eventCounts'), {
+            events: String(observabilityEvents.length),
+            domain: String(domainEvents.length),
+            workflows: String(workflowRuns.length),
+          })}
           kind="neutral"
           size="xs"
           className="mono"
@@ -369,7 +375,7 @@ export function TracesModule() {
       );
     }
     return list;
-  }, [totalMs, fmtNumber, observabilityEvents.length, domainEvents.length, workflowRuns.length]);
+  }, [totalMs, fmtNumber, observabilityEvents.length, domainEvents.length, workflowRuns.length, t]);
 
   const noResults =
     observabilityEvents.length === 0 &&
@@ -381,14 +387,14 @@ export function TracesModule() {
       <div className="page" data-testid="insights-traces-page">
         <PageHeader
           moduleKey="traces"
-          eyebrow="Insights"
-          titleAccent="Activity"
-          titlePlain="history"
+          eyebrow={t('insightsTraces.tracesModule.insights')}
+          titleAccent={t('insightsTraces.tracesModule.activity')}
+          titlePlain={t('insightsTraces.tracesModule.titlePlain')}
         />
         <StateView
           kind="denied"
           capability={CAP.OBSERVABILITY_READ}
-          hint="You need activity history access to view this page."
+          hint={t('insightsTraces.tracesModule.youNeedActivityHistory')}
         />
       </div>
     );
@@ -398,9 +404,9 @@ export function TracesModule() {
     <div className="page" data-testid="insights-traces-page">
       <PageHeader
         moduleKey="traces"
-        eyebrow="Insights"
-        titleAccent="Activity"
-        titlePlain="history"
+        eyebrow={t('insightsTraces.tracesModule.insights')}
+        titleAccent={t('insightsTraces.tracesModule.activity')}
+        titlePlain={t('insightsTraces.tracesModule.titlePlain')}
         pills={headerPills}
         actions={[]}
       />
@@ -413,13 +419,13 @@ export function TracesModule() {
             </span>
             <input
               type="text"
-              placeholder="Activity reference"
+              placeholder={t('insightsTraces.tracesModule.activityReference')}
               value={draftId}
               onChange={(e) => setDraftId(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') onFetch();
               }}
-              aria-label="Activity reference"
+              aria-label={t('insightsTraces.tracesModule.activityReference')}
             />
           </div>
         </div>
@@ -429,19 +435,19 @@ export function TracesModule() {
             type="button"
             className="btn btn--sm btn--ghost"
             onClick={onCopyCorrelation}
-            title="Copy activity reference"
+            title={t('insightsTraces.tracesModule.copyActivityReference')}
           >
-            Copy reference
+            {t('insightsTraces.tracesModule.copyReference')}
           </button>
           <button
             type="button"
             className="btn btn--sm btn--ghost"
             onClick={onOpenNewTab}
-            title="Open this activity in a new tab"
+            title={t('insightsTraces.tracesModule.openThisActivityIn')}
           >
-            Open in new tab
+            {t('insightsTraces.tracesModule.openInNewTab')}
           </button>
-          <Button label="Find activity" iconName="play" kind="primary" onClick={onFetch} />
+          <Button label={t('insightsTraces.tracesModule.findActivity')} iconName="play" kind="primary" onClick={onFetch} />
         </div>
       </div>
 
@@ -452,34 +458,34 @@ export function TracesModule() {
           // pretended a sample trace was the user's selection.
           <StateView
             kind="empty"
-            title="No activity reference selected"
-            hint="Paste an activity reference above to fetch its history."
+            title={t('insightsTraces.tracesModule.noActivityReferenceSelected')}
+            hint={t('insightsTraces.tracesModule.pasteAnActivityReference')}
           />
         ) : isError ? (
           <StateView
             kind="error"
-            title="Activity history unavailable"
-            hint={`Could not load activity history for "${activeId}".`}
+            title={t('insightsTraces.tracesModule.activityHistoryUnavailable')}
+            hint={fill(t('insightsTraces.tracesModule.couldNotLoadActivity'), { activeId: String(activeId) })}
           />
         ) : isLoading ? (
-          <StateView kind="loading" hint={`Fetching activity for "${activeId}"...`} />
+          <StateView kind="loading" hint={fill(t('insightsTraces.tracesModule.fetchingActivityForActiveid'), { activeId: String(activeId) })} />
         ) : noResults ? (
           <StateView
             kind="empty"
-            title="No events found"
-            hint={`No activity found for reference "${activeId}".`}
+            title={t('insightsTraces.tracesModule.noEventsFound')}
+            hint={fill(t('insightsTraces.tracesModule.noActivityFoundFor'), { activeId: String(activeId) })}
           />
         ) : (
           <>
             <div className="eyebrow">
-              {`Activity reference: ${trace?.correlation_id || activeId ? 'Recorded' : 'Not available'}`}
-              {totalMs > 0 ? ` · total ${fmtNumber(totalMs)}ms` : ''}
+              {fill(t('insightsTraces.tracesModule.activityReferenceValue'), { value: trace?.correlation_id || activeId ? t('insightsTraces.tracesModule.recorded') : t('insightsTraces.tracesModule.notAvailable') })}
+              {totalMs > 0 ? fill(t('insightsTraces.tracesModule.totalValueMs'), { value: String(fmtNumber(totalMs)) }) : ''}
             </div>
 
             {/* Section 1: observability_events timeline */}
             {observabilityEvents.length > 0 && (
               <section data-testid="traces-observability-section" style={{ marginTop: '16px' }}>
-                <h4 className="eyebrow">Timeline events</h4>
+                <h4 className="eyebrow">{t('insightsTraces.tracesModule.timelineEvents')}</h4>
                 <div
                   className="trace-timeline"
                   style={{
@@ -505,7 +511,7 @@ export function TracesModule() {
             {/* Section 2: domain_events */}
             {domainEvents.length > 0 && (
               <section data-testid="traces-domain-events-section" style={{ marginTop: '16px' }}>
-                <h4 className="eyebrow">Related events</h4>
+                <h4 className="eyebrow">{t('insightsTraces.tracesModule.relatedEvents')}</h4>
                 <div
                   style={{
                     display: 'flex',
@@ -524,7 +530,7 @@ export function TracesModule() {
             {/* Section 3: workflow_runs */}
             {workflowRuns.length > 0 && (
               <section data-testid="traces-workflow-runs-section" style={{ marginTop: '16px' }}>
-                <h4 className="eyebrow">Related workflows</h4>
+                <h4 className="eyebrow">{t('insightsTraces.tracesModule.relatedWorkflows')}</h4>
                 <div
                   style={{
                     display: 'flex',
