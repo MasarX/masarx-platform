@@ -27,10 +27,10 @@ test('Live refresh - Shipments goes offline, pauses writes and recovers', async 
   await expect(banner).toContainText('You are offline.');
   await expect(create).toHaveAttribute('aria-disabled', 'true');
   await expect(create).toHaveAccessibleDescription('Reconnect to save');
-  await expect(create).toBeEnabled();
+  await expect(create).toHaveJSProperty('disabled', false);
   await create.focus();
   await expect(create).toBeFocused();
-  await create.click();
+  await create.click({ force: true });
   await expect(page.locator('[role="dialog"]')).toHaveCount(0);
 
   await context.setOffline(false);
