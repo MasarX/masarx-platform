@@ -189,6 +189,67 @@
                 </div>
               </article>
 
+              <article class="card card-pad track-courier-card" data-track-courier aria-labelledby="track-courier-title" hidden>
+                <div class="track-panel-head">
+                  <h3 id="track-courier-title" data-i18n="track_courier_title">Your courier is on the way</h3>
+                  <span class="track-lock" data-track-courier-lock>Approximate</span>
+                </div>
+                <div class="track-summary-grid" data-track-courier-facts>
+                  <dl class="track-definition">
+                    <dt data-i18n="track_courier_eta">Estimated arrival</dt>
+                    <dd class="num" aria-live="polite" aria-atomic="true" data-track-courier-eta></dd>
+                  </dl>
+                  <dl class="track-definition">
+                    <dt data-i18n="track_courier_stops">Stops before yours</dt>
+                    <dd class="num" data-track-courier-stops></dd>
+                  </dl>
+                  <dl class="track-definition">
+                    <dt data-i18n="track_courier_updated">Last update</dt>
+                    <dd data-track-courier-updated></dd>
+                  </dl>
+                </div>
+                <div class="track-courier-map" data-track-courier-map-wrap hidden>
+                  <div class="track-map-picker track-courier-map-frame" role="img" data-track-courier-map-frame>
+                    <div class="track-courier-map-canvas" data-track-courier-map></div>
+                    <span class="track-courier-area-label" data-i18n="track_courier_area_label">Courier is in this area</span>
+                  </div>
+                  <span class="track-courier-attrib" data-track-courier-attrib></span>
+                </div>
+                <div class="track-courier-notice" data-track-courier-notice hidden>
+                  <strong data-track-courier-notice-title></strong>
+                  <p data-track-courier-notice-text></p>
+                </div>
+                <div class="track-form-actions" data-track-courier-actions>
+                  <button class="btn btn-secondary" type="button" data-track-courier-retry data-i18n="track_courier_retry" hidden>Try again</button>
+                  <button class="btn btn-primary" type="button" data-track-courier-reverify data-i18n="track_courier_reverify" hidden>Verify again</button>
+                </div>
+                <div class="track-map-meta" data-track-courier-meta hidden>
+                  <span data-track-courier-meta-text></span>
+                  <span class="track-map-status track-courier-status" role="status" data-track-courier-status><span class="track-courier-dot" aria-hidden="true"></span><span data-track-courier-status-text></span></span>
+                </div>
+                <p class="track-courier-privacy" data-track-courier-privacy hidden><span class="check" aria-hidden="true"></span><span data-i18n="track_courier_privacy">We never show the courier’s exact position, name, route or other deliveries.</span></p>
+                <p class="form-status" data-track-courier-form-status></p>
+              </article>
+
+              <article class="card card-pad track-pod" data-track-proof aria-labelledby="track-pod-title" hidden>
+                <div class="track-panel-head">
+                  <h3 id="track-pod-title" data-i18n="track_pod_title">Proof of delivery</h3>
+                  <span class="track-lock" data-track-proof-lock>Protected</span>
+                </div>
+                <div class="pod-grid" data-track-proof-grid></div>
+                <div class="track-courier-notice" data-track-proof-notice hidden>
+                  <strong data-track-proof-notice-title></strong>
+                  <p data-track-proof-notice-text></p>
+                </div>
+                <p class="pod-meta" data-track-proof-meta hidden></p>
+                <p class="pod-meta" data-track-proof-partial data-i18n="track_pod_partial_note" hidden>Proof for the remaining boxes appears after they are delivered.</p>
+                <div class="track-form-actions">
+                  <button class="btn btn-secondary" type="button" data-track-proof-reload data-i18n="track_pod_reload" hidden>Reload proof</button>
+                  <button class="btn btn-primary" type="button" data-track-proof-reverify data-i18n="track_courier_reverify" hidden>Verify again</button>
+                </div>
+                <p class="form-status" data-track-proof-status></p>
+              </article>
+              <p class="track-pod-plain" data-track-proof-plain data-i18n="track_pod_unavailable" hidden>Proof is not available for this delivery. Contact the sender if you need help.</p>
               <div class="track-request-banner" data-track-request-banner hidden>
                 <span class="track-request-banner-badge" data-track-request-banner-badge></span>
                 <p class="track-request-banner-text" data-track-request-banner-text></p>
@@ -323,6 +384,52 @@
                       <p class="form-status" data-track-location-status aria-live="polite"></p>
                     </form>
                   </article>
+
+                  <article class="card card-pad track-action-card track-option-card" data-track-option aria-labelledby="track-option-title" hidden>
+                    <div class="track-panel-head">
+                      <h3 id="track-option-title" data-i18n="track_option_title">Change how you receive it</h3>
+                      <span class="track-lock" data-i18n="track_option_pill">One request</span>
+                    </div>
+                    <div class="track-option-loading" data-track-option-loading hidden>
+                      <span class="track-courier-skel"></span>
+                      <span class="track-courier-skel"></span>
+                      <p class="form-status" data-i18n="track_option_loading">Finding pickup branches…</p>
+                    </div>
+                    <div class="track-courier-notice" data-track-option-notice hidden>
+                      <strong data-track-option-notice-title></strong>
+                      <p data-track-option-notice-text></p>
+                    </div>
+                    <form class="track-form" data-track-option-form hidden>
+                      <fieldset class="choices options" role="radiogroup" aria-labelledby="track-option-legend" data-track-option-choices>
+                        <legend id="track-option-legend" data-i18n="track_option_legend">How should we deliver?</legend>
+                      </fieldset>
+                      <div class="track-option-branch" data-track-option-branch hidden>
+                        <label class="field">
+                          <span data-i18n="track_option_branch_label">Branch, nearest first</span>
+                          <select name="branch_id" data-track-option-branch-select required></select>
+                        </label>
+                        <div class="track-definition track-option-detail" data-track-option-branch-detail></div>
+                      </div>
+                      <div class="track-option-place" data-track-option-place hidden>
+                        <fieldset class="choices nested" role="radiogroup" aria-labelledby="track-option-place-legend" data-track-option-places>
+                          <legend id="track-option-place-legend" data-i18n="track_option_place_legend">Where should we leave it?</legend>
+                        </fieldset>
+                        <div data-track-option-other hidden>
+                          <label class="field">
+                            <span data-i18n="track_option_other_label">Describe the place</span>
+                            <input type="text" name="instruction" maxlength="120" pattern=".*\S.*" required aria-describedby="track-option-counter" data-track-option-instruction>
+                          </label>
+                          <p class="track-option-counter" id="track-option-counter" data-track-option-counter></p>
+                        </div>
+                        <label class="track-option-consent">
+                          <input type="checkbox" data-track-option-consent>
+                          <span data-track-option-consent-text></span>
+                        </label>
+                      </div>
+                      <button class="btn btn-primary" type="submit" data-track-option-submit data-i18n="track_option_submit">Send request</button>
+                      <p class="form-status" id="track-option-status" data-track-option-status aria-live="polite"></p>
+                    </form>
+                  </article>
                 </div>
               </section>
             </section>
@@ -335,6 +442,7 @@
                 <li><span class="check"></span><span data-i18n="track_help_item_1">No full phone number or full delivery line is exposed on the public page.</span></li>
                 <li><span class="check"></span><span data-i18n="track_help_item_2">Verification uses the last 3 mobile digits before results are shown.</span></li>
                 <li><span class="check"></span><span data-i18n="track_help_item_3">Reschedule and location changes are requests, not direct shipment edits.</span></li>
+                <li><span class="check"></span><span data-i18n="track_help_item_4">The courier’s area appears only when they are close, and only approximately.</span></li>
               </ul>
             </article>
 
@@ -387,6 +495,22 @@
       </div>
     </div>
 
+    <div class="track-map-overlay" data-track-proof-overlay hidden>
+      <div class="track-map-modal track-pod-modal card card-pad" role="dialog" aria-modal="true" aria-labelledby="track-pod-dialog-title" aria-describedby="track-pod-dialog-copy">
+        <div class="track-map-modal-head">
+          <div>
+            <h3 id="track-pod-dialog-title" data-track-proof-dialog-title></h3>
+            <p class="lead track-map-modal-copy" id="track-pod-dialog-copy" data-track-proof-dialog-copy></p>
+          </div>
+          <button class="btn btn-ghost" type="button" data-track-proof-close data-i18n="track_pod_close">Close</button>
+        </div>
+        <span class="pod-tile" data-track-proof-dialog-tile><img data-track-proof-dialog-image alt=""></span>
+        <div class="pod-meta">
+          <span data-track-proof-dialog-meta></span>
+          <button class="btn btn-ghost" type="button" data-track-proof-next data-i18n="track_pod_next" hidden>Next</button>
+        </div>
+      </div>
+    </div>
     <footer class="footer">
       <div class="container">
         <div class="footer-grid">

@@ -21,6 +21,7 @@ test('rejects non-ASCII structural keys while preserving Unicode values for data
   const create = body => rewrite('POST', route, Buffer.from(JSON.stringify(body)), [database], container);
 
   expect(() => create({ ...config, 'm\u00e9tadata': true })).toThrow('Invalid Docker HostConfig for database init');
+  expect(() => create({ ...config, 'Ho\u017ftConfig': { Init: false } })).toThrow('Invalid Docker HostConfig for database init');
   expect(() => create({ ...config, HostConfig: { 'm\u00e9tadata': true } })).toThrow('Invalid Docker HostConfig for database init');
   expect(JSON.parse(create(config).body)).toMatchObject({ HostConfig: { Init: true }, Labels: config.Labels });
 });

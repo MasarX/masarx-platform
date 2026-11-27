@@ -20,12 +20,17 @@ export function unwrapMessagesImport(messages: MessagesImport | undefined): Intl
 }
 
 const DEFAULT_LOCALE = "en";
-const DEFAULT_MESSAGES = unwrapMessagesImport(enMessages as MessagesImport);
 
-const MESSAGE_MAP: Record<string, IntlMessages> = {
-  [DEFAULT_LOCALE]: DEFAULT_MESSAGES,
-  ar: unwrapMessagesImport(arMessages as MessagesImport),
-};
+// An app that uses a subset of shared UI can supply its catalogs at build time.
+declare const __UI_MESSAGE_CATALOGS__: string | undefined;
+const MESSAGE_MAP: Record<string, IntlMessages> =
+  typeof __UI_MESSAGE_CATALOGS__ === "string"
+    ? JSON.parse(__UI_MESSAGE_CATALOGS__)
+    : {
+        en: unwrapMessagesImport(enMessages as MessagesImport),
+        ar: unwrapMessagesImport(arMessages as MessagesImport),
+      };
+const DEFAULT_MESSAGES = MESSAGE_MAP[DEFAULT_LOCALE]!;
 
 const hasMessages = (messages: IntlMessages | undefined): messages is IntlMessages =>
   !!messages && Object.keys(messages).length > 0;
