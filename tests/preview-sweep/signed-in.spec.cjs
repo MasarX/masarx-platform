@@ -52,9 +52,36 @@ for (const app of ['console', 'console-v2', 'portal']) {
                   console.log('\nSWEEP-PAIR', app, locale, theme, size, state, index, tag,
                     hiddenAttr ? 'hidden' : '-', styleAttr ? 'style' : '-');
                 }
-                const markers = await page.getByTestId(markerTestId).count()
-                  .then(count => `count=${count}`, () => 'miss');
-                console.log('\nSWEEP-MARKERS', app, locale, theme, size, state, markers);
+                const snapshot = await page.evaluate(testId => {
+                  const ancestorTestId = /^(portal-resource-(blocked|error|ready|shipment-search)|portal-app-shell-sidebar|portal-app-shell-main|route-(loading|error)-page)$/;
+                  const markers = Array.from(document.querySelectorAll(`[data-testid="${testId}"]`), element => {
+                    const chain = [];
+                    for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+                      const parentTestId = parent.getAttribute('data-testid');
+                      if (ancestorTestId.test(parentTestId)) chain.push(parentTestId);
+                      else if (/^[SBP]:/.test(parent.id)) chain.push('seg');
+                      else if (parent.hasAttribute('hidden')) chain.push('hidden');
+                      else if (getComputedStyle(parent).display === 'none') chain.push('none');
+                      else if (parent.localName === 'template') chain.push('template');
+                      else if (parent === document.body) chain.push('body');
+                    }
+                    return `${element.checkVisibility() ? 'visible' : 'hidden'}:${chain.join('>') || 'root'}`;
+                  });
+
+                  const boundaryTokens = new Map([['$', 'c'], ['$?', 'p'], ['$!', 'x'], ['/$', 'e']]);
+                  const walker = document.createTreeWalker(document, NodeFilter.SHOW_COMMENT);
+                  const boundaries = [];
+                  while (boundaries.length < 40 && walker.nextNode()) {
+                    const token = boundaryTokens.get(walker.currentNode.data);
+                    if (token) boundaries.push(token);
+                  }
+                  return { markers, boundaries, segments: document.querySelectorAll('[id^="S:"]').length };
+                }, markerTestId).catch(() => null);
+                if (snapshot) {
+                  const { markers, boundaries, segments } = snapshot;
+                  console.log('\nSWEEP-MARKERS', app, locale, theme, size, state, `count=${markers.length}`, ...markers);
+                  console.log('\nSWEEP-BOUNDARIES', app, locale, theme, size, state, boundaries.join(',') || 'none', `segs=${segments}`);
+                }
               }
             }
             throw error;

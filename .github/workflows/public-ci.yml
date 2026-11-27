@@ -571,7 +571,8 @@ jobs:
                 -e '/^SWEEP-GEOM (console|console-v2|portal) (en|ar) (light|dark) (desktop|phone) (loading|empty|error|denied) [0-9]+ [0-9]+ (-?[0-9]+\.[0-9]{3} ){2}([0-9]+\.[0-9]{3} ){2}(0\.[0-9]{9}|1\.000000000)$/p' \
                 -e '/^SWEEP-FAIL (console|console-v2|portal) (en|ar) (light|dark) (desktop|phone) (loading|empty|error|denied) (new-session|new-context|route-guard|session-cookie|init-session|new-page|open-shell|shell-theme|open-mobile-menu|follow-route-link|close-mobile-menu|open-route|signed-in|marker|marker-in-view|language|direction|theme|screenshot|close-context)$/p' \
                 -e '/^SWEEP-SSR portal (en|ar) (light|dark) (desktop|phone) (error|denied) [0-9]{1,3} (none|((B|S):[0-9]{1,3}|RC:[0-9]{1,3}:[0-9]{1,3}|M)(,((B|S):[0-9]{1,3}|RC:[0-9]{1,3}:[0-9]{1,3}|M)){0,39})$/p' \
-                -e '/^SWEEP-MARKERS portal (en|ar) (light|dark) (desktop|phone) (error|denied) (miss|count=[0-9]{1,3})$/p' \
+                -e '/^SWEEP-MARKERS portal (en|ar) (light|dark) (desktop|phone) (error|denied) count=[0-9]{1,2}( (visible|hidden):(root|(portal-resource-(blocked|error|ready|shipment-search)|portal-app-shell-sidebar|portal-app-shell-main|route-(loading|error)-page|seg|hidden|none|template|body)(>(portal-resource-(blocked|error|ready|shipment-search)|portal-app-shell-sidebar|portal-app-shell-main|route-(loading|error)-page|seg|hidden|none|template|body)){0,30})){0,4}$/p' \
+                -e '/^SWEEP-BOUNDARIES portal (en|ar) (light|dark) (desktop|phone) (error|denied) (none|[cpxe](,[cpxe]){0,39}) segs=[0-9]{1,2}$/p' \
                 -e '/^SWEEP-PAIR portal (en|ar) (light|dark) (desktop|phone) (error|denied) [12] [a-z][a-z0-9]{0,15} (hidden|-) (style|-)$/p' \
                 -e "\%^\[WebServer\] ○ Compiling $next_path( \($next_path\))? \.\.\.$%p" \
                 -e "\%^\[WebServer\] ✓ Compiled in $next_time$%p" \
