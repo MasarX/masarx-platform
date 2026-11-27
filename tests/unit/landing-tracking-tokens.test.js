@@ -7,7 +7,7 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const css = readSharedUiTokenCss(repoRoot) + fs.readFileSync(
   path.join(repoRoot, 'docs', 'marketing', 'landing-v2', 'app.css'),
   'utf8',
-);
+).replace(/\/\*[\s\S]*?\*\//g, '');
 
 // Innermost `selector { declarations }` blocks; @media wrappers fall away because their body holds braces.
 const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => ({
