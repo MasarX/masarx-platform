@@ -90,8 +90,8 @@ export function AssetDropzone({
           disabled
             ? "cursor-not-allowed border-ui-border/30 bg-ui-paper/30 text-ui-muted/50"
             : isDragOver
-              ? "border-blue-400 bg-blue-50"
-              : "border-ui-border/50 bg-ui-paper/30 text-ui-muted hover:border-blue-300 hover:bg-blue-50/30"
+              ? "border-ui-accent bg-ui-accent-soft"
+              : "border-ui-border/50 bg-ui-paper/30 text-ui-muted hover:border-ui-accent/60 hover:bg-ui-accent-soft/30"
         }`}
         data-testid={`${prefix}-zone`}
       >

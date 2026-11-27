@@ -1,7 +1,7 @@
 const { Pool } = require('pg');
 const { randomUUID } = require('crypto');
 const {
-  DATABASE_URL,
+  assertDatabaseUrl,
   grantSelectRecursive,
   createOrganization,
   createClient,
@@ -15,7 +15,7 @@ const {
   createWebhookInboxEntry
 } = require('../helpers/tenant-utils');
 
-const pool = new Pool({ connectionString: DATABASE_URL });
+const pool = new Pool({ connectionString: assertDatabaseUrl('Security & RLS coverage') });
 
 async function createWorkflowTemplateWithStep(client, scopeLabel) {
   const name = `rls-template-${scopeLabel}-${Date.now()}`;
@@ -125,12 +125,7 @@ async function createWorkflowRunStep(client, runId, stepId) {
   return runStepId;
 }
 
-const rlsIntegrationEnabled = process.env.RUN_RLS_INTEGRATION_TESTS === 'true';
-
-const describeIfRls =
-  DATABASE_URL && rlsIntegrationEnabled ? describe : describe.skip;
-
-describeIfRls('Security & RLS coverage', () => {
+describe('Security & RLS coverage', () => {
   let client;
   let template;
   let templateStep;

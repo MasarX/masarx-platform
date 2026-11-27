@@ -15,7 +15,11 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test/render';
-import { DispatchModule, routeRunAssignTargetForDriver } from '@/modules/operate/dispatch';
+import { DispatchModule, routeRunAssignTargetForDriver, routeStopDeliveryOption } from '@/modules/operate/dispatch';
+// @ts-expect-error JS catalogs without types
+import { en } from '@/lib/seed-raw/i18n/en.js';
+// @ts-expect-error JS catalogs without types
+import { ar } from '@/lib/seed-raw/i18n/ar.js';
 import * as api from '@/lib/api';
 import { ui_get_resource_v1, ui_list_resource_complete } from '@/lib/data-source';
 
@@ -364,5 +368,31 @@ describe('DispatchModule', () => {
     expect(document.body.textContent).not.toMatch(/static demo limit/);
     expect(document.body.textContent).not.toMatch(/no cod_float_policy SSOT yet/);
     expect(document.body.textContent).not.toMatch(/cod\.float\.max_per_driver/);
+  });
+});
+
+const catalogLookup = (catalog: unknown) => (path: string, fallback?: string) => {
+  const value = path.split('.').reduce<unknown>(
+    (node, key) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[key] : undefined),
+    catalog,
+  );
+  return typeof value === 'string' ? value : fallback ?? path;
+};
+
+describe('routeStopDeliveryOption', () => {
+  it.each([
+    { lang: 'en', catalog: en, branch: 'Branch pickup', reception: 'Safe place: reception', other: 'Safe place: other' },
+    { lang: 'ar', catalog: ar, branch: 'استلام من الفرع', reception: 'مكان آمن: الاستقبال', other: 'مكان آمن: مكان آخر' },
+  ])('labels the recipient delivery option on the stop ($lang)', ({ catalog, branch, reception, other }) => {
+    const t = catalogLookup(catalog);
+    const stop = (option: Record<string, unknown> | undefined) => ({ metadata: option ? { recipient_delivery_option: option } : {} });
+    expect(routeStopDeliveryOption(stop(undefined), t)).toBeNull();
+    expect(routeStopDeliveryOption(stop({ option: 'home_delivery' }), t)).toBeNull();
+    expect(routeStopDeliveryOption(stop({ option: 'branch_pickup', branch_id: 'branch-1' }), t))
+      .toEqual({ label: branch, tone: 'warn', instruction: null });
+    expect(routeStopDeliveryOption(stop({ option: 'safe_place', place: 'reception', instruction: 'ignored' }), t))
+      .toEqual({ label: reception, tone: 'info', instruction: null });
+    expect(routeStopDeliveryOption(stop({ option: 'safe_place', place: 'other', instruction: ' Side gate ' }), t))
+      .toEqual({ label: other, tone: 'info', instruction: 'Side gate' });
   });
 });

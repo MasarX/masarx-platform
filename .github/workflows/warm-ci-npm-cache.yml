@@ -1,0 +1,39 @@
+name: Warm CI npm cache
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - package-lock.json
+      - .github/workflows/warm-ci-npm-cache.yml
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
+jobs:
+  warm:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        id: node
+        env: &npm_cache
+          NPM_CONFIG_CACHE: ${{ runner.temp }}/npm-cache
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Populate the npm cache
+        if: steps.node.outputs.cache-hit != 'true'
+        env: *npm_cache
+        run: npm ci --ignore-scripts --no-audit --no-fund

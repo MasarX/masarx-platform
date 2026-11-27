@@ -415,7 +415,6 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.driver_documents_enforce_org_match_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.driver_hours_of_service_enforce_org_match_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.driver_profiles_enforce_org_match_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
-  ('public.enforce_scan_input_mode_policy_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.enforce_settings_category_schema_presence()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.enforce_settlement_status_transition_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.enforce_workflow_guardrails()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),

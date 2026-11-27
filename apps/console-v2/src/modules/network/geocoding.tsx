@@ -1702,10 +1702,14 @@ export function GeocodingModule() {
   function renderPolicyTab(): ReactNode {
     return (
       <div>
-        <PolicyWorkflowControls
-          readback={policyMutationReadback}
-          onConfigure={openPolicyEditor}
-        />
+        {canonicalScopeOrder.length > 0 ? (
+          <PolicyWorkflowControls
+            readback={policyMutationReadback}
+            onConfigure={openPolicyEditor}
+          />
+        ) : (
+          <StateView kind={scopeRegistryQuery.isPending ? 'loading' : 'error'} />
+        )}
         <PolicyCapabilitySummary
           mapPolicy={mapPolicyValue}
           addressResolutionPolicy={addressResolutionPolicy}

@@ -67,9 +67,9 @@ describe('integration fixture bootstrap helpers', () => {
     expect(profile.clients.twoOne.slug).toBe('test_profile-client-2-1');
     expect(profile.webhook.basic.token).toBe('EXAMPLE_PASSWORD');
     expect(profile.webhook.clientAckA.token).toBe('test_profile-client-a-ack-token');
-    expect(profile.webhook.clientAckB.token).toBe('test_profile-EXAMPLE_PASSWORD');
+    expect(profile.webhook.clientAckB.token).toBe('test_profile-client-b-ack-token');
     expect(buildFixtureProfile().webhook.clientAckA.token).toBe('client-a-ack-token');
-    expect(buildFixtureProfile().webhook.clientAckB.token).toBe('EXAMPLE_PASSWORD');
+    expect(buildFixtureProfile().webhook.clientAckB.token).toBe('test-client-b-ack-token');
   });
 
   test('buildShipmentWebhookPolicy emits canonical typed shipment bindings', () => {
