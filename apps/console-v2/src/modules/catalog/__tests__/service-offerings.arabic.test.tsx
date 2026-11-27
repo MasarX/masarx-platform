@@ -1,6 +1,7 @@
 // service-offerings.arabic.test.tsx: service offerings and product context setup render their own copy in Arabic (issue #302).
 import { describe, expect, it, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { ServiceOfferingsModule } from '@/modules/catalog/service-offerings';
@@ -46,11 +47,26 @@ describe('ServiceOfferingsModule in Arabic', () => {
       ['catalogServiceOfferings.serviceLevelChipTitle.serviceLevelLabelNotLinked', 'Service level {label} is not linked'],
       ['catalogServiceOfferings.drawerTabs.slaTerms', 'SLA terms'],
       ['catalogServiceOfferings.coverageTab.branchName', 'branch · {name}'],
+      ['catalogServiceOfferings.coverageTab.coverageTrackedAtZoneLevel', 'Coverage tracked at zone level — see {link}.'],
     ];
     for (const [key, english] of keys) {
       expect(englishT(key)).toBe(english);
       expect(lookup(ar, key)).toMatch(/[؀-ۿ]/);
     }
+  });
+
+  it('renders the coverage hint as one Arabic sentence around the zones link', async () => {
+    window.history.pushState(null, '', '/catalog/service-offerings');
+    const user = userEvent.setup();
+    renderWithProviders(<ServiceOfferingsModule />, { locale: 'ar', capabilities: ['service_offerings.read'] });
+    await user.click(await screen.findByTestId('offering-card-sof_eco_kingdom'));
+    await user.click(within(await screen.findByTestId('offering-drawer-tabs')).getByTestId('offering-tab-coverage'));
+
+    const link = await screen.findByTestId('offering-coverage-zones-link');
+    expect(link).toHaveAttribute('href', '/network/zones');
+    const hint = link.parentElement as HTMLElement;
+    expect(hint.textContent).toBe(ar.catalogServiceOfferings.coverageTab.coverageTrackedAtZoneLevel.replace('{link}', '/network/zones'));
+    expect(findUntranslated(hint)).toEqual([]);
   });
 });
 

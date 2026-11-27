@@ -174,6 +174,7 @@ const messages: CatalogShape<typeof English> = {
       zoneName: 'المنطقة · {name}',
       allBranchZones: 'كل مناطق الفرع',
       branchName: 'الفرع · {name}',
+      coverageTrackedAtZoneLevel: 'تُتابَع التغطية على مستوى المنطقة — راجع {link}.',
     },
     subscriptionsTab: {
       activeSubscriptions: 'الاشتراكات النشطة',

@@ -172,6 +172,7 @@ const messages = {
       zoneName: 'zone · {name}',
       allBranchZones: 'all branch zones',
       branchName: 'branch · {name}',
+      coverageTrackedAtZoneLevel: 'Coverage tracked at zone level — see {link}.',
     },
     subscriptionsTab: {
       activeSubscriptions: 'active subscriptions',
