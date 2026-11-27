@@ -25,4 +25,4 @@ describe("Mobile V2 RPC permission errors", () => {
     expect(error).toMatchObject({ code });
     expect(isMobileV2RpcAccessDenied(error)).toBe(expected);
   });
-});\n
+});

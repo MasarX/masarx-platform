@@ -83,7 +83,7 @@ import {
 } from "./mobile-v2-theme-context";
 import { MobileV2TasksScreen, type MobileV2TasksDataState } from "./mobile-v2-tasks-screen";
 import { MobileV2LoginScreen, type MobileV2LoginStep } from "./mobile-v2-login-screen";
-import { getFieldOpsStrings } from "./i18n";
+import { getFieldOpsStrings, resolveLocaleCode } from "./i18n";
 import { isMobileV2RpcAccessDenied, useFieldopsTasksRpc } from "./mobile-v2-rpc-hooks";
 import {
   filterMobileV2TasksByQuery,
@@ -3932,7 +3932,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
     "mobile-trip-nav": tripsRpc.error,
   };
   const routeReadDenied = isMobileV2RpcAccessDenied(routeReadErrors[activeTabId]);
-  const routeReadAccess = getFieldOpsStrings(ctx.locale).routeReadAccess;
+  const routeReadAccess = getFieldOpsStrings(resolveLocaleCode(ctx.locale)).routeReadAccess;
 
   return (
     <>
