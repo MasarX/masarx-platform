@@ -4,7 +4,10 @@ import { screen } from '@testing-library/react';
 import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { ServiceOfferingsModule } from '@/modules/catalog/service-offerings';
-import { ProductContextSetupForm } from '@/modules/catalog/product-context-setup';
+import {
+  ProductContextSetupForm,
+  type ProductContextSetupFormProps,
+} from '@/modules/catalog/product-context-setup';
 import { englishT } from '@/lib/i18n';
 import ar from '@/lib/seed-raw/i18n/areas/ar/catalog-service-offerings';
 import setupAr from '@/lib/seed-raw/i18n/areas/ar/catalog-product-context-setup';
@@ -61,6 +64,14 @@ describe('ProductContextSetupForm in Arabic', () => {
         activeTenantId="tenant-synthetic"
         tenantTimezoneIana="Asia/Riyadh"
         tenantCurrencyIso="SAR"
+        canWriteZones
+        createServiceLevel={vi.fn<ProductContextSetupFormProps['createServiceLevel']>()}
+        createBranch={vi.fn<ProductContextSetupFormProps['createBranch']>()}
+        createZone={vi.fn<ProductContextSetupFormProps['createZone']>()}
+        assignBranchZone={vi.fn<ProductContextSetupFormProps['assignBranchZone']>()}
+        createOffering={vi.fn<ProductContextSetupFormProps['createOffering']>()}
+        refetchReadback={vi.fn<ProductContextSetupFormProps['refetchReadback']>()}
+        serviceLevelOptionLabel={(level) => level.name}
         serviceLevelKeyFromName={(name) => name.toLowerCase()}
         isOfferingActive={() => true}
         offeringStatusDefault="active"
