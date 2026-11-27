@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Button } from "../button";
+import { createUiTranslator } from "../i18n";
 
 type PayloadPathPickerProps = {
   title?: string;
@@ -11,16 +12,17 @@ type PayloadPathPickerProps = {
 };
 
 export function PayloadPathPicker({
-  title = "Detected source paths",
+  title,
   paths,
   onSelect,
   testIdPrefix,
 }: PayloadPathPickerProps) {
+  const t = createUiTranslator("ui.mappingStudio.payloadPathPicker");
   return (
     <div className="space-y-3">
-      <div className="text-sm font-medium text-ui-ink">{title}</div>
+      <div className="text-sm font-medium text-ui-ink">{title ?? t("title")}</div>
       {paths.length === 0 ? (
-        <p className="text-sm text-ui-muted">No source paths detected yet.</p>
+        <p className="text-sm text-ui-muted">{t("empty")}</p>
       ) : (
         <div className="max-h-64 space-y-2 overflow-auto rounded-xl border border-ui-border/60 bg-ui-surface/70 p-3">
           {paths.map((path) => (
@@ -33,7 +35,7 @@ export function PayloadPathPicker({
                 onClick={() => onSelect(path)}
                 data-testid={testIdPrefix ? `${testIdPrefix}-path-${path.replace(/[^a-zA-Z0-9]+/g, "_")}` : undefined}
               >
-                Use
+                {t("use")}
               </Button>
             </div>
           ))}

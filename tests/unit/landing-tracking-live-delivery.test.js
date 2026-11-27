@@ -53,14 +53,26 @@ function respond(body, status = 200) {
 
 function fakeLeaflet() {
   const rects = [];
+  const zoomControls = [];
   const any = () => new Proxy({}, { get: (_t, key) => (key === 'then' ? undefined : () => any()) });
   const map = new Proxy({ attributionControl: any(), getZoom: () => 11 }, {
     get: (t, key) => (key in t ? t[key] : key === 'then' ? undefined : () => map),
   });
   return {
     rects,
+    zoomControls,
     L: {
       map: () => map,
+      control: {
+        zoom(options) {
+          return {
+            addTo(targetMap) {
+              zoomControls.push({ map: targetMap, options });
+              return this;
+            },
+          };
+        },
+      },
       tileLayer: () => any(),
       marker: () => any(),
       divIcon: () => ({}),
@@ -128,6 +140,7 @@ describe.each(['en', 'ar'])('live delivery card (%s)', (lang) => {
     expect(q('updated').querySelector('bdi').textContent)
       .toBe(new Intl.RelativeTimeFormat(lang, { numeric: 'auto' }).format(-2, 'minute'));
     expect(q('map-wrap').hidden).toBe(false);
+    expect(leaflet.zoomControls).toMatchObject([{ options: { position: lang === 'ar' ? 'topright' : 'topleft' } }]);
     expect(leaflet.rects).toHaveLength(1);
     expect(leaflet.rects[0].bounds).toEqual([[AREA.south, AREA.west], [AREA.north, AREA.east]]);
     expect(leaflet.rects[0].options).toMatchObject({ className: 'track-courier-area', interactive: false });
