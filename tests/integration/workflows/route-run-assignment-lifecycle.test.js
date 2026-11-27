@@ -1480,7 +1480,9 @@ describe('UC076 route run assignment lifecycle foundation', () => {
       for (const [sql, params] of reads) {
         await client.query('SAVEPOINT e49_scope_denial');
         try {
-          await expect(client.query(sql, params)).rejects.toMatchObject({ code: '42501' });
+          await expect(client.query(sql, params)).rejects.toMatchObject({
+            code: '42501', message: 'Resource read scope denied',
+          });
         } finally {
           await client.query('ROLLBACK TO SAVEPOINT e49_scope_denial');
           await client.query('RELEASE SAVEPOINT e49_scope_denial');
@@ -1491,10 +1493,8 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     // Global is not a valid user fixture; this is shared-guard proof only.
     await client.query('SAVEPOINT e49_global_guard');
     try {
-      await expect(client.query(
-        `SELECT public.ui_assert_resource_read_scope_v1($1::jsonb, 'global', NULL)`,
-        [JSON.stringify(registryRow.resource)]
-      ))
+      await expect(client.query(`SELECT public.ui_assert_resource_read_scope_v1(
+        '{"read_scope_types":["tenant"],"scope_columns":{"tenant":"organization_id"}}'::jsonb,'global',NULL)`))
         .rejects.toMatchObject({ code:'42501',message:'Resource read scope denied' });
     } finally {
       await client.query('ROLLBACK TO SAVEPOINT e49_global_guard');
