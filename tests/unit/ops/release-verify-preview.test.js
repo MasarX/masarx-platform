@@ -1,3 +1,10 @@
+const { fixtureHost } = require('../../fixtures/builders/hosts');
+
+const consoleHost = fixtureHost('console', 'vercel.app');
+const portalHost = fixtureHost('portal', 'vercel.app');
+const landingHost = fixtureHost('landing', 'pages.dev');
+const docsHost = fixtureHost('docs', 'pages.dev');
+
 jest.mock('../../../scripts/ops/workspace/with-full-preview-stack', () => ({
   ensureVercelAutomationBypassSecret: jest.fn(),
   upsertEnvFileVariable: jest.fn(),
@@ -72,16 +79,16 @@ describe('release-verify-preview helpers', () => {
           supabase_url: 'https://preview.supabase.co',
         },
         console: {
-          url: 'https://console-preview.vercel.app',
+          url: `https://${consoleHost}`,
         },
         portal: {
-          deployment_url: 'https://portal-preview.vercel.app',
+          deployment_url: `https://${portalHost}`,
         },
         landing: {
-          host: 'landing-preview.pages.dev',
+          host: landingHost,
         },
         docs: {
-          base_url: 'https://docs-preview.pages.dev',
+          base_url: `https://${docsHost}`,
         },
       },
     });
@@ -91,21 +98,21 @@ describe('release-verify-preview helpers', () => {
       PREVIEW_PROJECT_REF: 'proj_ref',
       PREVIEW_PROJECT_NAME: 'preview-project',
       PREVIEW_SUPABASE_URL: 'https://preview.supabase.co',
-      PREVIEW_CONSOLE_URL: 'https://console-preview.vercel.app',
-      PREVIEW_PORTAL_URL: 'https://portal-preview.vercel.app',
-      PREVIEW_LANDING_URL: 'https://landing-preview.pages.dev',
-      PREVIEW_DOCS_URL: 'https://docs-preview.pages.dev',
+      PREVIEW_CONSOLE_URL: `https://${consoleHost}`,
+      PREVIEW_PORTAL_URL: `https://${portalHost}`,
+      PREVIEW_LANDING_URL: `https://${landingHost}`,
+      PREVIEW_DOCS_URL: `https://${docsHost}`,
     });
   });
 
   test('serializeShellExports quotes values for shell sourcing', () => {
-    expect(serializeShellExports({ PREVIEW_CONSOLE_URL: 'https://console-preview.vercel.app' })).toBe(
-      'PREVIEW_CONSOLE_URL="https://console-preview.vercel.app"',
+    expect(serializeShellExports({ PREVIEW_CONSOLE_URL: `https://${consoleHost}` })).toBe(
+      `PREVIEW_CONSOLE_URL="https://${consoleHost}"`,
     );
   });
 
   test('isProtectedPreviewHost matches Vercel preview urls only', () => {
-    expect(isProtectedPreviewHost('https://console-preview.vercel.app')).toBe(true);
+    expect(isProtectedPreviewHost(`https://${consoleHost}`)).toBe(true);
     expect(isProtectedPreviewHost('https://unjijvxjrwurjgsnokovrvom.example.invalid')).toBe(false);
     expect(isProtectedPreviewHost('')).toBe(false);
   });
@@ -187,7 +194,7 @@ describe('release-verify-preview helpers', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-verify-preview-'));
     const githubEnvPath = path.join(tempDir, 'github.env');
     const env = {
-      CONSOLE_URL: 'https://console-preview.vercel.app',
+      CONSOLE_URL: `https://${consoleHost}`,
       PORTAL_URL: 'https://hrorzpuminkttynstpljzjuu.example.invalid',
       PREVIEW_ENV_FILE: path.join(tempDir, 'preview.env'),
       GITHUB_ENV: githubEnvPath,
@@ -212,7 +219,7 @@ describe('release-verify-preview helpers', () => {
 
   test('ensureProtectedPreviewBypass fails closed when protected hosts need bypass but no secret is available', async () => {
     const env = {
-      CONSOLE_URL: 'https://console-preview.vercel.app',
+      CONSOLE_URL: `https://${consoleHost}`,
     };
     ensureVercelAutomationBypassSecret.mockResolvedValue({
       configured: false,

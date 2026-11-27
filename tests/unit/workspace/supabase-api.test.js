@@ -1,3 +1,11 @@
+const { supabasePoolerHost } = require('../../fixtures/builders/hosts');
+
+const eastRegion = 'us-test-1';
+const westRegion = 'eu-test-1';
+const eastPooler0 = supabasePoolerHost(0, eastRegion);
+const eastPooler1 = supabasePoolerHost(1, eastRegion);
+const westPooler1 = supabasePoolerHost(1, westRegion);
+
 describe('workspace/supabase-api', () => {
   const originalPreferModern = process.env.SUPABASE_PREFER_MANAGEMENT_API_KEYS;
 
@@ -482,13 +490,13 @@ describe('workspace/supabase-api', () => {
     expect(
       extractPoolerHostsFromPayload({
         database: {
-          primary: 'aws-1-us-east-1.pooler.supabase.com',
-          replicas: ['aws-0-us-east-1.pooler.supabase.com', 'aws-1-us-east-1.pooler.supabase.com'],
+          primary: eastPooler1,
+          replicas: [eastPooler0, eastPooler1],
         },
       }),
     ).toEqual([
-      'aws-1-us-east-1.pooler.supabase.com',
-      'aws-0-us-east-1.pooler.supabase.com',
+      eastPooler1,
+      eastPooler0,
     ]);
   });
 
@@ -502,7 +510,7 @@ describe('workspace/supabase-api', () => {
       text: async () =>
         JSON.stringify({
           connection_pooling: {
-            pooler_host: 'aws-0-us-east-1.pooler.supabase.com',
+            pooler_host: eastPooler0,
           },
         }),
     });
@@ -511,9 +519,9 @@ describe('workspace/supabase-api', () => {
       resolveProjectPoolerHost({
         projectRef: 'ref',
         token: 'tok',
-        preferredRegion: 'us-east-1',
+        preferredRegion: eastRegion,
       }),
-    ).resolves.toBe('aws-0-us-east-1.pooler.supabase.com');
+    ).resolves.toBe(eastPooler0);
   });
 
   test('resolveProjectPoolerHost falls back to region-derived host when metadata endpoints are unavailable', async () => {
@@ -530,9 +538,9 @@ describe('workspace/supabase-api', () => {
       resolveProjectPoolerHost({
         projectRef: 'ref',
         token: 'tok',
-        preferredRegion: 'us-east-1',
+        preferredRegion: eastRegion,
       }),
-    ).resolves.toBe('aws-1-us-east-1.pooler.supabase.com');
+    ).resolves.toBe(eastPooler1);
   });
 
   test('resolveProjectPoolerHost derives from exact metadata region instead of a stale caller fallback', async () => {
@@ -543,7 +551,7 @@ describe('workspace/supabase-api', () => {
         ok: true,
         status: 200,
         statusText: 'OK',
-        text: async () => JSON.stringify({ region: 'eu-west-1' }),
+        text: async () => JSON.stringify({ region: westRegion }),
       })
       .mockResolvedValue({
         ok: false,
@@ -556,7 +564,7 @@ describe('workspace/supabase-api', () => {
       projectRef: 'abcdefghijklmnopqrst',
       token: 'tok',
       preferredRegion: 'me-central-1',
-    })).resolves.toBe('aws-1-eu-west-1.pooler.supabase.com');
+    })).resolves.toBe(westPooler1);
   });
 
   test('resolveProjectPoolerHost can forbid guessed hosts and return direct-DB fallback instead', async () => {

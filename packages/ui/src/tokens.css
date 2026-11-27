@@ -1,0 +1,45 @@
+/* Shared --ui-* tokens: the single source for every app, including the Console V2 label designer (#443). */
+:root {
+  --ui-paper: 250 251 254;
+  --ui-surface: 255 255 255;
+  --ui-highlight: 238 241 250;
+  --ui-ink: 15 23 42;
+  --ui-muted: 71 85 105;
+  --ui-border: 226 232 240;
+  --ui-accent: 79 70 229;
+  --ui-accent-hover: 67 56 202;
+  --ui-accent-ink: 255 255 255;
+  --ui-accent-soft: 224 231 255;
+  --ui-success: 2 121 73;
+  --ui-warning: 151 92 1;
+  --ui-danger: 200 38 39;
+  --ui-danger-ink: 255 255 255;
+  --ui-info: 28 100 213;
+  --ui-shadow-rgb: 15 23 42;
+  --ui-shadow-pinned: rgb(var(--ui-shadow-rgb) / 0.12);
+  --ui-shadow-soft: 0 1px 2px rgb(var(--ui-shadow-rgb) / 0.06), 0 10px 24px -20px rgb(var(--ui-shadow-rgb) / 0.14);
+  --ui-glow-accent: rgb(var(--ui-accent) / 0.18);
+  --ui-layout-max-width: 100%;
+}
+
+:root[data-theme="dark"] {
+  --ui-paper: 11 17 33;
+  --ui-surface: 17 24 42;
+  --ui-highlight: 30 41 66;
+  --ui-ink: 241 245 249;
+  --ui-muted: 148 163 184;
+  --ui-border: 45 55 80;
+  --ui-accent: 129 140 248;
+  --ui-accent-hover: 165 180 252;
+  --ui-accent-ink: 11 17 33;
+  --ui-accent-soft: 30 27 75;
+  --ui-success: 54 158 107;
+  --ui-warning: 221 139 76;
+  --ui-danger: 241 88 86;
+  --ui-danger-ink: 11 17 33;
+  --ui-info: 96 165 250;
+  --ui-shadow-rgb: 0 0 0;
+  --ui-shadow-pinned: rgb(var(--ui-shadow-rgb) / 0.35);
+  --ui-shadow-soft: 0 1px 2px rgb(var(--ui-shadow-rgb) / 0.38), 0 14px 36px -26px rgb(var(--ui-shadow-rgb) / 0.48);
+  --ui-glow-accent: rgb(var(--ui-accent) / 0.25);
+}

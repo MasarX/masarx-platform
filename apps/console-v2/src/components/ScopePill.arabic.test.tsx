@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
-import { ar } from '@/lib/seed-raw/i18n/areas/scope';
+import ar from '@/lib/seed-raw/i18n/areas/ar/scope';
 import { ScopePill } from './ScopePill';
 
 describe('ScopePill', () => {
