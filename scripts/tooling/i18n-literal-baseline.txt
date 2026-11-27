@@ -58,9 +58,6 @@ apps/console-v2/src/modules/operate/shipments-address-tab.tsx 31
 apps/console-v2/src/modules/operate/shipments.tsx 454
 apps/console-v2/src/modules/platform/access.tsx 217
 apps/console-v2/src/modules/platform/commands.tsx 17
-apps/console-v2/src/modules/platform/imports-cancel.tsx 8
-apps/console-v2/src/modules/platform/imports.tsx 243
-apps/console-v2/src/modules/platform/labels.tsx 292
 apps/console-v2/src/modules/platform/organizations.tsx 162
 apps/console-v2/src/modules/platform/release-proof.tsx 28
 apps/console-v2/src/modules/platform/users.tsx 160
