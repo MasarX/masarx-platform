@@ -61,10 +61,12 @@ async function evaluate(get, env, record) {
   }
 
   const now = Date.now();
+  const maxHistoryDays = 400;
   const historyDays = (isTag && env.DB_APPLY_HISTORY_DAYS) || defaultHistoryDays;
   const historyStart = new Date(now - Number(historyDays) * 24 * 60 * 60 * 1000);
-  if (!/^[1-9]\d*$/.test(historyDays) || !Number.isFinite(historyStart.getTime())) {
-    throw new Error('DB_APPLY_HISTORY_DAYS must be a positive whole number of days within the date range');
+  // GitHub returns no runs for a created= range starting before 1970, which would read as "no previous apply".
+  if (!/^[1-9]\d*$/.test(historyDays) || Number(historyDays) > maxHistoryDays) {
+    throw new Error(`DB_APPLY_HISTORY_DAYS must be a positive whole number of days, at most ${maxHistoryDays}`);
   }
   const isoSecond = date => date.toISOString().replace(/\.\d{3}Z$/, 'Z');
   const created = encodeURIComponent(`${isoSecond(historyStart)}..${isoSecond(new Date(now))}`);

@@ -124,7 +124,7 @@ test('a custom staging history window excludes runs older than the window', asyn
   expect(summary()).toContain('G2: no previous apply found');
 });
 
-test.each(['0', '-2', '2.5', 'invalid', '999999999999999999999'])('refuses invalid history days %s', async days => {
+test.each(['0', '-2', '2.5', 'invalid', '401', '30000', '99999999', '999999999999999999999'])('refuses invalid history days %s', async days => {
   const fetchRequest = githubFetch('success', 'success');
   await expect(guard({ ...env, ...stgEnv, DB_APPLY_HISTORY_DAYS: days }, fetchRequest)).resolves.toBe(1);
   expect(fetchRequest).toHaveBeenCalledTimes(1);
