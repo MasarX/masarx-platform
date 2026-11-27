@@ -1825,7 +1825,9 @@ function InputsTab({
                     onDragStart={(e) =>
                       e.dataTransfer.setData('text/plain', `{{ ${k}.${it} }}`)
                     }
+                    // WCAG 2.5.7: a click or Enter does what the drop does, and also copies.
                     onClick={() => {
+                      setFieldExpr(`{{ ${k}.${it} }}`);
                       navigator.clipboard
                         ?.writeText(`{{ ${k}.${it} }}`)
                         .catch(() => undefined);
@@ -3123,6 +3125,8 @@ export function TemplatesModule() {
           name: activeStep.label,
         },
         'workflow template step',
+        undefined,
+        t,
       ),
     );
   }

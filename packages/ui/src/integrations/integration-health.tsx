@@ -5,6 +5,7 @@ import { Badge } from "../badge";
 import { KpiCard } from "../charts/kpi-card";
 import { cn } from "../utils";
 import { createUiTranslator } from "../i18n";
+import { formatResourceValue } from "../resource-utils";
 
 export type IntegrationHealthEntry = {
   id: string;
@@ -93,7 +94,7 @@ export function IntegrationHealth({
                   {entry.successRate != null ? `${entry.successRate}%` : "-"}
                 </td>
                 <td className="px-3 py-2 text-end text-xs text-ui-muted">
-                  {entry.totalCalls?.toLocaleString() ?? "-"}
+                  {formatResourceValue(entry.totalCalls, { renderType: "number" })}
                 </td>
                 <td className="px-3 py-2 text-end text-xs text-ui-muted">
                   {entry.avgResponseMs != null ? `${entry.avgResponseMs}ms` : "-"}

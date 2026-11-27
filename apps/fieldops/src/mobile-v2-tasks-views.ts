@@ -17,6 +17,145 @@ import type {
 } from "./mobile-v2-tasks-types";
 import type { MobileV2RouteStop } from "./mobile-v2-route-screen";
 import type { MobileV2MapAlert, MobileV2MapStop } from "./mobile-v2-map-screen";
+import { EN_STRINGS, type FieldOpsStrings } from "./i18n";
+
+// ===========================================================================
+// Label keys — every visible label resolves from `strings.taskViews` so
+// callers can pass AR_STRINGS; the exported constants keep English labels.
+// ===========================================================================
+
+type TaskViewsKey = keyof FieldOpsStrings["taskViews"];
+
+const TASK_FILTER_FIELD_LABEL_KEY: Readonly<Record<string, TaskViewsKey>> = Object.freeze({
+  urgency: "urgency",
+  type: "type",
+  area: "area",
+  cod: "hasCod",
+});
+
+// Option value -> label key for the urgency + type filter options (and the
+// urgency / type group headers, which share these labels).
+const TASK_OPTION_LABEL_KEY: Readonly<Record<string, TaskViewsKey>> = Object.freeze({
+  now: "now",
+  today: "today",
+  later: "later",
+  blocker: "typeBlocker",
+  delivery: "typeDelivery",
+  pickup: "typePickup",
+  return: "typeReturn",
+  cash: "typeCash",
+  break: "typeBreak",
+  eor: "typeEor",
+  "gate-in": "typeGateIn",
+  "scan-out": "typeScanOut",
+  hold: "typeHold",
+  sort: "typeSort",
+  ticket: "typeTicket",
+  approval: "typeApproval",
+  route_review: "typeRouteReview",
+  sync: "typeSync",
+});
+
+const TASK_GROUP_LABEL_KEY: Readonly<Record<string, TaskViewsKey>> = Object.freeze({
+  urgency: "urgency",
+  none: "groupNone",
+  type: "type",
+  area: "area",
+});
+
+const TASK_SORT_LABEL_KEY: Readonly<Record<string, TaskViewsKey>> = Object.freeze({
+  smart: "sortSmart",
+  urgency: "urgency",
+  eta: "sortEta",
+  priority: "priority",
+  type: "sortType",
+  title: "sortTitle",
+});
+
+const TASK_VIEW_NAME_KEY: Readonly<Record<string, TaskViewsKey>> = Object.freeze({
+  "tv-now": "now",
+  "tv-smart": "viewSmart",
+  "tv-today": "today",
+  "tv-cod": "viewCod",
+  "tv-area": "viewArea",
+});
+
+const ROUTE_SORT_LABEL_KEY: Readonly<Record<string, TaskViewsKey>> = Object.freeze({
+  sequence: "routeSortSequence",
+  sla: "routeSortSla",
+  "cod-desc": "routeSortCod",
+  name: "routeSortName",
+});
+
+const ROUTE_GROUP_LABEL_KEY: Readonly<Record<string, TaskViewsKey>> = Object.freeze({
+  none: "groupNone",
+  status: "routeGroupStatus",
+  window: "routeGroupWindow",
+});
+
+const ROUTE_VIEW_NAME_KEY: Readonly<Record<string, TaskViewsKey>> = Object.freeze({
+  route: "routeViewMine",
+  urgent: "routeViewUrgent",
+  cod: "routeViewCod",
+  fragile: "routeViewFragile",
+});
+
+const ROUTE_STATUS_GROUP_LABEL_KEY: Readonly<Record<string, TaskViewsKey>> = Object.freeze({
+  done: "statusDone",
+  current: "statusCurrent",
+  pending: "statusPending",
+  sla: "statusSla",
+  failed: "statusFailed",
+  partial: "statusPartial",
+});
+
+function lookupTaskViews(
+  map: Readonly<Record<string, TaskViewsKey>>,
+  key: string,
+  fallback: string,
+  strings: FieldOpsStrings,
+): string {
+  const labelKey = map[key];
+  return labelKey !== undefined ? strings.taskViews[labelKey] : fallback;
+}
+
+/** Localized label of a task filter field (`MOBILE_V2_TASK_FILTER_FIELDS[].key`). */
+export function getMobileV2TaskFilterFieldLabel(
+  key: string,
+  strings: FieldOpsStrings = EN_STRINGS,
+): string {
+  return lookupTaskViews(TASK_FILTER_FIELD_LABEL_KEY, key, key, strings);
+}
+
+/** Localized label of a task filter option value; unknown values (areas) pass through. */
+export function getMobileV2TaskFilterOptionLabel(
+  value: string,
+  strings: FieldOpsStrings = EN_STRINGS,
+): string {
+  return lookupTaskViews(TASK_OPTION_LABEL_KEY, value, value, strings);
+}
+
+/** Localized name of a built-in task saved view; custom views keep their own name. */
+export function getMobileV2TaskViewName(
+  id: string,
+  fallback: string,
+  strings: FieldOpsStrings = EN_STRINGS,
+): string {
+  return lookupTaskViews(TASK_VIEW_NAME_KEY, id, fallback, strings);
+}
+
+/** Localized name of a built-in route saved view; custom views keep their own name. */
+export function getMobileV2RouteViewName(
+  id: string,
+  fallback: string,
+  strings: FieldOpsStrings = EN_STRINGS,
+): string {
+  return lookupTaskViews(ROUTE_VIEW_NAME_KEY, id, fallback, strings);
+}
+
+function taskOption(value: string): MobileV2TaskFilterOption {
+  return Object.freeze({ value, label: getMobileV2TaskFilterOptionLabel(value) });
+}
 
 // ===========================================================================
 // Tasks — filter fields, sorts, groups, saved views
@@ -49,48 +188,48 @@ export const MOBILE_V2_TASK_FILTER_FIELDS: ReadonlyArray<MobileV2TaskFilterField
   Object.freeze([
     Object.freeze({
       key: "urgency",
-      label: "Urgency",
+      label: getMobileV2TaskFilterFieldLabel("urgency"),
       kind: "enum" as const,
       options: Object.freeze([
-        Object.freeze({ value: "now", label: "Now" }),
-        Object.freeze({ value: "today", label: "Today" }),
-        Object.freeze({ value: "later", label: "Later" }),
+        taskOption("now"),
+        taskOption("today"),
+        taskOption("later"),
       ]),
     }),
     Object.freeze({
       key: "type",
-      label: "Type",
+      label: getMobileV2TaskFilterFieldLabel("type"),
       kind: "enum" as const,
       // Mirrors flow-tasks.jsx TASK_FIELDS `type` options. Each value
       // matches a `MobileV2Task.type` discriminant emitted by
       // resolve_fieldops_tasks_v1 / the task fixtures.
       options: Object.freeze([
-        Object.freeze({ value: "blocker", label: "Blockers" }),
-        Object.freeze({ value: "delivery", label: "Drops" }),
-        Object.freeze({ value: "pickup", label: "Pickups" }),
-        Object.freeze({ value: "return", label: "Returns" }),
-        Object.freeze({ value: "cash", label: "Cash" }),
-        Object.freeze({ value: "break", label: "Break" }),
-        Object.freeze({ value: "eor", label: "EOR" }),
-        Object.freeze({ value: "gate-in", label: "Gate-in" }),
-        Object.freeze({ value: "scan-out", label: "Scan-out" }),
-        Object.freeze({ value: "hold", label: "Hold" }),
-        Object.freeze({ value: "sort", label: "Sort" }),
-        Object.freeze({ value: "ticket", label: "Tickets" }),
-        Object.freeze({ value: "approval", label: "Approvals" }),
-        Object.freeze({ value: "route_review", label: "Reviews" }),
-        Object.freeze({ value: "sync", label: "Sync" }),
+        taskOption("blocker"),
+        taskOption("delivery"),
+        taskOption("pickup"),
+        taskOption("return"),
+        taskOption("cash"),
+        taskOption("break"),
+        taskOption("eor"),
+        taskOption("gate-in"),
+        taskOption("scan-out"),
+        taskOption("hold"),
+        taskOption("sort"),
+        taskOption("ticket"),
+        taskOption("approval"),
+        taskOption("route_review"),
+        taskOption("sync"),
       ]),
     }),
     Object.freeze({
       key: "area",
-      label: "Area",
+      label: getMobileV2TaskFilterFieldLabel("area"),
       kind: "enum" as const,
       dynamic: true,
     }),
     Object.freeze({
       key: "cod",
-      label: "Has COD",
+      label: getMobileV2TaskFilterFieldLabel("cod"),
       kind: "bool" as const,
     }),
   ]);
@@ -105,10 +244,10 @@ export interface MobileV2TaskGroupOption {
 // Mirrors flow-tasks.jsx TASK_GROUPS.
 export const MOBILE_V2_TASK_GROUP_OPTIONS: ReadonlyArray<MobileV2TaskGroupOption> =
   Object.freeze([
-    Object.freeze({ key: "urgency" as const, label: "Urgency" }),
-    Object.freeze({ key: "none" as const, label: "No grouping" }),
-    Object.freeze({ key: "type" as const, label: "Type" }),
-    Object.freeze({ key: "area" as const, label: "Area" }),
+    Object.freeze({ key: "urgency" as const, label: getMobileV2TaskGroupLabel("urgency") }),
+    Object.freeze({ key: "none" as const, label: getMobileV2TaskGroupLabel("none") }),
+    Object.freeze({ key: "type" as const, label: getMobileV2TaskGroupLabel("type") }),
+    Object.freeze({ key: "area" as const, label: getMobileV2TaskGroupLabel("area") }),
   ]);
 
 export type MobileV2TaskSortKey =
@@ -128,12 +267,12 @@ export interface MobileV2TaskSortOption {
 // is portable — MobileV2Task carries `type` (U4).
 export const MOBILE_V2_TASK_SORT_OPTIONS: ReadonlyArray<MobileV2TaskSortOption> =
   Object.freeze([
-    Object.freeze({ key: "smart" as const, label: "Smart (urgency × priority)" }),
-    Object.freeze({ key: "urgency" as const, label: "Urgency" }),
-    Object.freeze({ key: "eta" as const, label: "ETA (soonest)" }),
-    Object.freeze({ key: "priority" as const, label: "Priority" }),
-    Object.freeze({ key: "type" as const, label: "Type A→Z" }),
-    Object.freeze({ key: "title" as const, label: "Title A→Z" }),
+    Object.freeze({ key: "smart" as const, label: getMobileV2TaskSortLabel("smart") }),
+    Object.freeze({ key: "urgency" as const, label: getMobileV2TaskSortLabel("urgency") }),
+    Object.freeze({ key: "eta" as const, label: getMobileV2TaskSortLabel("eta") }),
+    Object.freeze({ key: "priority" as const, label: getMobileV2TaskSortLabel("priority") }),
+    Object.freeze({ key: "type" as const, label: getMobileV2TaskSortLabel("type") }),
+    Object.freeze({ key: "title" as const, label: getMobileV2TaskSortLabel("title") }),
   ]);
 
 /** Per-key filter selection — enum keys hold a value array, bool keys hold true. */
@@ -156,7 +295,7 @@ export const MOBILE_V2_TASK_DEFAULT_VIEWS: ReadonlyArray<MobileV2TaskBoardSavedV
   Object.freeze([
     Object.freeze({
       id: "tv-now",
-      name: "Now",
+      name: EN_STRINGS.taskViews.now,
       emoji: "🔥",
       builtin: true,
       filters: Object.freeze({ urgency: Object.freeze(["now"]) }),
@@ -165,7 +304,7 @@ export const MOBILE_V2_TASK_DEFAULT_VIEWS: ReadonlyArray<MobileV2TaskBoardSavedV
     }),
     Object.freeze({
       id: "tv-smart",
-      name: "Smart inbox",
+      name: EN_STRINGS.taskViews.viewSmart,
       emoji: "⚡",
       builtin: true,
       filters: Object.freeze({}),
@@ -174,7 +313,7 @@ export const MOBILE_V2_TASK_DEFAULT_VIEWS: ReadonlyArray<MobileV2TaskBoardSavedV
     }),
     Object.freeze({
       id: "tv-today",
-      name: "Today",
+      name: EN_STRINGS.taskViews.today,
       emoji: "📅",
       builtin: true,
       filters: Object.freeze({ urgency: Object.freeze(["today", "now"]) }),
@@ -183,7 +322,7 @@ export const MOBILE_V2_TASK_DEFAULT_VIEWS: ReadonlyArray<MobileV2TaskBoardSavedV
     }),
     Object.freeze({
       id: "tv-cod",
-      name: "Cash & COD",
+      name: EN_STRINGS.taskViews.viewCod,
       emoji: "💵",
       builtin: true,
       filters: Object.freeze({ cod: true }),
@@ -192,7 +331,7 @@ export const MOBILE_V2_TASK_DEFAULT_VIEWS: ReadonlyArray<MobileV2TaskBoardSavedV
     }),
     Object.freeze({
       id: "tv-area",
-      name: "By area",
+      name: EN_STRINGS.taskViews.viewArea,
       emoji: "🗺️",
       builtin: true,
       filters: Object.freeze({}),
@@ -290,38 +429,16 @@ export interface MobileV2TaskViewGroup {
   readonly tasks: ReadonlyArray<MobileV2Task>;
 }
 
-const TASK_TYPE_LABEL: Readonly<Record<string, string>> = Object.freeze({
-  blocker: "Blockers",
-  delivery: "Drops",
-  pickup: "Pickups",
-  return: "Returns",
-  cash: "Cash",
-  break: "Break",
-  eor: "EOR",
-  "gate-in": "Gate-in",
-  "scan-out": "Scan-out",
-  hold: "Hold",
-  sort: "Sort",
-  ticket: "Tickets",
-  approval: "Approvals",
-  sync: "Sync",
-});
-
-const URGENCY_GROUP_LABEL: Readonly<Record<MobileV2TaskUrgency, string>> = Object.freeze({
-  now: "Now",
-  today: "Today",
-  later: "Later",
-});
-
 /** Group a (already sorted) task list by group key (pure; mirrors TASK_GROUPS). */
 export function applyMobileV2TaskGroups(
   tasks: ReadonlyArray<MobileV2Task>,
   group: MobileV2TaskGroupKey,
+  strings: FieldOpsStrings = EN_STRINGS,
 ): ReadonlyArray<MobileV2TaskViewGroup> {
   if (group === "none") {
     if (tasks.length === 0) return Object.freeze([]);
     return Object.freeze([
-      Object.freeze({ key: "all", label: "All", tasks }),
+      Object.freeze({ key: "all", label: strings.taskViews.all, tasks }),
     ]);
   }
   const buckets = new Map<string, MobileV2Task[]>();
@@ -345,10 +462,8 @@ export function applyMobileV2TaskGroups(
   return Object.freeze(
     keyOrder.map((key) => {
       let label: string;
-      if (group === "urgency") {
-        label = URGENCY_GROUP_LABEL[key as MobileV2TaskUrgency] ?? key;
-      } else if (group === "type") {
-        label = TASK_TYPE_LABEL[key] ?? key;
+      if (group === "urgency" || group === "type") {
+        label = getMobileV2TaskFilterOptionLabel(key, strings);
       } else {
         label = key;
       }
@@ -386,10 +501,10 @@ export interface MobileV2RouteSortOption {
 // Mirrors app-store.jsx STOP_SORTS (sequence / SLA / COD / name).
 export const MOBILE_V2_ROUTE_SORT_OPTIONS: ReadonlyArray<MobileV2RouteSortOption> =
   Object.freeze([
-    Object.freeze({ key: "sequence" as const, label: "Route sequence" }),
-    Object.freeze({ key: "sla" as const, label: "SLA (most urgent)" }),
-    Object.freeze({ key: "cod-desc" as const, label: "COD (high → low)" }),
-    Object.freeze({ key: "name" as const, label: "Customer A→Z" }),
+    Object.freeze({ key: "sequence" as const, label: getMobileV2RouteSortLabel("sequence") }),
+    Object.freeze({ key: "sla" as const, label: getMobileV2RouteSortLabel("sla") }),
+    Object.freeze({ key: "cod-desc" as const, label: getMobileV2RouteSortLabel("cod-desc") }),
+    Object.freeze({ key: "name" as const, label: getMobileV2RouteSortLabel("name") }),
   ]);
 
 // Route group keys. `window` (time-window buckets derived from the stop
@@ -408,9 +523,9 @@ export interface MobileV2RouteGroupOption {
 // type carries (no-grouping / status / time window).
 export const MOBILE_V2_ROUTE_GROUP_OPTIONS: ReadonlyArray<MobileV2RouteGroupOption> =
   Object.freeze([
-    Object.freeze({ key: "none" as const, label: "No grouping" }),
-    Object.freeze({ key: "status" as const, label: "Status" }),
-    Object.freeze({ key: "window" as const, label: "Time window" }),
+    Object.freeze({ key: "none" as const, label: getMobileV2RouteGroupLabel("none") }),
+    Object.freeze({ key: "status" as const, label: getMobileV2RouteGroupLabel("status") }),
+    Object.freeze({ key: "window" as const, label: getMobileV2RouteGroupLabel("window") }),
   ]);
 
 export interface MobileV2RouteListView {
@@ -435,7 +550,7 @@ export const MOBILE_V2_ROUTE_DEFAULT_VIEWS: ReadonlyArray<MobileV2RouteListView>
   Object.freeze([
     Object.freeze({
       id: "route",
-      name: "My route",
+      name: EN_STRINGS.taskViews.routeViewMine,
       emoji: "🛣",
       builtin: true,
       statusFilter: Object.freeze([]),
@@ -447,7 +562,7 @@ export const MOBILE_V2_ROUTE_DEFAULT_VIEWS: ReadonlyArray<MobileV2RouteListView>
     }),
     Object.freeze({
       id: "urgent",
-      name: "Urgent only",
+      name: EN_STRINGS.taskViews.routeViewUrgent,
       emoji: "⚡",
       builtin: true,
       statusFilter: Object.freeze(["sla", "failed"] as const),
@@ -459,7 +574,7 @@ export const MOBILE_V2_ROUTE_DEFAULT_VIEWS: ReadonlyArray<MobileV2RouteListView>
     }),
     Object.freeze({
       id: "cod",
-      name: "COD stops",
+      name: EN_STRINGS.taskViews.routeViewCod,
       emoji: "💵",
       builtin: true,
       statusFilter: Object.freeze([]),
@@ -471,7 +586,7 @@ export const MOBILE_V2_ROUTE_DEFAULT_VIEWS: ReadonlyArray<MobileV2RouteListView>
     }),
     Object.freeze({
       id: "fragile",
-      name: "Fragile + retry",
+      name: EN_STRINGS.taskViews.routeViewFragile,
       emoji: "📦",
       builtin: false,
       statusFilter: Object.freeze([]),
@@ -484,17 +599,6 @@ export const MOBILE_V2_ROUTE_DEFAULT_VIEWS: ReadonlyArray<MobileV2RouteListView>
       group: "none" as const,
     }),
   ]);
-
-const ROUTE_STATUS_GROUP_LABEL: Readonly<
-  Record<MobileV2RouteStop["status"], string>
-> = Object.freeze({
-  done: "Delivered",
-  current: "In progress",
-  pending: "Pending",
-  sla: "SLA risk",
-  failed: "Failed",
-  partial: "Partial",
-});
 
 export interface MobileV2RouteViewResult {
   readonly rows: ReadonlyArray<MobileV2RouteStop>;
@@ -510,12 +614,15 @@ export interface MobileV2RouteViewResult {
  * band — mirrors app-store.jsx STOP_GROUPS `window` group. An
  * unparseable / empty SLA lands in the "No window" bucket.
  */
-export function mobileV2RouteWindowBucket(sla: string): string {
+export function mobileV2RouteWindowBucket(
+  sla: string,
+  strings: FieldOpsStrings = EN_STRINGS,
+): string {
   const hour = Number.parseInt(sla.split(":")[0] ?? "", 10);
-  if (!Number.isFinite(hour)) return "No window";
-  if (hour < 11) return "Morning · before 11";
-  if (hour < 14) return "Midday · 11–14";
-  return "Afternoon · after 14";
+  if (!Number.isFinite(hour)) return strings.taskViews.windowNone;
+  if (hour < 11) return strings.taskViews.windowMorning;
+  if (hour < 14) return strings.taskViews.windowMidday;
+  return strings.taskViews.windowAfternoon;
 }
 
 /**
@@ -536,6 +643,7 @@ export function applyMobileV2RouteView(
     readonly group: MobileV2RouteGroupKey;
   },
   search: string,
+  strings: FieldOpsStrings = EN_STRINGS,
 ): MobileV2RouteViewResult {
   const term = search.trim().toLowerCase();
   let rows = stops.filter((s) => {
@@ -572,7 +680,7 @@ export function applyMobileV2RouteView(
   const buckets = new Map<string, MobileV2RouteStop[]>();
   const order: string[] = [];
   for (const s of rows) {
-    const key = view.group === "window" ? mobileV2RouteWindowBucket(s.sla) : s.status;
+    const key = view.group === "window" ? mobileV2RouteWindowBucket(s.sla, strings) : s.status;
     if (!buckets.has(key)) {
       buckets.set(key, []);
       order.push(key);
@@ -590,7 +698,7 @@ export function applyMobileV2RouteView(
           label:
             view.group === "window"
               ? key
-              : ROUTE_STATUS_GROUP_LABEL[key as MobileV2RouteStop["status"]] ?? key,
+              : lookupTaskViews(ROUTE_STATUS_GROUP_LABEL_KEY, key, key, strings),
           rows: Object.freeze(buckets.get(key) ?? []),
         }),
       ),
@@ -599,23 +707,35 @@ export function applyMobileV2RouteView(
 }
 
 /** Label for a route sort key (used in the chip + subtitle). */
-export function getMobileV2RouteSortLabel(key: MobileV2RouteSortKey): string {
-  return MOBILE_V2_ROUTE_SORT_OPTIONS.find((o) => o.key === key)?.label ?? "Route sequence";
+export function getMobileV2RouteSortLabel(
+  key: MobileV2RouteSortKey,
+  strings: FieldOpsStrings = EN_STRINGS,
+): string {
+  return lookupTaskViews(ROUTE_SORT_LABEL_KEY, key, strings.taskViews.routeSortSequence, strings);
 }
 
 /** Label for a route group key (used in the chip). */
-export function getMobileV2RouteGroupLabel(key: MobileV2RouteGroupKey): string {
-  return MOBILE_V2_ROUTE_GROUP_OPTIONS.find((o) => o.key === key)?.label ?? "No grouping";
+export function getMobileV2RouteGroupLabel(
+  key: MobileV2RouteGroupKey,
+  strings: FieldOpsStrings = EN_STRINGS,
+): string {
+  return lookupTaskViews(ROUTE_GROUP_LABEL_KEY, key, strings.taskViews.groupNone, strings);
 }
 
 /** Label for a task sort key. */
-export function getMobileV2TaskSortLabel(key: MobileV2TaskSortKey): string {
-  return MOBILE_V2_TASK_SORT_OPTIONS.find((o) => o.key === key)?.label ?? "Smart";
+export function getMobileV2TaskSortLabel(
+  key: MobileV2TaskSortKey,
+  strings: FieldOpsStrings = EN_STRINGS,
+): string {
+  return lookupTaskViews(TASK_SORT_LABEL_KEY, key, strings.taskViews.sortSmartShort, strings);
 }
 
 /** Label for a task group key. */
-export function getMobileV2TaskGroupLabel(key: MobileV2TaskGroupKey): string {
-  return MOBILE_V2_TASK_GROUP_OPTIONS.find((o) => o.key === key)?.label ?? "No grouping";
+export function getMobileV2TaskGroupLabel(
+  key: MobileV2TaskGroupKey,
+  strings: FieldOpsStrings = EN_STRINGS,
+): string {
+  return lookupTaskViews(TASK_GROUP_LABEL_KEY, key, strings.taskViews.groupNone, strings);
 }
 
 // ===========================================================================

@@ -23,6 +23,8 @@ export interface MobileV2ListStateViewProps {
   readonly isLoading: boolean;
   readonly isError: boolean;
   readonly errorMessage?: string;
+  readonly errorTitle?: string;
+  readonly retryLabel?: string;
   readonly onRetry?: () => void;
   /**
    * When the RPC is loading and there is no fresh data, render the
@@ -118,7 +120,7 @@ export function MobileV2ListStateView(
                   fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold,
                 }}
               >
-                Couldn’t reach the server
+                {props.errorTitle ?? "Couldn’t reach the server"}
               </Text>
               <Text
                 style={{
@@ -137,9 +139,9 @@ export function MobileV2ListStateView(
                   variant="soft"
                   icon="cloud-up"
                   onPress={props.onRetry}
-                  accessibilityLabel="Retry loading"
+                  accessibilityLabel={props.retryLabel ?? "Retry loading"}
                 >
-                  Retry
+                  {props.retryLabel ?? "Retry"}
                 </FxButton>
               ) : null}
             </FxCol>

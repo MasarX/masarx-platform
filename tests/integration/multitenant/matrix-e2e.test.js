@@ -1,6 +1,6 @@
 const { Pool } = require('pg');
 const {
-  DATABASE_URL,
+  assertDatabaseUrl,
   grantSelectRecursive,
   createOrganization,
   createClient,
@@ -23,12 +23,9 @@ const MATRIX_E2E_TIMEOUT_MS = Math.max(
 jest.setTimeout(MATRIX_E2E_TIMEOUT_MS);
 
 const TEST_RUN_PREFIX = `matrix-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-const rlsIntegrationEnabled =
-  process.env.RUN_RLS_INTEGRATION_TESTS === 'true' &&
-  process.env.RUN_MATRIX_E2E === 'true';
 
-(rlsIntegrationEnabled ? describe : describe.skip)('Multi-tenant workflow matrix', () => {
-  const pool = new Pool({ connectionString: DATABASE_URL });
+describe('Multi-tenant workflow matrix', () => {
+  const pool = new Pool({ connectionString: assertDatabaseUrl('Multi-tenant workflow matrix') });
   let client;
 
   beforeAll(async () => {

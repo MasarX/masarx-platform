@@ -39,12 +39,13 @@ import {
   computeMobileV2TaskKpiCounts,
   deriveMobileV2TaskMetaLabel,
   filterMobileV2TasksByQuery,
-  getMobileV2TaskSortModeLabel,
   groupMobileV2TasksByUrgency,
   isMobileV2TaskHighPriority,
   sortMobileV2TasksBy,
   type MobileV2Task,
+  type MobileV2TaskSortMode,
   type MobileV2TaskTone,
+  type MobileV2TaskUrgency,
 } from "./mobile-v2-tasks-types";
 import {
   MOBILE_V2_FONT_MONO,
@@ -55,6 +56,7 @@ import {
   MOBILE_V2_TYPE_WEIGHTS,
   type MobileV2Theme,
 } from "./mobile-v2-themes";
+import { getStrings, resolveLocaleCode, type FieldOpsStrings } from "./i18n";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -147,6 +149,7 @@ function resolveTypeIcon(type: string): "package" | "box" | "truck" | "split" | 
 
 interface TaskRowProps {
   readonly theme: MobileV2Theme;
+  readonly strings: FieldOpsStrings;
   readonly task: MobileV2Task;
   readonly onPress: (task: MobileV2Task) => void;
 }
@@ -157,7 +160,7 @@ interface TaskRowProps {
 // `chevron-right`. Priority/meta inputs are derived from the typed task
 // envelope (priority INT band + structured `meta`); there is no ETA
 // timestamp or CTA-text chip — those are not in the design.
-function TaskRow({ theme, task, onPress }: TaskRowProps): React.ReactElement {
+function TaskRow({ theme, strings, task, onPress }: TaskRowProps): React.ReactElement {
   const chipTone = toneToChipTone(task.tone);
   const icon = resolveTypeIcon(task.type);
   const disk = resolveTaskIconDisk(theme, task.tone);
@@ -253,7 +256,7 @@ function TaskRow({ theme, task, onPress }: TaskRowProps): React.ReactElement {
           <FxRow gap={MOBILE_V2_SPACING.sm} wrap style={{ marginTop: MOBILE_V2_SPACING.xs }}>
             {highPriority ? (
               <FxChip theme={theme} tone="danger" icon="alert" dense>
-                Priority
+                {strings.taskControls.priority}
               </FxChip>
             ) : null}
             {metaLabel !== null ? (
@@ -338,6 +341,8 @@ export interface MobileV2TasksScreenProps {
    * search + filter state.
    */
   readonly onClearFilters?: () => void;
+  /** Active UI locale ("en" | "ar"); defaults to English. */
+  readonly locale?: string;
   readonly style?: StyleProp<ViewStyle>;
 }
 
@@ -351,20 +356,26 @@ export interface MobileV2TasksScreenProps {
 const VIEW_MODE_CELLS: ReadonlyArray<{
   readonly k: MobileV2TasksViewMode;
   readonly icon: "list" | "split" | "pin";
-  readonly label: string;
 }> = Object.freeze([
-  Object.freeze({ k: "list", icon: "list", label: "List" }),
-  Object.freeze({ k: "board", icon: "split", label: "Board" }),
-  Object.freeze({ k: "map", icon: "pin", label: "Map" }),
+  Object.freeze({ k: "list", icon: "list" }),
+  Object.freeze({ k: "board", icon: "split" }),
+  Object.freeze({ k: "map", icon: "pin" }),
 ]);
+
+function viewModeLabel(mode: MobileV2TasksViewMode, strings: FieldOpsStrings): string {
+  if (mode === "board") return strings.taskControls.board;
+  if (mode === "map") return strings.tasksScreen.map;
+  return strings.taskControls.list;
+}
 
 interface ViewModeSegmentedProps {
   readonly theme: MobileV2Theme;
+  readonly strings: FieldOpsStrings;
   readonly active: MobileV2TasksViewMode;
   readonly onChange?: (next: MobileV2TasksViewMode) => void;
 }
 
-function ViewModeSegmented({ theme, active, onChange }: ViewModeSegmentedProps): React.ReactElement {
+function ViewModeSegmented({ theme, strings, active, onChange }: ViewModeSegmentedProps): React.ReactElement {
   return (
     <View
       style={{
@@ -379,12 +390,13 @@ function ViewModeSegmented({ theme, active, onChange }: ViewModeSegmentedProps):
     >
       {VIEW_MODE_CELLS.map((v) => {
         const on = v.k === active;
+        const label = viewModeLabel(v.k, strings);
         return (
           <Pressable
             key={v.k}
             onPress={() => onChange?.(v.k)}
             accessibilityRole="button"
-            accessibilityLabel={`Show ${v.label.toLowerCase()} view`}
+            accessibilityLabel={strings.tasksScreen.showView.replace("{view}", () => label.toLowerCase())}
             style={{
               flex: 1,
               height: 30,
@@ -405,7 +417,7 @@ function ViewModeSegmented({ theme, active, onChange }: ViewModeSegmentedProps):
                 fontFamily: MOBILE_V2_FONT_SANS,
               }}
             >
-              {v.label}
+              {label}
             </Text>
           </Pressable>
         );
@@ -671,6 +683,7 @@ function TaskBoard({ theme, groups, onTaskPress }: TaskBoardProps): React.ReactE
 
 interface TaskMapProps {
   readonly theme: MobileV2Theme;
+  readonly strings: FieldOpsStrings;
   readonly tasks: ReadonlyArray<MobileV2Task>;
   readonly onTaskPress: (task: MobileV2Task) => void;
 }
@@ -688,7 +701,7 @@ function taskMapPinPos(s: string, salt: number): number {
   return Math.abs((h + salt) % 1000) / 1000;
 }
 
-function TaskMap({ theme, tasks, onTaskPress }: TaskMapProps): React.ReactElement {
+function TaskMap({ theme, strings, tasks, onTaskPress }: TaskMapProps): React.ReactElement {
   const byArea = React.useMemo(() => {
     const buckets = new Map<string, MobileV2Task[]>();
     for (const t of tasks) {
@@ -805,7 +818,9 @@ function TaskMap({ theme, tasks, onTaskPress }: TaskMapProps): React.ReactElemen
               fontFamily: MOBILE_V2_FONT_SANS,
             }}
           >
-            {byArea.length} areas · {tasks.length} tasks
+            {strings.tasksScreen.mapSummary
+              .replace("{areas}", () => String(byArea.length))
+              .replace("{tasks}", () => String(tasks.length))}
           </Text>
         </View>
       </View>
@@ -843,7 +858,7 @@ function TaskMap({ theme, tasks, onTaskPress }: TaskMapProps): React.ReactElemen
                   </FxChip>
                   {hot > 0 ? (
                     <FxChip theme={theme} dense tone="danger" icon="alert">
-                      {`${hot} now`}
+                      {strings.tasksScreen.hotCount.replace("{count}", () => String(hot))}
                     </FxChip>
                   ) : null}
                 </FxRow>
@@ -855,7 +870,7 @@ function TaskMap({ theme, tasks, onTaskPress }: TaskMapProps): React.ReactElemen
                 }}
               >
                 {areaTasks.map((task) => (
-                  <TaskRow key={task.task_id} theme={theme} task={task} onPress={onTaskPress} />
+                  <TaskRow key={task.task_id} theme={theme} strings={strings} task={task} onPress={onTaskPress} />
                 ))}
               </View>
             </View>
@@ -868,6 +883,7 @@ function TaskMap({ theme, tasks, onTaskPress }: TaskMapProps): React.ReactElemen
 
 export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.ReactElement {
   const theme = props.theme;
+  const strings = getStrings(resolveLocaleCode(props.locale));
   const sortMode = props.sortMode ?? "smart";
   const grouped = props.grouped ?? true;
   const viewMode = props.viewMode ?? "list";
@@ -891,7 +907,15 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
     // Board view always groups by urgency (its columns); the list view
     // honors the grouped toggle.
     if (viewMode === "board" || grouped) {
-      return groupMobileV2TasksByUrgency(visibleTasks);
+      const urgencyLabels: Readonly<Record<MobileV2TaskUrgency, string>> = {
+        now: strings.taskControls.now,
+        today: strings.taskControls.today,
+        later: strings.taskControls.later,
+      };
+      return groupMobileV2TasksByUrgency(visibleTasks).map((g) => ({
+        ...g,
+        label: urgencyLabels[g.key],
+      }));
     }
     if (visibleTasks.length === 0) return [];
     // Ungrouped list view — one synthetic "All" section. Its key is the
@@ -901,12 +925,19 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
     return [
       Object.freeze({
         key: "all" as const,
-        label: "All",
+        label: strings.taskViews.all,
         count: visibleTasks.length,
         tasks: visibleTasks,
       }),
     ];
-  }, [hostDriven, props.precomputedGroups, props.state, visibleTasks, grouped, viewMode]);
+  }, [hostDriven, props.precomputedGroups, props.state, visibleTasks, grouped, viewMode, strings]);
+
+  const sortModeLabels: Readonly<Record<MobileV2TaskSortMode, string>> = {
+    smart: strings.taskViews.sortSmartShort,
+    eta: strings.taskControls.eta,
+    priority: strings.taskControls.priority,
+    area: strings.taskControls.area,
+  };
 
   // Live KPI counts for the hero strip (Now / Today / Later / Total).
   // Mirrors flow-tasks.jsx ScrTasks counts that drive the Stat row above
@@ -932,10 +963,10 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
         >
           <FxCard theme={theme} padding={14}>
             <FxRow gap={0} align="center">
-              <KpiStat theme={theme} value={kpiCounts.now} label="Now" tone="danger" first />
-              <KpiStat theme={theme} value={kpiCounts.today} label="Today" tone="warning" />
-              <KpiStat theme={theme} value={kpiCounts.later} label="Later" tone="muted" />
-              <KpiStat theme={theme} value={kpiCounts.all} label="Total" tone="accent" last />
+              <KpiStat theme={theme} value={kpiCounts.now} label={strings.taskControls.now} tone="danger" first />
+              <KpiStat theme={theme} value={kpiCounts.today} label={strings.taskControls.today} tone="warning" />
+              <KpiStat theme={theme} value={kpiCounts.later} label={strings.taskControls.later} tone="muted" />
+              <KpiStat theme={theme} value={kpiCounts.all} label={strings.taskControls.total} tone="accent" last />
             </FxRow>
           </FxCard>
         </View>
@@ -973,12 +1004,12 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
           <TextInput
             value={props.query}
             onChangeText={props.onQueryChange}
-            placeholder="Search tasks, customers, codes…"
+            placeholder={strings.tasksScreen.searchPlaceholder}
             placeholderTextColor={theme.muted}
             autoCorrect={false}
             returnKeyType="search"
             clearButtonMode="while-editing"
-            accessibilityLabel="Search tasks"
+            accessibilityLabel={strings.tasksScreen.searchLabel}
             style={{
               flex: 1,
               color: theme.ink,
@@ -993,7 +1024,7 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
           <Pressable
             onPress={props.onScanPress}
             accessibilityRole="button"
-            accessibilityLabel="Scan a barcode"
+            accessibilityLabel={strings.tasksScreen.scanBarcode}
             style={{
               flexDirection: "row",
               alignItems: "center",
@@ -1014,7 +1045,7 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
                 fontFamily: MOBILE_V2_FONT_SANS,
               }}
             >
-              Scan
+              {strings.tasksScreen.scan}
             </Text>
           </Pressable>
         </View>
@@ -1025,6 +1056,7 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
             into the production preview shell. */}
         <ViewModeSegmented
           theme={theme}
+          strings={strings}
           active={props.viewMode ?? "list"}
           onChange={props.onViewModeChange}
         />
@@ -1037,27 +1069,27 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
           <FxChipButton
             theme={theme}
             icon="filter"
-            label={props.filterLabel ?? "Filters"}
+            label={props.filterLabel ?? strings.tasksScreen.filters}
             active={props.filterActive === true}
             onPress={props.onFilterPress}
-            accessibilityLabel="Open task filters"
+            accessibilityLabel={strings.tasksScreen.openFilters}
           />
           {viewMode === "list" ? (
             <FxChipButton
               theme={theme}
               icon="list"
-              label={props.groupLabel ?? (grouped ? "Grouped" : "Group")}
+              label={props.groupLabel ?? (grouped ? strings.tasksScreen.grouped : strings.taskControls.group)}
               active={grouped}
               onPress={props.onGroupPress}
-              accessibilityLabel="Change task grouping"
+              accessibilityLabel={strings.tasksScreen.changeGrouping}
             />
           ) : null}
           <FxChipButton
             theme={theme}
             icon="chevron-down"
-            label={`Sort: ${props.sortLabel ?? getMobileV2TaskSortModeLabel(sortMode)}`}
+            label={strings.tasksScreen.sortChip.replace("{label}", () => props.sortLabel ?? sortModeLabels[sortMode])}
             onPress={props.onSortPress}
-            accessibilityLabel="Change task sort order"
+            accessibilityLabel={strings.tasksScreen.changeSort}
           />
         </FxRow>
       </View>
@@ -1070,7 +1102,7 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
             <FxRow gap={MOBILE_V2_SPACING.lg} align="center">
               <FxIcon name="sync" size={18} color={theme.muted} />
               <Text style={{ color: theme.muted, fontFamily: MOBILE_V2_FONT_SANS }}>
-                Loading tasks…
+                {strings.tasksScreen.loading}
               </Text>
             </FxRow>
           </FxCard>
@@ -1088,7 +1120,7 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
                     fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold,
                   }}
                 >
-                  Could not load tasks
+                  {strings.tasksScreen.loadError}
                 </Text>
               </FxRow>
               <Text style={{ color: theme.muted, fontFamily: MOBILE_V2_FONT_SANS }}>
@@ -1096,7 +1128,7 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
               </Text>
               {props.state.onRetry !== undefined ? (
                 <FxButton theme={theme} variant="soft" icon="refresh" size="sm" onPress={props.state.onRetry}>
-                  Retry
+                  {strings.tasksScreen.retry}
                 </FxButton>
               ) : null}
             </FxCol>
@@ -1139,7 +1171,7 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
                   fontFamily: MOBILE_V2_FONT_SANS,
                 }}
               >
-                {narrowed ? "No tasks match this view" : "All clear"}
+                {narrowed ? strings.tasksScreen.noMatchTitle : strings.tasksScreen.allClearTitle}
               </Text>
               <Text
                 style={{
@@ -1151,8 +1183,8 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
                 }}
               >
                 {narrowed
-                  ? "Clear filters or pick another saved view."
-                  : "Nothing on the list right now."}
+                  ? strings.tasksScreen.noMatchBody
+                  : strings.tasksScreen.allClearBody}
               </Text>
               {narrowed && props.onClearFilters !== undefined ? (
                 <FxButton
@@ -1161,10 +1193,10 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
                   size="sm"
                   icon="x"
                   onPress={props.onClearFilters}
-                  accessibilityLabel="Clear filters"
+                  accessibilityLabel={strings.tasksScreen.clearFilters}
                   style={{ marginTop: MOBILE_V2_SPACING["3xl"] }}
                 >
-                  Clear filters
+                  {strings.tasksScreen.clearFilters}
                 </FxButton>
               ) : null}
             </ScrollView>
@@ -1173,7 +1205,7 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
       ) : viewMode === "board" ? (
         <TaskBoard theme={theme} groups={groups} onTaskPress={props.onTaskPress} />
       ) : viewMode === "map" ? (
-        <TaskMap theme={theme} tasks={visibleTasks} onTaskPress={props.onTaskPress} />
+        <TaskMap theme={theme} strings={strings} tasks={visibleTasks} onTaskPress={props.onTaskPress} />
       ) : (
         <ScrollView
           contentContainerStyle={{
@@ -1251,7 +1283,7 @@ export function MobileV2TasksScreen(props: MobileV2TasksScreenProps): React.Reac
                 }}
               >
                 {group.tasks.map((task) => (
-                  <TaskRow key={task.task_id} theme={theme} task={task} onPress={props.onTaskPress} />
+                  <TaskRow key={task.task_id} theme={theme} strings={strings} task={task} onPress={props.onTaskPress} />
                 ))}
               </View>
             </View>

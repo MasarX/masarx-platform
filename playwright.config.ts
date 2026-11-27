@@ -155,6 +155,7 @@ if (requireBaseUrls && selectedLocalSurfaces.length > 0) {
 }
 const shouldStartLocalServers =
   !requireBaseUrls;
+const nightlyLocal = process.env.NIGHTLY_LOCAL_E2E === "1";
 const localAllowedDevOrigins = mergeAllowedDevOrigins(
   process.env.NEXT_ALLOWED_DEV_ORIGINS,
   [consoleBase, portalBase],
@@ -169,11 +170,11 @@ const localWebServers = shouldStartLocalServers
       ...(isProjectSelected("console", "a11y", "shared") && isOrdinaryLocalServerOrigin(consoleBase)
         ? [
             {
-              command: shouldForceClean
+              command: nightlyLocal ? "npm --prefix apps/console run dev -- --hostname 127.0.0.1" : shouldForceClean
                 ? "node scripts/tests/stop-port-listeners.js 3001 && node scripts/tests/clear-next-cache.js apps/console && npm run dev:console:legacy"
                 : "npm run dev:console:legacy",
               url: `${consoleResolved.origin}${consoleResolved.path}`,
-              reuseExistingServer: !shouldForceClean,
+              reuseExistingServer: !nightlyLocal && !shouldForceClean,
               timeout: webServerTimeoutMs,
               env: localWebServerEnv,
             },
@@ -182,11 +183,11 @@ const localWebServers = shouldStartLocalServers
       ...(isProjectSelected("portal") && isOrdinaryLocalServerOrigin(portalBase)
         ? [
             {
-              command: shouldForceClean
+              command: nightlyLocal ? "npm --prefix apps/portal run dev -- --hostname 127.0.0.1" : shouldForceClean
                 ? "node scripts/tests/stop-port-listeners.js 3002 && node scripts/tests/clear-next-cache.js apps/portal && npm run dev:portal"
                 : "npm run dev:portal",
               url: `${portalResolved.origin}${portalResolved.path}`,
-              reuseExistingServer: !shouldForceClean,
+              reuseExistingServer: !nightlyLocal && !shouldForceClean,
               timeout: webServerTimeoutMs,
               env: localWebServerEnv,
             },

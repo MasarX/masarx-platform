@@ -40,6 +40,10 @@ Native tool routes (mobile `href`)
   - `/mobile/outbox` (queued/failed writes; retry/clear flows)
   - `/mobile/scan` (manual + camera barcode capture -> `record_scan_event_v1`)
     - Scan input mode is policy/platform-driven (`camera`/`scanner`) with persisted user preference and safe fallback per platform.
+    - The stop parcel API uses `api.record_scan_event_v1` with `scan_type: stop_parcel`, an assigned `route_stop_id`, the parcel barcode and an idempotency key. The server derives the route branch from the stop and uses it to resolve policy.
+    - To opt in at a scope, save a v3 `scan_policy` row that accepts `stop_parcel` and sets `manual_entry.enabled` and `manual_entry.reason_codes`. Use active codes from the `stop_scan_manual_entry_reason` lookup. The resolved policy returns the configured choices and retains its camera and scanner list for earlier app versions.
+    - Manual requests use `metadata.scan_input_mode: manual_entry` and `metadata.scan_reason_code`, with optional text in `metadata.scan_reason_note`. The scan ledger records the reason with the resolved policy version, actor and timestamps.
+    - After a confirmed write, refetch `api.resolve_fieldops_stop_detail_v1` and render the matching parcel's `status`. A parcel scan leaves proof-of-delivery state to the proof workflow.
     - While driving lock is active, scan capture/submit is blocked and the UI remains explicit about lock state.
     - Warehouse checkpoint scans are sequence-enforced and append-only: `warehouse_checkpoint` capture must follow the resolved checkpoint order, bulk manifest/container capture must fan out through `api.record_scan_events_batch_v1`, and corrections must append a new supervised scan row instead of mutating the original event.
   - `/mobile/location` (one-shot capture -> `record_location_ping_v1`)
@@ -105,6 +109,19 @@ Native tool routes (mobile `href`)
   - Never "fake success" when offline; show pending state until server confirmation or explicit policy allows optimistic UI. An item is synced only when its ID appears in that sync invocation’s positive completion receipt after execution and queue removal; an absent or cleared row is not proof.
   - Route/settlement interaction telemetry (`mobile_route_navigate`, `mobile_route_contact`, `mobile_settlement_counted`) is queued through `ui_log_events_v1` for auditability and diagnostics.
 
+### Outbox diagnostics
+
+Outbox diagnostics preserve the complete fixed messages `AssertionError`, `Assertion failed` and `Unexpected token < in JSON`. Additional text goes through the normal redactor.
+
+| Diagnostic text | Withholding reason |
+| --- | --- |
+| Database uniqueness and foreign-key details | Constraint details can include record identifiers and values. The client can still use the conflict category when available. |
+| Authentication, session, signature, PIN or key messages | Free-form messages can contain credentials or identity data. |
+| Prose containing ambiguous credential terms | The redactor cannot establish the source or meaning of arbitrary prose. |
+| ANSI formatting or unit symbols that normalize outside the supported character set | Withholding keeps the diagnostic character boundary predictable. |
+| URLs with a `code` query parameter | A query parameter can carry a one-time credential. |
+| Text combining colons and `@` in a credential-shaped segment | The redactor treats ambiguous user information as sensitive. |
+
 ## Implementation (write-once)
 - Shared engine: `@masarx/mobile-core` provides a generic Outbox + sync loop (no business rules).
 - Durable store: `@masarx/mobile-core/sqlite` implements a SQLite-backed store using `expo-sqlite` (Expo-managed; production-safe).
@@ -122,6 +139,7 @@ Native tool routes (mobile `href`)
 ## Security model (enterprise)
 - No service-role secrets on device.
 - All reads/writes via authenticated user JWT + RLS + SECURITY DEFINER RPCs with least-privilege grants.
+- The outbox redactor handles accidental credential disclosure in supported diagnostic formats. Keep arbitrary ASCII rewrites of credential field names outside that contract. Treat messages from untrusted sources as untrusted data and use typed error codes for user-facing diagnostics.
 - Device registration via `register_user_device_v1` (store push token + versions + metadata; policy-gated).
 - Device attestation foundation is policy-driven (`mobile_attestation_policy`) and enforced server-side on mobile ingest ledgers:
   - Server issues one-time challenges (`issue_mobile_attestation_challenge_v1`) and validates challenge freshness/consumption.
