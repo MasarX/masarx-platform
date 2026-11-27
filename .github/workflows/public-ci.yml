@@ -426,6 +426,8 @@ jobs:
             echo '::error::The frozen Edge manifest accepted an unexpected file.'
             exit 1
           fi
+          rm -- "$EDGE_FROZEN_WORKDIR/supabase/unexpected.ts"
+          node scripts/edge/verify-label-renderer-preview.cjs
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs lint
