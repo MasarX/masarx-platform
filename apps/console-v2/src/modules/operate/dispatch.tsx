@@ -2747,7 +2747,7 @@ export function DispatchModule() {
     }
     drawer.open({
       title: fill(t('dispatch.context.routeTitle'), { label: routeRunLabel(routeRunId) }),
-      body: <RouteContextDrawerBody routeRunId={routeRunId} fallbackRun={run} />,
+      body: <ContextDrawerBody area="route" resource="route_runs" id={routeRunId} fallback={run} capability={CAP.ROUTES_READ} details={(row) => routeContextDetails(routeRunId, row)} />,
     });
   }
 
@@ -2759,7 +2759,7 @@ export function DispatchModule() {
     }
     drawer.open({
       title: fill(t('dispatch.context.basketTitle'), { label: basket.label ?? basket.code ?? basket.id }),
-      body: <BasketContextDrawerBody basketId={basketId} fallbackBasket={basket} />,
+      body: <ContextDrawerBody area="basket" resource="baskets" id={basketId} fallback={basket} capability={CAP.BASKETS_READ} details={(row) => basketContextDetails(basketId, row)} />,
     });
   }
 
@@ -2771,7 +2771,7 @@ export function DispatchModule() {
     }
     drawer.open({
       title: fill(t('dispatch.context.driverTitle'), { label: driver.name ?? driver.id }),
-      body: <DriverContextDrawerBody driverId={driverId} fallbackDriver={driver} />,
+      body: <ContextDrawerBody area="driver" resource="drivers" id={driverId} fallback={driver} capability={CAP.FLEET_READ} details={(row) => driverContextDetails(driverId, row)} />,
     });
   }
 
@@ -2783,85 +2783,87 @@ export function DispatchModule() {
     }
     drawer.open({
       title: fill(t('dispatch.context.vehicleTitle'), { label: vehicleDisplayLabel(vehicle.id) }),
-      body: <VehicleContextDrawerBody vehicleId={vehicleId} fallbackVehicle={vehicle} />,
+      body: <ContextDrawerBody area="vehicle" resource="vehicle_directory" id={vehicleId} fallback={vehicle} capability={CAP.FLEET_READ} details={(row) => vehicleContextDetails(vehicleId, row)} />,
     });
   }
 
-  function RouteContextDrawerBody({
-    routeRunId,
-    fallbackRun,
+  // One body for the route, basket, driver and vehicle drawers: each reads its record, then lists its facts and stops.
+  function ContextDrawerBody<T>({
+    area,
+    resource,
+    id,
+    fallback,
+    capability,
+    details,
   }: {
-    routeRunId: string;
-    fallbackRun: RouteRunRow;
+    area: 'route' | 'basket' | 'driver' | 'vehicle';
+    resource: string;
+    id: string;
+    fallback: T;
+    capability: string;
+    details: (row: T) => { rows: KvRow[]; linkedStops: RouteStopRow[]; routeRunId?: string };
   }) {
-    const routeQuery = useResource<RouteRunRow>('route_runs', routeRunId);
-    if (routeQuery.error) {
+    const query = useResource<T>(resource, id);
+    if (query.error) {
+      const denied = isDispatchPermissionDeniedError(query.error);
       return (
         <StateView
-          kind={isDispatchPermissionDeniedError(routeQuery.error) ? 'denied' : 'error'}
-          title={t('dispatch.context.route.unavailable')}
-          hint={dispatchReadErrorMessage(routeQuery.error, t)}
-          capability={isDispatchPermissionDeniedError(routeQuery.error) ? CAP.ROUTES_READ : undefined}
+          kind={denied ? 'denied' : 'error'}
+          title={t(`dispatch.context.${area}.unavailable`)}
+          hint={dispatchReadErrorMessage(query.error, t)}
+          capability={denied ? capability : undefined}
         />
       );
     }
-    const run = routeQuery.data ?? (routeQuery.isLoading ? fallbackRun : null);
-    if (!run && routeQuery.isLoading) return <StateView kind="loading" />;
-    if (!run) {
-      return <StateView kind="empty" title={t('dispatch.context.route.notFound')} hint={t('dispatch.context.route.notFoundHint')} />;
+    const row = query.data ?? (query.isLoading ? fallback : null);
+    if (!row && query.isLoading) return <StateView kind="loading" />;
+    if (!row) {
+      return <StateView kind="empty" title={t(`dispatch.context.${area}.notFound`)} hint={t(`dispatch.context.${area}.notFoundHint`)} />;
     }
-    const assignment = assignmentByRunId.get(routeRunId);
-    const runStops = stops.filter((stop) => stop.route_run_id === routeRunId);
-    const routeLabel = routeRunLabel(routeRunId);
-    const rows: KvRow[] = [
-      { key: 'route', label: t('dispatch.kv.route'), value: routeLabel, mono: true },
-      { key: 'status', label: t('dispatch.kv.status'), value: run.status, lookup: 'route_run_status' },
-      { key: 'planned_date', label: t('dispatch.kv.plannedDate'), value: run.planned_date ?? '—', mono: true },
-      { key: 'driver', label: t('dispatch.kv.driver'), value: driverDisplayName(run.driver_user_id) },
-      { key: 'vehicle', label: t('dispatch.kv.vehicle'), value: vehicleDisplayLabel(run.vehicle_id) },
-      { key: 'stops', label: t('dispatch.kv.stops'), value: runStops.length, mono: true },
-      { key: 'cod_total', label: t('dispatch.kv.codOnRun'), value: `${tenantCurrencyIso ?? '—'} ${codTotalByRunId.get(routeRunId) ?? 0}`, mono: true },
-      { key: 'assignment_mode', label: t('dispatch.kv.assignmentMode'), value: assignment?.assignment_mode ?? '—', lookup: assignment?.assignment_mode ? 'route_assignment_mode' : undefined },
-      { key: 'assignment_status', label: t('dispatch.kv.assignmentStatus'), value: assignment?.assignment_status ?? '—' },
-      { key: 'departure', label: t('dispatch.kv.departure'), value: routeRunDepartureConfirmedAt(run) ? fill(t('dispatch.context.confirmedAt'), { date: formatContextDate(routeRunDepartureConfirmedAt(run)) }) : t('dispatch.context.notConfirmed') },
-    ];
+    const { rows, linkedStops, routeRunId } = details(row);
     return (
-      <div data-testid="dispatch-route-context-drawer" style={{ display: 'grid', gap: 14 }}>
+      <div data-testid={`dispatch-${area}-context-drawer`} style={{ display: 'grid', gap: 14 }}>
         <p className="state__hint" style={{ margin: 0 }}>
-          {t('dispatch.context.route.intro')}
+          {t(`dispatch.context.${area}.intro`)}
         </p>
         <KvGrid rows={rows} />
+        {routeRunId ? (
+          <Button
+            type="button"
+            kind="ghost"
+            iconName="route"
+            label={t('dispatch.context.inspectRoute')}
+            capability={CAP.ROUTES_READ}
+            onClick={() => openRouteContext(routeRunId)}
+          />
+        ) : null}
         <div>
-          <h3 className="state__title" style={{ margin: '0 0 8px' }}>{t('dispatch.context.route.shipments')}</h3>
-          {linkedShipmentButtons(runStops, t('dispatch.context.route.empty'))}
+          <h3 className="state__title" style={{ margin: '0 0 8px' }}>{t(`dispatch.context.${area}.shipments`)}</h3>
+          {linkedShipmentButtons(linkedStops, t(`dispatch.context.${area}.empty`))}
         </div>
       </div>
     );
   }
 
-  function BasketContextDrawerBody({
-    basketId,
-    fallbackBasket,
-  }: {
-    basketId: string;
-    fallbackBasket: BasketLookupRow;
-  }) {
-    const basketQuery = useResource<BasketLookupRow>('baskets', basketId);
-    if (basketQuery.error) {
-      return (
-        <StateView
-          kind={isDispatchPermissionDeniedError(basketQuery.error) ? 'denied' : 'error'}
-          title={t('dispatch.context.basket.unavailable')}
-          hint={dispatchReadErrorMessage(basketQuery.error, t)}
-          capability={isDispatchPermissionDeniedError(basketQuery.error) ? CAP.BASKETS_READ : undefined}
-        />
-      );
-    }
-    const basket = basketQuery.data ?? (basketQuery.isLoading ? fallbackBasket : null);
-    if (!basket && basketQuery.isLoading) return <StateView kind="loading" />;
-    if (!basket) {
-      return <StateView kind="empty" title={t('dispatch.context.basket.notFound')} hint={t('dispatch.context.basket.notFoundHint')} />;
-    }
+  function routeContextDetails(routeRunId: string, run: RouteRunRow) {
+    const assignment = assignmentByRunId.get(routeRunId);
+    const linkedStops = stops.filter((stop) => stop.route_run_id === routeRunId);
+    const rows: KvRow[] = [
+      { key: 'route', label: t('dispatch.kv.route'), value: routeRunLabel(routeRunId), mono: true },
+      { key: 'status', label: t('dispatch.kv.status'), value: run.status, lookup: 'route_run_status' },
+      { key: 'planned_date', label: t('dispatch.kv.plannedDate'), value: run.planned_date ?? '—', mono: true },
+      { key: 'driver', label: t('dispatch.kv.driver'), value: driverDisplayName(run.driver_user_id) },
+      { key: 'vehicle', label: t('dispatch.kv.vehicle'), value: vehicleDisplayLabel(run.vehicle_id) },
+      { key: 'stops', label: t('dispatch.kv.stops'), value: linkedStops.length, mono: true },
+      { key: 'cod_total', label: t('dispatch.kv.codOnRun'), value: `${tenantCurrencyIso ?? '—'} ${codTotalByRunId.get(routeRunId) ?? 0}`, mono: true },
+      { key: 'assignment_mode', label: t('dispatch.kv.assignmentMode'), value: assignment?.assignment_mode ?? '—', lookup: assignment?.assignment_mode ? 'route_assignment_mode' : undefined },
+      { key: 'assignment_status', label: t('dispatch.kv.assignmentStatus'), value: assignment?.assignment_status ?? '—' },
+      { key: 'departure', label: t('dispatch.kv.departure'), value: routeRunDepartureConfirmedAt(run) ? fill(t('dispatch.context.confirmedAt'), { date: formatContextDate(routeRunDepartureConfirmedAt(run)) }) : t('dispatch.context.notConfirmed') },
+    ];
+    return { rows, linkedStops };
+  }
+
+  function basketContextDetails(basketId: string, basket: BasketLookupRow) {
     const shipmentIdsInBasket = new Set(
       activeBasketItems
         .filter((item) => item.basket_id === basketId)
@@ -2876,45 +2878,12 @@ export function DispatchModule() {
       { key: 'capacity', label: t('dispatch.kv.capacity'), value: `${basket.current_count ?? linkedStops.length} / ${basket.capacity_count ?? '—'}`, mono: true },
       { key: 'active_route_shipments', label: t('dispatch.kv.onActiveRoute'), value: linkedStops.length, mono: true },
     ];
-    return (
-      <div data-testid="dispatch-basket-context-drawer" style={{ display: 'grid', gap: 14 }}>
-        <p className="state__hint" style={{ margin: 0 }}>
-          {t('dispatch.context.basket.intro')}
-        </p>
-        <KvGrid rows={rows} />
-        <div>
-          <h3 className="state__title" style={{ margin: '0 0 8px' }}>{t('dispatch.context.basket.shipments')}</h3>
-          {linkedShipmentButtons(linkedStops, t('dispatch.context.basket.empty'))}
-        </div>
-      </div>
-    );
+    return { rows, linkedStops };
   }
 
-  function DriverContextDrawerBody({
-    driverId,
-    fallbackDriver,
-  }: {
-    driverId: string;
-    fallbackDriver: DriverLookupRow;
-  }) {
-    const driverQuery = useResource<DriverLookupRow>('drivers', driverId);
-    if (driverQuery.error) {
-      return (
-        <StateView
-          kind={isDispatchPermissionDeniedError(driverQuery.error) ? 'denied' : 'error'}
-          title={t('dispatch.context.driver.unavailable')}
-          hint={dispatchReadErrorMessage(driverQuery.error, t)}
-          capability={isDispatchPermissionDeniedError(driverQuery.error) ? CAP.FLEET_READ : undefined}
-        />
-      );
-    }
-    const driver = driverQuery.data ?? (driverQuery.isLoading ? fallbackDriver : null);
-    if (!driver && driverQuery.isLoading) return <StateView kind="loading" />;
-    if (!driver) {
-      return <StateView kind="empty" title={t('dispatch.context.driver.notFound')} hint={t('dispatch.context.driver.notFoundHint')} />;
-    }
+  function driverContextDetails(driverId: string, driver: DriverLookupRow) {
     const runForDriver = activeRun?.driver_user_id === driverId ? activeRun : runs.find((run) => run.driver_user_id === driverId);
-    const runStops = runForDriver ? stops.filter((stop) => stop.route_run_id === runForDriver.id) : [];
+    const linkedStops = runForDriver ? stops.filter((stop) => stop.route_run_id === runForDriver.id) : [];
     const rows: KvRow[] = [
       { key: 'name', label: t('dispatch.kv.driver'), value: driver.name ?? driver.id },
       { key: 'driver_code', label: t('dispatch.kv.driverCode'), value: driver.driver_code ?? '—', mono: true },
@@ -2923,57 +2892,14 @@ export function DispatchModule() {
       { key: 'email', label: t('dispatch.kv.email'), value: driver.user_email ?? '—', mono: true },
       { key: 'route', label: t('dispatch.kv.route'), value: runForDriver ? routeRunLabel(runForDriver.id) : t('dispatch.context.noRoute') },
       { key: 'vehicle', label: t('dispatch.kv.vehicle'), value: runForDriver ? vehicleDisplayLabel(runForDriver.vehicle_id) : '—' },
-      { key: 'stops', label: t('dispatch.kv.assignedStops'), value: runStops.length, mono: true },
+      { key: 'stops', label: t('dispatch.kv.assignedStops'), value: linkedStops.length, mono: true },
     ];
-    return (
-      <div data-testid="dispatch-driver-context-drawer" style={{ display: 'grid', gap: 14 }}>
-        <p className="state__hint" style={{ margin: 0 }}>
-          {t('dispatch.context.driver.intro')}
-        </p>
-        <KvGrid rows={rows} />
-        {runForDriver ? (
-          <Button
-            type="button"
-            kind="ghost"
-            iconName="route"
-            label={t('dispatch.context.inspectRoute')}
-            capability={CAP.ROUTES_READ}
-            onClick={() => openRouteContext(runForDriver.id)}
-          />
-        ) : null}
-        <div>
-          <h3 className="state__title" style={{ margin: '0 0 8px' }}>{t('dispatch.context.driver.shipments')}</h3>
-          {linkedShipmentButtons(runStops, t('dispatch.context.driver.empty'))}
-        </div>
-      </div>
-    );
+    return { rows, linkedStops, routeRunId: runForDriver?.id };
   }
 
-  function VehicleContextDrawerBody({
-    vehicleId,
-    fallbackVehicle,
-  }: {
-    vehicleId: string;
-    fallbackVehicle: VehicleLookupRow;
-  }) {
-    const vehicleQuery = useResource<VehicleLookupRow>('vehicle_directory', vehicleId);
-    if (vehicleQuery.error) {
-      return (
-        <StateView
-          kind={isDispatchPermissionDeniedError(vehicleQuery.error) ? 'denied' : 'error'}
-          title={t('dispatch.context.vehicle.unavailable')}
-          hint={dispatchReadErrorMessage(vehicleQuery.error, t)}
-          capability={isDispatchPermissionDeniedError(vehicleQuery.error) ? CAP.FLEET_READ : undefined}
-        />
-      );
-    }
-    const vehicle = vehicleQuery.data ?? (vehicleQuery.isLoading ? fallbackVehicle : null);
-    if (!vehicle && vehicleQuery.isLoading) return <StateView kind="loading" />;
-    if (!vehicle) {
-      return <StateView kind="empty" title={t('dispatch.context.vehicle.notFound')} hint={t('dispatch.context.vehicle.notFoundHint')} />;
-    }
+  function vehicleContextDetails(vehicleId: string, vehicle: VehicleLookupRow) {
     const runForVehicle = activeRun?.vehicle_id === vehicleId ? activeRun : runs.find((run) => run.vehicle_id === vehicleId);
-    const runStops = runForVehicle ? stops.filter((stop) => stop.route_run_id === runForVehicle.id) : [];
+    const linkedStops = runForVehicle ? stops.filter((stop) => stop.route_run_id === runForVehicle.id) : [];
     const rows: KvRow[] = [
       { key: 'vehicle', label: t('dispatch.kv.vehicle'), value: vehicleDisplayLabel(vehicle.id) },
       { key: 'plate', label: t('dispatch.kv.plate'), value: vehicle.plate_number ?? vehicle.plate ?? '—', mono: true },
@@ -2982,30 +2908,9 @@ export function DispatchModule() {
       { key: 'status', label: t('dispatch.kv.status'), value: vehicle.status ?? '—', lookup: vehicle.status ? 'vehicle_status' : undefined },
       { key: 'route', label: t('dispatch.kv.route'), value: runForVehicle ? routeRunLabel(runForVehicle.id) : t('dispatch.context.noRoute') },
       { key: 'driver', label: t('dispatch.kv.driver'), value: runForVehicle ? driverDisplayName(runForVehicle.driver_user_id) : '—' },
-      { key: 'stops', label: t('dispatch.kv.routeStops'), value: runStops.length, mono: true },
+      { key: 'stops', label: t('dispatch.kv.routeStops'), value: linkedStops.length, mono: true },
     ];
-    return (
-      <div data-testid="dispatch-vehicle-context-drawer" style={{ display: 'grid', gap: 14 }}>
-        <p className="state__hint" style={{ margin: 0 }}>
-          {t('dispatch.context.vehicle.intro')}
-        </p>
-        <KvGrid rows={rows} />
-        {runForVehicle ? (
-          <Button
-            type="button"
-            kind="ghost"
-            iconName="route"
-            label={t('dispatch.context.inspectRoute')}
-            capability={CAP.ROUTES_READ}
-            onClick={() => openRouteContext(runForVehicle.id)}
-          />
-        ) : null}
-        <div>
-          <h3 className="state__title" style={{ margin: '0 0 8px' }}>{t('dispatch.context.vehicle.shipments')}</h3>
-          {linkedShipmentButtons(runStops, t('dispatch.context.vehicle.empty'))}
-        </div>
-      </div>
-    );
+    return { rows, linkedStops, routeRunId: runForVehicle?.id };
   }
 
   function scannerOpenCapability(match: OpsScannerMatch): string | undefined {
