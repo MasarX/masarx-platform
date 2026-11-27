@@ -5,11 +5,8 @@ const { upsertSettings } = require('../../utils/policies');
 const { fetchJsonWithRetry, truncateText } = require('../helpers/http');
 const { createWorkflowContext, clearWorkflowEngineContext, cleanupWorkflowForLabelJobs } = require('../helpers/tenant-utils');
 const { ensureStorageBucket, resolveStorageAdminKey } = require('../helpers/storage-admin');
-const {
-  isAuthSignatureModeError,
-  logAuthSignatureModeSkip,
-} = require('../helpers/auth-signature-mode');
 const { waitForMetricRow } = require('../workflows/helpers/label-print-helpers');
+const { signedRendererHeaders } = require('../helpers/renderer-request');
 
 loadEnv();
 
@@ -24,28 +21,10 @@ const SERVICE_ROLE_KEY =
 const STORAGE_ADMIN_KEY =
   resolveStorageAdminKey() ||
   SERVICE_ROLE_KEY;
-const isTruthy = (value) => /^(1|true|yes)$/i.test(String(value || '').trim());
-const previewMode = isTruthy(process.env.PREVIEW_MODE) || isTruthy(process.env.CI_PREVIEW);
-const edgeRequireDbJwt = String(process.env.EDGE_REQUIRE_DB_JWT || '').trim() === '1';
-const skipInPreviewFallback = previewMode && !edgeRequireDbJwt;
-const labelRendererDbJwt =
-  String(process.env.LABEL_RENDERER_DB_JWT || process.env.EDGE_DB_JWT || '').trim();
-const skipForStrictDbJwtLocal = edgeRequireDbJwt && !labelRendererDbJwt;
-const LABEL_RENDERER_JWT = previewMode && !edgeRequireDbJwt
-  ? SERVICE_ROLE_KEY
-  : (process.env.LABEL_RENDERER_DB_JWT || SERVICE_ROLE_KEY || '');
 const LABEL_BUCKET =
   process.env.LABEL_RENDER_BUCKET || process.env.LABEL_RENDERER_BUCKET || 'labels';
 
-function skipForAuthSignatureMode(errorLike) {
-  if (!isAuthSignatureModeError(errorLike)) {
-    return false;
-  }
-  logAuthSignatureModeSkip('label-renderer-bundle-e2e.test', errorLike);
-  return true;
-}
-
-if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT || !STORAGE_ADMIN_KEY || skipInPreviewFallback || skipForStrictDbJwtLocal) {
+if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !STORAGE_ADMIN_KEY) {
   // eslint-disable-next-line jest/no-disabled-tests
   describe.skip('label renderer bundle E2E via webhook + workflow', () => {
     test.skip('skipped: missing env', () => {});
@@ -216,12 +195,7 @@ if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT 
         await upsertSettings('label_print_policy', 'tenant', a.orgId, labelPrintPolicy, 'e2e policy A', client);
         await upsertSettings('label_print_policy', 'tenant', b.orgId, labelPrintPolicy, 'e2e policy B', client);
 
-        try {
-          await ensureLabelBucket();
-        } catch (error) {
-          if (skipForAuthSignatureMode(error)) return;
-          throw error;
-        }
+        await ensureLabelBucket();
         await client.query(`DELETE FROM metrics_webhook_events WHERE metric LIKE 'label_bundle.%'`);
 
         const { shipmentId: shipmentA, boxId: boxA } = await createShipmentWithBox(client, a.orgId, a.clientId, a.addressId);
@@ -253,21 +227,17 @@ if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT 
           [jobA, jobB],
         );
 
-        // Render both jobs through the edge renderer (service-role, scoped per org)
+        // Render both jobs through the edge renderer with a fresh signed request per job
         const renderUrl = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/label-renderer`;
         const renderJob = async (jobId, orgId) => {
           const { resp, bodyText, json, jsonError } = await fetchJsonWithRetry(
             renderUrl,
             {
               method: 'POST',
-              headers: {
-                'content-type': 'application/json',
-                authorization: `Bearer ${LABEL_RENDERER_JWT}`,
-                apikey: SUPABASE_ANON_KEY,
-              },
+              headers: await signedRendererHeaders(renderUrl),
               body: JSON.stringify({ organization_id: orgId, job_id: jobId, lease_seconds: 60 }),
             },
-            { purpose: `render job ${jobId}` },
+            { attempts: 1, purpose: `render job ${jobId}` },
           );
 
           const debug = bodyText ? truncateText(bodyText) : json ? JSON.stringify(json) : '';
@@ -280,17 +250,10 @@ if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT 
           return json.file_url;
         };
 
-        let fileUrlA;
-        let fileUrlB;
-        try {
-          [fileUrlA, fileUrlB] = await Promise.all([
-            renderJob(jobA, a.orgId),
-            renderJob(jobB, b.orgId),
-          ]);
-        } catch (error) {
-          if (skipForAuthSignatureMode(error)) return;
-          throw error;
-        }
+        const [fileUrlA, fileUrlB] = await Promise.all([
+          renderJob(jobA, a.orgId),
+          renderJob(jobB, b.orgId),
+        ]);
 
         // eslint-disable-next-line no-console
         console.log('[bundle-e2e] rendered files', { fileUrlA, fileUrlB });
@@ -303,14 +266,10 @@ if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT 
         // Bundle only tenant A (client A) labels
         const { resp: bundleResp, bodyText: bundleText, json: body, jsonError } =
           await fetchJsonWithRetry(
-            `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/label-renderer`,
+            renderUrl,
             {
               method: 'POST',
-              headers: {
-                'content-type': 'application/json',
-                authorization: `Bearer ${LABEL_RENDERER_JWT}`,
-                apikey: SUPABASE_ANON_KEY,
-              },
+              headers: await signedRendererHeaders(renderUrl),
               body: JSON.stringify({
                 mode: 'bundle',
                 organization_id: a.orgId,
@@ -321,7 +280,7 @@ if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT 
                 },
               }),
             },
-            { purpose: 'bundle labels' },
+            { attempts: 1, purpose: 'bundle labels' },
           );
 
         const bundleDebug = bundleText ? truncateText(bundleText) : body ? JSON.stringify(body) : '';
@@ -329,7 +288,6 @@ if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT 
           throw new Error(`bundle non-JSON response (${bundleResp.status}): ${bundleDebug}`);
         }
         if (bundleResp.status !== 200) {
-          if (skipForAuthSignatureMode(body || bundleDebug)) return;
           throw new Error(`bundle failed: ${bundleResp.status} ${bundleDebug}`);
         }
 
