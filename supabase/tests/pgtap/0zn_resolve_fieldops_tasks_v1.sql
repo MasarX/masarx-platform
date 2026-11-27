@@ -225,7 +225,7 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.users (id, organization_id, email, full_name, user_type, status)
-  VALUES (v_loader_id, v_org_id, v_loader_id || '@example.test', 'Loader fixture', 'warehouse_operator', 'active'),
+  VALUES (v_loader_id, v_org_id, v_loader_id || '@example.test', 'Loader fixture', 'driver', 'active'),
          (v_supervisor_id, v_org_id, v_supervisor_id || '@example.test', 'Supervisor fixture', 'ops_admin', 'active');
   PERFORM public.provision_rbac_roles_from_templates_v1(v_org_id, ARRAY['warehouse_operator'], v_loader_id);
   INSERT INTO public.rbac_roles (organization_id, key, name)

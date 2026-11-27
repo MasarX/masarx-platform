@@ -42,12 +42,12 @@ BEGIN
   INSERT INTO public.users (id, organization_id, email, full_name, user_type, status, access_scope_type, access_scope_id)
   SELECT id, org, id || '@example.test', 'FieldOps fixture user', user_type, 'active', scope_type, scope_id
   FROM (VALUES
-    (fixture_driver, fixture_org, 'driver', 'tenant', fixture_org),
-    (unassigned_driver, fixture_org, 'driver', 'tenant', fixture_org),
-    (dual_role_driver, fixture_org, 'ops_admin', 'tenant', fixture_org),
-    (fixture_supervisor, fixture_org, 'ops_admin', 'tenant', fixture_org),
+    (fixture_driver, fixture_org, 'driver', 'tenant', NULL),
+    (unassigned_driver, fixture_org, 'driver', 'tenant', NULL),
+    (dual_role_driver, fixture_org, 'ops_admin', 'tenant', NULL),
+    (fixture_supervisor, fixture_org, 'ops_admin', 'tenant', NULL),
     (scoped_user, fixture_org, 'driver', 'client', fixture_client),
-    (other_tenant_driver, other_org, 'driver', 'tenant', other_org)
+    (other_tenant_driver, other_org, 'driver', 'tenant', NULL)
   ) actor(id, org, user_type, scope_type, scope_id);
 
   PERFORM public.provision_rbac_roles_from_templates_v1(fixture_org, ARRAY['driver'], fixture_driver);
