@@ -23,6 +23,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Icon } from './Icon';
 import { normalizeConsoleHref } from '@/lib/legacy-hash-navigation';
+import { useT } from '@/lib/i18n';
 
 export type DrawerSize = 'sm' | 'md' | 'lg' | 'xl';
 
@@ -47,6 +48,7 @@ export function Drawer({
   onClose,
   className,
 }: DrawerProps) {
+  const t = useT();
   const [isFull, setIsFull] = useState(false);
   // Defer the `.is-open` toggle a frame so the CSS transition fires after
   // the wrapper mounts (matches the legacy hand-rolled behavior).
@@ -129,8 +131,8 @@ export function Drawer({
                 <button
                   type="button"
                   className="icon-btn drawer__action"
-                  aria-label="Open in new tab"
-                  title="Open in new tab (⌘/Ctrl + click on expand)"
+                  aria-label={t('shell.drawer.newTab')}
+                  title={t('shell.drawer.newTabTitle')}
                   onClick={handleExternalClick}
                 >
                   <Icon name="external" size={13} />
@@ -139,8 +141,8 @@ export function Drawer({
               <button
                 type="button"
                 className="icon-btn drawer__action"
-                aria-label="Expand"
-                title="Expand · ⌘/Ctrl+click → new tab"
+                aria-label={t('shell.drawer.expand')}
+                title={t('shell.drawer.expandTitle')}
                 onClick={handleExpandClick}
                 onContextMenu={deepLink ? handleExpandContext : undefined}
               >
@@ -150,8 +152,8 @@ export function Drawer({
                 <button
                   type="button"
                   className="icon-btn drawer__action"
-                  aria-label="Close"
-                  title="Close · Esc"
+                  aria-label={t('shell.close')}
+                  title={t('shell.drawer.closeTitle')}
                 >
                   ×
                 </button>

@@ -16,7 +16,6 @@ export const ar = {
     labelDraftValidationFailed: 'فشل التحقق من المسودة',
   },
   app: {
-    navigation: 'التنقل',
     name: 'مَسار إكس',
     role: 'مشرف',
     search: 'ابحث في الشحنات، الخطط، السائقين، الإعدادات…',

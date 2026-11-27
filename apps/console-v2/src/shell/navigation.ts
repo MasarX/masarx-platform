@@ -3,6 +3,7 @@
 // untyped JS (seed-raw/navigation.js), so we narrow it here in one place.
 import * as api from '@/lib/api';
 import { formatCapabilityRequirement } from '@/lib/capabilities';
+import { englishT, fill, type Translate } from '@/lib/i18n';
 import { normalizeConsoleHref } from '@/lib/legacy-hash-navigation';
 import { ROUTE_TITLES, type RoutePath } from '@/lib/route-meta';
 import type { AccessScopeType } from '@/types/domain';
@@ -383,28 +384,21 @@ export function canAccessNavItem(item: NavItem, identity: NavAccessContext): boo
   return hasRequiredCapability && hasRequiredScope(item, identity);
 }
 
-function scopeRequirementLabel(scopeType: AccessScopeType): string {
-  switch (scopeType) {
-    case 'platform':
-      return 'Platform scope';
-    case 'tenant':
-      return 'Tenant scope';
-    case 'client':
-      return 'Client scope';
-    case 'sender':
-      return 'Sender scope';
-    default:
-      return 'Required scope';
-  }
+const SCOPE_TYPES: readonly string[] = ['platform', 'tenant', 'client', 'sender'];
+
+function scopeRequirementLabel(scopeType: AccessScopeType, t: Translate): string {
+  return t(`capabilities.scope.${SCOPE_TYPES.includes(scopeType) ? scopeType : 'other'}`);
 }
 
-export function navItemAccessLabel(item: NavItem): string {
+export function navItemAccessLabel(item: NavItem, t: Translate = englishT): string {
   const requiredCapabilities = navItemRequiredCapabilities(item);
-  const capabilityLabel = requiredCapabilities.map((capability) => formatCapabilityRequirement(capability)).join(' or ');
-  const scopeLabel = item.requiredScopeType ? scopeRequirementLabel(item.requiredScopeType) : '';
+  const capabilityLabel = requiredCapabilities
+    .map((capability) => formatCapabilityRequirement(capability, t))
+    .join(t('capabilities.or'));
+  const scopeLabel = item.requiredScopeType ? scopeRequirementLabel(item.requiredScopeType, t) : '';
 
-  if (scopeLabel && capabilityLabel) return `${scopeLabel} and ${capabilityLabel}`;
-  if (scopeLabel) return `${scopeLabel} required`;
+  if (scopeLabel && capabilityLabel) return fill(t('capabilities.scopeAnd'), { scope: scopeLabel, requirement: capabilityLabel });
+  if (scopeLabel) return fill(t('capabilities.scopeRequired'), { scope: scopeLabel });
   if (capabilityLabel) return capabilityLabel;
   return item.label;
 }

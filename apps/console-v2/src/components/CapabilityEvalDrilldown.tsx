@@ -40,6 +40,7 @@ import {
   formatCapabilityRequirement,
   formatCapabilityTitle,
 } from '@/lib/capabilities';
+import { useT } from '@/lib/i18n';
 
 export interface CapabilityEvalDrilldownProps {
   /**
@@ -82,7 +83,7 @@ interface PolicySource {
   scope_path?: Array<{ scope_type: string; scope_id: string | null }>;
 }
 
-function accessEvalLabel(value: unknown, fallback = 'Policy'): string {
+function accessEvalLabel(value: unknown, fallback: string): string {
   const token = String(value ?? '').trim();
   if (!token) return fallback;
   return token
@@ -92,14 +93,15 @@ function accessEvalLabel(value: unknown, fallback = 'Policy'): string {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-function accessEvalEvidenceLabel(value: unknown, fallback = 'Policy'): ReactNode {
+// Policy tokens are backend identifiers, so they render as isolated left-to-right text.
+function accessEvalEvidenceLabel(value: unknown, fallback: string): ReactNode {
   const token = String(value ?? '').trim();
   if (!token) return fallback;
   const label = accessEvalLabel(token, fallback);
-  return label === token ? token : (
-    <>
+  return label === token ? <bdi dir="ltr">{token}</bdi> : (
+    <bdi dir="ltr">
       {label} <span className="mono">({token})</span>
-    </>
+    </bdi>
   );
 }
 
@@ -112,6 +114,7 @@ export function CapabilityEvalDrilldown({
   knownAllowed,
   testIdPrefix,
 }: CapabilityEvalDrilldownProps) {
+  const t = useT();
   const { hasCapability } = useIdentity();
   const canRead = hasCapability(CAP.ACCESS_POLICY_READ);
   const [expanded, setExpanded] = useState<boolean>(defaultExpanded);
@@ -139,9 +142,9 @@ export function CapabilityEvalDrilldown({
       <span
         className="chip chip--neutral chip--xs"
         data-testid={`${idPrefix}-denied`}
-        title={formatCapabilityTitle(CAP.ACCESS_POLICY_READ)}
+        title={formatCapabilityTitle(CAP.ACCESS_POLICY_READ, t)}
       >
-        {formatCapabilityRequirement(CAP.ACCESS_POLICY_READ)}
+        {formatCapabilityRequirement(CAP.ACCESS_POLICY_READ, t)}
       </span>
     );
   }
@@ -157,8 +160,8 @@ export function CapabilityEvalDrilldown({
       <Chip
         kind={cheapAllowed ? 'good' : 'warn'}
         size="xs"
-        label={cheapAllowed ? 'granted' : 'denied'}
-        title="Capability status"
+        label={cheapAllowed ? t('shell.capEval.granted') : t('shell.capEval.denied')}
+        title={t('shell.capEval.status')}
       />
       <button
         type="button"
@@ -177,7 +180,7 @@ export function CapabilityEvalDrilldown({
         }}
       >
         <Icon name={expanded ? 'chevD' : 'chevR'} size={10} />
-        <span>Why?</span>
+        <span>{t('shell.capEval.why')}</span>
       </button>
 
       {expanded ? (
@@ -197,10 +200,10 @@ export function CapabilityEvalDrilldown({
           {/* Provenance summary — pinned to the canonical RPC name so
               operators can grep migrations for the exact evaluator. */}
           <div className="section-eyebrow" style={{ padding: 0, marginBottom: '6px' }}>
-            Access evaluation · {formatCapabilityLabel(capabilityKey, { titleCase: true })}
+            {t('shell.capEval.title')} <bdi>{formatCapabilityLabel(capabilityKey, { titleCase: true }, t)}</bdi>
             {userId ? (
               <span style={{ marginInlineStart: '6px' }}>
-                for selected user
+                {t('shell.capEval.forUser')}
               </span>
             ) : null}
           </div>
@@ -211,7 +214,7 @@ export function CapabilityEvalDrilldown({
               data-testid={`${idPrefix}-loading`}
               style={{ margin: 0, fontSize: '11px' }}
             >
-              Evaluating…
+              {t('shell.capEval.loading')}
             </p>
           ) : evalQuery.isError || !evalQuery.data ? (
             <p
@@ -219,7 +222,7 @@ export function CapabilityEvalDrilldown({
               data-testid={`${idPrefix}-error`}
               style={{ margin: 0, fontSize: '11px', color: 'var(--danger)' }}
             >
-              Access details could not be loaded. Try again.
+              {t('shell.capEval.loadFailed')}
             </p>
           ) : (
             <DrilldownPanelBody result={evalQuery.data} idPrefix={idPrefix} />
@@ -242,6 +245,7 @@ interface PanelResult {
 }
 
 function DrilldownPanelBody({ result, idPrefix }: { result: PanelResult; idPrefix: string }) {
+  const t = useT();
   const allowed = result.allowed;
   const policySource = (result.policy_source ?? {}) as PolicySource;
   const scopePath = policySource.scope_path ?? [];
@@ -260,7 +264,7 @@ function DrilldownPanelBody({ result, idPrefix }: { result: PanelResult; idPrefi
           size="xs"
           label={(
             <>
-              Reason: {accessEvalEvidenceLabel(result.reason, 'Reason')}
+              {t('shell.capEval.reason')} {accessEvalEvidenceLabel(result.reason, t('shell.capEval.reasonFallback'))}
             </>
           )}
         />
@@ -271,7 +275,7 @@ function DrilldownPanelBody({ result, idPrefix }: { result: PanelResult; idPrefi
             size="xs"
             label={(
               <>
-                Role: {accessEvalEvidenceLabel(roleKey, 'Role')}
+                {t('shell.capEval.role')} {accessEvalEvidenceLabel(roleKey, t('shell.capEval.roleFallback'))}
               </>
             )}
           />
@@ -282,11 +286,11 @@ function DrilldownPanelBody({ result, idPrefix }: { result: PanelResult; idPrefi
             size="xs"
             label={(
               <>
-                Scope: {accessEvalEvidenceLabel(result.scope_type, 'Scope')}
+                {t('shell.capEval.scope')} {accessEvalEvidenceLabel(result.scope_type, t('shell.capEval.scopeFallback'))}
                 {result.scope_id ? (
                   <>
                     {' · '}
-                    <span>selected scope</span>
+                    <span>{t('shell.capEval.selectedScopeLower')}</span>
                   </>
                 ) : null}
               </>
@@ -302,7 +306,7 @@ function DrilldownPanelBody({ result, idPrefix }: { result: PanelResult; idPrefi
       {scopePath.length > 0 ? (
         <>
           <div className="section-eyebrow" style={{ padding: 0, marginBottom: '4px' }}>
-            Access resolution ladder
+            {t('shell.capEval.ladder')}
           </div>
           <div className="ladder" data-testid={`${idPrefix}-ladder`}>
             {scopePath.map((step, i) => {
@@ -317,12 +321,12 @@ function DrilldownPanelBody({ result, idPrefix }: { result: PanelResult; idPrefi
                   data-testid={`${idPrefix}-ladder-step-${step.scope_type}`}
                 >
                   <span className="ladder__rank">{String(i + 1)}</span>
-                  <span className="ladder__level">{accessEvalEvidenceLabel(step.scope_type, 'Scope')}</span>
+                  <span className="ladder__level">{accessEvalEvidenceLabel(step.scope_type, t('shell.capEval.scopeFallback'))}</span>
                   <span className="ladder__id">
-                    {step.scope_id ? 'Selected scope' : 'Global policy'}
+                    {step.scope_id ? t('shell.capEval.selectedScope') : t('shell.capEval.globalPolicy')}
                   </span>
                   <span className="ladder__value">
-                    {isMatch ? 'resolved' : 'inherit'}
+                    {isMatch ? t('shell.capEval.resolved') : t('shell.capEval.inherit')}
                   </span>
                 </div>
               );
@@ -331,7 +335,7 @@ function DrilldownPanelBody({ result, idPrefix }: { result: PanelResult; idPrefi
         </>
       ) : (
         <p className="state__hint" style={{ margin: 0, fontSize: '11px' }}>
-          No policy resolved at any scope (default deny).
+          {t('shell.capEval.noPolicy')}
         </p>
       )}
 
@@ -345,22 +349,24 @@ function DrilldownPanelBody({ result, idPrefix }: { result: PanelResult; idPrefi
           data-testid={`${idPrefix}-source`}
           style={{ marginTop: '8px', fontSize: '10.5px', color: 'var(--ink-mute)' }}
         >
-          <div>Capability: {formatCapabilityLabel(result.capability_key, { titleCase: true })}</div>
+          <div>{t('shell.capEval.capability')} <bdi>{formatCapabilityLabel(result.capability_key, { titleCase: true }, t)}</bdi></div>
           {result.granted_capabilities.length > 0 ? (
             <div>
-              Granted through:{' '}
-              {result.granted_capabilities
-                .map((capability) => formatCapabilityLabel(capability, { titleCase: true }))
-                .join(', ')}
+              {t('shell.capEval.grantedThrough')}{' '}
+              <bdi>
+                {result.granted_capabilities
+                  .map((capability) => formatCapabilityLabel(capability, { titleCase: true }, t))
+                  .join(', ')}
+              </bdi>
             </div>
           ) : null}
           {policySource.policy_scope_type ? (
             <div>
-              Policy source: Recorded
+              {t('shell.capEval.policySource')}
             </div>
           ) : null}
-          {policySource.settings_id ? <div>Policy set: Applied policy</div> : null}
-          {policySource.settings_version_id ? <div>Policy revision: Recorded</div> : null}
+          {policySource.settings_id ? <div>{t('shell.capEval.policySet')}</div> : null}
+          {policySource.settings_version_id ? <div>{t('shell.capEval.policyRevision')}</div> : null}
         </div>
       ) : null}
     </>

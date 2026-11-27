@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { MapLibreBackdrop } from './MapLibreBackdrop';
+import { useT } from '@/lib/i18n';
 import { OpenStreetMapAttribution, type MapBounds } from './OpenStreetMapTileLayer';
 
 export type GeoPointTone = 'good' | 'warn' | 'danger' | 'info' | 'neutral';
@@ -156,6 +157,7 @@ export function GeoPointMap({
   tileAttributionLabel,
   tileAttributionUrl,
 }: GeoPointMapProps) {
+  const t = useT();
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<{ x: number; y: number; bounds: MapBounds } | null>(null);
@@ -292,11 +294,11 @@ export function GeoPointMap({
               );
             })}
           </svg>
-          <div className="geo-point-map__controls" aria-label="Map controls">
+          <div className="geo-point-map__controls" aria-label={t('shell.map.controls')}>
             <button
               type="button"
               className="geo-point-map__btn"
-              aria-label="Zoom in"
+              aria-label={t('shell.map.zoomIn')}
               onClick={() => handleZoom(0.85)}
             >
               +
@@ -304,7 +306,7 @@ export function GeoPointMap({
             <button
               type="button"
               className="geo-point-map__btn"
-              aria-label="Zoom out"
+              aria-label={t('shell.map.zoomOut')}
               onClick={() => handleZoom(1.15)}
             >
               -
@@ -312,18 +314,18 @@ export function GeoPointMap({
             <button
               type="button"
               className="geo-point-map__btn geo-point-map__btn--reset"
-              aria-label="Reset view"
+              aria-label={t('shell.map.resetView')}
               onClick={handleReset}
             >
-              Reset
+              {t('shell.map.reset')}
             </button>
           </div>
         </>
         ) : (
         <div className="maplibre-backdrop" data-engine="maplibre" data-policy-status="blocked">
           <div className="maplibre-backdrop__policy-error" role="status">
-            <span className="mono">Map setup needed</span>
-            <small>Set a default view or save coordinates before opening the map.</small>
+            <span className="mono">{t('shell.map.setupNeeded')}</span>
+            <small>{t('shell.map.setupHint')}</small>
           </div>
         </div>
         )}

@@ -24,6 +24,7 @@ import { CAP } from '@/lib/capabilities';
 import { readConsoleScopeOverride, scopeContextFromOverride } from '@/lib/scope-url';
 import { humanizeToken } from '@/lib/display-text';
 import type { ScopeType, SettingsResolution } from '@/types/domain';
+import { fill, useI18n } from '@/lib/i18n';
 
 interface SettingsCategory {
   category: string;
@@ -94,13 +95,14 @@ function deriveScopeRankChip(rows: ScopeTypeRegistryRow[]): Record<string, strin
 }
 
 function ScopeBox({ label, rank, res }: { label: string; rank: string; res: SettingsResolution | null }) {
+  const { t } = useI18n();
   return (
     <div className="card" style={{ padding: '10px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
         <span className="scope-pill__rank">{rank}</span>
         <span>{label}</span>
         {res?.resolved_from && res.resolved_from !== (label.toLowerCase() as ScopeType) ? (
-          <Chip label="inherit" size="xs" />
+          <Chip label={t('platformConfig.scopeBox.inherit')} size="xs" />
         ) : null}
       </div>
       <pre className="wf-code-block" style={{ margin: 0, fontSize: '10.5px', maxHeight: '160px' }}>
@@ -108,7 +110,7 @@ function ScopeBox({ label, rank, res }: { label: string; rank: string; res: Sett
       </pre>
       {res?.resolved_from ? (
         <div className="mono" style={{ fontSize: '10px', color: 'var(--ink-3)', marginTop: '6px' }}>
-          {`resolved_from=${res.resolved_from}`}
+          {fill(t('platformConfig.scopeBox.resolvedFrom'), { resolved_from: String(res.resolved_from) })}
         </div>
       ) : null}
     </div>
@@ -156,6 +158,7 @@ function summarizeResolvedValue(value: unknown): string[] {
 }
 
 function ResolvedValuePanel({ value }: { value: unknown }) {
+  const { t } = useI18n();
   const json = safeJsonStringify(value);
   const isLarge = json.length > LARGE_RESOLVED_VALUE_JSON_LENGTH;
 
@@ -179,7 +182,7 @@ function ResolvedValuePanel({ value }: { value: unknown }) {
   return (
     <div data-testid="resolved-value-summary" style={{ display: 'grid', gap: '8px' }}>
       <div className="state__hint">
-        Large saved policy value summarized for operator scanning. Full saved policy details are available below when needed.
+        {t('platformConfig.resolvedValuePanel.largeSavedPolicyValue')}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
         {summarizeResolvedValue(value).map((item) => (
@@ -190,7 +193,7 @@ function ResolvedValuePanel({ value }: { value: unknown }) {
       </div>
       <details>
         <summary className="mono" style={{ cursor: 'pointer', color: 'var(--accent-ink)' }}>
-          Show full saved policy details
+          {t('platformConfig.resolvedValuePanel.showFullSavedPolicy')}
         </summary>
         <pre
           className="mono"
@@ -218,6 +221,7 @@ function CompareScopesBody({
   allowed: ScopeType[];
   results: Array<SettingsResolution | null>;
 }) {
+  const { t } = useI18n();
   const scopeRegistryQuery = useResourceList<ScopeTypeRegistryRow>('scope_type_registry');
   const scopeRows = scopeRegistryQuery.data?.rows ?? [];
   const scopeLabelByType = scopeRows.reduce<Record<string, string>>((acc, row) => {
@@ -230,8 +234,7 @@ function CompareScopesBody({
   return (
     <div data-testid="compare-scopes">
       <p className="state__hint">
-        Resolves the same setting at every scope this category allows. Lower scopes override higher ones;
-        "inherit" means no row exists at that scope (fall through to ladder).
+        {t('platformConfig.compareScopesBody.resolvesTheSameSetting')}
       </p>
       <div style={{ ...SCOPE_BOX_GRID, gridTemplateColumns: cols }}>
         {allowed.map((s, i) => (
@@ -255,6 +258,7 @@ function CompareScopesBody({
 }
 
 export function ConfigModule() {
+  const { t } = useI18n();
   const canRead = useCapability(CAP.SETTINGS_READ);
   const { scope } = useIdentity();
   const drawer = useDrawer();
@@ -378,7 +382,7 @@ export function ConfigModule() {
     Promise.all(allowed.map((s) => api.resolveSettings(selected.category, samples[s] ?? samples.global)))
       .then((results) => {
         modal.open({
-          title: `Compare scopes · ${selected.category}`,
+          title: fill(t('platformConfig.configModule.compareScopes'), { category: String(selected.category) }),
           // CompareScopesBody subscribes to `scope_type_registry` so display
           // labels + rank chips stay reactive (the captured JSX snapshot
           // would otherwise pin labels to whatever the parent maps held at
@@ -389,16 +393,16 @@ export function ConfigModule() {
               results={results as Array<SettingsResolution | null>}
             />
           ),
-          footer: <Button label="Close" kind="ghost" onClick={() => modal.close()} />,
+          footer: <Button label={t('platformConfig.configModule.close')} kind="ghost" onClick={() => modal.close()} />,
         });
       })
-      .catch(() => pushToast('Compare scopes failed', 'danger'));
+      .catch(() => pushToast(t('platformConfig.configModule.compareScopesFailed'), 'danger'));
   };
 
   const openChangeRequest = () => {
     if (!selected) return;
     modal.open({
-      title: 'Request settings change',
+      title: t('platformConfig.configModule.requestSettingsChange'),
       body: (
         <SettingsChangeForm
           category={selected.category}
@@ -423,12 +427,12 @@ export function ConfigModule() {
                 dryRun,
                 justification,
               })) as SettingsChangePreviewResult;
-              pushToast(dryRun ? 'Change preview ready' : 'Change request submitted', 'good');
+              pushToast(dryRun ? t('platformConfig.configModule.changePreviewReady') : t('platformConfig.configModule.changeRequestSubmitted'), 'good');
               if (!dryRun) modal.close();
               return res;
             } catch (err) {
               pushToast(
-                'Change preview could not be prepared. Review the setting details and try again.',
+                t('platformConfig.configModule.changePreviewCouldNot'),
                 'danger'
               );
               return undefined;
@@ -445,14 +449,14 @@ export function ConfigModule() {
                 justification,
               });
               pushToast(
-                'Setting applied',
+                t('platformConfig.configModule.settingApplied'),
                 'good'
               );
               modal.close();
               return res;
             } catch (err) {
               pushToast(
-                'Setting could not be applied. Review the setting details and try again.',
+                t('platformConfig.configModule.settingCouldNotBe'),
                 'danger'
               );
               return undefined;
@@ -470,18 +474,18 @@ export function ConfigModule() {
       <div className="page">
         <PageHeader
           moduleKey="config"
-          eyebrow="Platform"
-          titleAccent="Configuration"
-          titlePlain="— scope ladder"
+          eyebrow={t('platformConfig.configModule.platform')}
+          titleAccent={t('platformConfig.configModule.titleAccent')}
+          titlePlain={t('platformConfig.configModule.titlePlain')}
           pills={[
             tenantId ? <ScopePill scopeType="tenant" scopeId={tenantId} /> : null,
-            <span className="chip chip--xs">Policy resolver</span>,
+            <span className="chip chip--xs">{t('platformConfig.configModule.policyResolver')}</span>,
           ].filter(Boolean) as React.ReactNode[]}
         />
         <StateView
           kind="denied"
           capability={CAP.SETTINGS_READ}
-          hint="You do not have permission to view configuration & scope ladder."
+          hint={t('platformConfig.configModule.youDoNotHave')}
         />
       </div>
     );
@@ -491,17 +495,17 @@ export function ConfigModule() {
     <div className="page">
       <PageHeader
         moduleKey="config"
-        eyebrow="Platform"
-        titleAccent="Configuration"
-        titlePlain="— scope ladder"
+        eyebrow={t('platformConfig.configModule.platform')}
+        titleAccent={t('platformConfig.configModule.titleAccent')}
+        titlePlain={t('platformConfig.configModule.titlePlain')}
         pills={[
           tenantId ? <ScopePill scopeType="tenant" scopeId={tenantId} /> : null,
-          <span className="chip chip--xs">Policy resolver</span>,
+          <span className="chip chip--xs">{t('platformConfig.configModule.policyResolver')}</span>,
         ].filter(Boolean) as React.ReactNode[]}
         actions={[
-          <Button label="Compare scopes" iconName="git" kind="ghost" onClick={openCompareScopes} />,
+          <Button label={t('platformConfig.configModule.compareScopes2')} iconName="git" kind="ghost" onClick={openCompareScopes} />,
           <Button
-            label="Request change"
+            label={t('platformConfig.configModule.requestChange')}
             iconName="edit"
             kind="primary"
             anyCapabilities={[CAP.SETTINGS_WRITE, CAP.SYSTEM_WRITE]}
@@ -554,7 +558,7 @@ export function ConfigModule() {
                     </span>
                     <div style={{ flex: 1 }} />
                     {c.approval_required ? (
-                      <span className="chip chip--info chip--xs" title="approval-required">~</span>
+                      <span className="chip chip--info chip--xs" title={t('platformConfig.configModule.approvalRequired')}>~</span>
                     ) : null}
                   </button>
                 );
@@ -573,13 +577,13 @@ export function ConfigModule() {
           }}
         >
           {!selected ? (
-            <StateView kind="empty" hint="No settings categories registered." />
+            <StateView kind="empty" hint={t('platformConfig.configModule.noSettingsCategoriesRegistered')} />
           ) : !resolution ? (
             <StateView kind="loading" />
           ) : (
             <>
               <div className="card">
-                <div className="eyebrow">Setting</div>
+                <div className="eyebrow">{t('platformConfig.configModule.setting')}</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
                   <span
                     style={{
@@ -591,15 +595,15 @@ export function ConfigModule() {
                   >
                     {selected.category}
                   </span>
-                  <span className="chip chip--xs mono" title="schema id (server-side ajv-validates here)">{selected.schema_id}</span>
+                  <span className="chip chip--xs mono" title={t('platformConfig.configModule.schemaIdServerSide')}>{selected.schema_id}</span>
                   {selected.approval_required ? (
-                    <span className="chip chip--info chip--xs">approval-required</span>
+                    <span className="chip chip--info chip--xs">{t('platformConfig.configModule.approvalRequired')}</span>
                   ) : (
-                    <span className="chip chip--xs">auto-apply</span>
+                    <span className="chip chip--xs">{t('platformConfig.configModule.autoApply')}</span>
                   )}
                   <div style={{ flex: 1 }} />
                   <span className="mono" style={{ fontSize: '10.5px', color: 'var(--ink-3)' }}>
-                    {`scopes: ${(selected.scopes ?? []).join(' · ')}`}
+                    {fill(t('platformConfig.configModule.scopes'), { value: String((selected.scopes ?? []).join(' · ')) })}
                   </span>
                 </div>
                 <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -619,7 +623,7 @@ export function ConfigModule() {
                       return (
                         <StateView
                           kind="error"
-                          hint="The saved policy source is missing required scope details."
+                          hint={t('platformConfig.configModule.theSavedPolicySource')}
                         />
                       );
                     }
@@ -631,7 +635,7 @@ export function ConfigModule() {
                     );
                   })()}
                   <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-3)' }}>
-                    Resolution recorded
+                    {t('platformConfig.configModule.resolutionRecorded')}
                   </span>
                   <a
                     href={`/insights/resolutions?category=${encodeURIComponent(selected.category)}`}
@@ -639,26 +643,26 @@ export function ConfigModule() {
                     style={{ textDecoration: 'none' }}
                     data-testid="config-resolution-log-link"
                   >
-                    Open policy history
+                    {t('platformConfig.configModule.openPolicyHistory')}
                   </a>
                 </div>
                 {resolution.override_of ? (
                   <div className="chip chip--warn chip--xs" style={{ marginTop: '8px' }}>
-                    {`Override: ${resolution.resolved_from} replaces ${resolution.override_of}`}
+                    {fill(t('platformConfig.configModule.overrideReplaces'), { resolved_from: String(resolution.resolved_from), override_of: String(resolution.override_of) })}
                   </div>
                 ) : null}
                 <h4 className="eyebrow" style={{ marginTop: '12px' }}>
-                  Resolved value
+                  {t('platformConfig.configModule.resolvedValue')}
                 </h4>
                 <ResolvedValuePanel value={resolution.value} />
               </div>
 
-              <div className="eyebrow">Scope ladder</div>
+              <div className="eyebrow">{t('platformConfig.configModule.scopeLadder')}</div>
               <LadderViz resolution={resolution} />
 
-              <div className="eyebrow">Related workflows</div>
+              <div className="eyebrow">{t('platformConfig.configModule.relatedWorkflows')}</div>
               <div className="card mono" style={{ fontSize: '11px' }}>
-                {`${humanizeToken(selected.category, 'Selected policy')} resolves at the ${resolution.resolved_from} scope. Related workflows use this saved policy decision automatically.`}
+                {fill(t('platformConfig.configModule.resolvesAtTheScope'), { value: String(humanizeToken(selected.category, 'Selected policy')), resolved_from: String(resolution.resolved_from) })}
               </div>
             </>
           )}

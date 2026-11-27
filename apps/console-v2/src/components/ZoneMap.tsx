@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { getLookups } from '@/lib/api';
 import { MapLibreBackdrop } from './MapLibreBackdrop';
+import { useT } from '@/lib/i18n';
 import { OpenStreetMapAttribution, type MapBounds } from './OpenStreetMapTileLayer';
 
 export type ZoneTone = 'good' | 'warn' | 'danger' | 'neutral';
@@ -111,6 +112,7 @@ export function ZoneMap({
   tileAttributionLabel,
   tileAttributionUrl,
 }: ZoneMapProps) {
+  const t = useT();
   const svgRef = useRef<SVGSVGElement>(null);
   const [viewBox, setViewBox] = useState<{ x: number; y: number; w: number; h: number }>({
     x: 0,
@@ -251,8 +253,8 @@ export function ZoneMap({
         ) : (
           <div className="maplibre-backdrop" data-engine="maplibre" data-policy-status="blocked">
             <div className="maplibre-backdrop__policy-error" role="status">
-              <span className="mono">Zone geometry required</span>
-              <small>Add zone geometry and a default map viewport before rendering zone maps.</small>
+              <span className="mono">{t('shell.map.zoneRequired')}</span>
+              <small>{t('shell.map.zoneHint')}</small>
             </div>
           </div>
         )}
@@ -262,7 +264,7 @@ export function ZoneMap({
           viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
           preserveAspectRatio="xMidYMid meet"
           role="application"
-          aria-label="Zone map — pan and select regions"
+          aria-label={t('shell.map.zoneLabel')}
         >
           {sortedZones.map((z) => {
             const tone = z.tone ?? 'neutral';
@@ -309,7 +311,7 @@ export function ZoneMap({
           <button
             type="button"
             className="primitive-zonemap__btn"
-            aria-label="Zoom in"
+            aria-label={t('shell.map.zoomIn')}
             onClick={() => handleZoom(0.85)}
           >
             +
@@ -317,7 +319,7 @@ export function ZoneMap({
           <button
             type="button"
             className="primitive-zonemap__btn"
-            aria-label="Zoom out"
+            aria-label={t('shell.map.zoomOut')}
             onClick={() => handleZoom(1.15)}
           >
             −
@@ -325,7 +327,7 @@ export function ZoneMap({
           <button
             type="button"
             className="primitive-zonemap__btn"
-            aria-label="Reset view"
+            aria-label={t('shell.map.resetView')}
             onClick={handleReset}
             style={{ fontSize: 10 }}
           >

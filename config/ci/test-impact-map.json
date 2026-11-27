@@ -37,7 +37,6 @@
       "include_re": [
         "^scripts/deploy/apply-guard\\.cjs$",
         "^scripts/deploy/disable-console-v2-dev-subdomain\\.sh$",
-        "^tests/unit/ops/stg-deploy-release-ref\\.test\\.js$",
         "^\\.github/",
         "^config/ci/",
         "^scripts/ci-hosted/review-verdict\\.cjs$",

@@ -347,7 +347,10 @@ test('holds every database push behind the guard and skips app deploys when supe
   }
   expect(pushes[0].run).toMatch(/trap 'rm -f "\$deploy_temp\/edge\.env"\n[\s\S]+?apply-guard\.cjs summarize[^\n]+\|\|/);
   expect(outputs.superseded).toContain('steps.apply_guard.outputs.superseded');
-  expect(concurrency).toEqual({ group: 'deploy-dev-database', 'cancel-in-progress': false });
+  const environmentInput = "${{ inputs.environment || 'dev' }}";
+  expect(concurrency).toEqual({ group: `deploy-${environmentInput}-database`, 'cancel-in-progress': false });
+  expect(['', 'dev', 'stg', 'prod'].map(environment => concurrency.group.replace(environmentInput, environment || 'dev')))
+    .toEqual(['deploy-dev-database', 'deploy-dev-database', 'deploy-stg-database', 'deploy-prod-database']);
   for (const app of ['console', 'portal', 'landing', 'ingress']) {
     expect(jobs[app].if).toContain("needs.database.outputs.superseded != 'true'");
   }
