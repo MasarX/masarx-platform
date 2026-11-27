@@ -34,7 +34,7 @@ import { Chip, type ChipKind } from '@/components/Chip';
 import { pushToast } from '@/components/toastStore';
 import { useIdentity, useCapability } from '@/lib/identity';
 import { CAP } from '@/lib/capabilities';
-import { useI18n } from '@/lib/i18n';
+import { englishT, fill, useI18n, type Translate } from '@/lib/i18n';
 import * as api from '@/lib/api';
 import { getSupabaseClient } from '@/lib/supabase';
 import { DetailRow, SeamLine } from './_shared';
@@ -189,10 +189,12 @@ function canResolveDispute(d: DisputeRow): boolean {
   return disputeLifecycle(d.status)?.allows_resolve === true;
 }
 
-function disputeActionDisabledReason(d: DisputeRow, action: string): string | undefined {
-  if (disputeLifecycle(d.status) == null) return 'Dispute status is not configured for this action.';
-  if (disputeIsTerminal(d.status)) return `Dispute is ${String(d.status)}; ${action} is not allowed.`;
-  return `Dispute status ${String(d.status)} does not allow ${action}.`;
+// `action` is a key under disputes.action; the status stays the raw enum (data).
+function disputeActionDisabledReason(d: DisputeRow, action: string, t: Translate = englishT): string | undefined {
+  if (disputeLifecycle(d.status) == null) return t('disputes.disabled.notConfigured');
+  const values = { status: String(d.status), action: t(`disputes.action.${action}`, action) };
+  if (disputeIsTerminal(d.status)) return fill(t('disputes.disabled.terminal'), values);
+  return fill(t('disputes.disabled.notAllowed'), values);
 }
 
 function actionableDisputesFor(
@@ -239,7 +241,7 @@ export function DisputesModule() {
   // AGENTS.md §7 (CAPABILITY-GATED UI for reads): page-level fail-closed gate.
   const canRead = useCapability(CAP.DISPUTES_READ);
   const { scope, currentTenantId } = useIdentity();
-  const { fmtCurrency, fmtDateTime } = useI18n();
+  const { t, fmtCurrency, fmtDateTime } = useI18n();
   const drawer = useDrawer();
   const modal = useModal();
   const navigate = useNavigate();
@@ -378,7 +380,7 @@ export function DisputesModule() {
       textOf(d.counterparty_organization_id) || textOf(proj?.counterparty_organization_id);
     const activeId = textOf(activeTenantId);
     if ((openedById || counterpartyId) && (!activeId || (openedById !== activeId && counterpartyId !== activeId))) {
-      return "Switch to this dispute's tenant before changing dispute lifecycle.";
+      return t('disputes.disabled.otherTenant');
     }
     return undefined;
   }
@@ -386,37 +388,37 @@ export function DisputesModule() {
   function acknowledgeDisabledReason(d: DisputeRow): string | undefined {
     const tenantReason = disputeTenantActionDisabledReason(d);
     if (tenantReason) return tenantReason;
-    if (acknowledgeMutation.isPending) return 'Dispute acknowledgement is already running.';
+    if (acknowledgeMutation.isPending) return t('disputes.disabled.acknowledgeRunning');
     return canAcknowledgeDispute(d)
       ? undefined
-      : disputeActionDisabledReason(d, 'acknowledgement');
+      : disputeActionDisabledReason(d, 'acknowledgement', t);
   }
 
   function escalateDisabledReason(d: DisputeRow): string | undefined {
     const tenantReason = disputeTenantActionDisabledReason(d);
     if (tenantReason) return tenantReason;
-    if (escalateMutation.isPending) return 'Dispute escalation is already running.';
+    if (escalateMutation.isPending) return t('disputes.disabled.escalateRunning');
     return canEscalateDispute(d)
       ? undefined
-      : disputeActionDisabledReason(d, 'escalation');
+      : disputeActionDisabledReason(d, 'escalation', t);
   }
 
   function rejectDisabledReason(d: DisputeRow): string | undefined {
     const tenantReason = disputeTenantActionDisabledReason(d);
     if (tenantReason) return tenantReason;
-    if (rejectMutation.isPending) return 'Dispute rejection is already running.';
+    if (rejectMutation.isPending) return t('disputes.disabled.rejectRunning');
     return canRejectDispute(d)
       ? undefined
-      : disputeActionDisabledReason(d, 'rejection');
+      : disputeActionDisabledReason(d, 'rejection', t);
   }
 
   function resolveDisabledReason(d: DisputeRow): string | undefined {
     const tenantReason = disputeTenantActionDisabledReason(d);
     if (tenantReason) return tenantReason;
-    if (resolveMutation.isPending) return 'Dispute resolution is already running.';
+    if (resolveMutation.isPending) return t('disputes.disabled.resolveRunning');
     return canResolveDispute(d)
       ? undefined
-      : disputeActionDisabledReason(d, 'resolution');
+      : disputeActionDisabledReason(d, 'resolution', t);
   }
 
   async function reconcileDisputeFromBackend(disputeId: string) {
@@ -461,9 +463,9 @@ export function DisputesModule() {
           void reconcileDisputeFromBackend(res.dispute_id);
           if (source === 'drawer') setOpenDisputeId(d.id);
           if (res.already_processed) {
-            pushToast(`Dispute already acknowledged · ${res.dispute_id}`, 'info');
+            pushToast(fill(t('disputes.toast.alreadyAcknowledged'), { id: res.dispute_id }), 'info');
           } else {
-            pushToast(`Dispute acknowledged · ${res.dispute_id}`, 'good');
+            pushToast(fill(t('disputes.toast.acknowledged'), { id: res.dispute_id }), 'good');
           }
         },
         onError: (err: Error) => pushToast(err.message, 'danger'),
@@ -484,16 +486,11 @@ export function DisputesModule() {
   if (!canRead) {
     return (
       <div className="page">
-        <PageHeader
-          moduleKey="disputes"
-          eyebrow="Finance"
-          titleAccent="Disputes"
-          titlePlain=""
-        />
+        <PageHeader moduleKey="disputes" />
         <StateView
           kind="denied"
           capability={CAP.DISPUTES_READ}
-          hint="You do not have permission to view disputes (disputes.read)."
+          hint={t('disputes.denied')}
         />
       </div>
     );
@@ -501,12 +498,7 @@ export function DisputesModule() {
   if (disputePolicy.isLoading) {
     return (
       <div className="page">
-        <PageHeader
-          moduleKey="disputes"
-          eyebrow="Finance"
-          titleAccent="Disputes"
-          titlePlain=""
-        />
+        <PageHeader moduleKey="disputes" />
         <StateView kind="loading" />
       </div>
     );
@@ -514,15 +506,10 @@ export function DisputesModule() {
   if (readError) {
     return (
       <div className="page">
-        <PageHeader
-          moduleKey="disputes"
-          eyebrow="Finance"
-          titleAccent="Disputes"
-          titlePlain=""
-        />
+        <PageHeader moduleKey="disputes" />
         <StateView
           kind="error"
-          title="Unable to load disputes"
+          title={t('disputes.loadErrorTitle')}
           hint={(readError as Error).message}
         />
       </div>
@@ -531,16 +518,11 @@ export function DisputesModule() {
   if (disputeSlaHours == null) {
     return (
       <div className="page">
-        <PageHeader
-          moduleKey="disputes"
-          eyebrow="Finance"
-          titleAccent="Disputes"
-          titlePlain=""
-        />
+        <PageHeader moduleKey="disputes" />
         <StateView
           kind="error"
-          title="Dispute resolution policy missing"
-          hint="Configure dispute resolution SLA before using this surface."
+          title={t('disputes.policyMissingTitle')}
+          hint={t('disputes.policyMissingHint')}
         />
       </div>
     );
@@ -570,8 +552,8 @@ export function DisputesModule() {
       return (
         <StateView
           kind="error"
-          title="Dispute resolution options missing"
-          hint="Configure dispute resolution options before resolving disputes."
+          title={t('disputes.resolveForm.optionsMissingTitle')}
+          hint={t('disputes.resolveForm.optionsMissingHint')}
         />
       );
     }
@@ -584,15 +566,17 @@ export function DisputesModule() {
     const amountOk = !isAmountRequired || parseFloat(draft.amount) > 0;
     const notesOk = !isNotesRequired || draft.notes.trim().length > 0;
     const valid = !!draft.resolution && isDispatchConfigured && amountOk && notesOk;
+    const [summaryBefore, summaryAfter = ''] = t(
+      rs.length === 1 ? 'disputes.resolveForm.summaryOne' : 'disputes.resolveForm.summaryOther',
+    ).split('{n}');
     return (
       <div>
         <p className="state__hint">
-          Resolves <strong>{rs.length}</strong> dispute{rs.length === 1 ? '' : 's'}.
-          Choose a resolution kind; required fields are loaded from dispute resolution settings.
+          {summaryBefore}<strong>{rs.length}</strong>{summaryAfter}
         </p>
         {!isDispatchConfigured ? (
           <p className="state__hint" style={{ color: 'var(--danger)', marginTop: '8px' }}>
-            Selected resolution is missing its action settings.
+            {t('disputes.resolveForm.actionMissing')}
           </p>
         ) : null}
         <div
@@ -605,7 +589,7 @@ export function DisputesModule() {
             marginTop: '12px',
           }}
         >
-          <label className="mono" htmlFor="dispute-resolution-kind">Resolution</label>
+          <label className="mono" htmlFor="dispute-resolution-kind">{t('disputes.resolveForm.resolution')}</label>
           <select
             id="dispute-resolution-kind"
             className="dt-inline-input"
@@ -617,7 +601,7 @@ export function DisputesModule() {
             ))}
           </select>
           <label className="mono" htmlFor="dispute-resolution-amount">
-            Amount {isAmountRequired ? '*' : ''}
+            {t('disputes.resolveForm.amount')} {isAmountRequired ? '*' : ''}
           </label>
           <input
             id="dispute-resolution-amount"
@@ -627,10 +611,10 @@ export function DisputesModule() {
             min="0"
             value={draft.amount}
             onChange={(e) => setDraft((d) => ({ ...d, amount: e.target.value }))}
-            placeholder={isAmountRequired ? 'Required for partial' : 'Optional'}
+            placeholder={isAmountRequired ? t('disputes.resolveForm.amountRequired') : t('disputes.resolveForm.optional')}
           />
           <label className="mono" htmlFor="dispute-resolution-notes">
-            Notes {isNotesRequired ? '*' : ''}
+            {t('disputes.resolveForm.notes')} {isNotesRequired ? '*' : ''}
           </label>
           <textarea
             id="dispute-resolution-notes"
@@ -638,13 +622,13 @@ export function DisputesModule() {
             rows={2}
             value={draft.notes}
             onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
-            placeholder={isNotesRequired ? 'Required for this resolution' : 'Optional context for audit log'}
+            placeholder={isNotesRequired ? t('disputes.resolveForm.notesRequired') : t('disputes.resolveForm.notesOptional')}
           />
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Mark resolved"
+            label={t('disputes.actions.markResolved')}
             kind="primary"
             capability={CAP.DISPUTES_WRITE}
             disabled={!valid || resolveMutation.isPending || bulkDisputeActionMutation.isPending}
@@ -665,11 +649,13 @@ export function DisputesModule() {
     }
     const actionableRows = actionableDisputesFor(rs, canResolveDispute);
     if (actionableRows.length !== rs.length) {
-      pushToast('Selected disputes include a status that cannot be resolved.', 'warn');
+      pushToast(t('disputes.disabled.cannotResolve'), 'warn');
       return;
     }
     modal.open({
-      title: rs.length === 1 ? `Resolve · ${rs[0]!.id}` : `Resolve ${rs.length} disputes`,
+      title: rs.length === 1
+        ? fill(t('disputes.modal.resolveOne'), { id: rs[0]!.id })
+        : fill(t('disputes.modal.resolveMany'), { n: rs.length }),
       body: (
         <ResolveForm
           rs={actionableRows}
@@ -682,7 +668,7 @@ export function DisputesModule() {
 
             const targetRpc = disputeResolutionMeta(draft.resolution)?.target_rpc;
             if (!targetRpc) {
-              pushToast('Selected dispute resolution is not configured yet.', 'danger');
+              pushToast(t('disputes.toast.resolutionNotConfigured'), 'danger');
               return;
             }
             const operation = targetRpc === 'dispute_reject_v1' ? 'reject' : 'resolve';
@@ -714,7 +700,8 @@ export function DisputesModule() {
                   });
                   if (opts?.keepDrawerOpen && list.length === 1) setOpenDisputeId(list[0]!.id);
                   pushToast(
-                    `Disputes ${operation === 'reject' ? 'rejected' : 'resolved'} · ${res.succeeded_count} succeeded${res.failed_count ? ` · ${res.failed_count} failed` : ''}`,
+                    fill(t(operation === 'reject' ? 'disputes.toast.bulkRejected' : 'disputes.toast.bulkResolved'), { n: res.succeeded_count }) +
+                      (res.failed_count ? fill(t('disputes.toast.bulkFailed'), { n: res.failed_count }) : ''),
                     res.failed_count ? 'warn' : operation === 'reject' ? 'warn' : 'good',
                   );
                 },
@@ -766,11 +753,11 @@ export function DisputesModule() {
             rows={3}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Required context for audit log"
+            placeholder={t('disputes.resolveForm.reasonRequired')}
           />
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
             label={submitLabel}
             kind={submitKind}
@@ -794,25 +781,25 @@ export function DisputesModule() {
     }
     const actionableRows = actionableDisputesFor(rs, canEscalateDispute);
     if (actionableRows.length !== rs.length) {
-      pushToast('Selected disputes include a status that cannot be escalated.', 'warn');
+      pushToast(t('disputes.disabled.cannotEscalate'), 'warn');
       return;
     }
     const useBulk = opts?.forceBulk === true || actionableRows.length > 1;
     const title = useBulk
-      ? `Escalate ${actionableRows.length} dispute${actionableRows.length === 1 ? '' : 's'}`
-      : `Escalate - ${actionableRows[0]!.id}`;
+      ? fill(t(actionableRows.length === 1 ? 'disputes.modal.escalateManyOne' : 'disputes.modal.escalateManyOther'), { n: actionableRows.length })
+      : fill(t('disputes.modal.escalateOne'), { id: actionableRows[0]!.id });
     modal.open({
       title,
       body: (
         <ReasonActionForm
           inputId={useBulk ? 'bulk-dispute-escalation-reason' : 'dispute-escalation-reason'}
-          label="Escalation reason"
+          label={t('disputes.modal.escalationReason')}
           summary={
             useBulk
-              ? `Escalates ${actionableRows.length} dispute${actionableRows.length === 1 ? '' : 's'} for manager review.`
-              : `Escalates dispute ${actionableRows[0]!.id} for manager review.`
+              ? fill(t(actionableRows.length === 1 ? 'disputes.modal.escalatesManyOne' : 'disputes.modal.escalatesManyOther'), { n: actionableRows.length })
+              : fill(t('disputes.modal.escalatesOne'), { id: actionableRows[0]!.id })
           }
-          submitLabel={useBulk ? 'Escalate disputes' : 'Escalate dispute'}
+          submitLabel={useBulk ? t('disputes.modal.escalateDisputes') : t('disputes.modal.escalateDispute')}
           isPending={escalateMutation.isPending || bulkDisputeActionMutation.isPending}
           onSubmit={(reason) => {
             modal.close();
@@ -846,7 +833,8 @@ export function DisputesModule() {
                       setOpenDisputeId(actionableRows[0]!.id);
                     }
                     pushToast(
-                      `Disputes escalated · ${res.succeeded_count} succeeded${res.failed_count ? ` · ${res.failed_count} failed` : ''}`,
+                      fill(t('disputes.toast.bulkEscalated'), { n: res.succeeded_count }) +
+                        (res.failed_count ? fill(t('disputes.toast.bulkFailed'), { n: res.failed_count }) : ''),
                       res.failed_count ? 'warn' : 'good',
                     );
                   },
@@ -862,7 +850,7 @@ export function DisputesModule() {
                 onSuccess: (res) => {
                   void reconcileDisputeFromBackend(res.dispute_id);
                   if (opts?.keepDrawerOpen) setOpenDisputeId(dispute.id);
-                  pushToast(`Dispute escalated · ${res.dispute_id}`, 'warn');
+                  pushToast(fill(t('disputes.toast.escalated'), { id: res.dispute_id }), 'warn');
                 },
                 onError: (err: Error) => pushToast(err.message, 'danger'),
               },
@@ -880,13 +868,13 @@ export function DisputesModule() {
       return;
     }
     modal.open({
-      title: `Reject - ${d.id}`,
+      title: fill(t('disputes.modal.reject'), { id: d.id }),
       body: (
         <ReasonActionForm
           inputId="dispute-rejection-reason"
-          label="Rejection reason"
-          summary={`Rejects dispute ${d.id} and records the reason in the decision trail.`}
-          submitLabel="Reject dispute"
+          label={t('disputes.modal.rejectionReason')}
+          summary={fill(t('disputes.modal.rejects'), { id: d.id })}
+          submitLabel={t('disputes.modal.rejectDispute')}
           submitKind="danger"
           isPending={rejectMutation.isPending}
           onSubmit={(reason) => {
@@ -922,7 +910,7 @@ export function DisputesModule() {
                   }
                   void reconcileDisputeFromBackend(res.dispute_id);
                   setOpenDisputeId(d.id);
-                  pushToast(`Dispute rejected · ${res.dispute_id}`, 'warn');
+                  pushToast(fill(t('disputes.toast.rejected'), { id: res.dispute_id }), 'warn');
                 },
                 onError: (err: Error) => pushToast(err.message, 'danger'),
               },
@@ -951,66 +939,66 @@ export function DisputesModule() {
     // counterparty / opened_by_user) when present.
     const proj = directoryById.get(d.id);
     return {
-      title: `Dispute · ${d.id}`,
+      title: fill(t('disputes.drawer.title'), { id: d.id }),
       size: 'md',
       onClose: () => setOpenDisputeId(null),
       body: (
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-            <Chip label={d.category} kind={lookupTone('dispute_kind', d.category) ?? 'danger'} size="xs" />
-            <Chip label={d.status} kind={lookupTone('dispute_status', d.status) ?? 'danger'} size="xs" />
+            <Chip label={<bdi>{d.category}</bdi>} kind={lookupTone('dispute_kind', d.category) ?? 'danger'} size="xs" />
+            <Chip label={<bdi>{d.status}</bdi>} kind={lookupTone('dispute_status', d.status) ?? 'danger'} size="xs" />
             {aging ? (
               <Chip
-                label={`aging ${aging.label}`}
+                label={fill(t('disputes.drawer.aging'), { age: aging.label })}
                 kind={aging.tone}
                 size="xs"
-                title={`Filed ${aging.label} ago · SLA ${disputeSlaHours}h`}
+                title={fill(t('disputes.drawer.agingTitle'), { age: aging.label, hours: disputeSlaHours ?? '' })}
               />
             ) : null}
             {proj && proj.is_escalated ? (
               <Chip
-                label={`escalated ×${proj.escalation_count}`}
+                label={fill(t('disputes.drawer.escalatedCount'), { n: proj.escalation_count })}
                 kind="warn"
                 size="xs"
                 title={
                   proj.escalation_at
-                    ? `Last escalation ${proj.escalation_at}`
-                    : 'Escalated for review'
+                    ? fill(t('disputes.drawer.lastEscalation'), { at: proj.escalation_at })
+                    : t('disputes.drawer.escalatedForReview')
                 }
               />
             ) : null}
           </div>
           <div className="card">
-            <DetailRow k="Contract" v={d.contract_id} mono />
-            <DetailRow k="Shipment" v={shipmentRefOf(d) ?? '—'} mono />
-            <DetailRow k="Amount" v={fmtCurrency(amountSarOf(d))} />
-            <DetailRow k="Filed" v={fmtDateTime(d.created_at)} />
+            <DetailRow k={t('disputes.drawer.contract')} v={<bdi>{d.contract_id}</bdi>} mono />
+            <DetailRow k={t('disputes.drawer.shipment')} v={<bdi>{shipmentRefOf(d) ?? '—'}</bdi>} mono />
+            <DetailRow k={t('disputes.drawer.amount')} v={<bdi>{fmtCurrency(amountSarOf(d))}</bdi>} />
+            <DetailRow k={t('disputes.drawer.filed')} v={<bdi>{fmtDateTime(d.created_at)}</bdi>} />
             {proj?.opened_by_label ? (
-              <DetailRow k="Opened by" v={proj.opened_by_label} />
+              <DetailRow k={t('disputes.drawer.openedBy')} v={<bdi>{proj.opened_by_label}</bdi>} />
             ) : null}
             {proj?.counterparty_label ? (
-              <DetailRow k="Counterparty" v={proj.counterparty_label} />
+              <DetailRow k={t('disputes.drawer.counterparty')} v={<bdi>{proj.counterparty_label}</bdi>} />
             ) : null}
             {proj?.opened_by_user_label ? (
-              <DetailRow k="Filed by" v={proj.opened_by_user_label} />
+              <DetailRow k={t('disputes.drawer.filedBy')} v={<bdi>{proj.opened_by_user_label}</bdi>} />
             ) : null}
             {proj?.resolved_by_user_label ? (
-              <DetailRow k="Resolved by" v={proj.resolved_by_user_label} />
+              <DetailRow k={t('disputes.drawer.resolvedBy')} v={<bdi>{proj.resolved_by_user_label}</bdi>} />
             ) : null}
-            {d.resolution ? <DetailRow k="Resolution" v={String(d.resolution)} /> : null}
+            {d.resolution ? <DetailRow k={t('disputes.drawer.resolution')} v={<bdi>{String(d.resolution)}</bdi>} /> : null}
           </div>
-          <h4 className="eyebrow" style={{ marginTop: '14px' }}>Operational backing</h4>
+          <h4 className="eyebrow" style={{ marginTop: '14px' }}>{t('disputes.drawer.backing')}</h4>
           <div className="card mono" style={{ fontSize: '11px', lineHeight: 1.6 }}>
-            <SeamLine k="Case record" v="Marketplace dispute" />
-            <SeamLine k="Resolution" v="Resolution workflow" />
-            <SeamLine k="Audit" v="Audit and decision history" />
+            <SeamLine k={t('disputes.drawer.caseRecord')} v={t('disputes.drawer.caseRecordValue')} />
+            <SeamLine k={t('disputes.drawer.resolution')} v={t('disputes.drawer.resolutionValue')} />
+            <SeamLine k={t('disputes.drawer.audit')} v={t('disputes.drawer.auditValue')} />
           </div>
         </div>
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
           <Button
-            label="Open shipment"
+            label={t('disputes.actions.openShipment')}
             iconName="right"
             kind="ghost"
             onClick={() => {
@@ -1020,7 +1008,7 @@ export function DisputesModule() {
             }}
           />
           <Button
-            label="Acknowledge"
+            label={t('disputes.actions.acknowledge')}
             iconName="check"
             kind="ghost"
             capability={CAP.DISPUTES_WRITE}
@@ -1030,7 +1018,7 @@ export function DisputesModule() {
           />
           <div style={{ flex: 1 }} />
           <Button
-            label="Escalate"
+            label={t('common.escalate')}
             iconName="alert"
             kind="ghost"
             capability={CAP.DISPUTES_WRITE}
@@ -1039,7 +1027,7 @@ export function DisputesModule() {
             onClick={() => escalateDispute(d, 'drawer')}
           />
           <Button
-            label="Reject"
+            label={t('common.reject')}
             iconName="close"
             kind="danger"
             capability={CAP.DISPUTES_WRITE}
@@ -1048,7 +1036,7 @@ export function DisputesModule() {
             onClick={() => openRejectModal(d)}
           />
           <Button
-            label="Mark resolved"
+            label={t('disputes.actions.markResolved')}
             iconName="check"
             kind="primary"
             capability={CAP.DISPUTES_WRITE}
@@ -1064,13 +1052,13 @@ export function DisputesModule() {
   }
 
   const columns: Array<DataTableColumn<DisputeRow>> = [
-    { key: 'id', label: 'ID', mono: true, sortable: true },
+    { key: 'id', label: t('disputes.columns.id'), mono: true, sortable: true },
     // W13-1 — `shipment_ref` and `amount_sar` resolve through metadata jsonb
     // (no top-level columns on canonical marketplace_disputes). Per-projection
     // keys keep React key uniqueness across columns.
     {
       key: 'metadata.shipment_ref',
-      label: 'Shipment',
+      label: t('disputes.columns.shipment'),
       mono: true,
       sortable: false,
       filterable: false,
@@ -1079,18 +1067,18 @@ export function DisputesModule() {
         return ref ? <span className="mono">{ref}</span> : <span>—</span>;
       },
     },
-    { key: 'category', label: 'Kind', sortable: true, filterable: true, lookup: 'dispute_kind' },
+    { key: 'category', label: t('disputes.columns.kind'), sortable: true, filterable: true, lookup: 'dispute_kind' },
     {
       key: 'metadata.amount_sar',
-      label: 'Amount',
+      label: t('disputes.columns.amount'),
       align: 'right',
       sortable: false,
       render: (_raw, row) => fmtCurrency(amountSarOf(row)),
     },
-    { key: 'status', label: 'Status', sortable: true, filterable: true, lookup: 'dispute_status' },
+    { key: 'status', label: t('disputes.columns.status'), sortable: true, filterable: true, lookup: 'dispute_status' },
     {
       key: 'aging',
-      label: 'Aging',
+      label: t('disputes.columns.aging'),
       sortable: false,
       render: (_raw: unknown, row: DisputeRow): ReactNode => {
         if (disputeLifecycle(row.status)?.lifecycle !== 'working') return null;
@@ -1100,12 +1088,12 @@ export function DisputesModule() {
             label={a.label}
             kind={a.tone}
             size="xs"
-            title={`Filed ${a.label} ago · SLA ${disputeSlaHours}h`}
+            title={fill(t('disputes.drawer.agingTitle'), { age: a.label, hours: disputeSlaHours })}
           />
         );
       },
     },
-    { key: 'created_at', label: 'Filed', format: 'datetime', sortable: true },
+    { key: 'created_at', label: t('disputes.columns.filed'), format: 'datetime', sortable: true },
   ];
 
   const pills: ReactNode[] = [
@@ -1114,31 +1102,25 @@ export function DisputesModule() {
       ? [
           <Chip
             key="url-scope"
-            label={financeUrlScopeLabel(urlScope, scopeLabelRows)}
+            label={financeUrlScopeLabel(urlScope, scopeLabelRows, t)}
             kind="info"
             size="xs"
           />,
         ]
       : []),
-    <span key="seam" className="chip chip--xs mono">dispute cases</span>,
+    <span key="seam" className="chip chip--xs mono">{t('disputes.seamChip')}</span>,
     <Chip
       key="sla"
-      label={`SLA ${disputeSlaHours}h`}
+      label={fill(t('disputes.sla'), { hours: disputeSlaHours })}
       kind="neutral"
       size="xs"
-      title="Resolved dispute SLA from tenant settings"
+      title={t('disputes.slaTitle')}
     />,
   ];
 
   return (
     <div className="page">
-      <PageHeader
-        moduleKey="disputes"
-        eyebrow="Finance"
-        titleAccent="Disputes"
-        titlePlain=""
-        pills={pills}
-      />
+      <PageHeader moduleKey="disputes" pills={pills} />
 
       {isLoading ? (
         <StateView kind="loading" />
@@ -1162,13 +1144,13 @@ export function DisputesModule() {
           onRowClick={openDisputeDrawer}
           rowActions={[
             {
-              label: 'Open dispute',
+              label: t('disputes.actions.openDispute'),
               icon: 'eye',
               kind: 'primary',
               onClick: openDisputeDrawer,
             },
             {
-              label: 'Open shipment',
+              label: t('disputes.actions.openShipment'),
               icon: 'right',
               onClick: (r) => {
                 const ref = shipmentRefOf(r);
@@ -1176,7 +1158,7 @@ export function DisputesModule() {
               },
             },
             {
-              label: 'Acknowledge',
+              label: t('disputes.actions.acknowledge'),
               icon: 'check',
               capability: CAP.DISPUTES_WRITE,
               disabled: (r) => Boolean(acknowledgeDisabledReason(r)),
@@ -1184,7 +1166,7 @@ export function DisputesModule() {
               onClick: (r) => acknowledgeDispute(r, 'row'),
             },
             {
-              label: 'Escalate',
+              label: t('common.escalate'),
               icon: 'alert',
               kind: 'danger',
               capability: CAP.DISPUTES_WRITE,
@@ -1193,7 +1175,7 @@ export function DisputesModule() {
               onClick: (r) => escalateDispute(r, 'row'),
             },
             {
-              label: 'Mark resolved',
+              label: t('disputes.actions.markResolved'),
               icon: 'check',
               capability: CAP.DISPUTES_WRITE,
               disabled: (r) => Boolean(resolveDisabledReason(r)),
@@ -1203,32 +1185,32 @@ export function DisputesModule() {
           ]}
           bulkActions={[
             {
-              label: 'Mark resolved',
+              label: t('disputes.actions.markResolved'),
               icon: 'check',
               kind: 'primary',
               capability: CAP.DISPUTES_WRITE,
               disabled: (rs) => rs.length === 0 || rs.some((r) => Boolean(resolveDisabledReason(r))),
               disabledReason: (rs) => {
                 if (rs.some((r) => disputeTenantActionDisabledReason(r))) {
-                  return "Switch to each selected dispute's tenant before changing dispute lifecycle.";
+                  return t('disputes.disabled.otherTenantBulk');
                 }
                 return rs.some((r) => !canResolveDispute(r))
-                  ? 'Selected disputes include a status that cannot be resolved.'
+                  ? t('disputes.disabled.cannotResolve')
                   : undefined;
               },
               onClick: (rs) => openResolveModal(rs),
             },
             {
-              label: 'Escalate',
+              label: t('common.escalate'),
               icon: 'alert',
               capability: CAP.DISPUTES_WRITE,
               disabled: (rs) => rs.length === 0 || rs.some((r) => Boolean(escalateDisabledReason(r))),
               disabledReason: (rs) => {
                 if (rs.some((r) => disputeTenantActionDisabledReason(r))) {
-                  return "Switch to each selected dispute's tenant before changing dispute lifecycle.";
+                  return t('disputes.disabled.otherTenantBulk');
                 }
                 return rs.some((r) => !canEscalateDispute(r))
-                  ? 'Selected disputes include a status that cannot be escalated.'
+                  ? t('disputes.disabled.cannotEscalate')
                   : undefined;
               },
               onClick: (rs) => openEscalateModal(rs, { forceBulk: true }),
