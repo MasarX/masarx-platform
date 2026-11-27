@@ -81,7 +81,6 @@ apps/console-v2/src/modules/platform/release-proof.tsx 28
 apps/console-v2/src/modules/platform/users.tsx 160
 apps/console-v2/src/modules/support/cases.tsx 180
 apps/console-v2/src/modules/workflows/_bindings/condition-model.ts 7
-apps/console-v2/src/modules/workflows/templates.tsx 240
 apps/console-v2/src/modules/workflows/workflow-run-context.tsx 17
 apps/console/app/_components/webhook-tester-page.tsx 1
 apps/console/app/integrations/plugins/[plugin_id]/page.tsx 2
