@@ -15,6 +15,7 @@ const messages = {
       polling: 'Auto-refresh',
     },
     connectedTitle: 'Connected. Last change {age} ago.',
+    detailSeparator: '·',
     lastUpdate: 'last update {age} ago',
     dataFrom: 'data from {time}',
     dataFromLabel: 'Data from {time}',

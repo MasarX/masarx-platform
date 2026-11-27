@@ -18,6 +18,7 @@ const messages: CatalogShape<typeof English> = {
       polling: 'تحديث تلقائي',
     },
     connectedTitle: 'متصل. آخر تغيير قبل {age}.',
+    detailSeparator: '·',
     lastUpdate: 'آخر تحديث قبل {age}',
     dataFrom: 'البيانات من {time}',
     dataFromLabel: 'البيانات من {time}',

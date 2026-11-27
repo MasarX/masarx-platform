@@ -5,10 +5,11 @@
 // empty payload; the page refetches its existing scoped reads. When realtime is
 // off for the build, or the channel fails `maxReconnects` times, the page polls
 // every `pollMs`. The page's LiveChip and the Statusbar read the same state.
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useQueryClient, type InvalidateQueryFilters } from '@tanstack/react-query';
 import { CAP } from '@/lib/capabilities';
 import { useIdentity } from '@/lib/identity';
+import { useResolveSettings } from '@/lib/queries';
 import { getSupabaseClient, isRealtimeEnabled } from '@/lib/supabase';
 
 export type LiveState = 'syncing' | 'live' | 'reconnecting' | 'offline' | 'polling';
@@ -21,15 +22,36 @@ const LIVE_RESOURCES = {
 } satisfies Record<string, string[]>;
 type LiveTopic = keyof typeof LIVE_RESOURCES;
 type LiveClient = NonNullable<ReturnType<typeof getSupabaseClient>>;
-const channelRemovals = new WeakMap<LiveClient, Promise<unknown>>();
+const channelRemovals = new WeakMap<LiveClient, Map<string, Promise<unknown>>>();
 type ChannelStatus = 'connecting' | 'joined' | 'lost';
+type RefreshStatus = 'idle' | 'pending' | 'failed';
 
-/** Single source for live-refresh timing. Heartbeat timing comes from the realtime client itself. */
-export const LIVE_CONFIG = {
-  pollMs: 30_000,
-  offlineAfterMs: 60_000,
-  maxReconnects: 3,
-} as const;
+type HeartbeatListener = Parameters<LiveClient['realtime']['onHeartbeat']>[0];
+const heartbeatListeners = new WeakMap<LiveClient, Set<HeartbeatListener>>();
+
+function listenForHeartbeat(client: LiveClient, listener: HeartbeatListener) {
+  let listeners = heartbeatListeners.get(client);
+  if (!listeners) {
+    const callbacks = new Set<HeartbeatListener>();
+    client.realtime.onHeartbeat((status, latency) => callbacks.forEach((callback) => callback(status, latency)));
+    heartbeatListeners.set(client, callbacks);
+    listeners = callbacks;
+  }
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function positiveTimerInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 2_147_483_647;
+}
+
+function readLivePolicy(value: unknown) {
+  const policy = (value as { live_refresh?: Record<string, unknown> } | undefined)?.live_refresh;
+  const { poll_interval_ms, offline_after_ms, max_reconnects, refetch_interval_ms } = policy ?? {};
+  if (!positiveTimerInteger(poll_interval_ms) || !positiveTimerInteger(offline_after_ms)
+    || !positiveTimerInteger(max_reconnects) || !positiveTimerInteger(refetch_interval_ms)) return null;
+  return { pollMs: poll_interval_ms, offlineAfterMs: offline_after_ms, maxReconnects: max_reconnects, refetchMs: refetch_interval_ms };
+}
 
 export interface LiveInputs {
   online: boolean;
@@ -39,16 +61,20 @@ export interface LiveInputs {
   lastBeatAt: number;
   hasData: boolean;
   catchingUp: boolean;
+  refreshFailed?: boolean;
   now: number;
 }
 
-export function deriveLiveState(i: LiveInputs, cfg: typeof LIVE_CONFIG = LIVE_CONFIG): LiveState {
+export function deriveLiveState(i: LiveInputs, cfg: { maxReconnects: number; offlineAfterMs: number }): LiveState {
   if (!i.online) return 'offline';
+  const polling = !i.realtime || i.failures >= cfg.maxReconnects;
+  if (!polling && i.channel === 'lost') {
+    return i.now - i.lastBeatAt >= cfg.offlineAfterMs ? 'offline' : 'reconnecting';
+  }
+  if (i.refreshFailed) return 'reconnecting';
   if (!i.hasData || i.catchingUp) return 'syncing';
-  if (!i.realtime || i.failures >= cfg.maxReconnects) return 'polling';
-  if (i.channel === 'joined') return 'live';
-  if (i.channel === 'connecting') return 'syncing';
-  return i.now - i.lastBeatAt >= cfg.offlineAfterMs ? 'offline' : 'reconnecting';
+  if (polling) return 'polling';
+  return i.channel === 'joined' ? 'live' : 'syncing';
 }
 
 // ---- shared status for the Statusbar (one clock, no second subscription) ----
@@ -74,7 +100,7 @@ export function useLiveStatus(): LiveStatus | null {
 }
 
 export interface LiveConnection extends LiveStatus {
-  pollMs: number;
+  pollMs: number | null;
   retry: () => void;
 }
 
@@ -88,7 +114,12 @@ export function useLiveConnection({
   dataUpdatedAt: number;
 }): LiveConnection {
   const queryClient = useQueryClient();
-  const { user, scope, hasCapability, isAuthenticated } = useIdentity();
+  const { user, scope, hasCapability, isAuthenticated, isAuthLoading } = useIdentity();
+  const policy = useResolveSettings('ui_presentation_policy', undefined, {
+    enabled: enabled && isAuthenticated && !isAuthLoading,
+  });
+  const config = readLivePolicy(policy.data?.value);
+  const { pollMs, offlineAfterMs, maxReconnects, refetchMs } = config ?? {};
   const orgId = user.organization_id;
   const client = getSupabaseClient();
   // With no route ID, the server's route policy requires tenant-wide route access.
@@ -104,25 +135,17 @@ export function useLiveConnection({
   const [channel, setChannel] = useState<ChannelStatus>('connecting');
   const [failures, setFailures] = useState(0);
   const [lastBeatAt, setLastBeatAt] = useState(() => Date.now());
-  const [catchingUp, setCatchingUp] = useState(false);
+  const [refresh, setRefresh] = useState<RefreshStatus>('idle');
   const [attempt, setAttempt] = useState(0);
   const [, setTick] = useState(0);
-
-  const refetch = useCallback(() => {
-    void queryClient.invalidateQueries({
-      predicate: ({ queryKey: [kind, resource] }) =>
-        (kind === 'list' || kind === 'lists_by_filters')
-        && typeof resource === 'string' && LIVE_RESOURCES[topic].includes(resource),
-      refetchType: 'active',
-    });
-  }, [queryClient, topic]);
+  const catchUpOnPoll = useRef(!online);
 
   useEffect(() => {
     if (!enabled) return undefined;
     const up = () => {
+      catchUpOnPoll.current = true;
+      setChannel('connecting');
       setOnline(true);
-      setCatchingUp(true);
-      refetch();
     };
     const down = () => setOnline(false);
     window.addEventListener('online', up);
@@ -131,93 +154,146 @@ export function useLiveConnection({
       window.removeEventListener('online', up);
       window.removeEventListener('offline', down);
     };
-  }, [enabled, refetch]);
+  }, [enabled]);
 
-  const polling = !realtime || failures >= LIVE_CONFIG.maxReconnects;
+  const polling = !realtime || (maxReconnects !== undefined && failures >= maxReconnects);
   useEffect(() => {
-    if (polling || !client || !online) return undefined;
+    if (!enabled || !online || pollMs === undefined || refetchMs === undefined) return undefined;
+    const interval = refetchMs;
     let active = true;
-    let lost = false;
-    const markLost = () => {
-      lost = true;
-      setChannel('lost');
+    let queued = false;
+    let catchUpQueued = false;
+    let refreshing = false;
+    let dueAt = 0;
+    let availableAt = 0;
+    let timer: number | undefined;
+    const filters: InvalidateQueryFilters = {
+      predicate: ({ queryKey: [kind, resource] }) =>
+        (kind === 'list' || kind === 'lists_by_filters')
+        && typeof resource === 'string' && LIVE_RESOURCES[topic].includes(resource),
+      refetchType: 'active',
     };
-    let channel: ReturnType<LiveClient['channel']> | undefined;
-    const join = () => {
-      if (!active) return;
-      channel = client
-        .channel(`console-live:${orgId}:${topic}`, { config: { private: true } })
-        .on('broadcast', { event: 'invalidate' }, () => refetch())
-        .subscribe((status) => {
-          if (!active) return;
-          if (status === 'SUBSCRIBED') {
-            setChannel('joined');
-            setFailures(0);
-            setLastBeatAt(Date.now());
-            if (lost) {
-              setCatchingUp(true);
-              refetch();
-            }
-            lost = false;
-          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-            markLost();
-            setFailures((f) => f + 1);
-          }
+    function flush() {
+      if (!active || !queued || refreshing || timer !== undefined) return;
+      const delay = dueAt - Date.now();
+      if (delay > 0) {
+        timer = window.setTimeout(() => {
+          timer = undefined;
+          flush();
+        }, delay);
+        return;
+      }
+      // A read that started before the invalidation can still return the previous snapshot.
+      if (queryClient.isFetching({ ...filters, type: 'active' })) return;
+      queued = false;
+      const isCatchUp = catchUpQueued;
+      catchUpQueued = false;
+      refreshing = true;
+      availableAt = Date.now() + interval;
+      void queryClient.invalidateQueries(filters, { cancelRefetch: false, throwOnError: isCatchUp })
+        .then(
+          () => { if (active && isCatchUp && !catchUpQueued) setRefresh('idle'); },
+          () => { if (active && isCatchUp && !catchUpQueued) setRefresh('failed'); },
+        )
+        .finally(() => {
+          refreshing = false;
+          flush();
         });
-      // One missed heartbeat (the client's own heartbeatIntervalMs) means reconnecting.
-      client.realtime.onHeartbeat((beat) => {
-        if (beat === 'ok') setLastBeatAt(Date.now());
-        else if (beat === 'timeout' || beat === 'error' || beat === 'disconnected') markLost();
-      });
-    };
+    }
+    function requestRefresh(kind: 'broadcast' | 'catch-up' | 'poll') {
+      if (!active) return;
+      if (kind === 'catch-up') {
+        catchUpQueued = true;
+        setRefresh('pending');
+      }
+      if (!queued) {
+        dueAt = kind === 'broadcast' ? Math.max(availableAt, Date.now() + interval) : availableAt;
+        queued = true;
+      }
+      flush();
+    }
+    const unsubscribeCache = queryClient.getQueryCache().subscribe(flush);
+    const catchUp = catchUpOnPoll.current;
+    catchUpOnPoll.current = false;
+    setChannel('connecting');
+    setRefresh('idle');
 
-    // Realtime reuses a topic until its previous channel has left.
-    const pendingRemoval = channelRemovals.get(client);
-    if (pendingRemoval) void pendingRemoval.then(join);
-    else join();
+    let pollTimer: number | undefined;
+    let unsubscribeHeartbeat: (() => void) | undefined;
+    let channel: ReturnType<LiveClient['channel']> | undefined;
+    const channelName = `console-live:${orgId}:${topic}`;
+    if (polling) {
+      if (catchUp) requestRefresh('catch-up');
+      pollTimer = window.setInterval(() => requestRefresh('poll'), pollMs);
+    } else if (client) {
+      const join = () => {
+        if (!active) return;
+        channel = client.channel(channelName, { config: { private: true } });
+        channel.on('broadcast', { event: 'invalidate' }, () => requestRefresh('broadcast'))
+          .subscribe((status) => {
+            if (!active) return;
+            if (status === 'SUBSCRIBED') {
+              requestRefresh('catch-up');
+              setChannel('joined');
+              setFailures(0);
+              setLastBeatAt(Date.now());
+            } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              setChannel('lost');
+              setFailures((count) => count + 1);
+            } else if (status === 'CLOSED') {
+              setChannel('lost');
+            }
+          });
+        // One missed heartbeat uses the Realtime client's own heartbeat interval.
+        unsubscribeHeartbeat = listenForHeartbeat(client, (beat) => {
+          if (beat === 'ok') setLastBeatAt(Date.now());
+          else if (beat === 'timeout' || beat === 'error' || beat === 'disconnected') setChannel('lost');
+        });
+      };
+      // Realtime reuses the topic until its previous channel has left.
+      const pendingRemoval = channelRemovals.get(client)?.get(channelName);
+      if (pendingRemoval) void pendingRemoval.then(join);
+      else join();
+    }
 
     return () => {
       active = false;
-      if (!channel) return;
-      client.realtime.onHeartbeat(() => undefined);
-      const removal = client.removeChannel(channel);
-      channelRemovals.set(client, removal);
+      unsubscribeCache();
+      unsubscribeHeartbeat?.();
+      window.clearTimeout(timer);
+      window.clearInterval(pollTimer);
+      if (!client || !channel) return;
+      const removals = channelRemovals.get(client) ?? new Map<string, Promise<unknown>>();
+      const removal = client.removeChannel(channel).catch(() => undefined);
+      removals.set(channelName, removal);
+      channelRemovals.set(client, removals);
       void removal.then(() => {
-        if (channelRemovals.get(client) === removal) channelRemovals.delete(client);
+        if (removals.get(channelName) === removal) removals.delete(channelName);
       });
     };
-  }, [polling, client, online, orgId, topic, attempt, refetch]);
+  }, [enabled, polling, client, online, orgId, topic, attempt, pollMs, refetchMs, queryClient]);
 
-  useEffect(() => {
-    setCatchingUp(false);
-  }, [dataUpdatedAt]);
-
-  const state = deriveLiveState({
+  const state = config ? deriveLiveState({
     online,
     realtime,
     channel,
     failures,
     lastBeatAt,
     hasData: dataUpdatedAt > 0,
-    catchingUp,
+    catchingUp: refresh === 'pending',
+    refreshFailed: refresh === 'failed',
     now: Date.now(),
-  });
+  }, config) : !online ? 'offline' : policy.isPending ? 'syncing' : 'reconnecting';
 
   // Re-derive when the no-heartbeat window turns reconnecting into offline.
   useEffect(() => {
-    if (state !== 'reconnecting') return undefined;
+    if (state !== 'reconnecting' || channel !== 'lost' || polling || offlineAfterMs === undefined) return undefined;
     const id = window.setTimeout(
       () => setTick((t) => t + 1),
-      Math.max(0, lastBeatAt + LIVE_CONFIG.offlineAfterMs - Date.now()),
+      Math.max(0, lastBeatAt + offlineAfterMs - Date.now()),
     );
     return () => window.clearTimeout(id);
-  }, [state, lastBeatAt]);
-
-  useEffect(() => {
-    if (!enabled || !online || !polling) return undefined;
-    const id = window.setInterval(refetch, LIVE_CONFIG.pollMs);
-    return () => window.clearInterval(id);
-  }, [enabled, online, polling, refetch]);
+  }, [state, channel, polling, lastBeatAt, offlineAfterMs]);
 
   useEffect(() => {
     publish(enabled ? { state, syncedAt: dataUpdatedAt } : null);
@@ -225,12 +301,15 @@ export function useLiveConnection({
   useEffect(() => () => publish(null), []);
 
   const retry = useCallback(() => {
+    if (pollMs === undefined) {
+      if (online) void policy.refetch();
+      return;
+    }
+    catchUpOnPoll.current = true;
     setFailures(0);
     setChannel('connecting');
     setAttempt((a) => a + 1);
-    setCatchingUp(true);
-    refetch();
-  }, [refetch]);
+  }, [online, pollMs, policy.refetch]);
 
-  return { state, syncedAt: dataUpdatedAt, pollMs: LIVE_CONFIG.pollMs, retry };
+  return { state, syncedAt: dataUpdatedAt, pollMs: pollMs ?? null, retry };
 }
