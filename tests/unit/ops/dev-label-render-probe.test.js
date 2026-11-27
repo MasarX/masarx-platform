@@ -132,6 +132,19 @@ test.each([
   });
 });
 
+test('DEV label probe reports the allowlisted class of a classified preview error', async () => {
+  const result = await renderPreview(async () => Response.json({
+    ok: false,
+    error: { code: 'draft_not_found', class: '42501' },
+  }, { status: 404 }));
+  expect(result).toEqual({
+    code: EXIT.renderStatus,
+    diagnostic: 'LABEL_PROBE_RENDER_ERROR status=404 renderer_code=draft_not_found renderer_class=42501'
+      + ' renderer_shape=error,ok' + unavailablePlatform
+      + ' renderer_content_type=application/json renderer_handler=unavailable',
+  });
+});
+
 test('DEV label probe distinguishes a platform JSON error from an application error', async () => {
   const result = await renderPreview(async () => new Response(JSON.stringify({
     message: 'fixture private detail', code: 'BOOT_ERROR',

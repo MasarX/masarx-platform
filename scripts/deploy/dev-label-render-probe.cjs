@@ -104,7 +104,7 @@ async function describeRenderError(response) {
   const errorClass = body?.error?.class;
   const rendererCode = previewErrorCodes.has(errorCode) || errorCode === rendererInternalCode
     ? errorCode : 'unavailable';
-  const rendererClass = errorCode === rendererInternalCode && isRendererErrorClass(errorClass)
+  const rendererClass = rendererCode !== 'unavailable' && isRendererErrorClass(errorClass)
     ? errorClass : 'unavailable';
 
   const keys = body && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body) : [];

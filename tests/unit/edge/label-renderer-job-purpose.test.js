@@ -4,11 +4,20 @@ const vm = jest.requireActual('node:vm');
 const ts = jest.requireActual('typescript');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../../../supabase/functions/label-renderer/index.ts'), 'utf8');
+const failureHelpers = source.slice(source.indexOf('const logRenderer ='), source.indexOf('interface LeaseRequest'));
 const helpers = source.slice(source.indexOf('const normalizeString ='), source.indexOf('type BundleReturnMode ='));
 const handler = source.slice(source.indexOf('const handlePrintRequest ='), source.indexOf('const handleBundleRequest ='));
-const compiled = ts.transpileModule(`${helpers}\n${handler}\nmodule.exports = handlePrintRequest;`, {
+const compiled = ts.transpileModule(`${failureHelpers}\n${helpers}\n${handler}\nmodule.exports = handlePrintRequest;`, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
+
+let classifyError;
+let rendererError;
+
+beforeAll(async () => {
+  ({ classifyError } = await import('../../../supabase/functions/_shared/mod.mjs'));
+  ({ rendererError } = await import('../../../supabase/functions/label-renderer/error-response.mjs'));
+});
 
 function renderer(fresh, reused = false) {
   const callRendererRpc = jest.fn(async (_client, name) => ({
@@ -21,6 +30,7 @@ function renderer(fresh, reused = false) {
   const handlerModule = { exports: {} };
   vm.runInNewContext(compiled, {
     module: handlerModule, exports: handlerModule.exports, Error,
+    classifyError, rendererError, logStructured: jest.fn(),
     normalizeLabelTargetType: (value) => value,
     defaultLabelTypeForTargetType: () => 'route',
     resolveWorkflowProgress: (input) => input.workflow_run_step_id
@@ -68,7 +78,12 @@ describe.each(paths)('label purpose %s step=%s (%s)', (kind, step, rpc) => {
       ...(step ? { p_workflow_run_step_id: 'step-1' } : {}),
     }), 'rest');
     expect(result.statusCode).toBe(503);
-    expect(result.body.error).toBe('test_stop_after_enqueue');
+    expect(result.body.error).toBe('label_bucket_unavailable');
+    expect(result.body.error_class).toBe('unknown');
+    expect(result.body.steps.find((entry) => entry.step === 'render_label_jobs')).toMatchObject({
+      ok: false, error: 'label_bucket_unavailable', error_class: 'unknown',
+    });
+    expect(JSON.stringify(result.body)).not.toContain('test_stop_after_enqueue');
     expect(result.body.job_purpose).toBe(effectivePurpose);
     expect(result.body.steps.find((entry) => entry.step === 'enqueue_label_jobs')).toMatchObject({
       job_purpose: effectivePurpose, fresh_generation_required: fresh,
