@@ -42,12 +42,6 @@ apps/console-v2/src/modules/integrations/ExternalIntakeWorkspaceToolbar.tsx 15
 apps/console-v2/src/modules/integrations/_helpers.ts 1
 apps/console-v2/src/modules/integrations/_webhook-replay-outcome.ts 1
 apps/console-v2/src/modules/integrations/_webhook-tester/envelopes.ts 1
-apps/console-v2/src/modules/integrations/credentials.tsx 140
-apps/console-v2/src/modules/integrations/customer-migration.tsx 97
-apps/console-v2/src/modules/integrations/health.tsx 52
-apps/console-v2/src/modules/integrations/intake.tsx 155
-apps/console-v2/src/modules/integrations/plugin-studio.tsx 90
-apps/console-v2/src/modules/integrations/sources.tsx 129
 apps/console-v2/src/modules/network/branches.tsx 186
 apps/console-v2/src/modules/network/geocoding.tsx 187
 apps/console-v2/src/modules/network/hubs.tsx 11
