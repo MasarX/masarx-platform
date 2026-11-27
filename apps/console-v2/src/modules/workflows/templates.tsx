@@ -1411,7 +1411,7 @@ function Canvas({
           <div className="wf-canvas-pulse">
             <Dot kind={dotKind} />
             <span className="mono">
-              {fill(t('workflowTemplates.canvas.lastRunStatus'), { ref: lastRun.run_id, status: String(row.label ?? lastRun.status) })}
+              {fill(t('workflowTemplates.canvas.lastRunStatus'), { ref: lastRun.run_id ?? '—', status: String(row.label ?? lastRun.status) })}
             </span>
           </div>
         );
