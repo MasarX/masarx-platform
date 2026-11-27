@@ -35,6 +35,7 @@
     {
       "id": "ci",
       "include_re": [
+        "^scripts/deploy/apply-guard\\.cjs$",
         "^\\.github/",
         "^config/ci/",
         "^scripts/ci-hosted/review-verdict\\.cjs$",

@@ -59,6 +59,22 @@
       ]
     },
     {
+      "id": "database_apply_guard",
+      "required_impact_surfaces": [
+        "ci"
+      ],
+      "allowed_changed_path_re": [
+        "^scripts/deploy/apply-guard\\.cjs$",
+        "^tests/unit/ops/(?:dev-deploy-apply-guard(?:-retry)?|stg-deploy-apply-guard)\\.test\\.js$"
+      ],
+      "test_paths": [
+        "tests/unit/ops/deploy-branch-refs.test.js",
+        "tests/unit/ops/dev-deploy-apply-guard-retry.test.js",
+        "tests/unit/ops/dev-deploy-apply-guard.test.js",
+        "tests/unit/ops/stg-deploy-apply-guard.test.js"
+      ]
+    },
+    {
       "id": "landing",
       "required_direct_surface_ids": [
         "landing"
