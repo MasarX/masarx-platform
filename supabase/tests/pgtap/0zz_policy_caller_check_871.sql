@@ -2,7 +2,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 
-SELECT plan(220);
+SELECT plan(232);
 
 CREATE FUNCTION pg_temp.check_policy_callers() RETURNS SETOF TEXT
 LANGUAGE plpgsql AS $test$
@@ -14,6 +14,20 @@ DECLARE
   v_sender UUID := gen_random_uuid();
   v_branch UUID := gen_random_uuid();
   v_provider UUID := gen_random_uuid();
+  v_own_client UUID := gen_random_uuid();
+  v_own_branch UUID := gen_random_uuid();
+  v_run UUID := gen_random_uuid();
+  v_stop UUID := gen_random_uuid();
+  v_shipment UUID := gen_random_uuid();
+  v_session TEXT := gen_random_uuid()::text;
+  v_result_id UUID;
+  v_result JSONB;
+  v_profile UUID;
+  v_request UUID;
+  v_offer UUID;
+  v_award UUID;
+  v_contract UUID;
+  v_package UUID;
   v_own JSONB := jsonb_build_object('organization_id', v_org);
   v_other JSONB := jsonb_build_object('organization_id', v_other_org);
   v_endpoint RECORD;
@@ -158,6 +172,87 @@ BEGIN
   RETURN NEXT lives_ok(format('SELECT api.resolve_mobile_shell_policy(''driver'', %L::jsonb)', v_own),
     'Shell accepts the service scope');
   EXECUTE 'RESET ROLE';
+
+  PERFORM set_config('request.jwt.claims', '', TRUE);
+  PERFORM set_config('request.jwt.claim.role', '', TRUE);
+  PERFORM set_config('request.jwt.claim.sub', '', TRUE);
+  INSERT INTO public.clients(id, organization_id, name, slug, status)
+    VALUES (v_own_client, v_org, 'Policy fixture', 'policy-' || v_own_client, 'active');
+  INSERT INTO public.branches(id, organization_id, code, name, is_active)
+    VALUES (v_own_branch, v_org, 'policy-' || left(v_own_branch::text, 8), 'Policy fixture', TRUE);
+  INSERT INTO public.shipments(id, organization_id, client_id, tracking_number, service_type, status)
+    VALUES (v_shipment, v_org, v_own_client, 'P-' || left(v_shipment::text, 12), 'delivery', 'out_for_delivery');
+  INSERT INTO public.route_runs(id, organization_id, branch_id, status, planned_date)
+    VALUES (v_run, v_org, v_own_branch, 'in_progress', CURRENT_DATE);
+  INSERT INTO public.route_stops(id, organization_id, route_run_id, client_id, shipment_id, stop_kind, sequence_order)
+    VALUES (v_stop, v_org, v_run, v_own_client, v_shipment, 'delivery', 1);
+  INSERT INTO public.tracking_sessions(organization_id, client_id, shipment_id, token, expires_at)
+    VALUES (v_org, v_own_client, v_shipment, v_session, '2099-01-01T00:00:00Z');
+
+  EXECUTE 'SET LOCAL ROLE service_role';
+  RETURN NEXT lives_ok(format('SELECT * FROM api.resolve_device_policy(%L::jsonb)', v_other),
+    'SQL service session resolves a supplied organization');
+  v_result := api.public_tracking_live_session_v1(jsonb_build_object('session_token', v_session, 'ip_hash', gen_random_uuid()));
+  EXECUTE 'RESET ROLE';
+  RETURN NEXT is(v_result->>'ok', 'true', 'Tracking resolves the organization of a valid session');
+
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', 'edge-function', 'role', 'edge_label_renderer_role')::text, TRUE);
+  EXECUTE 'SET LOCAL ROLE edge_label_renderer_role';
+  v_result_id := public.request_label_generation_target_v1('route', v_run, 'shipping');
+  EXECUTE 'RESET ROLE';
+  RETURN NEXT ok(EXISTS(SELECT 1 FROM public.label_jobs WHERE id = v_result_id AND organization_id = v_org),
+    'Renderer resolves a route template with its service subject');
+
+  PERFORM set_config('request.jwt.claims', v_authenticated_claims, TRUE);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  RETURN NEXT ok((SELECT r.scope_path FROM api.resolve_pod_policy(v_own || jsonb_build_object(
+    'resource_type', 'route_stop', 'resource_id', v_stop)) AS r) @>
+    jsonb_build_array(jsonb_build_object('scope_type', 'resource', 'scope_id', v_own_branch)),
+    'POD resolves a route stop through its branch');
+  RETURN NEXT throws_ok(format('SELECT * FROM api.resolve_pod_policy(%L::jsonb)',
+    v_other || jsonb_build_object('resource_type', 'route_stop', 'resource_id', v_stop)),
+    '42501', v_denial, 'POD checks explicit organization with a resolved stop branch');
+  RETURN NEXT throws_ok(format('SELECT * FROM api.resolve_device_policy(%L::jsonb)',
+    jsonb_build_object('resource_id', 'invalid')), '22023', 'Policy context contains an invalid scoped identifier',
+    'Device policy rejects a malformed scope identifier');
+  RETURN NEXT lives_ok(format('SELECT * FROM api.resolve_device_policy(%L::jsonb)',
+    v_own || jsonb_build_object('actor_id', 'fixture')), 'Device policy accepts a non-scope actor label');
+  RETURN NEXT throws_ok(format('SELECT * FROM api.resolve_device_policy(%L::jsonb)',
+    jsonb_build_object('organization_id', NULL, 'client_id', v_client)), '42501', v_denial,
+    'Device policy still checks the client with a null organization');
+  EXECUTE 'RESET ROLE';
+
+  RETURN NEXT ok(public.ensure_task_type_from_catalog_v1(v_other_org, 'route_stop_execute', '{}') IS NOT NULL,
+    'System provisioning resolves the bound task organization');
+  RETURN NEXT is(public.compute_delivery_attempt_projection_v1(v_org, v_own_client, v_shipment, v_stop,
+    'delivered', 'status_update', '{}')->>'outcome', 'delivered', 'Delivery projection resolves the policy for its route record');
+
+  INSERT INTO public.marketplace_participant_profiles(organization_id, participant_type_key, display_name)
+    VALUES (v_other_org, 'provider_tenant', 'Policy fixture') RETURNING id INTO v_profile;
+  INSERT INTO public.marketplace_requests(requester_organization_id, request_kind_key, status, title)
+    VALUES (v_org, 'capacity_block', 'completed', 'Policy fixture') RETURNING id INTO v_request;
+  INSERT INTO public.marketplace_offers(request_id, supplier_participant_profile_id, supplier_organization_id, status, pricing)
+    VALUES (v_request, v_profile, v_other_org, 'accepted', '{"amount":100,"currency":"SAR"}') RETURNING id INTO v_offer;
+  INSERT INTO public.marketplace_awards(request_id, offer_id, requester_organization_id, supplier_organization_id,
+    supplier_participant_profile_id, status)
+    VALUES (v_request, v_offer, v_org, v_other_org, v_profile, 'materialized') RETURNING id INTO v_award;
+  INSERT INTO public.marketplace_contracts(award_id, request_id, requester_organization_id, supplier_organization_id,
+    supplier_participant_profile_id, status, settlement_mode_key)
+    VALUES (v_award, v_request, v_org, v_other_org, v_profile, 'completed', 'auto_recorded_internal') RETURNING id INTO v_contract;
+  INSERT INTO public.marketplace_work_packages(contract_id, award_id, request_id, requester_organization_id,
+    supplier_organization_id, supplier_participant_profile_id, status)
+    VALUES (v_contract, v_award, v_request, v_org, v_other_org, v_profile, 'completed') RETURNING id INTO v_package;
+
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  v_result := api.marketplace_settlement_finalize_v1(v_package, v_contract);
+  EXECUTE 'RESET ROLE';
+  RETURN NEXT ok(v_result->>'status' = 'settled' AND v_result->>'supplier_settlement_batch_id' IS NOT NULL,
+    'Marketplace posts the supplier batch from the bound contract');
+  RETURN NEXT ok(NOT EXISTS (
+    SELECT 1 FROM unnest(ARRAY['anon', 'authenticated', 'service_role', 'ui_rpc_executor']) AS roles(role_name)
+    WHERE has_function_privilege(role_name, 'public.resolve_settings_row_from_bound_policy_context_v1(text,jsonb)', 'EXECUTE')
+       OR has_function_privilege(role_name, 'public.marketplace_policy_lookup_bound_v1(text,jsonb)', 'EXECUTE')
+  ), 'Record-bound lookup implementations are owner-only');
 END;
 $test$;
 
