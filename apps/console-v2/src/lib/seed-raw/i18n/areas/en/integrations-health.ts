@@ -34,6 +34,10 @@ const messages = {
       resetting: 'Resetting...',
       resetBreaker: 'Reset breaker',
       titleAccent: 'Provider',
+      providerHealth: 'Provider health',
+      circuitBreaker: 'Circuit breaker',
+      providerHealthFor: 'Provider health - {provider}',
+      circuitBreakerFor: 'Circuit breaker - {provider}',
       titlePlain: 'health',
     },
     lookupChip: {

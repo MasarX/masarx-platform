@@ -245,9 +245,9 @@ export function PluginStudioModule() {
     setCatalogReadback(null);
   }
 
-  function ensureStudioBackend(action: string): boolean {
+  function ensureStudioBackend(blockedMessage: string): boolean {
     if (!liveBackendUnavailable) return true;
-    pushToast(fill(t('integrationsPluginStudio.pluginStudioModule.blockedLiveBackendIs'), { action: String(action) }), 'danger');
+    pushToast(blockedMessage, 'danger');
     return false;
   }
 
@@ -277,7 +277,7 @@ export function PluginStudioModule() {
         directoryStatus: null,
         versionStatus: null,
         requestedAt,
-        error: 'Saved plugin id missing from save result',
+        error: t('integrationsPluginStudio.pluginStudioModule.savedPluginIdMissing'),
       });
       return;
     }
@@ -344,7 +344,7 @@ export function PluginStudioModule() {
   }
 
   async function runParse() {
-    if (!ensureStudioBackend('Parse')) return;
+    if (!ensureStudioBackend(t('integrationsPluginStudio.pluginStudioModule.parseBlocked'))) return;
     const sourcePayload = buildSourcePayload();
     const safeSourceText = redactIntegrationSourceTextForDisplay(sourceText);
     setStage('parsing');
@@ -368,7 +368,7 @@ export function PluginStudioModule() {
       pushToast(fill(t('integrationsPluginStudio.pluginStudioModule.parsedContract'), { plugin_kind: String(res.normalized_contract.plugin_kind) }), 'good');
     } catch (err) {
       if (safeSourceText !== sourceText) setSourceText(safeSourceText);
-      const message = (err as Error)?.message ?? 'parse failed';
+      const message = (err as Error)?.message ?? t('integrationsPluginStudio.pluginStudioModule.parseFailedNoDetail');
       setErrMsg(message);
       setStage('error');
       pushToast(fill(t('integrationsPluginStudio.pluginStudioModule.parseFailed'), { message: String(message) }), 'danger');
@@ -376,7 +376,7 @@ export function PluginStudioModule() {
   }
 
   async function runInfer() {
-    if (!ensureStudioBackend('Infer')) return;
+    if (!ensureStudioBackend(t('integrationsPluginStudio.pluginStudioModule.inferBlocked'))) return;
     if (!contract) {
       pushToast(t('integrationsPluginStudio.pluginStudioModule.runParseFirst'), 'warn');
       return;
@@ -401,7 +401,7 @@ export function PluginStudioModule() {
         : 0;
       pushToast(fill(t(fieldCount === 1 ? 'integrationsPluginStudio.pluginStudioModule.inferredMappingFieldOne' : 'integrationsPluginStudio.pluginStudioModule.inferredMappingFieldOther'), { fieldCount: String(fieldCount) }), 'good');
     } catch (err) {
-      const message = (err as Error)?.message ?? 'infer failed';
+      const message = (err as Error)?.message ?? t('integrationsPluginStudio.pluginStudioModule.inferFailedNoDetail');
       setErrMsg(message);
       setStage('error');
       pushToast(fill(t('integrationsPluginStudio.pluginStudioModule.inferFailed'), { message: String(message) }), 'danger');
@@ -409,7 +409,7 @@ export function PluginStudioModule() {
   }
 
   async function runPreview() {
-    if (!ensureStudioBackend('Preview')) return;
+    if (!ensureStudioBackend(t('integrationsPluginStudio.pluginStudioModule.previewBlocked'))) return;
     if (!contract || !mappingSuggestion) {
       pushToast(t('integrationsPluginStudio.pluginStudioModule.runParseInferFirst'), 'warn');
       return;
@@ -436,7 +436,7 @@ export function PluginStudioModule() {
         tone,
       );
     } catch (err) {
-      const message = (err as Error)?.message ?? 'preview failed';
+      const message = (err as Error)?.message ?? t('integrationsPluginStudio.pluginStudioModule.previewFailedNoDetail');
       setErrMsg(message);
       setStage('error');
       pushToast(fill(t('integrationsPluginStudio.pluginStudioModule.previewFailed'), { message: String(message) }), 'danger');
@@ -444,7 +444,7 @@ export function PluginStudioModule() {
   }
 
   async function runSave() {
-    if (!ensureStudioBackend('Save')) return;
+    if (!ensureStudioBackend(t('integrationsPluginStudio.pluginStudioModule.saveBlocked'))) return;
     if (!contract || !mappingSuggestion || !review) {
       pushToast(t('integrationsPluginStudio.pluginStudioModule.completeParseInferPreview'), 'warn');
       return;
@@ -478,7 +478,7 @@ export function PluginStudioModule() {
       void refreshSavedPluginCatalog(saved);
       pushToast(fill(t('integrationsPluginStudio.pluginStudioModule.savedMode'), { save_mode: String(res.save_mode) }), 'good');
     } catch (err) {
-      const message = (err as Error)?.message ?? 'save failed';
+      const message = (err as Error)?.message ?? t('integrationsPluginStudio.pluginStudioModule.saveFailedNoDetail');
       setErrMsg(message);
       setStage('error');
       pushToast(fill(t('integrationsPluginStudio.pluginStudioModule.saveFailed'), { message: String(message) }), 'danger');

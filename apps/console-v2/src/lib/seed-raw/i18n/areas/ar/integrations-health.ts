@@ -36,6 +36,10 @@ const messages: CatalogShape<typeof English> = {
       resetting: 'جارٍ إعادة التعيين...',
       resetBreaker: 'إعادة تعيين القاطع',
       titleAccent: 'سلامة',
+      providerHealth: 'صحة المزوّد',
+      circuitBreaker: 'قاطع الدائرة',
+      providerHealthFor: 'صحة المزوّد - {provider}',
+      circuitBreakerFor: 'قاطع الدائرة - {provider}',
       titlePlain: 'المزوّدين',
     },
     lookupChip: {

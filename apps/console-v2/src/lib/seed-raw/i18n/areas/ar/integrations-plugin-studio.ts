@@ -5,7 +5,6 @@ import type English from '../en/integrations-plugin-studio';
 const messages: CatalogShape<typeof English> = {
   integrationsPluginStudio: {
     pluginStudioModule: {
-      blockedLiveBackendIs: 'تم حظر {action} · الخادم الحي غير مهيأ',
       parsedContract: 'تم التحليل · عقد {plugin_kind}',
       parseFailed: 'تعذّر التحليل · {message}',
       runParseFirst: 'شغّل التحليل أولًا',
@@ -92,6 +91,15 @@ const messages: CatalogShape<typeof English> = {
       coercionOne: 'تحويل نوع واحد ({coercion_count})',
       coercionOther: 'تحويلات الأنواع: {coercion_count}',
       titleAccent: 'استوديو',
+      parseBlocked: 'تم حظر التحليل · الخادم الحي غير مهيأ',
+      inferBlocked: 'تم حظر الاستنتاج · الخادم الحي غير مهيأ',
+      previewBlocked: 'تم حظر المعاينة · الخادم الحي غير مهيأ',
+      saveBlocked: 'تم حظر الحفظ · الخادم الحي غير مهيأ',
+      savedPluginIdMissing: 'معرّف الإضافة المحفوظة غير موجود في نتيجة الحفظ',
+      parseFailedNoDetail: 'فشل التحليل',
+      inferFailedNoDetail: 'فشل الاستنتاج',
+      previewFailedNoDetail: 'فشلت المعاينة',
+      saveFailedNoDetail: 'فشل الحفظ',
       titlePlain: 'الإضافات',
     },
   },

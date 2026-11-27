@@ -52,7 +52,7 @@ import {
   type DomainEventLite,
   type InboxProvenance,
 } from './_inbox-provenance';
-import { formatWebhookReplayToast } from './_webhook-replay-outcome';
+import { webhookReplayWasPreserved } from './_webhook-replay-outcome';
 import { useConsoleNavigator } from '@/lib/useConsoleNavigator';
 import { openShipmentContextDrawer } from '@/modules/operate/shipments';
 import { openWorkflowRunContextDrawer } from '@/modules/workflows/workflow-run-context';
@@ -280,17 +280,21 @@ function shortReference(value: unknown): string {
   return `${raw.slice(0, 4)}...${raw.slice(-6)}`;
 }
 
-function operatorReference(kind: string, value: unknown): string {
+type ReferenceKind =
+  | 'activity' | 'dispatch' | 'event' | 'external' | 'idempotency' | 'mapping'
+  | 'run' | 'shipment' | 'source' | 'task' | 'workflow';
+
+function operatorReference(t: Translate, kind: ReferenceKind, value: unknown): string {
   const raw = String(value ?? '').trim();
-  if (!raw) return `${kind} ref none`;
   const friendly = shortReference(raw);
-  return friendly === raw ? `${kind} ref ${raw}` : `${kind} ref ${friendly} (${raw})`;
+  const shown = !raw ? t('integrationsIntake.reference.none') : friendly === raw ? raw : `${friendly} (${raw})`;
+  return fill(t(`integrationsIntake.reference.${kind}`), { value: shown });
 }
 
-function humanizeWebhookOutcome(value: unknown): string {
+function humanizeWebhookOutcome(t: Translate, value: unknown): string {
   const raw = String(value ?? '').trim();
-  if (!raw) return 'No acknowledgement yet';
-  if (raw === 'ack_replayed' || raw === 'response_replayed') return 'Duplicate replayed';
+  if (!raw) return t('integrationsIntake.intakeModule.noAcknowledgementYet');
+  if (raw === 'ack_replayed' || raw === 'response_replayed') return t('integrationsIntake.intakeModule.duplicateReplayed');
   return raw
     .split('_')
     .filter(Boolean)
@@ -319,14 +323,15 @@ function receiverReason(row: Partial<WebhookInboxDirectoryRow>): string | null {
 }
 
 function ReceiverOutcomeCell({ row }: { row: Partial<WebhookInboxDirectoryRow> }) {
+  const { t } = useI18n();
   const outcome = receiverOutcomeValue(row);
   const idempotencyKey = row.idempotency_key;
   return (
     <span style={{ display: 'inline-flex', flexDirection: 'column', gap: '3px', minWidth: 0 }}>
-      <Chip label={humanizeWebhookOutcome(outcome)} kind={receiverOutcomeTone(outcome)} size="xs" />
+      <Chip label={humanizeWebhookOutcome(t, outcome)} kind={receiverOutcomeTone(outcome)} size="xs" />
       {idempotencyKey ? (
         <span className="mono" style={{ color: 'var(--ink-3)' }}>
-          {operatorReference('Idempotency', idempotencyKey)}
+          {operatorReference(t, 'idempotency', idempotencyKey)}
         </span>
       ) : null}
     </span>
@@ -375,8 +380,8 @@ function ReplayLedgerCell({ row }: { row: Partial<WebhookInboxDirectoryRow> }) {
   );
 }
 
-function sourceReference(row: WebhookInboxRow & Partial<WebhookInboxDirectoryRow>): string {
-  return operatorReference('Source', row.source_identifier ?? row.webhook_source_id);
+function sourceReference(t: Translate, row: WebhookInboxRow & Partial<WebhookInboxDirectoryRow>): string {
+  return operatorReference(t, 'source', row.source_identifier ?? row.webhook_source_id);
 }
 
 function ShipmentReferenceButton({
@@ -397,8 +402,8 @@ function ShipmentReferenceButton({
       iconName="package"
       kind="ghost"
       size="sm"
-      label={operatorReference('Shipment', shipmentId)}
-      title={fill(t('integrationsIntake.shipmentReferenceButton.openContext'), { value: String(operatorReference('Shipment', shipmentId)) })}
+      label={operatorReference(t, 'shipment', shipmentId)}
+      title={fill(t('integrationsIntake.shipmentReferenceButton.openContext'), { value: String(operatorReference(t, 'shipment', shipmentId)) })}
       onClick={(event) => {
         event.stopPropagation();
         openContext();
@@ -473,9 +478,9 @@ function marketingColumns(t: Translate): Array<DataTableColumn<MarketingIntakeEv
         }
         return (
           <span className="mono">
-            {taskId ? operatorReference('Task', taskId) : t('integrationsIntake.marketingColumns.taskPending')}
-            {workflowRunId ? ` - ${operatorReference('Workflow', workflowRunId)}` : ''}
-            {dispatchId ? ` - ${operatorReference('Dispatch', dispatchId)}` : ''}
+            {taskId ? operatorReference(t, 'task', taskId) : t('integrationsIntake.marketingColumns.taskPending')}
+            {workflowRunId ? ` - ${operatorReference(t, 'workflow', workflowRunId)}` : ''}
+            {dispatchId ? ` - ${operatorReference(t, 'dispatch', dispatchId)}` : ''}
           </span>
         );
       },
@@ -688,11 +693,12 @@ export function IntakeModule() {
     const rows = await refreshWebhookInbox();
     const readback = rows.find((row) => row.id === inboxId);
     if (!readback) {
-      throw new Error(`Webhook inbox ${inboxId} is not readable from the backend directory.`);
+      throw new Error(fill(t('integrationsIntake.intakeModule.inboxNotReadable'), { id: inboxId }));
     }
+    // check returns a whole translated sentence, so no English fragment is spliced in.
     const mismatch = check(readback);
     if (mismatch) {
-      throw new Error(`Webhook inbox ${inboxId} confirmation did not ${mismatch}.`);
+      throw new Error(mismatch);
     }
     return readback;
   }
@@ -708,18 +714,18 @@ export function IntakeModule() {
       if (!replayQueued) {
         const preservedStatus = String(result.preserved_status ?? row.processing_status ?? '').trim();
         if (preservedStatus && readback.processing_status !== preservedStatus) {
-          return `preserve status ${preservedStatus}`;
+          return fill(t('integrationsIntake.intakeModule.statusNotPreserved'), { id: row.id, status: preservedStatus });
         }
-        return nextReplayCount > previousReplayCount ? null : 'show replay ledger increment';
+        return nextReplayCount > previousReplayCount ? null : fill(t('integrationsIntake.intakeModule.replayLedgerMissing'), { id: row.id });
       }
-      return nextReplayCount > previousReplayCount ? null : 'show replay ledger increment';
+      return nextReplayCount > previousReplayCount ? null : fill(t('integrationsIntake.intakeModule.replayLedgerMissing'), { id: row.id });
     });
   }
 
   async function executeReplayInboxEvent(
     row: WebhookInboxRow,
     reason: 'operator_retry' | 'operator_replay',
-    label: 'Retry' | 'Replay',
+    action: 'retry' | 'replay',
     refreshOpenProvenance = false,
   ) {
     const previousReplayCount = Number((row as Partial<WebhookInboxDirectoryRow>).replay_count ?? 0);
@@ -729,7 +735,7 @@ export function IntakeModule() {
       openProvenanceDrawer(readback as WebhookInboxRow);
     }
     setIntakeActionReadback({
-      actionLabel: label,
+      actionLabel: action === 'retry' ? t('integrationsIntake.intakeModule.retryAction') : t('integrationsIntake.intakeModule.replayAction'),
       eventId: row.id,
       processingStatus: String(readback.processing_status ?? row.processing_status ?? 'pending'),
       replayCount: Number(readback.replay_count ?? 0),
@@ -738,8 +744,14 @@ export function IntakeModule() {
       lastReplayActor: readback.last_replay_actor ?? null,
       lastReplayAt: readback.last_replay_at ?? null,
     });
-    const toast = formatWebhookReplayToast(label, result, operatorReference('Event', row.id));
-    pushToast(toast.message, toast.tone);
+    const preserved = webhookReplayWasPreserved(result);
+    const toastKey = action === 'retry'
+      ? preserved ? 'retryNotQueued' : 'retryQueued'
+      : preserved ? 'replayNotQueued' : 'replayQueued';
+    pushToast(
+      fill(t(`integrationsIntake.intakeModule.${toastKey}`), { reference: operatorReference(t, 'event', row.id) }),
+      preserved ? 'warn' : 'good',
+    );
   }
 
   async function requireForceStatusReadback(
@@ -749,12 +761,12 @@ export function IntakeModule() {
   ): Promise<WebhookInboxDirectoryRow> {
     return requireInboxDirectoryReadback(row.id, (readback) => {
       if (String(readback.processing_status ?? '') !== targetStatus) {
-        return `reflect forced status ${targetStatus}`;
+        return fill(t('integrationsIntake.intakeModule.forcedStatusMissing'), { id: row.id, status: targetStatus });
       }
       const nextForceStatusCount = Number(readback.force_status_count ?? 0);
       return nextForceStatusCount > previousForceStatusCount
         ? null
-        : 'show force-status ledger increment';
+        : fill(t('integrationsIntake.intakeModule.forceLedgerMissing'), { id: row.id });
     });
   }
 
@@ -768,7 +780,7 @@ export function IntakeModule() {
       : null;
     if (newInboxId) {
       return requireInboxDirectoryReadback(newInboxId, (readback) =>
-        readback.id === newInboxId ? null : 'show the fresh intake row',
+        readback.id === newInboxId ? null : fill(t('integrationsIntake.intakeModule.freshRowMissing'), { id: newInboxId }),
       );
     }
     return requireInboxDirectoryReadback(row.id, (readback) => {
@@ -776,7 +788,7 @@ export function IntakeModule() {
       const lastReplayAt = replayLedgerTimestamp(readback);
       return action === 'retry_as_new_intake' && lastReplayAt && lastReplayAt !== previousLastReplayAt
         ? null
-        : 'show a new retry-as-new-intake remediation ledger';
+        : fill(t('integrationsIntake.intakeModule.remediationLedgerMissing'), { id: row.id });
     });
   }
   const inboxDirectoryById = useMemo(() => {
@@ -881,7 +893,7 @@ export function IntakeModule() {
     }
     const prov = provenanceByInboxId[row.id] ?? deriveInboxProvenance(row, runs, events);
     drawer.open({
-      title: fill(t('integrationsIntake.intakeModule.event'), { value: String(operatorReference('Event', row.id)) }),
+      title: fill(t('integrationsIntake.intakeModule.event'), { value: String(operatorReference(t, 'event', row.id)) }),
       size: 'md',
       body: (
         <ProvenanceDrawerBody
@@ -900,7 +912,7 @@ export function IntakeModule() {
             capability={CAP.WEBHOOKS_WRITE}
             disabled={replayInbox.isPending}
             onClick={() => {
-              void executeReplayInboxEvent(row, 'operator_retry', 'Retry', true).catch((err) => {
+              void executeReplayInboxEvent(row, 'operator_retry', 'retry', true).catch((err) => {
                 pushToast(fill(t('integrationsIntake.intakeModule.retryFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
               });
             }}
@@ -912,7 +924,7 @@ export function IntakeModule() {
             capability={CAP.WEBHOOKS_WRITE}
             disabled={replayInbox.isPending}
             onClick={() => {
-              void executeReplayInboxEvent(row, 'operator_replay', 'Replay', true).catch((err) => {
+              void executeReplayInboxEvent(row, 'operator_replay', 'replay', true).catch((err) => {
                 pushToast(fill(t('integrationsIntake.intakeModule.replayFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
               });
             }}
@@ -988,7 +1000,7 @@ export function IntakeModule() {
           label: t('integrationsIntake.intakeModule.inboxEvent'),
           value: (
             <>
-              {operatorReference('Event', row.id)} · <CanonicalChip category="processing_status" value={row.processing_status} />
+              {operatorReference(t, 'event', row.id)} · <CanonicalChip category="processing_status" value={row.processing_status} />
             </>
           ),
         },
@@ -1017,7 +1029,7 @@ export function IntakeModule() {
     try {
       const readback = await ui_get_resource_v1<WebhookAuthRejectionRow>('webhook_auth_rejections', row.id);
       if (!readback?.id || readback.id !== row.id) {
-        throw new Error('Rejected access confirmation did not return the selected record.');
+        throw new Error(t('integrationsIntake.intakeModule.rejectedAccessRecordMismatch'));
       }
       latest = readback;
     } catch (err) {
@@ -1052,7 +1064,7 @@ export function IntakeModule() {
       render: (raw, row) => {
         const sourceLabel = (row as { source_label?: string | null }).source_label;
         const providerLabel = (row as { provider_type_label?: string | null }).provider_type_label;
-        const ref = sourceReference(row as WebhookInboxRow & Partial<WebhookInboxDirectoryRow>);
+        const ref = sourceReference(t, row as WebhookInboxRow & Partial<WebhookInboxDirectoryRow>);
         if (sourceLabel) {
           return (
             <span>
@@ -1083,7 +1095,7 @@ export function IntakeModule() {
         }
         return (
           <span>
-            <span className="mono">{mappingLabel ?? operatorReference('Mapping', mappingId)}</span>
+            <span className="mono">{mappingLabel ?? operatorReference(t, 'mapping', mappingId)}</span>
             {mappingTarget ? (
               <span className="mono" style={{ color: 'var(--ink-3)' }}> · {mappingTarget}</span>
             ) : null}
@@ -1097,7 +1109,7 @@ export function IntakeModule() {
       key: 'external_id',
       label: t('integrationsIntake.intakeModule.externalReference'),
       mono: true,
-      render: (raw) => <span className="mono">{operatorReference('External', raw)}</span>,
+      render: (raw) => <span className="mono">{operatorReference(t, 'external', raw)}</span>,
     },
     {
       key: 'ack_outcome',
@@ -1131,7 +1143,7 @@ export function IntakeModule() {
       mono: true,
       render: (raw) => (
         raw
-          ? <span className="mono">{operatorReference('Run', raw)}</span>
+          ? <span className="mono">{operatorReference(t, 'run', raw)}</span>
           : <span className="mono" style={{ color: 'var(--ink-3)' }}>—</span>
       ),
     },
@@ -1177,7 +1189,7 @@ export function IntakeModule() {
           // contract key is `webhook_inbox_id` (migration 202604280219),
           // not `inbox_id`. Send canonical key directly; the api facade
           // adapter still translates `inbox_id` defensively.
-          await executeReplayInboxEvent(row, 'operator_retry', 'Retry');
+          await executeReplayInboxEvent(row, 'operator_retry', 'retry');
         } catch (err) {
           pushToast(fill(t('integrationsIntake.intakeModule.retryFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
         }
@@ -1189,7 +1201,7 @@ export function IntakeModule() {
       capability: CAP.WEBHOOKS_WRITE,
       onClick: async (row) => {
         try {
-          await executeReplayInboxEvent(row, 'operator_replay', 'Replay');
+          await executeReplayInboxEvent(row, 'operator_replay', 'replay');
         } catch (err) {
           pushToast(fill(t('integrationsIntake.intakeModule.replayFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
         }
@@ -1200,7 +1212,7 @@ export function IntakeModule() {
       icon: 'plus',
       capability: CAP.WEBHOOKS_WRITE,
       disabled: (row) => !['failed', 'dead_letter'].includes(row.processing_status),
-      disabledReason: () => 'Fresh intake is only available for failed webhook inbox rows.',
+      disabledReason: () => t('integrationsIntake.intakeModule.freshIntakeFailedOnly'),
       onClick: async (row) => {
         try {
           const previousLastReplayAt = replayLedgerTimestamp(row as Partial<WebhookInboxDirectoryRow>);
@@ -1226,7 +1238,7 @@ export function IntakeModule() {
           });
           if (newInboxId) {
             pushToast(
-              fill(t('integrationsIntake.intakeModule.freshIntakeCreated'), { value: String(operatorReference('Event', newInboxId)) }),
+              fill(t('integrationsIntake.intakeModule.freshIntakeCreated'), { value: String(operatorReference(t, 'event', newInboxId)) }),
               'good',
             );
             return;
@@ -1292,7 +1304,7 @@ export function IntakeModule() {
             lastReplayActor: readback.last_replay_actor ?? null,
             lastReplayAt: readback.last_replay_at ?? null,
           });
-          pushToast(fill(t('integrationsIntake.intakeModule.forced'), { value: String(lookupRow('processing_status', failedRow.value)?.label ?? failedRow.value), value2: String(operatorReference('Event', row.id)) }), 'warn');
+          pushToast(fill(t('integrationsIntake.intakeModule.forced'), { value: String(lookupRow('processing_status', failedRow.value)?.label ?? failedRow.value), value2: String(operatorReference(t, 'event', row.id)) }), 'warn');
         } catch (err) {
           pushToast(fill(t('integrationsIntake.intakeModule.forceStatusFailed2'), { value: String((err as Error)?.message ?? '') }), 'danger');
         }
@@ -1302,7 +1314,7 @@ export function IntakeModule() {
       label: t('integrationsIntake.intakeModule.viewWorkflowRun'),
       icon: 'history',
       disabled: (row) => !row.workflow_run_id,
-      disabledReason: () => 'No workflow run reference yet.',
+      disabledReason: () => t('integrationsIntake.intakeModule.noWorkflowRunYet'),
       onClick: openWorkflowRunContext,
     },
   ];
@@ -1419,7 +1431,7 @@ export function IntakeModule() {
   const intakeRelatedWarning = intakeRelatedError
     ? (intakeRelatedError as Error).message
     : canRead && workflowRunFilters.length > 0 && !canReadWorkflows
-      ? `Capability denied: ${CAP.WORKFLOWS_READ}`
+      ? fill(t('integrationsIntake.intakeModule.capabilityDenied'), { capability: CAP.WORKFLOWS_READ })
       : null;
 
   return (
@@ -1462,7 +1474,7 @@ export function IntakeModule() {
           <div className="state__hint">
             <span className="mono">{intakeActionReadback.actionLabel}</span>
             {t('integrationsIntake.intakeModule.event3')}
-            <span className="mono">{operatorReference('Event', intakeActionReadback.eventId)}</span>
+            <span className="mono">{operatorReference(t, 'event', intakeActionReadback.eventId)}</span>
             {t('integrationsIntake.intakeModule.status2')}
             <span className="mono">{intakeActionReadback.processingStatus}</span>
             {t('integrationsIntake.intakeModule.replay2')}
@@ -1478,7 +1490,7 @@ export function IntakeModule() {
             {intakeActionReadback.newInboxId ? (
               <>
                 {t('integrationsIntake.intakeModule.fresh')}
-                <span className="mono">{operatorReference('Event', intakeActionReadback.newInboxId)}</span>
+                <span className="mono">{operatorReference(t, 'event', intakeActionReadback.newInboxId)}</span>
               </>
             ) : null}
           </div>
@@ -1622,20 +1634,20 @@ function WebhookAuthRejectionDrawerBody({ row }: { row: WebhookAuthRejectionRow 
   const headerEntries = Object.entries(row.request_headers ?? {}).filter(([, value]) => value != null);
   const kvRows = [
     { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.correlationId'), value: row.correlation_id ?? '-', mono: true },
-    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.rejectionConfirmation'), value: row.id ? 'Available' : '—' },
-    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.requestConfirmation'), value: row.request_id ? 'Available' : '—' },
-    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.trackingKey'), value: row.correlation_id ? 'Linked' : '—' },
-    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.status'), value: row.http_status ? 'Rejected' : '—' },
-    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.failureType'), value: row.failure_code ? 'Request rejected' : '—' },
-    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.failureMessage'), value: row.failure_message ? 'Source check failed' : '—' },
-    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.credential'), value: row.credential_kind ? 'Source credential checked' : '—' },
-    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.method'), value: row.method ? 'Received' : '—' },
-    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.path'), value: row.path ? 'Protected' : '—' },
-    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.source'), value: row.source_label ?? (row.source_id ? 'Linked source' : 'Unresolved source') },
-    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.sourceReference'), value: row.source_identifier ? 'Matched' : '—' },
-    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.client'), value: row.client_label ?? (row.client_id ? 'Linked client' : '—') },
-    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.sender'), value: row.sender_label ?? (row.sender_id ? 'Linked sender' : '—') },
-    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.tokenCheck'), value: row.token_fingerprint ? 'Completed' : '—' },
+    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.rejectionConfirmation'), value: row.id ? t('integrationsIntake.webhookAuthRejectionDrawerBody.available') : '—' },
+    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.requestConfirmation'), value: row.request_id ? t('integrationsIntake.webhookAuthRejectionDrawerBody.available') : '—' },
+    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.trackingKey'), value: row.correlation_id ? t('integrationsIntake.webhookAuthRejectionDrawerBody.linked') : '—' },
+    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.status'), value: row.http_status ? t('integrationsIntake.intakeModule.rejected') : '—' },
+    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.failureType'), value: row.failure_code ? t('integrationsIntake.intakeModule.requestRejected') : '—' },
+    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.failureMessage'), value: row.failure_message ? t('integrationsIntake.webhookAuthRejectionDrawerBody.sourceCheckFailed') : '—' },
+    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.credential'), value: row.credential_kind ? t('integrationsIntake.webhookAuthRejectionDrawerBody.sourceCredentialChecked') : '—' },
+    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.method'), value: row.method ? t('integrationsIntake.webhookAuthRejectionDrawerBody.received') : '—' },
+    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.path'), value: row.path ? t('integrationsIntake.webhookAuthRejectionDrawerBody.protected') : '—' },
+    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.source'), value: row.source_label ?? (row.source_id ? t('integrationsIntake.intakeModule.linkedSource') : t('integrationsIntake.intakeModule.unresolvedSource')) },
+    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.sourceReference'), value: row.source_identifier ? t('integrationsIntake.webhookAuthRejectionDrawerBody.matched') : '—' },
+    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.client'), value: row.client_label ?? (row.client_id ? t('integrationsIntake.webhookAuthRejectionDrawerBody.linkedClient') : '—') },
+    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.sender'), value: row.sender_label ?? (row.sender_id ? t('integrationsIntake.webhookAuthRejectionDrawerBody.linkedSender') : '—') },
+    { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.tokenCheck'), value: row.token_fingerprint ? t('integrationsIntake.webhookAuthRejectionDrawerBody.completed') : '—' },
     { label: t('integrationsIntake.webhookAuthRejectionDrawerBody.rejectedAt'), value: row.occurred_at, mono: true },
   ];
 
@@ -1733,7 +1745,7 @@ function ProvenanceDrawerBody({
         <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'flex-end' }}>
           <span>{(row as Partial<WebhookInboxDirectoryRow>).source_label ?? t('integrationsIntake.provenanceDrawerBody.intakeSource')}</span>
           <span className="mono" style={{ color: 'var(--ink-3)' }}>
-            {sourceReference(row as WebhookInboxRow & Partial<WebhookInboxDirectoryRow>)}
+            {sourceReference(t, row as WebhookInboxRow & Partial<WebhookInboxDirectoryRow>)}
           </span>
           <span className="mono" style={{ color: 'var(--ink-3)' }}>
             {fill(t('integrationsIntake.provenanceDrawerBody.id'), { webhook_source_id: String(row.webhook_source_id) })}
@@ -1747,7 +1759,7 @@ function ProvenanceDrawerBody({
       label: t('integrationsIntake.provenanceDrawerBody.inboxEvent'),
       detail: (
         <span className="mono">
-          {operatorReference('Event', row.id)} · <CanonicalChip category="processing_status" value={row.processing_status} />
+          {operatorReference(t, 'event', row.id)} · <CanonicalChip category="processing_status" value={row.processing_status} />
         </span>
       ),
       tone: inboxTone,
@@ -1789,7 +1801,7 @@ function ProvenanceDrawerBody({
             <span className="mono">{(row as Partial<WebhookInboxDirectoryRow>).mapping_label}</span>
           ) : (
             <span className="mono" style={{ color: 'var(--ink-3)' }}>
-              {operatorReference('Mapping', (row as Partial<WebhookInboxDirectoryRow>).mapping_config_id)}
+              {operatorReference(t, 'mapping', (row as Partial<WebhookInboxDirectoryRow>).mapping_config_id)}
             </span>
           )}
           {(row as Partial<WebhookInboxDirectoryRow>).mapping_target ? (
@@ -1825,7 +1837,7 @@ function ProvenanceDrawerBody({
       label: t('integrationsIntake.provenanceDrawerBody.workflowRun'),
       detail: hasWorkflowRun ? (
         <span className="mono">
-          {operatorReference('Run', prov?.workflow_run?.id ?? projectedWorkflowRunId)}
+          {operatorReference(t, 'run', prov?.workflow_run?.id ?? projectedWorkflowRunId)}
           {runStatus ? (
             <>
               {' · '}
@@ -1890,7 +1902,7 @@ function ProvenanceDrawerBody({
         <p className="state__hint" style={{ marginTop: '12px' }}>
           {t('integrationsIntake.provenanceDrawerBody.activityReference')}{' '}
           <a className="mono" href={buildTraceDeepLink(prov.correlation_id)}>
-            {operatorReference('Activity', prov.correlation_id)}
+            {operatorReference(t, 'activity', prov.correlation_id)}
           </a>
         </p>
       ) : null}

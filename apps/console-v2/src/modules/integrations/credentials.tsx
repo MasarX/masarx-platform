@@ -427,14 +427,14 @@ export function CredentialsModule() {
     : '/platform/onboarding-readiness';
   const providerSetupBlocked = providers.length === 0;
   const createDisabledReason = providerSetupBlocked
-    ? 'Complete tenant provider setup before creating credentials.'
+    ? t('integrationsCredentials.credentialsModule.completeProviderSetupFirst')
     : authTypes.length === 0
-      ? 'Provider auth type lookups are missing.'
+      ? t('integrationsCredentials.credentialsModule.authTypeLookupsMissing')
       : undefined;
   const providerAccountRouteBlockedReason = apiRoutesQuery.isLoading
-    ? 'Loading API gateway route policy.'
+    ? t('integrationsCredentials.credentialsModule.loadingRoutePolicy')
     : providerAccountRoutes.length === 0
-      ? 'No API gateway route with provider-account policy is visible to this operator.'
+      ? t('integrationsCredentials.credentialsModule.noProviderAccountRoute')
       : undefined;
   const providerAccountCompanyId = providerAccountValue?.company_id == null
     ? ''
@@ -468,11 +468,12 @@ export function CredentialsModule() {
         try {
           const parsed = JSON.parse(credentialsText) as unknown;
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-            throw new Error('Credential details must be a valid object.');
+            throw new Error(t('integrationsCredentials.credentialsModule.credentialDetailsMustBeObject'));
           }
           credentials = parsed as Record<string, unknown>;
         } catch (error) {
-          pushToast(fill(t('integrationsCredentials.credentialsModule.credentialsJson'), { value: String((error as Error).message || 'Credential details are invalid.') }), 'danger');
+          // A JSON.parse message can quote the pasted secret, so only the fixed message is shown.
+          pushToast(fill(t('integrationsCredentials.credentialsModule.credentialsJson'), { value: error instanceof SyntaxError ? t('integrationsCredentials.credentialsModule.credentialDetailsAreInvalid') : (error as Error).message }), 'danger');
           return;
         }
       }
@@ -489,7 +490,7 @@ export function CredentialsModule() {
           ...(credentials ? { credentials } : {}),
           ...(expiresAt || !row ? { expires_at: expiresAt ? new Date(expiresAt).toISOString() : null } : {}),
         });
-        pushToast(fill(t('integrationsCredentials.credentialsModule.credential'), { value: String(row ? 'updated' : 'created') }), 'good');
+        pushToast(row ? t('integrationsCredentials.credentialsModule.credentialUpdated') : t('integrationsCredentials.credentialsModule.credentialCreated'), 'good');
         modal.close();
       } catch (error) {
         pushToast(fill(t('integrationsCredentials.credentialsModule.credentialSaveFailed'), { value: String((error as Error)?.message ?? '') }), 'danger');
@@ -587,11 +588,12 @@ export function CredentialsModule() {
       try {
         const parsed = JSON.parse(credentialsText) as unknown;
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          throw new Error('Delivery API credential details must be a valid object.');
+          throw new Error(t('integrationsCredentials.credentialsModule.deliveryApiCredentialDetailsMustBeObject'));
         }
         credentials = parsed as Record<string, unknown>;
       } catch (error) {
-        pushToast((error as Error).message || t('integrationsCredentials.credentialsModule.deliveryApiCredentialDetails'), 'danger');
+        // A JSON.parse message can quote the pasted secret, so only the fixed message is shown.
+        pushToast(error instanceof SyntaxError ? t('integrationsCredentials.credentialsModule.deliveryApiCredentialDetails') : (error as Error).message, 'danger');
         return;
       }
 
@@ -769,11 +771,12 @@ export function CredentialsModule() {
         try {
           const parsed = JSON.parse(credentialsText) as unknown;
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-            throw new Error('Replacement credential details must be a valid object.');
+            throw new Error(t('integrationsCredentials.credentialsModule.replacementCredentialDetailsMustBeObject'));
           }
           credentials = parsed as Record<string, unknown>;
         } catch (error) {
-          pushToast((error as Error).message || t('integrationsCredentials.credentialsModule.replacementCredentialDetailsAre'), 'danger');
+          // A JSON.parse message can quote the pasted secret, so only the fixed message is shown.
+          pushToast(error instanceof SyntaxError ? t('integrationsCredentials.credentialsModule.replacementCredentialDetailsAre') : (error as Error).message, 'danger');
           return;
         }
       }
@@ -886,7 +889,9 @@ export function CredentialsModule() {
       if (ok > 0) modal.close();
     }
 
-    const title = rows.length === 1 ? 'Revoke credential' : `Revoke ${rows.length} credentials`;
+    const title = rows.length === 1
+      ? t('integrationsCredentials.credentialsModule.revokeCredential')
+      : fill(t('integrationsCredentials.credentialsModule.revokeCredentialsCount'), { count: String(rows.length) });
     modal.open({
       title,
       body: (

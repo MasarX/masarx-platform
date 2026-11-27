@@ -3,7 +3,6 @@
 const messages = {
   integrationsPluginStudio: {
     pluginStudioModule: {
-      blockedLiveBackendIs: '{action} blocked · live backend is not configured',
       parsedContract: 'Parsed · {plugin_kind} contract',
       parseFailed: 'Parse failed · {message}',
       runParseFirst: 'Run Parse first',
@@ -90,6 +89,15 @@ const messages = {
       coercionOne: '{coercion_count} coercion',
       coercionOther: '{coercion_count} coercions',
       titleAccent: 'Plugin',
+      parseBlocked: 'Parse blocked · live backend is not configured',
+      inferBlocked: 'Infer blocked · live backend is not configured',
+      previewBlocked: 'Preview blocked · live backend is not configured',
+      saveBlocked: 'Save blocked · live backend is not configured',
+      savedPluginIdMissing: 'Saved plugin id missing from save result',
+      parseFailedNoDetail: 'parse failed',
+      inferFailedNoDetail: 'infer failed',
+      previewFailedNoDetail: 'preview failed',
+      saveFailedNoDetail: 'save failed',
       titlePlain: 'studio',
     },
   },

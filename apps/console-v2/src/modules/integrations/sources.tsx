@@ -57,7 +57,7 @@ import {
   ExternalIntakeWorkspaceToolbar,
   externalIntakeTargetPath,
 } from './ExternalIntakeWorkspaceToolbar';
-import { fill, useI18n } from '@/lib/i18n';
+import { fill, useI18n, type Translate } from '@/lib/i18n';
 
 // ─── Strict canonical lookup row resolver (NO fallback constants) ─────────
 // AGENTS.md §2 + §4: provider chip tone resolves through canonical
@@ -197,36 +197,43 @@ function shortReference(value: unknown): string {
   return `${raw.slice(0, 4)}...${raw.slice(-6)}`;
 }
 
-function operatorReference(kind: string, value: unknown): string {
+type ReferenceKind = 'mapping' | 'sender' | 'source';
+
+function operatorReference(t: Translate, kind: ReferenceKind, value: unknown): string {
   const raw = String(value ?? '').trim();
-  if (!raw) return `${kind} ref none`;
   const friendly = shortReference(raw);
-  return friendly === raw ? `${kind} ref ${raw}` : `${kind} ref ${friendly} (${raw})`;
+  const shown = !raw ? t('integrationsSources.reference.none') : friendly === raw ? raw : `${friendly} (${raw})`;
+  return fill(t(`integrationsSources.reference.${kind}`), { value: shown });
 }
 
-function authTokenStatusLabel(projection: WebhookSourceDirectoryRow | undefined): string {
-  if (!projection) return 'Token state unavailable';
-  return projection.auth_token_masked ? 'Configured' : 'Not configured';
+function authTokenStatusLabel(t: Translate, projection: WebhookSourceDirectoryRow | undefined): string {
+  if (!projection) return t('integrationsSources.sourcesModule.tokenStateUnavailable');
+  return projection.auth_token_masked
+    ? t('integrationsSources.sourcesModule.tokenConfigured')
+    : t('integrationsSources.sourcesModule.tokenNotConfigured');
 }
 
-function hmacValidationLabel(row: WebhookSourceDirectoryRow | undefined): string {
-  if (!row?.hmac_enabled) return 'Token only';
+function hmacValidationLabel(t: Translate, row: WebhookSourceDirectoryRow | undefined): string {
+  if (!row?.hmac_enabled) return t('integrationsSources.sourceForm.tokenOnly');
   const header = String(row.hmac_header ?? '').trim();
-  return header ? `Token + HMAC (${header})` : 'Token + HMAC';
+  return header
+    ? fill(t('integrationsSources.sourcesModule.tokenHmacHeader'), { header })
+    : t('integrationsSources.sourcesModule.tokenHmac');
 }
 
 function HmacValidationChip({ row }: { row: WebhookSourceDirectoryRow | undefined }) {
+  const { t } = useI18n();
   return (
     <Chip
-      label={hmacValidationLabel(row)}
+      label={hmacValidationLabel(t, row)}
       kind={row?.hmac_enabled ? 'info' : 'neutral'}
       size="xs"
     />
   );
 }
 
-function providerLabel(value: string): string {
-  return lookupRow('webhook_provider_type', value)?.label ?? `Unknown provider: ${value}`;
+function providerLabel(t: Translate, value: string): string {
+  return lookupRow('webhook_provider_type', value)?.label ?? fill(t('integrationsSources.providerChip.unknownProvider'), { value });
 }
 
 function mappingOptionLabel(row: MappingConfigOptionRow): string {
@@ -266,6 +273,7 @@ function isTechnicalMappingKey(value: string): boolean {
 }
 
 function sourceMappingLabel(
+  t: Translate,
   raw: unknown,
   row: WebhookSourceRow & Partial<WebhookSourceDirectoryRow>,
   mappingOptionsById: Map<string, MappingConfigOptionRow>,
@@ -277,7 +285,7 @@ function sourceMappingLabel(
   if (configured && (!projected || projected === mappingId || isTechnicalMappingKey(projected))) {
     return configured;
   }
-  return projected || operatorReference('Mapping', mappingId);
+  return projected || operatorReference(t, 'mapping', mappingId);
 }
 
 function senderOptionLabel(row: SenderOptionRow): string {
@@ -293,13 +301,13 @@ function hmacCredentialOptionLabel(row: IntegrationCredentialOptionRow): string 
   return status ? `${base} (${status})` : base;
 }
 
-function sourceSenderLabel(row: WebhookSourceRow & WebhookSourceDirectoryRow): string {
+function sourceSenderLabel(t: Translate, row: WebhookSourceRow & WebhookSourceDirectoryRow): string {
   const sender = String(row.sender_label ?? '').trim();
   const client = String(row.client_label ?? '').trim();
   if (sender && client) return `${sender} -> ${client}`;
   if (sender) return sender;
-  if (row.sender_id) return operatorReference('Sender', row.sender_id);
-  return 'Not bound';
+  if (row.sender_id) return operatorReference(t, 'sender', row.sender_id);
+  return t('integrationsSources.sourcesModule.notBound');
 }
 
 function mappingOptionsForSource(
@@ -359,9 +367,9 @@ function EnabledChip({ value }: { value: boolean }) {
   return <Chip label={row.label ?? row.value} kind={(row.tone as ChipKind) ?? 'neutral'} size="xs" />;
 }
 
-function enabledLabel(value: boolean): string {
+function enabledLabel(t: Translate, value: boolean): string {
   const row = lookupRow('enabled_state', enabledStateKey(value));
-  return row?.label ?? (value ? 'Enabled' : 'Disabled');
+  return row?.label ?? (value ? t('integrationsSources.sourcesModule.enabledFallback') : t('integrationsSources.sourcesModule.disabledFallback'));
 }
 
 function enabledStateOptions(): Array<{ key: string; enabled: boolean; label: string }> {
@@ -415,10 +423,10 @@ function HealthChip({ isHealthy, errorCount24h }: { isHealthy: boolean; errorCou
   return <Chip label={row.label ?? row.value} kind={(row.tone as ChipKind) ?? 'neutral'} size="xs" />;
 }
 
-function healthLabel(isHealthy: boolean, errorCount24h: number): string {
+function healthLabel(t: Translate, isHealthy: boolean, errorCount24h: number): string {
   const healthState = deriveHealthStateKey(isHealthy, errorCount24h);
   const row = lookupRow('webhook_source_health', healthState);
-  return row?.label ?? 'Unknown source health';
+  return row?.label ?? t('integrationsSources.healthChip.unknownSourceHealth');
 }
 
 function sourceManagedMetadata(row: WebhookSourceRow | WebhookSourceDirectoryRow): Record<string, unknown> {
@@ -575,7 +583,7 @@ export function SourcesModule() {
       ? result.auth_token.trim()
       : '';
     if (mintedToken) {
-      openOneTimeTokenModal(row.name, mintedToken, authTokenStatusLabel(directory), row.id);
+      openOneTimeTokenModal(row.name, mintedToken, authTokenStatusLabel(t, directory), row.id);
     }
     pushToast(fill(t('integrationsSources.sourcesModule.rotated'), { name: String(row.name) }), 'good');
   }
@@ -716,7 +724,7 @@ export function SourcesModule() {
       const [submitting, setSubmitting] = useState<boolean>(false);
       const [oneTimeToken, setOneTimeToken] = useState<string>('');
       const [oneTimeSourceId, setOneTimeSourceId] = useState<string | null>(row?.id ?? null);
-      const [oneTimeSourceName, setOneTimeSourceName] = useState<string>(row?.name ?? 'Intake source');
+      const [oneTimeSourceName, setOneTimeSourceName] = useState<string>(row?.name ?? t('integrationsSources.sourcesModule.intakeSource'));
       const selectedMappingOption = formMappingOptions.find(
         (option) => option.id === formState.mapping_config_id,
       );
@@ -732,27 +740,27 @@ export function SourcesModule() {
         const name = String(formState.name ?? '').trim();
         const sourceIdentifier = String(formState.source_identifier ?? '').trim();
         if (!name) {
-          setErr('Display name is required.');
+          setErr(t('integrationsSources.sourceForm.displayNameRequired'));
           return;
         }
         if (!sourceIdentifier) {
-          setErr('Source reference is required.');
+          setErr(t('integrationsSources.sourceForm.sourceReferenceRequired'));
           return;
         }
         if (!/[A-Za-z]/.test(sourceIdentifier) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(sourceIdentifier)) {
-          setErr('Source reference must be an operator key with letters and optional numbers, dots, hyphens, underscores, or colons.');
+          setErr(t('integrationsSources.sourceForm.sourceReferenceFormat'));
           return;
         }
         if (!formState.mapping_config_id) {
-          setErr('Mapping profile is required.');
+          setErr(t('integrationsSources.sourceForm.mappingProfileRequired'));
           return;
         }
         if (senderRequired && !formState.sender_id) {
-          setErr('Shipment-create mappings require a shipment sender so webhook intake can resolve client scope.');
+          setErr(t('integrationsSources.sourceForm.shipmentSenderRequired'));
           return;
         }
         if (hmacEnabled && !formState.hmac_auth_config_id) {
-          setErr('Choose an HMAC credential before requiring receiver signatures.');
+          setErr(t('integrationsSources.sourceForm.chooseHmacCredential'));
           return;
         }
         setSubmitting(true);
@@ -808,7 +816,7 @@ export function SourcesModule() {
             'good',
           );
         } catch (e) {
-          setErr((e as Error)?.message ?? 'Save failed');
+          setErr((e as Error)?.message ?? t('integrationsSources.sourceForm.saveFailed'));
         } finally {
           setSubmitting(false);
         }
@@ -1132,19 +1140,19 @@ export function SourcesModule() {
     const ruleCount = proj?.rule_count ?? 0;
     const activeRuleCount = proj?.active_rule_count ?? 0;
     const isHealthy = proj?.is_healthy ?? false;
-    const tokenStatus = authTokenStatusLabel(proj);
+    const tokenStatus = authTokenStatusLabel(t, proj);
     const tokenStatusReadback = proj
-      ? `Token status confirmed: ${tokenStatus}`
-      : 'Token status confirmation pending';
+      ? fill(t('integrationsSources.sourcesModule.tokenStatusConfirmed'), { status: tokenStatus })
+      : t('integrationsSources.sourcesModule.tokenStatusPending');
     const summaryRows: KvRow[] = [
       { key: 'name', label: t('integrationsSources.sourcesModule.name'), value: row.name },
-      { key: 'id', label: t('integrationsSources.sourcesModule.sourceConfirmation'), value: row.id ? 'Available' : '—' },
+      { key: 'id', label: t('integrationsSources.sourcesModule.sourceConfirmation'), value: row.id ? t('integrationsSources.sourcesModule.available') : '—' },
       { key: 'source_id', label: t('integrationsSources.sourcesModule.sourceId'), value: row.id, mono: true },
-      { key: 'source_identifier', label: t('integrationsSources.sourcesModule.sourceReference'), value: operatorReference('Source', row.source_identifier), mono: true },
+      { key: 'source_identifier', label: t('integrationsSources.sourcesModule.sourceReference'), value: operatorReference(t, 'source', row.source_identifier), mono: true },
       {
         key: 'provider_type',
         label: t('integrationsSources.sourcesModule.provider'),
-        value: providerLabel(row.provider_type),
+        value: providerLabel(t, row.provider_type),
       },
       {
         key: 'auth_token_status',
@@ -1154,19 +1162,19 @@ export function SourcesModule() {
       {
         key: 'hmac_validation',
         label: t('integrationsSources.sourcesModule.receiverAuth'),
-        value: hmacValidationLabel(row as WebhookSourceRow & WebhookSourceDirectoryRow),
+        value: hmacValidationLabel(t, row as WebhookSourceRow & WebhookSourceDirectoryRow),
       },
       {
         key: 'mapping_config_id',
         label: t('integrationsSources.sourcesModule.mapping'),
         value: row.mapping_config_id
-          ? sourceMappingLabel(row.mapping_config_id, row as WebhookSourceRow & WebhookSourceDirectoryRow, mappingOptionsById)
+          ? sourceMappingLabel(t, row.mapping_config_id, row as WebhookSourceRow & WebhookSourceDirectoryRow, mappingOptionsById)
           : '—',
       },
       {
         key: 'sender_id',
         label: t('integrationsSources.sourcesModule.shipmentSender'),
-        value: sourceSenderLabel(row as WebhookSourceRow & WebhookSourceDirectoryRow),
+        value: sourceSenderLabel(t, row as WebhookSourceRow & WebhookSourceDirectoryRow),
       },
       {
         key: 'rate_limit_per_hour',
@@ -1177,12 +1185,12 @@ export function SourcesModule() {
       {
         key: 'enabled',
         label: t('integrationsSources.sourcesModule.enabled'),
-        value: enabledLabel(row.enabled),
+        value: enabledLabel(t, row.enabled),
       },
       {
         key: 'lifecycle',
         label: t('integrationsSources.sourcesModule.lifecycle'),
-        value: isArchivedSource(row) ? 'Archived' : 'Open',
+        value: isArchivedSource(row) ? t('integrationsSources.sourceLifecycleChip.archived') : t('integrationsSources.sourceLifecycleChip.open'),
       },
       ...(isArchivedSource(row)
         ? [
@@ -1202,7 +1210,7 @@ export function SourcesModule() {
       {
         key: 'health',
         label: t('integrationsSources.sourcesModule.health'),
-        value: healthLabel(isHealthy, errorCount24h),
+        value: healthLabel(t, isHealthy, errorCount24h),
       },
       {
         key: 'event_count_24h',
@@ -1219,7 +1227,7 @@ export function SourcesModule() {
       {
         key: 'rule_count',
         label: t('integrationsSources.sourcesModule.routingRules'),
-        value: `${activeRuleCount} active · ${ruleCount} total`,
+        value: fill(t('integrationsSources.sourcesModule.ruleCounts'), { active: String(activeRuleCount), total: String(ruleCount) }),
         mono: true,
       },
       {
@@ -1236,7 +1244,7 @@ export function SourcesModule() {
       },
     ];
     drawer.open({
-      title: `${row.name} · ${operatorReference('Source', row.source_identifier)}`,
+      title: fill(t('integrationsSources.sourcesModule.drawerTitle'), { name: String(row.name), reference: operatorReference(t, 'source', row.source_identifier) }),
       size: 'lg',
       deepLink: `/integrations/sources?focus=${row.id}`,
       body: (
@@ -1322,7 +1330,7 @@ export function SourcesModule() {
       mono: true,
       sortable: true,
       filterable: true,
-      render: (raw) => <span className="mono">{operatorReference('Source', raw)}</span>,
+      render: (raw) => <span className="mono">{operatorReference(t, 'source', raw)}</span>,
     },
     {
       key: 'provider_type',
@@ -1337,7 +1345,7 @@ export function SourcesModule() {
       render: (raw, row) => {
         const v = String(raw ?? '');
         if (!v) return <span style={{ color: 'var(--ink-3)' }}>—</span>;
-        const label = sourceMappingLabel(v, row as WebhookSourceRow & WebhookSourceDirectoryRow, mappingOptionsById);
+        const label = sourceMappingLabel(t, v, row as WebhookSourceRow & WebhookSourceDirectoryRow, mappingOptionsById);
         const href = `/integrations/mapping?focus=${encodeURIComponent(v)}`;
         return (
           <a
@@ -1356,7 +1364,7 @@ export function SourcesModule() {
     {
       key: 'sender_id',
       label: t('integrationsSources.sourcesModule.senderClient'),
-      render: (_raw, row) => sourceSenderLabel(row as WebhookSourceRow & WebhookSourceDirectoryRow),
+      render: (_raw, row) => sourceSenderLabel(t, row as WebhookSourceRow & WebhookSourceDirectoryRow),
     },
     { key: 'rate_limit_per_hour', label: t('integrationsSources.sourcesModule.rateHr'), align: 'right', mono: true, sortable: true },
     {
@@ -1388,7 +1396,7 @@ export function SourcesModule() {
         <Chip
           size="xs"
           kind={(row as WebhookSourceRow & WebhookSourceDirectoryRow).auth_token_masked ? 'good' : 'warn'}
-          label={authTokenStatusLabel(row as WebhookSourceRow & WebhookSourceDirectoryRow)}
+          label={authTokenStatusLabel(t, row as WebhookSourceRow & WebhookSourceDirectoryRow)}
         />
       ),
     },
@@ -1441,7 +1449,7 @@ export function SourcesModule() {
       kind: 'primary',
       capability: CAP.WEBHOOKS_WRITE,
       disabled: (row) => isArchivedSource(row),
-      disabledReason: 'Archived sources are retained for audit and cannot be edited.',
+      disabledReason: t('integrationsSources.sourcesModule.archivedCannotEdit'),
       onClick: openSourceForm,
     },
     {
@@ -1449,7 +1457,7 @@ export function SourcesModule() {
       icon: 'refresh',
       capability: CAP.WEBHOOKS_WRITE,
       disabled: (row) => isArchivedSource(row),
-      disabledReason: 'Archived sources are retained for audit and cannot rotate tokens.',
+      disabledReason: t('integrationsSources.sourcesModule.archivedCannotRotate'),
       onClick: async (row) => {
         try {
           await rotateSourceToken(row);
@@ -1463,7 +1471,7 @@ export function SourcesModule() {
       icon: 'bolt',
       capability: CAP.WEBHOOKS_WRITE,
       disabled: (row) => isArchivedSource(row),
-      disabledReason: 'Archived sources are already disabled for intake.',
+      disabledReason: t('integrationsSources.sourcesModule.archivedAlreadyDisabled'),
       onClick: async (row) => {
         const nextEnabled = !row.enabled;
         try {

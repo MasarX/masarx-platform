@@ -2,6 +2,12 @@
 
 const messages = {
   integrationsSources: {
+    reference: {
+      mapping: 'Mapping ref {value}',
+      sender: 'Sender ref {value}',
+      source: 'Source ref {value}',
+      none: 'none',
+    },
     providerChip: {
       unknownProvider: 'Unknown provider: {value}',
     },
@@ -67,6 +73,22 @@ const messages = {
       accessControlled: 'Access controlled',
       useThisOnce: 'Use this once in External Intake > Test webhook intake or API request intake. It will not be shown again.',
       titleAccent: 'Sources',
+      tokenStateUnavailable: 'Token state unavailable',
+      tokenConfigured: 'Configured',
+      tokenNotConfigured: 'Not configured',
+      tokenHmacHeader: 'Token + HMAC ({header})',
+      tokenHmac: 'Token + HMAC',
+      notBound: 'Not bound',
+      enabledFallback: 'Enabled',
+      disabledFallback: 'Disabled',
+      tokenStatusConfirmed: 'Token status confirmed: {status}',
+      tokenStatusPending: 'Token status confirmation pending',
+      available: 'Available',
+      ruleCounts: '{active} active · {total} total',
+      drawerTitle: '{name} · {reference}',
+      archivedCannotEdit: 'Archived sources are retained for audit and cannot be edited.',
+      archivedCannotRotate: 'Archived sources are retained for audit and cannot rotate tokens.',
+      archivedAlreadyDisabled: 'Archived sources are already disabled for intake.',
       titlePlain: '& tokens',
     },
     sourceForm: {
@@ -116,6 +138,13 @@ const messages = {
       saving: 'Saving…',
       save: 'Save',
       create: 'Create',
+      displayNameRequired: 'Display name is required.',
+      sourceReferenceRequired: 'Source reference is required.',
+      sourceReferenceFormat: 'Source reference must be an operator key with letters and optional numbers, dots, hyphens, underscores, or colons.',
+      mappingProfileRequired: 'Mapping profile is required.',
+      shipmentSenderRequired: 'Shipment-create mappings require a shipment sender so webhook intake can resolve client scope.',
+      chooseHmacCredential: 'Choose an HMAC credential before requiring receiver signatures.',
+      saveFailed: 'Save failed',
     },
     archiveSourceForm: {
       archivingKeepsSourceHistory: 'Archiving keeps source history visible, disables intake, and records the operator reason.',

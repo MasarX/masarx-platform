@@ -391,12 +391,12 @@ export function HealthModule() {
         ) ?? null
       : null;
   const drawerTitle = selectedHealthRow
-    ? `Provider health - ${providerLabel(selectedHealthRow)}`
+    ? fill(t('integrationsHealth.healthModule.providerHealthFor'), { provider: providerLabel(selectedHealthRow) })
     : selectedBreakerRow
-      ? `Circuit breaker - ${providerLabel(selectedBreakerRow)}`
+      ? fill(t('integrationsHealth.healthModule.circuitBreakerFor'), { provider: providerLabel(selectedBreakerRow) })
       : activeDrawer?.kind === 'health'
-        ? 'Provider health'
-        : 'Circuit breaker';
+        ? t('integrationsHealth.healthModule.providerHealth')
+        : t('integrationsHealth.healthModule.circuitBreaker');
   const drawerBody = selectedHealthRow ? (
     <ProviderHealthDrawer
       row={selectedHealthRow}

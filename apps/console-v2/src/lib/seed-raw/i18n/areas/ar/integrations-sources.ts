@@ -4,6 +4,12 @@ import type English from '../en/integrations-sources';
 
 const messages: CatalogShape<typeof English> = {
   integrationsSources: {
+    reference: {
+      mapping: 'مرجع التحويل {value}',
+      sender: 'مرجع المرسِل {value}',
+      source: 'مرجع المصدر {value}',
+      none: 'لا يوجد',
+    },
     providerChip: {
       unknownProvider: 'مزوّد غير معروف: {value}',
     },
@@ -69,6 +75,22 @@ const messages: CatalogShape<typeof English> = {
       accessControlled: 'وصول مضبوط',
       useThisOnce: 'استخدمه مرة واحدة في الاستقبال الخارجي > اختبار استقبال Webhook أو استقبال طلبات API. لن يُعرض مرة أخرى.',
       titleAccent: 'المصادر',
+      tokenStateUnavailable: 'حالة الرمز غير متاحة',
+      tokenConfigured: 'مهيأ',
+      tokenNotConfigured: 'غير مهيأ',
+      tokenHmacHeader: 'الرمز + HMAC ({header})',
+      tokenHmac: 'الرمز + HMAC',
+      notBound: 'غير مرتبط',
+      enabledFallback: 'مفعّل',
+      disabledFallback: 'معطّل',
+      tokenStatusConfirmed: 'تم تأكيد حالة الرمز: {status}',
+      tokenStatusPending: 'تأكيد حالة الرمز قيد الانتظار',
+      available: 'متاح',
+      ruleCounts: '{active} نشطة · {total} إجمالًا',
+      drawerTitle: '{name} · {reference}',
+      archivedCannotEdit: 'تُحفظ المصادر المؤرشفة للتدقيق ولا يمكن تعديلها.',
+      archivedCannotRotate: 'تُحفظ المصادر المؤرشفة للتدقيق ولا يمكن تدوير رموزها.',
+      archivedAlreadyDisabled: 'المصادر المؤرشفة معطّلة بالفعل للاستقبال.',
       titlePlain: 'والرموز',
     },
     sourceForm: {
@@ -118,6 +140,13 @@ const messages: CatalogShape<typeof English> = {
       saving: 'جارٍ الحفظ…',
       save: 'حفظ',
       create: 'إنشاء',
+      displayNameRequired: 'اسم العرض مطلوب.',
+      sourceReferenceRequired: 'مرجع المصدر مطلوب.',
+      sourceReferenceFormat: 'يجب أن يكون مرجع المصدر مفتاح تشغيل يحتوي على أحرف لاتينية، مع أرقام أو نقاط أو شرطات أو شرطات سفلية أو نقطتين اختياريًا.',
+      mappingProfileRequired: 'ملف التحويل مطلوب.',
+      shipmentSenderRequired: 'تتطلب تحويلات إنشاء الشحنات مرسِل شحنة حتى يتمكن الاستقبال من تحديد نطاق العميل.',
+      chooseHmacCredential: 'اختر بيانات اعتماد HMAC قبل اشتراط توقيعات المستقبِل.',
+      saveFailed: 'فشل الحفظ',
     },
     archiveSourceForm: {
       archivingKeepsSourceHistory: 'تُبقي الأرشفة سجل المصدر ظاهرًا، وتعطّل الاستقبال، وتسجّل سبب المشغّل.',
