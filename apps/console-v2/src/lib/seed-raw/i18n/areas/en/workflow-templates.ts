@@ -76,6 +76,7 @@ const messages = {
       runStatusMissing: 'Run status setup missing',
       lastRunRef: 'Last run · {ref}',
       lastRunStatus: 'Last run · {ref} · {status}',
+      stepFallback: 'Step {ref}',
     },
     inspector: {
       noStepTitle: 'No step selected',
@@ -289,6 +290,8 @@ const messages = {
       timeout: '{seconds}s timeout',
       snippetsHint: 'Reusable workflow snippets are not available yet.',
       canvasAria: 'Workflow template canvas',
+      stageFlow: '{stage} flow',
+      workflowCode: 'Workflow',
     },
   },
 };

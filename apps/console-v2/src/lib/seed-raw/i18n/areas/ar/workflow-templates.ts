@@ -79,6 +79,7 @@ const messages: CatalogShape<typeof English> = {
       runStatusMissing: 'إعداد حالة التشغيل غير مكتمل',
       lastRunRef: 'آخر تشغيل · {ref}',
       lastRunStatus: 'آخر تشغيل · {ref} · {status}',
+      stepFallback: 'الخطوة {ref}',
     },
     inspector: {
       noStepTitle: 'لم تُحدَّد خطوة',
@@ -292,6 +293,8 @@ const messages: CatalogShape<typeof English> = {
       timeout: 'مهلة {seconds} ث',
       snippetsHint: 'مقتطفات سير العمل القابلة لإعادة الاستخدام غير متاحة بعد.',
       canvasAria: 'لوحة قالب سير العمل',
+      stageFlow: 'مسار {stage}',
+      workflowCode: 'سير العمل',
     },
   },
 };
