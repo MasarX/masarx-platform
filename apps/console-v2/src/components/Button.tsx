@@ -29,6 +29,11 @@ export interface ButtonProps {
   title?: string;
   ariaLabel?: string;
   testId?: string;
+  /**
+   * Pauses a write action (e.g. offline) while keeping it focusable: sets
+   * aria-disabled and points aria-describedby at the visible reason element.
+   */
+  pausedReasonId?: string;
 }
 
 export function Button({
@@ -47,6 +52,7 @@ export function Button({
   title,
   ariaLabel,
   testId,
+  pausedReasonId,
 }: ButtonProps) {
   const { hasCapability } = useIdentity();
   const requiredCapabilities = [capability, ...(capabilities ?? [])].filter(Boolean) as string[];
@@ -60,6 +66,8 @@ export function Button({
     ...(missingAnyCapability ? anyCapabilityOptions : []),
   ];
   const isDisabled = !!disabled || denied;
+  const paused = !isDisabled && !!pausedReasonId;
+  const blocked = isDisabled || paused;
 
   const classes = [
     'btn',
@@ -71,7 +79,11 @@ export function Button({
     .join(' ');
 
   const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    if (isDisabled) return;
+    if (blocked) {
+      // A paused submit button must not submit its form.
+      event.preventDefault();
+      return;
+    }
     onClick?.(event);
   };
 
@@ -81,7 +93,8 @@ export function Button({
       className={classes}
       onClick={handleClick}
       disabled={isDisabled}
-      aria-disabled={isDisabled || undefined}
+      aria-disabled={blocked || undefined}
+      aria-describedby={paused ? pausedReasonId : undefined}
       aria-label={ariaLabel}
       data-testid={testId}
       title={title}

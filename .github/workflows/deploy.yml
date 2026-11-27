@@ -805,7 +805,7 @@ jobs:
       github.ref == 'refs/heads/main' &&
       needs.database.result == 'success' && needs.database.outputs.edge_deployed == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 3
     environment:
       name: dev
       deployment: false
@@ -985,7 +985,7 @@ jobs:
     needs: database
     if: ${{ !cancelled() && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: ${{ inputs.environment == 'stg' && 35 || 3 }}
     environment: ${{ inputs.environment || 'dev' }}
     env:
       DEPLOY_TARGET_ENV: *deploy-target-env
@@ -1086,7 +1086,7 @@ jobs:
     needs: database
     if: ${{ !cancelled() && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: ${{ inputs.environment == 'stg' && 35 || 3 }}
     environment: ${{ inputs.environment || 'dev' }}
     env:
       DEPLOY_TARGET_ENV: *deploy-target-env
@@ -1249,7 +1249,7 @@ jobs:
     needs: database
     if: ${{ !cancelled() && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: ${{ inputs.environment == 'stg' && 20 || 2 }}
     environment: ${{ inputs.environment || 'dev' }}
     env:
       DEPLOY_TARGET_ENV: *deploy-target-env
@@ -1339,7 +1339,7 @@ jobs:
     needs: database
     if: ${{ !cancelled() && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: ${{ inputs.environment == 'stg' && 15 || 1 }}
     environment: ${{ inputs.environment || 'dev' }}
     env:
       DEPLOY_TARGET_ENV: *deploy-target-env
@@ -1428,7 +1428,7 @@ jobs:
     needs: [database, label-render-probe, console, portal, landing, ingress]
     if: ${{ always() && (github.event_name == 'push' || inputs.mode == 'deploy') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: ${{ inputs.environment == 'stg' && 5 || 1 }}
     steps:
       - name: Guard deployment ref
         run: |

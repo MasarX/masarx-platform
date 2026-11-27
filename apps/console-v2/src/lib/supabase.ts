@@ -75,6 +75,12 @@ export function getSupabaseClient(): ConsoleSupabaseClient | null {
   return cached;
 }
 
+/** Realtime subscriptions run only when the build opts in (`VITE_REALTIME_ENABLED`). */
+export function isRealtimeEnabled(): boolean {
+  const flag = import.meta.env.VITE_REALTIME_ENABLED as string | undefined;
+  return flag === 'true' || flag === '1';
+}
+
 /** For tests only — reset memoization so the factory re-reads env. */
 export function __resetSupabaseClientForTests(): void {
   cached = undefined;

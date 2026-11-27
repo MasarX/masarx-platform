@@ -27,7 +27,7 @@ import {
   useSuspendZone,
 } from '@/lib/queries';
 import { useIdentity, useCapability } from '@/lib/identity';
-import { useI18n } from '@/lib/i18n';
+import { fill, useI18n, useT } from '@/lib/i18n';
 import { useDrawer } from '@/hooks/useOverlay';
 import { pushToast } from '@/components/toastStore';
 // W54-E closure: typed accessor for `zone_performance_metrics` (mirrors
@@ -374,11 +374,12 @@ function CanonicalChip({
   className?: string;
   labelOverride?: string;
 }) {
+  const t = useT();
   const row = lookupRow(category, value);
   if (!row) {
     return (
       <Chip
-        label={`${category}/${value} (missing)`}
+        label={fill(t('zones.missing'), { ref: `${category}/${value}` })}
         kind="danger"
         size="xs"
         className={className}
@@ -398,7 +399,7 @@ function CanonicalChip({
 // ────────── Module ──────────
 export function ZonesModule() {
   const { scope, currentTenantId } = useIdentity();
-  const { fmtNumber, fmtDateTime } = useI18n();
+  const { t, fmtNumber, fmtDateTime } = useI18n();
   const drawer = useDrawer();
   const openDrawer = drawer.open;
   const isDrawerOpen = drawer.isOpen;
@@ -725,7 +726,7 @@ export function ZonesModule() {
       return zoneCountsAsActive(z, meta);
     });
     if (targets.length === 0) {
-      setBulkPending('No active zones to suspend.');
+      setBulkPending(t('zones.bulk.noActive'));
       // W73-Network Cycle F-R-13 closure (P2-5): transient toast auto-hide
       // resolves through canonical `ux_safety_policy.toast_auto_hide_ms`.
       // AGENTS.md §2 (ZERO HARDCODING) + §6 (row-driven by configuration).
@@ -736,7 +737,7 @@ export function ZonesModule() {
       }
       return;
     }
-    setBulkPending(`Suspending ${targets.length} active zones…`);
+    setBulkPending(fill(t('zones.bulk.suspending'), { n: targets.length }));
     Promise.all(
       targets.map((z) =>
         // E2 closure (P1 #6) — `reason: 'bulk_suspend'` is RPC-canonical;
@@ -750,15 +751,14 @@ export function ZonesModule() {
         const typedResults = results as Array<{ already_processed?: boolean } | null | undefined>;
         const newly = typedResults.filter((r) => !r?.already_processed).length;
         const already = typedResults.length - newly;
-        pushToast(
-          `Suspended ${newly} zone${newly === 1 ? '' : 's'}` +
-            (already > 0 ? ` (${already} already suspended).` : '.'),
-          'good',
-        );
+        const suspendedKey = already > 0
+          ? (newly === 1 ? 'zones.bulk.suspendedAlreadyOne' : 'zones.bulk.suspendedAlreadyOther')
+          : (newly === 1 ? 'zones.bulk.suspendedOne' : 'zones.bulk.suspendedOther');
+        pushToast(fill(t(suspendedKey), { n: newly, already }), 'good');
         setBulkPending(null);
       })
       .catch(() => {
-        pushToast('Bulk suspend failed. Support details were recorded.', 'danger');
+        pushToast(t('zones.bulk.suspendFailed'), 'danger');
         setBulkPending(null);
       });
   }
@@ -772,13 +772,13 @@ export function ZonesModule() {
       return zoneCountsAsSuspended(z, meta);
     });
     if (targets.length === 0) {
-      setBulkPending('No suspended zones to restore.');
+      setBulkPending(t('zones.bulk.noSuspended'));
       if (typeof toastAutoHideMs === 'number') {
         setTimeout(() => setBulkPending(null), toastAutoHideMs);
       }
       return;
     }
-    setBulkPending(`Restoring ${targets.length} suspended zones...`);
+    setBulkPending(fill(t('zones.bulk.restoring'), { n: targets.length }));
     Promise.all(
       targets.map((z) =>
         restoreZoneMut.mutateAsync({ zone_id: z.id, reason: 'bulk_restore' }),
@@ -788,15 +788,14 @@ export function ZonesModule() {
         const typedResults = results as Array<{ already_processed?: boolean } | null | undefined>;
         const newly = typedResults.filter((r) => !r?.already_processed).length;
         const already = typedResults.length - newly;
-        pushToast(
-          `Restored ${newly} zone${newly === 1 ? '' : 's'}` +
-            (already > 0 ? ` (${already} already active).` : '.'),
-          'good',
-        );
+        const restoredKey = already > 0
+          ? (newly === 1 ? 'zones.bulk.restoredAlreadyOne' : 'zones.bulk.restoredAlreadyOther')
+          : (newly === 1 ? 'zones.bulk.restoredOne' : 'zones.bulk.restoredOther');
+        pushToast(fill(t(restoredKey), { n: newly, already }), 'good');
         setBulkPending(null);
       })
       .catch(() => {
-        pushToast('Bulk restore failed. Support details were recorded.', 'danger');
+        pushToast(t('zones.bulk.restoreFailed'), 'danger');
         setBulkPending(null);
       });
   }
@@ -821,11 +820,11 @@ export function ZonesModule() {
       };
 
       openDrawer({
-        title: `Zone · ${zone.name}`,
+        title: fill(t('zones.drawer.title'), { name: zone.name }),
         size: 'lg',
       deepLink: `/network/zones?focus=${encodeURIComponent(zone.id)}`,
         body: (
-          <Suspense fallback={<StateView kind="loading" hint="Loading zone…" />}>
+          <Suspense fallback={<StateView kind="loading" hint={t('zones.loadingZone')} />}>
             <ZoneDrawerBody
               zone={projectedZone}
               linkedDistricts={linkedDistricts}
@@ -856,6 +855,7 @@ export function ZonesModule() {
       districtIndex,
       tenantId,
       openDrawer,
+      t,
       fmtNumber,
       fmtDateTime,
     ],
@@ -886,7 +886,7 @@ export function ZonesModule() {
 
   function renderSideList() {
     if (visibleZones.length === 0) {
-      return <StateView kind="empty" hint="No zones found for this tenant." />;
+      return <StateView kind="empty" hint={t('zones.empty')} />;
     }
     return (
       <ul className="zones-side-list" role="list">
@@ -917,7 +917,7 @@ export function ZonesModule() {
                 type="button"
                 className="zones-side-row__btn"
                 aria-pressed={isSelected}
-                aria-label={`Open zone ${z.name}`}
+                aria-label={fill(t('zones.side.open'), { name: z.name })}
                 data-zone-row={z.id}
                 onClick={() => openZone(z.id)}
               >
@@ -937,14 +937,14 @@ export function ZonesModule() {
                     kind="neutral"
                     size="xs"
                     className="mono"
-                    title={`${linkedD} district${linkedD === 1 ? '' : 's'}`}
+                    title={fill(t(linkedD === 1 ? 'zones.side.districtOne' : 'zones.side.districtOther'), { n: linkedD })}
                   />
                   <Chip
                     label={`${linkedB}B`}
                     kind="info"
                     size="xs"
                     className="mono"
-                    title={`${linkedB} branch${linkedB === 1 ? '' : 'es'} serving`}
+                    title={fill(t(linkedB === 1 ? 'zones.side.branchOne' : 'zones.side.branchOther'), { n: linkedB })}
                   />
                   {pending > 0 ? (
                     <Chip
@@ -952,13 +952,13 @@ export function ZonesModule() {
                       kind="danger"
                       size="xs"
                       className="mono"
-                      title={`${pending} pending override request${pending === 1 ? '' : 's'}`}
+                      title={fill(t(pending === 1 ? 'zones.side.pendingOne' : 'zones.side.pendingOther'), { n: pending })}
                     />
                   ) : null}
                   <CanonicalChip
                     category="zone_status"
                     value={zoneStatusOf(z)}
-                    labelOverride={zoneStatusOf(z)}
+                    labelOverride={t(`zones.status.${zoneStatusOf(z)}`, zoneStatusOf(z))}
                   />
                 </span>
               </button>
@@ -989,7 +989,7 @@ export function ZonesModule() {
   const headerActions: ReactNode[] = [
     <Button
       key="new"
-      label="New zone"
+      label={t('zones.actions.newZone')}
       iconName="plus"
       kind="primary"
       capability={CAP.ZONES_WRITE}
@@ -997,7 +997,7 @@ export function ZonesModule() {
     />,
     <Button
       key="suspend"
-      label="Suspend zone"
+      label={t('zones.actions.suspendZone')}
       iconName="pause"
       kind="ghost"
       capability={CAP.ZONES_WRITE}
@@ -1005,7 +1005,7 @@ export function ZonesModule() {
     />,
     <Button
       key="restore"
-      label="Restore zone"
+      label={t('zones.actions.restoreZone')}
       iconName="refresh"
       kind="ghost"
       capability={CAP.ZONES_WRITE}
@@ -1018,14 +1018,14 @@ export function ZonesModule() {
       <div className="page">
         <PageHeader
           moduleKey="network-zones"
-          eyebrow="Network"
-          titleAccent="Zones"
-          titlePlain="— map-first delivery footprint"
+          eyebrow={t('nav.network')}
+          titleAccent={t('zones.header.accent')}
+          titlePlain={t('zones.header.plain')}
         />
         <StateView
           kind="denied"
           capability={CAP.ZONES_READ}
-          hint="You do not have permission to view zones."
+          hint={t('zones.denied')}
         />
       </div>
     );
@@ -1035,14 +1035,14 @@ export function ZonesModule() {
     <div className="page">
       <PageHeader
         moduleKey="network-zones"
-        eyebrow="Network"
-        titleAccent="Zones"
-        titlePlain="— map-first delivery footprint"
+        eyebrow={t('nav.network')}
+        titleAccent={t('zones.header.accent')}
+        titlePlain={t('zones.header.plain')}
         pills={[
           <ScopePill key="scope" scopeType="tenant" scopeId={tenantId} />,
           <Chip
             key="src"
-            label="zones · districts · overrides"
+            label={<bdi>zones · districts · overrides</bdi>} // i18n-literal-ok: source table names
             kind="neutral"
             size="xs"
             className="mono"
@@ -1068,22 +1068,22 @@ export function ZonesModule() {
       ) : null}
 
       {isError ? (
-        <StateView kind="error" hint="Could not load zones graph." />
+        <StateView kind="error" hint={t('zones.loadError')} />
       ) : isLoading ? (
-        <StateView kind="loading" hint="Loading zones…" />
+        <StateView kind="loading" hint={t('zones.loading')} />
       ) : (
         <>
           <div className="kpi-strip" data-testid="zones-kpi-strip">
             <KPICard
-              label="Total zones"
+              label={t('zones.kpi.total')}
               value={fmtNumber(totalZones)}
-              delta="seeded footprint"
+              delta={t('zones.kpi.totalDelta')}
               tone="info"
             />
             <KPICard
-              label="Active"
+              label={t('zones.kpi.active')}
               value={fmtNumber(activeZones)}
-              delta={`${fmtNumber(totalZones - activeZones)} non-active`}
+              delta={fill(t('zones.kpi.activeDelta'), { n: fmtNumber(totalZones - activeZones) })}
               tone={activeZones > 0 ? 'good' : 'warn'}
             />
             {/* W27 Cycle D Network closure (P1 #7): tone bands resolve
@@ -1091,9 +1091,9 @@ export function ZonesModule() {
                 inline `<= 2` magic threshold. Missing policy → neutral
                 tone (no silent FE-literal masking). */}
             <KPICard
-              label="Suspended"
+              label={t('zones.kpi.suspended')}
               value={fmtNumber(suspendedZones)}
-              delta="awaiting restore"
+              delta={t('zones.kpi.suspendedDelta')}
               tone={
                 suspendedZones === 0
                   ? 'good'
@@ -1105,12 +1105,12 @@ export function ZonesModule() {
               }
             />
             <KPICard
-              label="Pending overrides"
+              label={t('zones.kpi.pending')}
               value={fmtNumber(pendingOverridesTotal)}
               delta={
                 pendingOverridesTotal === 0
-                  ? 'all clear'
-                  : 'review queue'
+                  ? t('zones.kpi.allClear')
+                  : t('zones.kpi.reviewQueue')
               }
               tone={
                 pendingOverridesTotal === 0
@@ -1143,7 +1143,7 @@ export function ZonesModule() {
             </div>
             <div className="zones-split__list" data-testid="zones-side-list">
               <div className="section-eyebrow" style={{ marginTop: 0 }}>
-                {fmtNumber(visibleZones.length)} zones
+                {fill(t('zones.count'), { n: fmtNumber(visibleZones.length) })}
               </div>
               {renderSideList()}
             </div>

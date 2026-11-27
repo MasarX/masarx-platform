@@ -32,7 +32,7 @@ import { KvGrid, type KvRow } from '@/components/KvGrid';
 import { StateView } from '@/components/StateView';
 import { useResourceList, useResolveSettings } from '@/lib/queries';
 import { useIdentity, useCapability } from '@/lib/identity';
-import { useI18n } from '@/lib/i18n';
+import { fill, useI18n, useT } from '@/lib/i18n';
 import { useDrawer } from '@/hooks/useOverlay';
 import { CAP } from '@/lib/capabilities';
 import { getLookups, lookupRow } from '@/lib/api';
@@ -275,13 +275,14 @@ function CanonicalChip({
   category: string;
   value: string;
   className?: string;
-  labelOverride?: string;
+  labelOverride?: ReactNode;
 }) {
+  const t = useT();
   const row = lookupRow(category, value);
   if (!row) {
     return (
       <Chip
-        label={`${category}/${value} (missing)`}
+        label={fill(t('partners.missing'), { ref: `${category}/${value}` })}
         kind="danger"
         size="xs"
         className={className}
@@ -301,7 +302,7 @@ function CanonicalChip({
 export function PartnersModule() {
   const { scope } = useIdentity();
   const go = useConsoleNavigator();
-  const { fmtNumber, fmtCurrency, fmtDateTime } = useI18n();
+  const { t, fmtNumber, fmtCurrency, fmtDateTime } = useI18n();
   const drawer = useDrawer();
   // W54-E closure: capability scope alignment with marketplace.tsx — partners
   // module reads from `marketplace_participants` (canonical
@@ -578,30 +579,30 @@ export function PartnersModule() {
       // `partnerNameOf` / `partnerKindOf` / `partnerComplianceOf`; FE
       // aliases `name` / `kind` / `compliance` remain back-compat
       // fallbacks inside the resolvers.
-      { key: 'name', label: 'Name', value: partnerNameOf(p) || '—' },
-      { key: 'kind', label: 'Kind', value: partnerKindOf(p) || '—', mono: true },
-      { key: 'country', label: 'Country', value: p.country ?? '—' },
+      { key: 'name', label: t('partners.cols.name'), value: partnerNameOf(p) || '—' },
+      { key: 'kind', label: t('partners.cols.kind'), value: partnerKindOf(p) || '—', mono: true },
+      { key: 'country', label: t('partners.cols.country'), value: p.country ?? '—' },
       {
         key: 'listing_status',
-        label: 'Listing',
+        label: t('partners.cols.listing'),
         value: p.listing_status ?? '—',
         mono: true,
       },
       {
         key: 'compliance',
-        label: 'Compliance',
+        label: t('partners.cols.compliance'),
         value: partnerComplianceOf(p) || '—',
         mono: true,
       },
       {
         key: 'contracts_count',
-        label: 'Contracts',
+        label: t('partners.cols.contracts'),
         value: fmtNumber(aggregates.contracts_count),
         mono: true,
       },
       {
         key: 'settlement_balance_sar',
-        label: 'Balance',
+        label: t('partners.cols.balance'),
         value: fmtCurrency(balance, tenantCurrencyIso),
         mono: true,
       },
@@ -612,10 +613,10 @@ export function PartnersModule() {
     // resolved via `contractNoOf()` for a stable monospace identifier
     // column ahead of the row id.
     const contractColumns: Array<DataTableColumn<ContractRow>> = [
-      { key: 'id', label: 'ID', mono: true, sortable: true },
+      { key: 'id', label: t('partners.cols.id'), mono: true, sortable: true },
       {
         key: 'metadata.contract_no',
-        label: 'Contract #',
+        label: t('partners.cols.contractNo'),
         mono: true,
         sortable: false,
         filterable: false,
@@ -626,23 +627,23 @@ export function PartnersModule() {
       },
       {
         key: 'terms',
-        label: 'Terms',
+        label: t('partners.cols.terms'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => <span>{termsOf(row)}</span>,
       },
-      { key: 'started_at', label: 'Started', mono: true, sortable: true, format: 'datetime' },
-      { key: 'ends_at', label: 'Ends', mono: true, sortable: true, format: 'datetime' },
-      { key: 'status', label: 'Status', sortable: true, filterable: true },
+      { key: 'started_at', label: t('partners.cols.started'), mono: true, sortable: true, format: 'datetime' },
+      { key: 'ends_at', label: t('partners.cols.ends'), mono: true, sortable: true, format: 'datetime' },
+      { key: 'status', label: t('partners.cols.status'), sortable: true, filterable: true },
     ];
 
     const disputeColumns: Array<DataTableColumn<DisputeRow>> = [
-      { key: 'id', label: 'ID', mono: true, sortable: true },
+      { key: 'id', label: t('partners.cols.id'), mono: true, sortable: true },
       // W13-1 — `shipment_ref` + `amount_sar` resolve through metadata jsonb.
       // Per-projection keys keep React key uniqueness across columns.
       {
         key: 'metadata.shipment_ref',
-        label: 'Shipment',
+        label: t('partners.cols.shipment'),
         mono: true,
         sortable: false,
         filterable: false,
@@ -657,22 +658,22 @@ export function PartnersModule() {
       // view-saved sorts/filters keep working.
       {
         key: 'kind',
-        label: 'Kind',
+        label: t('partners.cols.kind'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => disputeCategoryOf(row) || '—',
       },
       {
         key: 'metadata.amount_sar',
-        label: 'Amount',
+        label: t('partners.cols.amount'),
         align: 'right',
         sortable: false,
         render: (_raw, row) => fmtCurrency(amountSarOf(row), tenantCurrencyIso),
       },
-      { key: 'status', label: 'Status', sortable: true, filterable: true },
+      { key: 'status', label: t('partners.cols.status'), sortable: true, filterable: true },
       {
         key: 'filed_at',
-        label: 'Filed',
+        label: t('partners.cols.filed'),
         format: 'datetime',
         sortable: true,
         render: (_raw, row) => {
@@ -702,26 +703,26 @@ export function PartnersModule() {
             <CanonicalChip
               category="partner_listing_status"
               value={p.listing_status}
-              labelOverride={`listing: ${p.listing_status}`}
+              labelOverride={<>{t('partners.drawer.listing')} <bdi>{p.listing_status}</bdi></>}
             />
           ) : null}
           {partnerComplianceOf(p) ? (
             <CanonicalChip
               category="partner_compliance_status"
               value={partnerComplianceOf(p)}
-              labelOverride={`compliance: ${partnerComplianceOf(p)}`}
+              labelOverride={<>{t('partners.drawer.compliance')} <bdi>{partnerComplianceOf(p)}</bdi></>}
             />
           ) : null}
         </div>
         <KvGrid rows={kvRows} />
 
-        <div className="section-eyebrow">Contracts</div>
+        <div className="section-eyebrow">{t('partners.drawer.contracts')}</div>
         {contractsQuery.isLoading ? (
-          <StateView kind="loading" hint="Loading contracts…" />
+          <StateView kind="loading" hint={t('partners.drawer.loadingContracts')} />
         ) : contractsQuery.isError ? (
-          <StateView kind="error" hint="Could not load contracts." />
+          <StateView kind="error" hint={t('partners.drawer.contractsError')} />
         ) : myContracts.length === 0 ? (
-          <StateView kind="empty" hint="No contracts on file for this partner." />
+          <StateView kind="empty" hint={t('partners.drawer.noContracts')} />
         ) : (
           <DataTable<ContractRow>
             columns={contractColumns}
@@ -732,13 +733,13 @@ export function PartnersModule() {
           />
         )}
 
-        <div className="section-eyebrow">Disputes</div>
+        <div className="section-eyebrow">{t('partners.drawer.disputes')}</div>
         {disputesQuery.isLoading ? (
-          <StateView kind="loading" hint="Loading disputes…" />
+          <StateView kind="loading" hint={t('partners.drawer.loadingDisputes')} />
         ) : disputesQuery.isError ? (
-          <StateView kind="empty" hint="Disputes feed unavailable." />
+          <StateView kind="empty" hint={t('partners.drawer.disputesError')} />
         ) : myDisputes.length === 0 ? (
-          <StateView kind="empty" hint="No disputes filed against this partner." />
+          <StateView kind="empty" hint={t('partners.drawer.noDisputes')} />
         ) : (
           <DataTable<DisputeRow>
             columns={disputeColumns}
@@ -749,7 +750,7 @@ export function PartnersModule() {
           />
         )}
 
-        <div className="section-eyebrow">Quick links</div>
+        <div className="section-eyebrow">{t('partners.drawer.quickLinks')}</div>
         <div
           style={{
             display: 'flex',
@@ -759,7 +760,7 @@ export function PartnersModule() {
           }}
         >
           <Button
-            label="Settlements"
+            label={t('partners.drawer.settlements')}
             iconName="wallet"
             kind="ghost"
             onClick={() => {
@@ -769,7 +770,7 @@ export function PartnersModule() {
             }}
           />
           <Button
-            label="Disputes"
+            label={t('partners.drawer.disputes')}
             iconName="alert"
             kind="ghost"
             onClick={() => {
@@ -779,7 +780,7 @@ export function PartnersModule() {
             }}
           />
           <Button
-            label="Ledger"
+            label={t('partners.drawer.ledger')}
             iconName="audit"
             kind="ghost"
             onClick={() => {
@@ -795,7 +796,7 @@ export function PartnersModule() {
             className="state__hint"
             style={{ margin: '8px 14px 0', fontSize: '11px' }}
           >
-            Latest dispute filed{' '}
+            {t('partners.drawer.latestDispute')}{' '}
             <span className="mono">
               {fmtDateTime(myDisputes[0]!.filed_at as string)}
             </span>{' '}
@@ -806,7 +807,7 @@ export function PartnersModule() {
     );
 
     drawer.open({
-      title: `Partner · ${partnerNameOf(p)}`,
+      title: fill(t('partners.drawer.title'), { name: partnerNameOf(p) }),
       size: 'lg',
       deepLink: `/network/partners?focus=${encodeURIComponent(p.id)}`,
       body,
@@ -839,23 +840,23 @@ export function PartnersModule() {
       // sorts/filters keep working.
       {
         key: 'name',
-        label: 'Partner',
+        label: t('partners.cols.partner'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => partnerNameOf(row) || '—',
       },
       {
         key: 'kind',
-        label: 'Kind',
+        label: t('partners.cols.kind'),
         sortable: true,
         filterable: true,
         mono: true,
         render: (_raw, row) => partnerKindOf(row) || '—',
       },
-      { key: 'country', label: 'Country', sortable: true, filterable: true },
+      { key: 'country', label: t('partners.cols.country'), sortable: true, filterable: true },
       {
         key: 'listing_status',
-        label: 'Listing',
+        label: t('partners.cols.listing'),
         sortable: true,
         filterable: true,
         render: (raw) => {
@@ -865,7 +866,7 @@ export function PartnersModule() {
       },
       {
         key: 'compliance',
-        label: 'Compliance',
+        label: t('partners.cols.compliance'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => {
@@ -879,7 +880,7 @@ export function PartnersModule() {
       },
       {
         key: 'contracts_count',
-        label: 'Contracts',
+        label: t('partners.cols.contracts'),
         align: 'right',
         sortable: true,
         type: 'number',
@@ -890,14 +891,14 @@ export function PartnersModule() {
         // through canonical `tenant_currency.iso_code` (already resolved
         // above via useResolveSettings) instead of an inline 'SAR' literal.
         // AGENTS.md §2 (ZERO HARDCODING) + §4 (SSOT).
-        label: tenantCurrencyIso ? `Balance (${tenantCurrencyIso})` : 'Balance',
+        label: tenantCurrencyIso ? fill(t('partners.cols.balanceIso'), { iso: tenantCurrencyIso }) : t('partners.cols.balance'),
         align: 'right',
         sortable: true,
         format: 'currency',
         type: 'number',
       },
     ],
-    [tenantCurrencyIso]
+    [tenantCurrencyIso, t]
   );
 
   if (!canRead) {
@@ -905,14 +906,11 @@ export function PartnersModule() {
       <div className="page">
         <PageHeader
           moduleKey="partners"
-          eyebrow="Network"
-          titleAccent="Partners"
-          titlePlain="— marketplace participants"
         />
         <StateView
           kind="denied"
           capability={CAP.MARKETPLACE_READ}
-          hint="You do not have permission to view network partners (marketplace.read)."
+          hint={fill(t('partners.denied'), { cap: CAP.MARKETPLACE_READ })}
         />
       </div>
     );
@@ -922,14 +920,11 @@ export function PartnersModule() {
     <div className="page">
       <PageHeader
         moduleKey="partners"
-        eyebrow="Network"
-        titleAccent="Partners"
-        titlePlain="— marketplace participants"
         pills={[
           <ScopePill key="scope" scopeType="tenant" scopeId={tenantId} />,
           <Chip
             key="src"
-            label="marketplace_participants"
+            label={<bdi>marketplace_participants</bdi>} // i18n-literal-ok: source table name
             kind="neutral"
             size="xs"
             className="mono"
@@ -939,22 +934,22 @@ export function PartnersModule() {
       />
 
       {isError ? (
-        <StateView kind="error" hint="Could not load marketplace participants." />
+        <StateView kind="error" hint={t('partners.loadError')} />
       ) : isLoading || !data ? (
-        <StateView kind="loading" hint="Loading partners…" />
+        <StateView kind="loading" hint={t('partners.loading')} />
       ) : (
         <>
           <div className="kpi-strip">
             <KPICard
-              label="Active listings"
+              label={t('partners.kpi.activeListings')}
               value={fmtNumber(activeListings)}
-              delta={`of ${fmtNumber(partners.length)} partners`}
+              delta={fill(t('partners.kpi.ofPartners'), { n: fmtNumber(partners.length) })}
               tone={activeListings > 0 ? 'good' : 'warn'}
             />
             <KPICard
-              label="Pending compliance"
+              label={t('partners.kpi.pendingCompliance')}
               value={fmtNumber(pendingCompliance)}
-              delta="not yet verified"
+              delta={t('partners.kpi.notVerified')}
               tone={
                 pendingCompliance === 0
                   ? 'good'
@@ -966,20 +961,20 @@ export function PartnersModule() {
               }
             />
             <KPICard
-              label="Total balance"
+              label={t('partners.kpi.totalBalance')}
               value={fmtCurrency(totalBalance, tenantCurrencyIso)}
-              delta="settlement_balance_sar"
+              delta={<bdi>settlement_balance_sar</bdi>} // i18n-literal-ok: source column name
               tone="info"
             />
             <KPICard
-              label="Open disputes"
+              label={t('partners.kpi.openDisputes')}
               value={openDisputes == null ? '—' : fmtNumber(openDisputes)}
               delta={
                 openDisputes == null
-                  ? 'feed unavailable'
+                  ? t('partners.kpi.feedUnavailable')
                   : openDisputes === 0
-                  ? 'all clear'
-                  : 'awaiting resolution'
+                  ? t('partners.kpi.allClear')
+                  : t('partners.kpi.awaiting')
               }
               tone={
                 openDisputes == null
