@@ -35,6 +35,7 @@ Follows engineering standard v1.29.3.
 | [Release on tag](.github/workflows/release-on-tag.yml) | Verifies the tagged commit and builds, attests and publishes the static Landing archive. | Verify 10, build and publish 20. |
 
 - Set job and step limits from measured run and job timings, plus a margin.
+- The Console build job also builds Console V2 in live mode and enforces its [bundle budgets](apps/console-v2/scripts/check-bundle-size.mjs).
 - Root Markdown changes select Unit Jest, which runs the public-source boundary test.
 - Append-only migrations checks the PR opener on `pull_request`. On `merge_group` it follows the squash commits back to the event base, fetching missing commits by SHA, and checks each author and committer. Both steps use the [identity allowlist](config/ci/commit-identities.json). A commit rejection reports its short SHA. Guard errors give a fixed reason without identity values.
 - CI runs only on free GitHub-hosted runners. Get the owner's approval before spending money or using a paid service. Use at most 20 jobs per CI run. CI runs Landing E2E. Full Console, Portal and FieldOps journeys need separate qualification.
