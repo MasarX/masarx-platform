@@ -22,9 +22,9 @@ function mask(value) {
   console.log(`::add-mask::${value.replaceAll('%', '%25')}`);
 }
 
-async function reportFixtureWriteError(response) {
+async function reportQueryError(response, reason) {
   // The status alone separates a token or scope refusal from a database error.
-  console.error(`fixture_write_http_status=${response.status}`);
+  console.error(`${reason}_http_status=${response.status}`);
   const error = await response.json();
   // Supabase can wrap the PostgreSQL error in a message with additional row details.
   const message = typeof error?.message === 'string' ? error.message : '';
@@ -41,7 +41,7 @@ async function reportFixtureWriteError(response) {
   let detail = '';
   if (typeof constraint === 'string' && identifier.test(constraint)) detail = ` constraint=${constraint}`;
   else if (typeof column === 'string' && identifier.test(column)) detail = ` column=${column}`;
-  console.error(`fixture_write_sqlstate=${sqlstate}${detail}`);
+  console.error(`${reason}_sqlstate=${sqlstate}${detail}`);
 }
 
 async function request(url, headers, reason, method = 'GET', body) {
@@ -55,7 +55,7 @@ async function request(url, headers, reason, method = 'GET', body) {
     });
     if (response.ok) return method === 'DELETE' ? null : await response.json();
     if (reason === 'auth_config') console.error(`auth_config_http_status=${response.status}`);
-    if (reason === 'fixture_write') await reportFixtureWriteError(response);
+    else if (url.endsWith('/database/query')) await reportQueryError(response, reason);
   } catch {
     // Provider errors can contain configuration, identities or request data.
   }
