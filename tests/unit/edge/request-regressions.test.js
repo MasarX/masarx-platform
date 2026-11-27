@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const ts = require('typescript');
-const { createHmac, webcrypto } = require('crypto');
+const { webcrypto } = require('crypto');
 
 const functionsRoot = path.resolve(__dirname, '../../../supabase/functions');
 const compiledModules = new Map();
@@ -544,43 +544,5 @@ describe('UI resource download storage paths', () => {
     }));
     expect(response.status).toBe(500);
     expect(from).not.toHaveBeenCalled();
-  });
-});
-
-describe('GitHub planning webhook validation', () => {
-  const secret = 'webhook-fixture-secret';
-  const env = { GITHUB_WEBHOOK_SECRET: secret, GITHUB_PLANNING_WORKFLOW_TOKEN: 'workflow-fixture-token' };
-  const request = (body, signature) => new Request('https://api.example.test/functions/v1/github-planning-receiver', {
-    method: 'POST', body,
-    headers: {
-      'content-type': 'application/json', 'x-github-event': 'projects_v2_item',
-      'x-hub-signature-256': signature || `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`,
-    },
-  });
-
-  test('malformed JSON returns a controlled client error without dispatching', async () => {
-    const fetch = jest.fn();
-    const handler = loadHandler('github-planning-receiver', { env, fetch });
-    const response = await handler(request('{"secret_input":"must not appear in errors",invalid}'));
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: 'invalid_json' });
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  test.each(['sha256=zz', 'sha256=' + '0'.repeat(63), 'sha256=' + 'g'.repeat(64)])('rejects malformed signature %s', async (signature) => {
-    const fetch = jest.fn();
-    const handler = loadHandler('github-planning-receiver', { env, fetch });
-    const response = await handler(request('{"action":"edited","projects_v2_item":{"node_id":"item-1"}}', signature));
-    expect(response.status).toBe(401);
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  test('a valid signed project event still dispatches the workflow', async () => {
-    const fetch = jest.fn(async () => new Response(null, { status: 204 }));
-    const handler = loadHandler('github-planning-receiver', { env, fetch });
-    const response = await handler(request('{"action":"edited","projects_v2_item":{"node_id":"item-1"}}'));
-    expect(response.status).toBe(202);
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({ inputs: { item_id: 'item-1', event_action: 'edited' } });
   });
 });

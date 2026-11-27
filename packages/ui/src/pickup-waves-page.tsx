@@ -362,7 +362,7 @@ export async function PickupWavesPage({
                     ) : null}
                     <Badge tone="accent">{t("ledger.shipmentCount", { count: shipments.length })}</Badge>
                   </div>
-                  <div className="mt-3 text-sm font-medium text-ui-ink">
+                  <div data-evidence-mask="record-id" className="mt-3 text-sm font-medium text-ui-ink">
                     {stringValue(row.name) ?? buildLookupFriendlyLabel(t("ledger.route"), routeRunId)}
                   </div>
                   <div className="mt-2 text-sm text-ui-muted">
@@ -373,7 +373,7 @@ export async function PickupWavesPage({
                       me?.timezone,
                     ) ?? t("ledger.noWindow")}
                   </div>
-                  <div className="mt-3">
+                  <div data-evidence-mask="record-id" className="mt-3">
                     {renderFieldPairs([
                       [t("fields.branch"), stringValue(row.branch_label)],
                       [t("fields.driver"), stringValue(row.driver_label) ?? pickupRelationshipLabel(assignmentChoices.options.drivers, row.driver_user_id)],
@@ -393,7 +393,7 @@ export async function PickupWavesPage({
                               key={shipmentId}
                               className="rounded-xl border border-ui-border bg-ui-surface/50 p-3 text-sm text-ui-muted"
                             >
-                              <div className="font-medium text-ui-ink">
+                              <div data-evidence-mask="record-id" className="font-medium text-ui-ink">
                                 {stringValue(shipmentRecord?.tracking_number) ?? shipmentId}
                               </div>
                               <div>{stringValue(shipmentRecord?.status) ?? createUiTranslator("ui.pickupOperations")("unknownStatus")}</div>
@@ -403,12 +403,15 @@ export async function PickupWavesPage({
                       </div>
                     ) : null}
                     {pickupAssignment ? (
-                      <pre className="overflow-x-auto rounded-xl border border-ui-border bg-ui-surface/70 p-3 text-xs text-ui-muted">
+                      <pre
+                        data-evidence-mask="record-id"
+                        className="overflow-x-auto rounded-xl border border-ui-border bg-ui-surface/70 p-3 text-xs text-ui-muted"
+                      >
                         {JSON.stringify(pickupAssignment, null, 2)}
                       </pre>
                     ) : null}
                   </div>
-                  <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                  <div data-evidence-mask="record-id" className="mt-4 grid gap-4 xl:grid-cols-2">
                     <PickupMutationForm
                       action={assignInternalWave}
                       submitLabel={t("assign.driverSubmit")}

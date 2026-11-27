@@ -298,6 +298,14 @@ const normalizeErrorCode = (value, fallback = "edge.request.failed") => {
     .replace(/^_+|_+$/g, "") || "edge.request.failed";
 };
 
+const LOGGABLE_DATABASE_ERROR_CODES = new Set([
+  "23505", "42501", "57014", "P0001",
+  "PGRST116", "PGRST202", "PGRST301", "PGRST302",
+]);
+
+export const databaseErrorCodeForLog = (code) =>
+  LOGGABLE_DATABASE_ERROR_CODES.has(code) ? code : null;
+
 export const buildErrorEnvelope = ({
   status,
   code,
@@ -367,34 +375,13 @@ export const classifyError = (error) => {
 
 const normalizeErrorForLog = (error) => {
   if (!error) return null;
-  if (typeof error === "string") {
-    return {
-      error_type: classifyError(error),
-      error_message: redactStringForLog(error),
-    };
-  }
-  if (error instanceof Error) {
-    return {
-      error_type: classifyError(error),
-      error_message: redactStringForLog(error.message || error.name || "Unknown error"),
-      error_stack: redactStringForLog(error.stack || ""),
-    };
-  }
-  if (typeof error === "object") {
-    const raw = error;
-    const message = "message" in raw ? String(raw.message || "") : "";
-    const code = "code" in raw ? String(raw.code || "") : "";
-    const status = "status" in raw ? Number(raw.status) : null;
-    return {
-      error_type: classifyError(message || JSON.stringify(raw)),
-      error_message: redactStringForLog(message || "Unknown error"),
-      ...(code ? { error_code: redactStringForLog(code) } : {}),
-      ...(Number.isFinite(status) ? { error_status: status } : {}),
-    };
-  }
+  const errorType = classifyError(error);
+  const rawStatus = typeof error === "object" && "status" in error ? error.status : null;
+  const status = typeof rawStatus === "string" ? Number(rawStatus) : rawStatus;
   return {
-    error_type: "unexpected",
-    error_message: "Unknown error",
+    error_type: errorType,
+    error_message: errorType,
+    ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { error_status: status } : {}),
   };
 };
 

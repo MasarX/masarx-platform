@@ -4,7 +4,6 @@ const path = require('node:path');
 const { randomBytes } = require('node:crypto');
 const { setTimeout: delay } = require('node:timers/promises');
 const { shardOption } = require('./jest.cjs');
-const { loadRegistry, planDeploy } = require('../edge/functions-registry.js');
 const timing = require('./integration-timings.json');
 const inventoryRoot = 'tests/integration';
 const exceptionFile = 'config/ci/hosted-integration-exceptions.json';
@@ -37,6 +36,7 @@ function integrationEdgeEnvironment(apiPort) {
 }
 
 function integrationFunctionConfig() {
+  const { loadRegistry, planDeploy } = require('../edge/functions-registry.js');
   // The disposable stack exercises the same public entry points as local development.
   return planDeploy(loadRegistry(), 'dev').noVerifyJwt.flatMap(({ name }) => {
     if (!/^[a-z0-9_-]+$/.test(name)) throw new Error('Invalid hosted Edge function name');

@@ -13,6 +13,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { IdentityProvider } from '@/lib/identity';
 import { renderWithProviders } from '@/test/render';
 import { BindingsModule } from './bindings';
 import * as apiMod from '@/lib/api';
@@ -417,53 +418,75 @@ describe('BindingsModule', () => {
     });
   });
 
-  // W37 — capability-gating closure for the bindings drawer + condition-builder
-  // modal Save buttons. Same defect class as W35c-2 (review-queue) on a
-  // different surface: every write affordance must gate on the canonical
-  // capability the server RPC asserts (`workflows.write` for
-  // register_workflow_binding_v1). Closes REAUDIT4 WORKFLOWS NEW P1.
-  //
-  // We use a source-grep regression guard (mirrors the W37-PLATFORM pattern)
-  // because the existing 90-test mutation suite already exercises the
-  // positive paths via spy assertions; any future revert that strips
-  // `capability="workflows.write"` from these specific Buttons would fail
-  // this guard at test time without depending on drawer DOM querying.
   describe('W37 capability gating on bindings drawer write affordances', () => {
-    it('every drawer/modal Save-class Button carries capability="workflows.write"', async () => {
-      const fs = await import('node:fs');
-      const path = await import('node:path');
-      const file = path.resolve(__dirname, './bindings.tsx');
-      const src = fs.readFileSync(file, 'utf8');
+    function renderWithWorkflowWrite() {
+      function bindings(canWrite: boolean) {
+        const capabilities = canWrite ? ['workflows.read', 'workflows.write'] : ['workflows.read'];
+        return (
+          <IdentityProvider mockValue={{ capabilities }}>
+            <BindingsModule />
+          </IdentityProvider>
+        );
+      }
 
-      // Helper: extract the `<Button ...>` (or self-closing) opening tag whose
-      // body matches `re` and assert it has a workflows.write capability gate
-      // — either as the string literal (legacy) or the canonical typed
-      // `CAP.WORKFLOWS_WRITE` expression introduced by the Wave 10 codemod.
-      const assertButtonGated = (re: RegExp, _name: string) => {
-        // Match `<Button ... <re> ... />` or `<Button ... <re> ...></Button>`.
-        // We strip the closing `/>` or `>` and only inspect the opening tag.
-        const tagMatches = src.matchAll(/<Button\b([\s\S]*?)\/>/g);
-        const matches = Array.from(tagMatches).filter((m) => re.test(m[1] ?? ''));
-        expect(matches.length).toBeGreaterThan(0);
-        for (const m of matches) {
-          expect(m[1]).toMatch(/capability=(\{CAP\.WORKFLOWS_WRITE\}|"workflows\.write")/);
-        }
-      };
+      // Keep the drawer and modal open when changing the identity's capabilities.
+      const { rerender } = renderWithProviders(bindings(false), { locale: 'en' });
+      return (canWrite: boolean) => rerender(bindings(canWrite));
+    }
 
-      // Drawer Save (condition builder modal footer)
-      assertButtonGated(/label="Save"/, 'Save');
-      // Drawer "Edit condition visually" entry point
-      assertButtonGated(/label="Edit condition visually"/, 'Edit condition visually');
-      // Drawer toggle status button — Cycle E2 (Workflows P1 #4) made the
-      // label canonical-row-driven (`workflow_binding_status.metadata
-      // .toggle_label`). The button now renders dynamically from the
-      // resolved `toggleLabel` variable. Match the canonical shape so the
-      // capability gate stays asserted at compile time.
-      assertButtonGated(/label=\{toggleLabel\}/, 'workflow_binding_status toggle');
-      // Bulk reassign modal footer (label is `Reassign ${rows.length}`)
-      assertButtonGated(/label=\{`Reassign \$\{rows\.length\}`\}/, 'Reassign N');
-      // Header New Binding entry point and matching keyboard shortcut route.
-      assertButtonGated(/label="New binding"/, 'New binding');
+    it('gates New binding, condition editing, and the status toggle on workflows.write', async () => {
+      const user = userEvent.setup();
+      const setWorkflowWrite = renderWithWorkflowWrite();
+      const newBinding = { name: /^New binding\b/ };
+      const editCondition = { name: /^Edit condition visually\b/ };
+      const toggleStatus = { name: /^Disable\b/ };
+
+      expect(await screen.findByRole('button', newBinding)).toBeDisabled();
+      const cards = await screen.findAllByLabelText(/Open binding/i);
+      await user.click(cards[0]!);
+      expect(await screen.findByRole('button', editCondition)).toBeDisabled();
+      expect(screen.getByRole('button', toggleStatus)).toBeDisabled();
+
+      setWorkflowWrite(true);
+      expect(screen.getByRole('button', editCondition)).toBeEnabled();
+      expect(screen.getByRole('button', toggleStatus)).toBeEnabled();
+
+      await user.click(screen.getByRole('button', { name: 'Close' }));
+      expect(await screen.findByRole('button', newBinding)).toBeEnabled();
+    });
+
+    it('gates the condition Save button when workflows.write changes with the modal open', async () => {
+      const user = userEvent.setup();
+      const setWorkflowWrite = renderWithWorkflowWrite();
+      setWorkflowWrite(true);
+      const cards = await screen.findAllByLabelText(/Open binding/i);
+      await user.click(cards[0]!);
+      await user.click(await screen.findByRole('button', { name: /^Edit condition visually$/ }));
+
+      const save = { name: /^Save\b/ };
+      await screen.findByRole('button', save);
+      setWorkflowWrite(false);
+      expect(screen.getByRole('button', save)).toBeDisabled();
+      setWorkflowWrite(true);
+      expect(screen.getByRole('button', save)).toBeEnabled();
+    });
+
+    it('gates the Reassign N button when workflows.write changes with the modal open', async () => {
+      const user = userEvent.setup();
+      const setWorkflowWrite = renderWithWorkflowWrite();
+      const rows = await screen.findAllByRole('checkbox', { name: 'Select row' });
+      await user.click(rows[0]!);
+      const bulkReassign = { name: 'Bulk reassign template' };
+      expect(await screen.findByRole('button', bulkReassign)).toBeDisabled();
+
+      setWorkflowWrite(true);
+      await user.click(screen.getByRole('button', bulkReassign));
+      const reassign = { name: /^Reassign 1\b/ };
+      await screen.findByRole('button', reassign);
+      setWorkflowWrite(false);
+      expect(screen.getByRole('button', reassign)).toBeDisabled();
+      setWorkflowWrite(true);
+      expect(screen.getByRole('button', reassign)).toBeEnabled();
     });
 
     it('keeps failed local preview persistence seed-only', async () => {

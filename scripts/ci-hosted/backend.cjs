@@ -17,6 +17,7 @@ const { isJwtSignedWithSecret } = require('../ops/workspace/edge-db-jwt.js');
 
 const { prepareImages } = require('./images.cjs');
 const { install } = require('./tasks.cjs');
+const { buildSupabaseCliAsset } = require('../ops/ci/supabase-cli-asset.js');
 
 const root = process.cwd();
 const HOSTED_PORT_MIN = 15420;
@@ -40,6 +41,31 @@ async function hostedStackPorts(probe = canBindPort, withMail = false) {
     }
   }
   throw new Error(`Could not find ${withMail ? 'four' : 'three'} free hosted Supabase ports in ${HOSTED_PORT_MIN}-${HOSTED_PORT_MAX}`);
+}
+async function installHostedCli(checked, env, temp, bin) {
+  const asset = buildSupabaseCliAsset({ version: '2.116.0', platform: 'linux', arch: 'amd64' });
+  if (!/^[a-f0-9]{64}$/.test(asset.sha256 || '')) throw new Error('PIN_NEEDED: Supabase CLI archive checksum');
+  const response = await fetch(asset.download_url, { signal: AbortSignal.timeout(120000) });
+  if (!response.ok) throw new Error('Supabase CLI public asset download failed');
+  const archive = Buffer.from(await response.arrayBuffer());
+  if (crypto.createHash('sha256').update(archive).digest('hex') !== asset.sha256) throw new Error('Supabase CLI checksum mismatch');
+  const archivePath = path.join(temp, 'cli.tar.gz');
+  fs.writeFileSync(archivePath, archive, { mode: 0o600 });
+  await checked('tar', ['-xzf', archivePath, '-C', bin, 'supabase'], env);
+  return asset.sha256;
+}
+function writeHostedStackConfig(workdir, project, { shadowPort, apiPort, dbPort }, major, auth, seed = false) {
+  const sb = path.join(workdir, 'supabase');
+  fs.mkdirSync(path.join(sb, 'migrations'), { recursive: true });
+  const config = [
+    `project_id = "${project}"`, '[api]', 'enabled = true', `port = ${apiPort}`, 'schemas = ["api"]',
+    'extra_search_path = ["public", "extensions"]', '[db]', `port = ${dbPort}`,
+    `shadow_port = ${shadowPort}`, `major_version = ${major}`, '[db.seed]', `enabled = ${seed}`,
+    '[studio]', 'enabled = false', '[analytics]', 'enabled = false', '[auth]', 'enabled = true',
+    ...auth, '[storage]', 'enabled = true', '', bucketSections(fs.readFileSync('supabase/config.toml', 'utf8')),
+  ].join('\n');
+  fs.writeFileSync(path.join(sb, 'config.toml'), config, { mode: 0o600 });
+  return config;
 }
 async function disableHostedAutovacuum(databaseUrl, dbPort, admin, db, wait = delay) {
   const target = new URL(databaseUrl);
@@ -127,6 +153,21 @@ async function cloneHostedDatabases(admin, databases, created, restore = admin, 
   } finally {
     await restore('ALTER DATABASE postgres ALLOW_CONNECTIONS true');
   }
+}
+
+function timeHostedCloneCommand(summary, admin, ...commands) {
+  const clone = /^CREATE DATABASE (pgtap_worker_\d+) TEMPLATE /.exec(commands[0]);
+  if (!clone) return admin(...commands);
+  return stage(summary, `database-clone:${clone[1]}`, () => admin(...commands));
+}
+
+function dropHostedDatabases(summary, admin, databases) {
+  return stage(summary, 'database-clone-cleanup', async () => {
+    // Each drop gets its own stage, so a slow drop is visible by name inside the combined cleanup.
+    for (const database of databases) {
+      await stage(summary, `database-clone-drop:${database}`, () => admin(`DROP DATABASE ${database} WITH (FORCE)`));
+    }
+  });
 }
 
 async function withHostedCloneIsolation(admin, restore, clone) {
@@ -275,7 +316,8 @@ async function runHostedShard({ selected, checked, testEnv, admin, summary, dock
   try {
     const [setupResult] = await Promise.allSettled([execute('setup', setup.length ? setup : selected.slice(0, 1), 'postgres', !setup.length)]);
     if (setupResult.status === 'rejected' && !fs.existsSync('ci-reports/pgtap-setup.json')) throw setupResult.reason;
-    const cloneAdmin = (...commands) => admin(Math.min(15000, remaining()), ...commands);
+    const boundedAdmin = (...commands) => admin(Math.min(15000, remaining()), ...commands);
+    const cloneAdmin = (...commands) => timeHostedCloneCommand(summary, boundedAdmin, ...commands);
     const migratedDatabaseBytes = Number((await cloneAdmin("SELECT pg_database_size('postgres')")).trim());
     if (!Number.isSafeInteger(migratedDatabaseBytes) || migratedDatabaseBytes < 1) throw new Error('Could not measure migrated database size');
     summary.migratedDatabaseBytes = migratedDatabaseBytes;
@@ -298,7 +340,7 @@ async function runHostedShard({ selected, checked, testEnv, admin, summary, dock
       diskFloor(dockerRoot);
       results = await Promise.allSettled(workers.map((files, index) => execute(`worker-${index}`, files, index === 0 ? 'postgres' : databases[index - 1])));
     } finally {
-      if (created.length) await admin(15000, ...created.map(database => `DROP DATABASE ${database} WITH (FORCE)`));
+      if (created.length) await dropHostedDatabases(summary, boundedAdmin, created);
     }
     // Shared state and database catalog assertions see only the canonical database and no concurrent tests.
     const [serialResult] = await Promise.allSettled([execute('worker-0-serial', serial)]);
@@ -409,7 +451,7 @@ async function imageGuard(pins, file, env, initContainer) {
   fs.writeFileSync(file, JSON.stringify(pins), { mode: 0o600 });
   const args = [file, host.slice(7), policyFile];
   if (initContainer) args.push(initContainer);
-  const child = fork('scripts/ci-hosted/docker-images.cjs', args, { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  const child = fork(path.join(__dirname, 'docker-images.cjs'), args, { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
   try {
     const port = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Digest guard startup timed out')), 10000);
@@ -423,7 +465,7 @@ async function imageGuard(pins, file, env, initContainer) {
 }
 async function verifyHostedDatabaseInit(checked, env, container) {
   const pid1 = (await checked('docker', ['exec', container, 'cat', '/proc/1/comm'], env, 10000, { quiet: true })).trim();
-  if (pid1 !== 'docker-init') throw new Error('Hosted pgTAP database requires docker-init as PID 1');
+  if (pid1 !== 'docker-init') throw new Error('Hosted database requires docker-init as PID 1');
   return pid1;
 }
 async function backendLint(summary, commands, execute, file = 'ci-reports/db-lint.json') {
@@ -453,6 +495,7 @@ async function qualify(diagnostic) {
   diagnostic.imagePolicy = { mode: pinState.qualificationOnly ? 'qualification-only' : 'digest-pinned', decision: 'not_started', allowed: 0, denied: 0, denials: [] };
   if (process.argv[2] === 'preflight') return;
   const shard = process.env.PGTAP_SHARD;
+  const nightlyNetwork = process.env.NIGHTLY_DOCKER_NETWORK;
   const disposableShard = isHostedPgtap(process.env);
   if (disposableShard && pinState.qualificationOnly) throw new Error('Hosted pgTAP database init requires the digest-pinned Docker guard');
   const useDatabaseInit = !pinState.qualificationOnly && needsHostedDatabaseInit(process.env);
@@ -462,7 +505,7 @@ async function qualify(diagnostic) {
   }
   const workers = process.env.PGTAP_WORKERS || 'nproc';
   if (disposableShard) hostedWorkerLimit(workers, PGTAP_WORKER_CAP);
-  const selected = shard ? shardFiles(fs.readdirSync('supabase/tests/pgtap'), shard) : undefined;
+  const selected = shard ? shardFiles(fs.readdirSync('supabase/tests/pgtap'), shard, { hosted: disposableShard }) : undefined;
   if (shard && fs.existsSync('supabase/tests/pgtap/.pgtap-skip.json')) {
     const skip = JSON.parse(fs.readFileSync('supabase/tests/pgtap/.pgtap-skip.json', 'utf8'));
     if (!Array.isArray(skip) || skip.length) throw new Error('pgTAP shards cannot use a malformed/nonempty skip list');
@@ -471,7 +514,6 @@ async function qualify(diagnostic) {
   diagnostic.stage = 'local-contracts';
   // Reuse the existing loopback, version, client-image and full-pgTAP contracts.
   const local = require('../ops/ci/cloud-pool-db-local.js');
-  const { buildSupabaseCliAsset } = require('../ops/ci/supabase-cli-asset.js');
   const { major } = local.readSupabaseConfig();
   const lane = local.loadLaneConfig();
   if (String(major) !== String(lane.psqlClientMajor)) throw new Error('Postgres/psql major mismatch');
@@ -492,7 +534,15 @@ async function qualify(diagnostic) {
     serviceImagePins: pinState.qualificationOnly ? 'PIN_NEEDED' : 'resolved SHA-256 indices', imageQualificationOnly: pinState.qualificationOnly, ok: false };
   fs.mkdirSync('ci-reports', { recursive: true });
   const logFile = `ci-reports/${reportName}.log`;
-  const checked = (command, args, commandEnv, timeout, options = {}) => run(command, args, { env: commandEnv, timeout, logFile, ...options });
+  const checked = async (command, args, commandEnv, timeout, options = {}) => {
+    const settings = { env: commandEnv, timeout, logFile, ...options };
+    if (!nightlyNetwork || command !== cli || args[0] !== 'start') return run(command, args, settings);
+    const { checkDockerBindings, checkFixtureNetwork } = require('../ci/nightly-local.cjs');
+    checkFixtureNetwork(nightlyNetwork);
+    const output = await run(command, ['--network-id', nightlyNetwork, ...args], settings);
+    checkDockerBindings(project);
+    return output;
+  };
   const timed = (name, action) => { diagnostic.stage = name; return stage(summary, name, action); };
   try {
     diagnostic.stage = 'docker-preflight';
@@ -504,7 +554,8 @@ async function qualify(diagnostic) {
     }
     diagnostic.stage = 'prepare-inputs';
     const [dependencies, images] = await Promise.allSettled([
-      stage(summary, 'npm-install', () => install((command, args) => checked(command, args, env, undefined, { logPrefix: '[npm] ' }))),
+      nightlyNetwork ? undefined : stage(summary, 'npm-install', () =>
+        install((command, args) => checked(command, args, env, undefined, { logPrefix: '[npm] ' }))),
       pinState.qualificationOnly ? undefined : stage(summary, 'image-pulls', () => prepareImages(pins, {
         env, checked, timed: (name, action) => stage(summary, name, action), summary, dockerRoot, logFile, checkDisk: () => diskFloor(dockerRoot),
       })),
@@ -524,20 +575,10 @@ async function qualify(diagnostic) {
       cliEnv = guard.env;
     }
     diagnostic.stage = 'cli-download';
-    const asset = buildSupabaseCliAsset({ version: '2.116.0', platform: 'linux', arch: 'amd64' });
-    if (!/^[a-f0-9]{64}$/.test(asset.sha256 || '')) throw new Error('PIN_NEEDED: Supabase CLI archive checksum');
-    const response = await fetch(asset.download_url, { signal: AbortSignal.timeout(120000) });
-    if (!response.ok) throw new Error('Supabase CLI public asset download failed');
-    const archive = Buffer.from(await response.arrayBuffer());
-    if (crypto.createHash('sha256').update(archive).digest('hex') !== asset.sha256) throw new Error('Supabase CLI checksum mismatch');
-    const archivePath = path.join(temp, 'cli.tar.gz');
-    fs.writeFileSync(archivePath, archive, { mode: 0o600 });
-    await checked('tar', ['-xzf', archivePath, '-C', bin, 'supabase'], env);
+    await installHostedCli(checked, env, temp, bin);
     env.SUPABASE_CLI_BIN = cli;
     // This workdir owns an empty DB. No remote profiles, seed files or cached schema are copied.
     const sb = path.join(temp, 'supabase');
-    fs.mkdirSync(sb);
-    fs.mkdirSync(path.join(sb, 'migrations'));
     diagnostic.stage = 'stack-configuration';
     if (disposableShard) {
       await timed('edge-preparation', async () => {
@@ -546,32 +587,24 @@ async function qualify(diagnostic) {
         fs.cpSync('supabase/functions', path.join(sb, 'functions'), { recursive: true });
       });
     }
-    const originalConfig = fs.readFileSync('supabase/config.toml', 'utf8');
-    const buckets = bucketSections(originalConfig);
     summary.stackPorts = await hostedStackPorts(canBindPort, disposableShard);
-    const { shadowPort, apiPort, dbPort, mailPort } = summary.stackPorts;
+    const { apiPort, dbPort, mailPort } = summary.stackPorts;
     const edge = disposableShard ? integrationEdgeEnvironment(apiPort) : undefined;
     if (edge) {
       // PostgREST needs the empty schema for startup, before the tracked migrations replay.
-      fs.writeFileSync(path.join(sb, 'ci-api-bootstrap.sql'), 'CREATE SCHEMA IF NOT EXISTS api;\n', { mode: 0o600 });
+      fs.writeFileSync(path.join(sb, 'seed.sql'), 'CREATE SCHEMA IF NOT EXISTS api;\n', { mode: 0o600 });
       Object.assign(env, edge.vars);
       // The Edge worker reaches Kong on the stack network.
       cliEnv = { ...cliEnv, ...edge.vars, EDGE_SUPABASE_URL: 'http://kong:8000',
         SUPABASE_AUTH_JWT_SECRET: edge.jwtSecret };
     }
-    fs.writeFileSync(path.join(sb, 'config.toml'), [
-      `project_id = "${project}"`, '[api]', 'enabled = true', `port = ${apiPort}`, 'schemas = ["api"]',
-      'extra_search_path = ["public", "extensions"]', '[db]', `port = ${dbPort}`,
-      `shadow_port = ${shadowPort}`, `major_version = ${major}`, '[db.seed]',
-      ...(edge ? ['enabled = true', 'sql_paths = ["./ci-api-bootstrap.sql"]'] : ['enabled = false']),
-      '[studio]', 'enabled = false', '[analytics]', 'enabled = false', '[auth]', 'enabled = true',
+    writeHostedStackConfig(temp, project, summary.stackPorts, major, [
       'site_url = "http://127.0.0.1:3001"',
       ...(edge ? ['jwt_secret = "env(SUPABASE_AUTH_JWT_SECRET)"',
         '[edge_runtime]', 'enabled = true', 'policy = "per_worker"', 'deno_version = 2',
         '[edge_runtime.secrets]', ...Object.keys(edge.vars).map(name => `${name} = "env(${name})"`),
         ...integrationFunctionConfig(), '[local_smtp]', 'enabled = true', `port = ${mailPort}`] : []),
-      '[storage]', 'enabled = true', '', buckets,
-    ].join('\n'), { mode: 0o600 });
+    ], Boolean(edge));
     diagnostic.stage = 'stack-start';
     started = true; // A partial start must also be stopped.
     const exclude = lane.exclude.filter(service => !edge || !Object.hasOwn(integrationImages, service)).join(',');
@@ -684,7 +717,7 @@ async function qualify(diagnostic) {
         $fixture$`);
       }
       const databasePin = pins.find(pin => pin.role === 'database');
-      local.writePsqlWrapper(bin, databasePin.runtimeId);
+      local.writePsqlWrapper(bin, databasePin.runtimeId, { rootless: Boolean(nightlyNetwork) });
       const testEnv = shardEnvironment(env, local.loadBackendLocalPgtapEnv(), project, dbPort, selected);
       diskFloor(dockerRoot);
       summary.pgtap = 'running';
@@ -802,4 +835,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, withHostedCloneIsolation, pgtapDeadline };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, installHostedCli, writeHostedStackConfig, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, timeHostedCloneCommand, dropHostedDatabases, withHostedCloneIsolation, pgtapDeadline };

@@ -4,6 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { readSharedUiTokenCss } = require('../../scripts/frontend/landing-shared-tokens');
 
 const ROOT = path.join(__dirname, '..', '..');
 const TEXT = 4.5;
@@ -24,8 +25,8 @@ function readBlock(css, selector) {
 }
 
 // Each theme is the cascade of its selectors, later blocks winning.
-function loadTheme(file, selectors) {
-  const css = fs.readFileSync(path.join(ROOT, file), 'utf8');
+function loadTheme(file, selectors, prefix = '') {
+  const css = prefix + fs.readFileSync(path.join(ROOT, file), 'utf8');
   return Object.assign({}, ...selectors.map((s) => readBlock(css, s)));
 }
 
@@ -47,11 +48,24 @@ function oklchToRgb(l, c, h) {
   return lin.map((v) => clamp01(linearToSrgb(v)) * 255);
 }
 
+// A token every reference needs; a missing one fails with its name, never a fallback.
+function lookup(name, vars) {
+  if (vars[name] === undefined) throw new Error(`unknown token: ${name}`);
+  return vars[name];
+}
+
 // Returns [r, g, b, alpha] in 0-255 / 0-1.
 function parseColor(raw, vars) {
   const value = raw.replace(/\/\*.*?\*\//g, '').trim();
   const ref = value.match(/^var\((--[\w-]+)\)$/);
-  if (ref) return parseColor(vars[ref[1]], vars);
+  if (ref) return parseColor(lookup(ref[1], vars), vars);
+  // rgb(var(--ui-*)): an alias of a shared UI RGB channel triplet (#162).
+  const alias = value.match(/^rgb\(\s*var\((--[\w-]+)\)\s*\)$/);
+  if (alias) {
+    const triplet = lookup(alias[1], vars).trim();
+    if (!/^[\d.]+\s+[\d.]+\s+[\d.]+$/.test(triplet)) throw new Error(`not an RGB channel triplet: ${alias[1]}`);
+    return parseColor(triplet, vars);
+  }
   let m = value.match(/^#([0-9a-f]{6})$/i);
   if (m) return [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16)).concat(1);
   m = value.match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+))?\s*\)$/);
@@ -76,7 +90,7 @@ function contrast(a, b) {
 // A color spec is a token name, optionally with `@alpha` for a tint, painted over `base` tokens.
 function resolve(spec, vars, base) {
   const [name, alpha] = spec.split('@');
-  const color = parseColor(vars[name] ?? name, vars);
+  const color = parseColor(name.startsWith('--') ? lookup(name, vars) : name, vars);
   const rgba = alpha === undefined ? color : [...color.slice(0, 3), +alpha];
   if (rgba[3] >= 1) return rgba.slice(0, 3);
   return over(rgba, base.length ? resolve(base[0], vars, base.slice(1)) : [255, 255, 255]);
@@ -127,9 +141,11 @@ const SURFACES = [
   {
     name: 'landing and public tracking',
     file: 'docs/marketing/landing-v2/app.css',
+    // The landing build prepends the shared --ui-* blocks to app.css; read the same text.
+    prefix: readSharedUiTokenCss(ROOT),
     themes: {
-      light: [':root', 'html[data-variant="ai"]', 'html[data-theme="light"]'],
-      dark: [':root', 'html[data-variant="ai"]', 'html[data-theme="dark"]'],
+      light: ['html', ':root', 'html[data-variant="ai"]', 'html[data-theme="light"]'],
+      dark: ['html', ':root', ':root[data-theme="dark"]', 'html[data-variant="ai"]', 'html[data-theme="dark"]'],
     },
     pairs: [
       ['--text', ['--bg'], TEXT, 'body text'],
@@ -138,13 +154,16 @@ const SURFACES = [
       ['--muted', ['--surface', '--bg'], TEXT, 'secondary card text'],
       ['--muted', ['--surface-strong'], TEXT, 'secondary text on solid surface'],
       ['--btn-primary-text', ['--brand'], TEXT, 'primary button'],
+      ['--brand-text', ['--surface', '--bg'], TEXT, 'brand text on card (#423)'],
+      ['--brand-text', ['--brand@0.03', '--surface', '--bg'], TEXT, 'brand heading on highlighted card (#423)'],
+      ['--brand-text', ['--surface-strong'], TEXT, 'brand text on solid surface'],
     ],
   },
 ];
 
 const cases = SURFACES.flatMap((s) =>
   Object.entries(s.themes).flatMap(([theme, selectors]) => {
-    const vars = loadTheme(s.file, selectors);
+    const vars = loadTheme(s.file, selectors, s.prefix);
     return s.pairs.map(([fg, bg, min, use]) => {
       const bgRgb = resolve(bg[0], vars, bg.slice(1));
       const ratio = contrast(resolve(fg, vars, bg), bgRgb);
@@ -158,6 +177,13 @@ describe('design token contrast (WCAG 2.2 AA)', () => {
     expect(contrast([0, 0, 0], [255, 255, 255])).toBeCloseTo(21, 5);
     expect(oklchToRgb(1, 0, 0).map(Math.round)).toEqual([255, 255, 255]);
     expect(oklchToRgb(0.6279554, 0.2576833, 29.2338851).map(Math.round)).toEqual([255, 0, 0]);
+  });
+
+  test('an rgb(var()) alias resolves and a missing one fails with its name', () => {
+    const vars = { '--ui-paper': '250 251 254', '--bg': 'rgb(var(--ui-paper))', '--lost': 'rgb(var(--ui-missing))' };
+    expect(resolve('--bg', vars, [])).toEqual([250, 251, 254]);
+    expect(() => resolve('--lost', vars, [])).toThrow('unknown token: --ui-missing');
+    expect(() => resolve('--absent', vars, [])).toThrow('unknown token: --absent');
   });
 
   test.each(cases.map((c) => [c.label, c]))('%s', (_label, { ratio, min }) => {

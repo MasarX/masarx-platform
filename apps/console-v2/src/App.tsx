@@ -4,7 +4,7 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { routeTree } from './routeTree.gen';
-import { I18nProvider, TenantTimeZoneSync } from './lib/i18n';
+import { I18nProvider, TenantTimeZoneSync, useI18n } from './lib/i18n';
 import { IdentityProvider } from '@/lib/identity';
 import { ThemeProvider } from './lib/theme';
 import { ToastRoot } from './shell/ToastRoot';
@@ -12,6 +12,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { StateView } from './components/StateView';
 import { Button } from './components/Button';
 import { resolveLegacyConsoleRoute } from './lib/legacy-routes';
+import { RouteError } from './shell/RouteError';
 
 // One QueryClient for the whole app. Defaults match the AGENTS.md "row-driven" mandate:
 // staleTime=30s so resolved settings/decision_log don't thrash; retry=1 so RLS denials surface fast.
@@ -32,6 +33,7 @@ const queryClient = new QueryClient({
 function LegacyAwareNotFound() {
   const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
   const target = resolveLegacyConsoleRoute(pathname);
+  const { t } = useI18n();
 
   useEffect(() => {
     if (!target) return;
@@ -43,8 +45,8 @@ function LegacyAwareNotFound() {
       <div className="page" style={{ padding: '24px' }}>
         <StateView
           kind="loading"
-          title="Opening Console V2 workbench"
-          hint="This compatibility route now resolves to the canonical Console V2 module."
+          title={t('route.redirectTitle')}
+          hint={t('route.redirectHint')}
         />
       </div>
     );
@@ -54,9 +56,9 @@ function LegacyAwareNotFound() {
     <div className="page" style={{ padding: '24px' }}>
       <StateView
         kind="empty"
-        title="Page not found"
-        hint="The page you tried to open does not exist. Use the command palette or the sidebar to jump to a known module."
-        action={<Button label="Back to dashboard" iconName="home" kind="primary" onClick={() => { void router.navigate({ to: '/' }); }} />}
+        title={t('route.notFoundTitle')}
+        hint={t('route.notFoundHint')}
+        action={<Button label={t('route.backToDashboard')} iconName="home" kind="primary" onClick={() => { void router.navigate({ to: '/' }); }} />}
       />
     </div>
   );
@@ -68,16 +70,7 @@ const router = createRouter({
   defaultPreloadStaleTime: 0,
   context: { queryClient },
   defaultNotFoundComponent: LegacyAwareNotFound,
-  defaultErrorComponent: ({ error, reset }) => (
-    <div className="page" style={{ padding: '24px' }}>
-      <StateView
-        kind="error"
-        title="This page failed to load"
-        hint={error instanceof Error && error.message ? error.message : 'An error occurred rendering this route.'}
-        action={<Button label="Retry" iconName="refresh" kind="primary" onClick={reset} />}
-      />
-    </div>
-  ),
+  defaultErrorComponent: RouteError,
 });
 
 declare module '@tanstack/react-router' {
