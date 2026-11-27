@@ -112,14 +112,18 @@ function readback(parcelStatus: string, photoStatus: string): MobileV2StopDetail
   );
 }
 
-function renderStop(stop: MobileV2StopDetail, handlers: { onScanParcel?: () => void; onProofPress?: (key: string) => void } = {}) {
+function renderStop(
+  stop: MobileV2StopDetail,
+  handlers: { onScanParcel?: () => void; onProofPress?: (key: string) => void; locale?: string } = {},
+) {
   const { MobileV2StopScreen } =
     require("../../../apps/fieldops/src/mobile-v2-stop-screen") as typeof import("../../../apps/fieldops/src/mobile-v2-stop-screen");
   return collectNodeProps(MobileV2StopScreen({ theme: MOBILE_V2_THEMES.hivis, stop, ...handlers }));
 }
 
+// A proof tap opens capture, so the row is a button whose label carries the read-back status.
 function proofRow(nodes: NodeProps[]): NodeProps | undefined {
-  return nodes.find((n) => n.accessibilityRole === "checkbox" && n.accessibilityLabel === "Capture photo at door");
+  return nodes.find((n) => n.accessibilityLabel?.startsWith("Capture photo at door, ") === true);
 }
 
 describe("MobileV2StopScreen parcel and proof status (#602)", () => {
@@ -132,14 +136,32 @@ describe("MobileV2StopScreen parcel and proof status (#602)", () => {
     const nodes = renderStop(readback("pending", "pending"));
 
     expect(nodes.map((n) => n.accessibilityLabel)).toContain("Parcel TEST-BOX-01 pending");
-    expect(proofRow(nodes)?.accessibilityState?.checked).toBe(false);
+    expect(proofRow(nodes)).toMatchObject({ accessibilityRole: "button", accessibilityLabel: "Capture photo at door, Pending" });
+    expect(proofRow(nodes)?.accessibilityState?.checked).toBeUndefined();
   });
 
   test("shows scanned parcel and done proof from the server read-back", () => {
     const nodes = renderStop(readback("scanned", "done"));
 
     expect(nodes.map((n) => n.accessibilityLabel)).toContain("Parcel TEST-BOX-01 scanned");
-    expect(proofRow(nodes)?.accessibilityState?.checked).toBe(true);
+    expect(proofRow(nodes)).toMatchObject({ accessibilityRole: "button", accessibilityLabel: "Capture photo at door, Done" });
+    expect(proofRow(nodes)?.accessibilityState?.checked).toBeUndefined();
+  });
+
+  test("proof row status in the accessible label follows the locale", () => {
+    const { AR_STRINGS } = require("../../../apps/fieldops/src/i18n") as typeof import("../../../apps/fieldops/src/i18n");
+    const labels = (status: string) =>
+      renderStop(readback("pending", status), { locale: "ar-SA" }).map((n) => n.accessibilityLabel);
+
+    expect(labels("pending")).toContain(`Capture photo at door, ${AR_STRINGS.home.counter_pending}`);
+    expect(labels("done")).toContain(`Capture photo at door, ${AR_STRINGS.home.counter_done}`);
+  });
+
+  test("parcel rows are buttons without a checked state", () => {
+    const parcel = renderStop(readback("scanned", "done")).find((n) => n.accessibilityLabel === "Parcel TEST-BOX-01 scanned");
+
+    expect(parcel?.accessibilityRole).toBe("button");
+    expect(parcel?.accessibilityState?.checked).toBeUndefined();
   });
 
   test("a proof tap hands the key to the capture path and leaves status to the read-back", () => {
@@ -150,7 +172,7 @@ describe("MobileV2StopScreen parcel and proof status (#602)", () => {
     row?.onPress?.();
 
     expect(onProofPress).toHaveBeenCalledWith("photo");
-    expect(proofRow(renderStop(stop, { onProofPress }))?.accessibilityState?.checked).toBe(false);
+    expect(proofRow(renderStop(stop, { onProofPress }))?.accessibilityLabel).toBe("Capture photo at door, Pending");
   });
 });
 

@@ -6162,6 +6162,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
           <MobileV2StopScreen
             theme={ctx.theme}
             stop={liveStop}
+            locale={ctx.locale}
             locationReadback={activeStopLocationReadback}
             terminalState={activeStopTerminalState}
             intentReadback={routeIntentReadback}
