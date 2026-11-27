@@ -188,6 +188,8 @@ DO $$
 DECLARE
   v_org_id UUID := gen_random_uuid();
   v_user_id UUID := gen_random_uuid();
+  v_loader_id UUID := gen_random_uuid();
+  v_supervisor_id UUID := gen_random_uuid();
   v_client_id UUID := gen_random_uuid();
   v_sender_id UUID := gen_random_uuid();
   v_branch_id UUID := gen_random_uuid();
@@ -206,7 +208,6 @@ DECLARE
   v_driver_count INT;
   v_loader_count INT;
   v_supervisor_count INT;
-  v_unknown_count INT;
   v_first_task RECORD;
   v_driver_pickup_task RECORD;
 BEGIN
@@ -222,6 +223,19 @@ BEGIN
   INSERT INTO public.users (id, organization_id, email, full_name, status)
   VALUES (v_user_id, v_org_id, 'pgtap-tasks-' || substr(v_user_id::text, 1, 8) || '@example.test', 'pgTAP tasks user', 'active')
   ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.users (id, organization_id, email, full_name, user_type, status)
+  VALUES (v_loader_id, v_org_id, v_loader_id || '@example.test', 'Loader fixture', 'warehouse_operator', 'active'),
+         (v_supervisor_id, v_org_id, v_supervisor_id || '@example.test', 'Supervisor fixture', 'ops_admin', 'active');
+  PERFORM public.provision_rbac_roles_from_templates_v1(v_org_id, ARRAY['warehouse_operator'], v_loader_id);
+  INSERT INTO public.rbac_roles (organization_id, key, name)
+  VALUES (v_org_id, 'supervisor', 'Supervisor');
+  INSERT INTO public.rbac_user_role_assignments (organization_id, user_id, role_id)
+  SELECT v_org_id, actor.user_id, r.id
+  FROM (VALUES (v_loader_id, 'warehouse_operator'), (v_supervisor_id, 'supervisor')) actor(user_id, role_key)
+  JOIN public.rbac_roles r ON r.organization_id = v_org_id AND r.key = actor.role_key;
+  INSERT INTO public.mobile_v2_active_role (user_id, organization_id, role_key)
+  VALUES (v_loader_id, v_org_id, 'loader'), (v_supervisor_id, v_org_id, 'supervisor');
 
   INSERT INTO public.clients (id, organization_id, name, slug, status)
   VALUES (v_client_id, v_org_id, 'pgTAP tasks client', 'pgtap-tasks-client-' || substr(v_client_id::text, 1, 8), 'active')
@@ -401,21 +415,25 @@ BEGIN
   );
 
   -- (d4) Loader sees the org-wide pickup stop
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_loader_id)::text, TRUE);
   SELECT COUNT(*) INTO v_loader_count
     FROM public.resolve_fieldops_tasks_v1('loader', '{}'::jsonb) t
    WHERE t.task_id = 'stop:' || v_pickup_stop_id::text;
   PERFORM ok(v_loader_count = 1, 'loader sees pickup stop');
 
   -- (d5) Supervisor sees pending_review run
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_supervisor_id)::text, TRUE);
   SELECT COUNT(*) INTO v_supervisor_count
     FROM public.resolve_fieldops_tasks_v1('supervisor', '{}'::jsonb) t
    WHERE t.task_id = 'run:' || v_review_run_id::text;
   PERFORM ok(v_supervisor_count = 1, 'supervisor sees pending_review run');
 
-  -- (d6) Unknown role returns no rows (no exception)
-  SELECT COUNT(*) INTO v_unknown_count
-    FROM public.resolve_fieldops_tasks_v1('unknown_role_xyz', '{}'::jsonb);
-  PERFORM ok(v_unknown_count = 0, 'unknown role returns 0 rows (no raise)');
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_user_id)::text, TRUE);
+  -- (d6) Invalid role is denied.
+  PERFORM throws_ok(
+    'SELECT public.resolve_fieldops_tasks_v1(''unknown_role_xyz'', ''{}''::jsonb)',
+    '42501', NULL, 'unknown role is denied'
+  );
 
   -- (d7) p_active_role default is 'driver' (whitespace trimmed + lowercased)
   SELECT COUNT(*) INTO v_driver_count

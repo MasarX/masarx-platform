@@ -62,6 +62,7 @@ DO $$
 DECLARE
   v_org_id UUID := gen_random_uuid();
   v_driver_id UUID := gen_random_uuid();
+  v_loader_id UUID := gen_random_uuid();
   v_other_driver_id UUID := gen_random_uuid();
   v_client_id UUID := gen_random_uuid();
   v_sender_id UUID := gen_random_uuid();
@@ -119,6 +120,15 @@ BEGIN
    WHERE r.organization_id = v_org_id
      AND r.key = 'driver'
   ON CONFLICT DO NOTHING;
+
+  INSERT INTO public.users (id, organization_id, email, full_name, user_type, status)
+  VALUES (v_loader_id, v_org_id, v_loader_id || '@example.test', 'Loader fixture', 'warehouse_operator', 'active');
+  PERFORM public.provision_rbac_roles_from_templates_v1(v_org_id, ARRAY['warehouse_operator'], v_loader_id);
+  INSERT INTO public.rbac_user_role_assignments (organization_id, user_id, role_id)
+  SELECT v_org_id, v_loader_id, id FROM public.rbac_roles
+  WHERE organization_id = v_org_id AND key = 'warehouse_operator';
+  INSERT INTO public.mobile_v2_active_role (user_id, organization_id, role_key)
+  VALUES (v_loader_id, v_org_id, 'loader');
 
   INSERT INTO public.branches (id, organization_id, name, code, branch_type, timezone, is_active)
   VALUES (v_branch_id, v_org_id, 'Branch', 'pgt-b-' || substr(v_branch_id::text, 1, 8), 'primary', 'Asia/Riyadh', TRUE)
@@ -208,10 +218,13 @@ BEGIN
   PERFORM ok(v_count_driver = 0, 'driver does NOT see delivery stops (only pickup stop_kind)');
 
   -- Loader sees ALL pickup stops org-wide
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_loader_id)::text, TRUE);
   SELECT COUNT(*) INTO v_count_loader
     FROM public.resolve_fieldops_pickups_v1('loader', '{}'::jsonb) t
     WHERE t.task_id IN ('pickup:' || v_pickup_stop_driver::text, 'pickup:' || v_pickup_stop_other::text);
   PERFORM ok(v_count_loader = 2, 'loader sees ALL org pickup stops (both drivers)');
+
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_driver_id)::text, TRUE);
 
   -- Envelope shape: code, type, route, action are correct
   PERFORM ok(
