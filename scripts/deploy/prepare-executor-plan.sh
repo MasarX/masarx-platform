@@ -9,7 +9,7 @@ refuse() {
 # Resolve the migration by suffix so a rename-only re-stamp needs no script change.
 shopt -s nullglob
 planner_fix=(supabase/migrations/*_executor_partition_write_plan_v1.sql)
-[[ ${#planner_fix[@]} == 1 && -n "${SUPABASE_DB_PASSWORD:-}" ]] || refuse
+[[ "${DEPLOY_ENV:-}" == dev && ${#planner_fix[@]} == 1 && -n "${SUPABASE_DB_PASSWORD:-}" ]] || refuse
 
 # Reuse the pinned CLI's session-pooler link without passing connection secrets in argv.
 pooler="$(node 2>/dev/null <<'NODE'
