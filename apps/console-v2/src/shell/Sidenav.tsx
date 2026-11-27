@@ -100,7 +100,7 @@ export function Sidenav({ pinned, onTogglePin, onHoverGroup, onOpenGroup }: Side
   }, [pinned, onHoverGroup]);
 
   return (
-    <aside className="sidenav" role="navigation" aria-label="Primary">
+    <aside id="primary-nav" className="sidenav" role="navigation" aria-label="Primary">
       <div className="sidenav__pin">
         <button
           className="icon-btn sidenav__pin-btn"
