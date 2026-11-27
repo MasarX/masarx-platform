@@ -4,7 +4,7 @@ test('hosted pgTAP creates worker clones using WAL_LOG', async () => {
   const admin = jest.fn()
     .mockResolvedValueOnce(JSON.stringify({ owner: 'fixture_owner', limit: -1, explicitAcl: false }))
     .mockResolvedValueOnce('')
-    .mockResolvedValueOnce('t')
+    .mockResolvedValueOnce('0')
     .mockResolvedValueOnce('')
     .mockResolvedValueOnce('[]')
     .mockResolvedValueOnce('');

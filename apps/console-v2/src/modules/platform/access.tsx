@@ -58,7 +58,7 @@ import {
 import { pushToast } from '@/components/toastStore';
 import { CapabilityEvalDrilldown } from '@/components/CapabilityEvalDrilldown';
 import { readAuthorizedConsoleScopeOverride } from '@/lib/scope-url';
-import { fill, useI18n, type Translate } from '@/lib/i18n';
+import { fill, useI18n, useT, type Translate } from '@/lib/i18n';
 
 interface PolicyCapability {
   key: string;
@@ -549,7 +549,7 @@ function accessTabs(t: Translate): Array<{ key: AccessTabKey; label: string }> {
 // -----------------------------------------------------------------------------
 
 export function AccessModule() {
-  const { t } = useI18n();
+  const t = useT();
   const { user, scope, capabilities, hasCapability } = useIdentity();
   const myCaps = useMemo(() => new Set(capabilities), [capabilities]);
   const modal = useModal();
@@ -768,7 +768,7 @@ export function AccessModule() {
     modal.open({
       title: (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-          {fill(t('platformAccess.accessModule.requestAccess'), { value: String(formatCapabilityLabel(cap, { titleCase: true })) })}
+          {fill(t('platformAccess.accessModule.requestAccess'), { value: formatCapabilityLabel(cap, { titleCase: true }, t) })}
         </span>
       ),
       body: (
@@ -858,7 +858,7 @@ export function AccessModule() {
                       return;
                     }
                     setAccessRequestEvidence(readback);
-                    pushToast(fill(t('platformAccess.accessModule.accessRequestSubmitted'), { value: String(formatCapabilityTitle(cap)) }), 'good');
+                    pushToast(fill(t('platformAccess.accessModule.accessRequestSubmitted'), { value: formatCapabilityTitle(cap, t) }), 'good');
                     modal.close();
                   },
                   onError: () => pushToast(t('platformAccess.accessModule.accessRequestCouldNot'), 'danger'),
@@ -1892,14 +1892,14 @@ export function AccessModule() {
                       <td>{accessResourceLabel(key)}</td>
                       <td>
                         <Chip
-                          label={r ? formatCapabilityLabel(r, { titleCase: true }) : t('platformAccess.accessModule.notAvailable')}
+                          label={r ? formatCapabilityLabel(r, { titleCase: true }, t) : t('platformAccess.accessModule.notAvailable')}
                           kind={rOk ? 'good' : 'warn'}
                           size="xs"
                         />
                       </td>
                       <td>
                         <Chip
-                          label={w ? formatCapabilityLabel(w, { titleCase: true }) : t('platformAccess.accessModule.notAvailable')}
+                          label={w ? formatCapabilityLabel(w, { titleCase: true }, t) : t('platformAccess.accessModule.notAvailable')}
                           kind={wOk ? 'good' : 'warn'}
                           size="xs"
                         />
@@ -2040,7 +2040,7 @@ export function AccessModule() {
           )}
           {!canApprove ? (
             <p className="state__hint" style={{ padding: '0 16px 16px' }}>
-              {fill(t('platformAccess.accessModule.roleChangesRequire'), { value: String(formatCapabilityRequirement(CAP.ACCESS_POLICY_APPROVE)) })}
+              {fill(t('platformAccess.accessModule.roleChangesRequire'), { value: formatCapabilityRequirement(CAP.ACCESS_POLICY_APPROVE, t) })}
             </p>
           ) : null}
         </div>

@@ -1370,15 +1370,6 @@ function SignupDrawerBody({
           kind="primary"
           capability={CAP.TENANT_SIGNUP_REQUESTS_REVIEW}
           disabled={!canReview || reviewed || pending}
-          onPointerDown={(event) => {
-            if (event.pointerType !== 'mouse' && event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
-            event.preventDefault();
-            runApprove();
-          }}
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runApprove();
-          }}
           onClick={runApprove}
         />
         <Button

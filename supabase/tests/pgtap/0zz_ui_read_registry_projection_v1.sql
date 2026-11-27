@@ -114,7 +114,9 @@ DECLARE
   v_device UUID := gen_random_uuid(); v_signup UUID := gen_random_uuid();
   v_webhook UUID := gen_random_uuid(); v_own UUID := gen_random_uuid();
   v_foreign UUID := gen_random_uuid(); v_secret UUID;
-  v_marker TEXT := 'QA-UI-PROJECTION-SECRET-' || gen_random_uuid();
+  v_marker_prefix TEXT := 'QA-PROJECTION-FIXTURE-' || v_org::TEXT || '-';
+  v_marker TEXT := v_marker_prefix || 'value';
+  v_marker_filter TEXT := v_marker_prefix || '%';
   v_registry JSONB; v_resource JSONB; v_policy JSONB; v_global_policy JSONB; v_schema INTEGER;
   v_role_key TEXT := 'qa_projection_' || replace(gen_random_uuid()::TEXT, '-', '');
   v_detail JSONB; v_list JSONB; v_expected TEXT[]; v_case RECORD; v_bad JSONB;
@@ -307,15 +309,15 @@ BEGIN
     'distinct values fail closed for a declared filter outside the allowed projection');
 
   FOR v_case IN SELECT * FROM (VALUES
-    ('{"hidden_secret":"QA-UI-PROJECTION-SECRET-%"}'::JSONB,'flat ilike'),
-    ('{"hidden_secret":["QA-UI-PROJECTION-SECRET-%"]}'::JSONB,'flat array ilike'),
-    ('{" hidden_secret ":"QA-UI-PROJECTION-SECRET-%"}'::JSONB,'trimmed flat alias'),
-    ('{"rules":[{"key":"hidden_secret","op":"ilike","value":"QA-UI-PROJECTION-SECRET-%"}]}'::JSONB,'tree ilike'),
-    ('{"op":"or","rules":[{"key":"safe_name","value":"Own row"},{"op":"and","rules":[{"key":"hidden_secret","op":"ilike","value":"QA-UI-PROJECTION-SECRET-%"}]}]}'::JSONB,'nested tree ilike'),
+    (format('{"hidden_secret":%s}',to_jsonb(v_marker_filter))::JSONB,'flat ilike'),
+    (format('{"hidden_secret":[%s]}',to_jsonb(v_marker_filter))::JSONB,'flat array ilike'),
+    (format('{" hidden_secret ":%s}',to_jsonb(v_marker_filter))::JSONB,'trimmed flat alias'),
+    (format('{"rules":[{"key":"hidden_secret","op":"ilike","value":%s}]}',to_jsonb(v_marker_filter))::JSONB,'tree ilike'),
+    (format('{"op":"or","rules":[{"key":"safe_name","value":"Own row"},{"op":"and","rules":[{"key":"hidden_secret","op":"ilike","value":%s}]}]}',to_jsonb(v_marker_filter))::JSONB,'nested tree ilike'),
     ('{"rules":[{"key":"hidden_secret","op":"gt","value":"QA"}]}'::JSONB,'tree gt override'),
     ('{"rules":[{"key":"hidden_secret","op":"lt","value":"QZ"}]}'::JSONB,'tree lt override'),
     ('{"rules":[{"key":"hidden_secret","op":"ne","value":"wrong-prefix"}]}'::JSONB,'tree ne override'),
-    ('{"rules":null,"key":"hidden_secret","op":"ilike","value":"QA-UI-PROJECTION-SECRET-%"}'::JSONB,'non-array rules leaf')
+    (format('{"rules":null,"key":"hidden_secret","op":"ilike","value":%s}',to_jsonb(v_marker_filter))::JSONB,'non-array rules leaf')
   ) AS cases(filters,case_name)
   LOOP
     RETURN NEXT throws_ok(format('SELECT api.ui_list_resource_v1(%L,%L::JSONB,10,0,NULL)',
@@ -506,7 +508,7 @@ BEGIN
   SET LOCAL ROLE authenticated;
   FOR v_bad IN SELECT jsonb_build_object('rules',jsonb_build_array(
     jsonb_build_object('key','hidden_secret','op','ilike','value',prefixes.value)))
-    FROM (VALUES ('QA-UI-PROJECTION-SECRET-%'),('wrong-prefix%')) prefixes(value)
+    FROM (VALUES (v_marker_filter),('wrong-prefix%')) prefixes(value)
   LOOP
     RETURN NEXT throws_ok(format('SELECT api.ui_list_resource_v1(%L,%L::JSONB,10,0,NULL)',
       'qa_ui_projection',v_bad::TEXT),'P0001','ui_read_registry filter column not allowed: hidden_secret',

@@ -1,4 +1,11 @@
 {
   "maxAgeDays": 120,
-  "docs": []
+  "docs": [
+    { "path": "AGENTS.md", "checkLinks": true },
+    { "path": "DELIVERY.md", "checkLinks": true },
+    { "path": "DESIGN.md", "checkLinks": true },
+    { "path": "docs/product/mission.md", "checkLinks": true },
+    { "path": "docs/guides/TESTING_GUIDE.md", "checkLinks": true },
+    { "path": "docs/guides/LOCAL_SETUP.md", "checkLinks": true }
+  ]
 }

@@ -113,9 +113,8 @@ describe("ui_create_shipment_v1", () => {
       });
 
       const { rows: levelRows } = await admin.query(
-        `INSERT INTO public.service_levels (organization_id, key, name, metadata)
-         VALUES ($1::uuid, 'standard', 'Integration standard', '{}'::jsonb)
-         RETURNING id`,
+        `SELECT id FROM public.service_levels
+         WHERE organization_id = $1::uuid AND key = 'standard'`,
         [organizationId]
       );
       serviceLevelId = levelRows[0].id;

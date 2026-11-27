@@ -1,4 +1,4 @@
-const { requireEnv } = require('../../utils/test-env');
+const { assertEnv } = require('../../utils/test-env');
 
 const parseJsonSafe = async (response) => {
   const text = await response.text();
@@ -25,12 +25,11 @@ const expectSchemaDenied = async (response, schema) => {
 };
 
 describe('API schema boundary (PostgREST exposure)', () => {
-  const missing = requireEnv(['SUPABASE_URL', 'SUPABASE_ANON_KEY'], 'api schema boundary');
+  assertEnv(['SUPABASE_URL', 'SUPABASE_ANON_KEY'], 'API schema boundary');
+  const baseUrl = process.env.SUPABASE_URL.trim().replace(/\/+$/g, '');
+  const anonKey = process.env.SUPABASE_ANON_KEY.trim();
 
-  (missing ? test.skip : test)('public schema is not exposed (PGRST106)', async () => {
-    const baseUrl = String(process.env.SUPABASE_URL || '').replace(/\/+$/g, '');
-    const anonKey = String(process.env.SUPABASE_ANON_KEY || '').trim();
-
+  test('public schema is not exposed (PGRST106)', async () => {
     const res = await fetch(`${baseUrl}/rest/v1/spatial_ref_sys?select=srid&limit=1`, {
       headers: {
         apikey: anonKey,
@@ -43,10 +42,7 @@ describe('API schema boundary (PostgREST exposure)', () => {
     await expectSchemaDenied(res, 'public');
   });
 
-  (missing ? test.skip : test)('qa schema is not exposed (PGRST106)', async () => {
-    const baseUrl = String(process.env.SUPABASE_URL || '').replace(/\/+$/g, '');
-    const anonKey = String(process.env.SUPABASE_ANON_KEY || '').trim();
-
+  test('qa schema is not exposed (PGRST106)', async () => {
     const res = await fetch(`${baseUrl}/rest/v1/spatial_ref_sys?select=srid&limit=1`, {
       headers: {
         apikey: anonKey,
@@ -59,10 +55,7 @@ describe('API schema boundary (PostgREST exposure)', () => {
     await expectSchemaDenied(res, 'qa');
   });
 
-  (missing ? test.skip : test)('graphql_public schema is not exposed (PGRST106)', async () => {
-    const baseUrl = String(process.env.SUPABASE_URL || '').replace(/\/+$/g, '');
-    const anonKey = String(process.env.SUPABASE_ANON_KEY || '').trim();
-
+  test('graphql_public schema is not exposed (PGRST106)', async () => {
     const res = await fetch(`${baseUrl}/rest/v1/spatial_ref_sys?select=srid&limit=1`, {
       headers: {
         apikey: anonKey,

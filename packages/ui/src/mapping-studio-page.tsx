@@ -21,13 +21,13 @@ import { Section } from "./section";
 import { Select } from "./select";
 import { TABULAR_FILE_ACCEPT, parseTabularFile } from "./tabular-file";
 import { Textarea } from "./textarea";
+import { createUiTranslator } from "./i18n";
 import { useToast } from "./use-toast";
 import {
   buildResourceSchema,
   buildReviewMappingConfig,
   buildRuntimeMappingConfig,
   collectLeafPaths,
-  deriveSourceTypeLabel,
   inferTabularRules,
   normalizeRulesFromMappingConfig,
   parseJsonText,
@@ -70,12 +70,15 @@ type StudioStep = "source" | "mapping" | "review" | "report";
 type SourceType = "json" | "curl" | "openapi" | "csv" | "xlsx";
 type PluginKind = "webhook" | "api";
 
-const ARTIFACT_OPTIONS: Array<{ value: MappingArtifact; label: string }> = [
-  { value: "tabular_import", label: "Tabular import" },
-  { value: "webhook_inbound", label: "Webhook inbound" },
-  { value: "api_outbound", label: "API outbound" },
-  { value: "integration_plugin", label: "Integration plugin draft" },
-];
+type UiTranslator = ReturnType<typeof createUiTranslator>;
+
+// Option labels live in ui.mappingStudio.page.artifacts and ui.mappingStudio.page.sourceTypes, keyed by value.
+const ARTIFACT_OPTIONS: MappingArtifact[] = ["tabular_import", "webhook_inbound", "api_outbound", "integration_plugin"];
+
+// Technical JSON examples shown as input hints; they are code, not prose, so they stay untranslated.
+const REQUEST_CONFIG_EXAMPLE = '{"method":"POST","url_template":"https://example.com/orders","headers_template":{"content-type":"application/json"}}';
+const TARGET_SCHEMA_EXAMPLE = '{"type":"object","properties":{"status":{"type":"string"}}}';
+const WORKFLOW_BINDING_EXAMPLE = '{"mode":"attach_existing","workflow_template_id":"..."}';
 
 function defaultSourceType(artifact: MappingArtifact): SourceType {
   if (artifact === "tabular_import") return "csv";
@@ -83,18 +86,8 @@ function defaultSourceType(artifact: MappingArtifact): SourceType {
   return "curl";
 }
 
-function sourceOptionsForArtifact(artifact: MappingArtifact): Array<{ value: SourceType; label: string }> {
-  if (artifact === "tabular_import") {
-    return [
-      { value: "csv", label: "CSV" },
-      { value: "xlsx", label: "XLSX" },
-    ];
-  }
-  return [
-    { value: "json", label: "JSON payload" },
-    { value: "curl", label: "cURL" },
-    { value: "openapi", label: "OpenAPI" },
-  ];
+function sourceOptionsForArtifact(artifact: MappingArtifact): SourceType[] {
+  return artifact === "tabular_import" ? ["csv", "xlsx"] : ["json", "curl", "openapi"];
 }
 
 const WORKFLOW_TEMPLATE_LOOKUP = {
@@ -199,6 +192,7 @@ function MappingStudioForm({
   onSavePendingChange: (pending: boolean) => void;
 }) {
   const ui = React.useMemo(() => createUiClient(), []);
+  const t = React.useMemo<UiTranslator>(() => createUiTranslator("ui.mappingStudio.page"), []);
   const { toast } = useToast();
   const prefix = (testIdPrefix || "mapping-studio").trim() || "mapping-studio";
 
@@ -298,8 +292,8 @@ function MappingStudioForm({
       .catch((error) => {
         if (cancelled) return;
         toast({
-          title: "Mapping studio registry",
-          description: error instanceof Error ? error.message : "Unable to load UI registry.",
+          title: t("registryErrorTitle"),
+          description: error instanceof Error ? error.message : t("registryErrorFallback"),
           tone: "error",
         });
       })
@@ -309,7 +303,7 @@ function MappingStudioForm({
     return () => {
       cancelled = true;
     };
-  }, [toast, ui]);
+  }, [t, toast, ui]);
 
   const resourceOptions = React.useMemo(
     () =>
@@ -404,15 +398,15 @@ function MappingStudioForm({
       } catch (error) {
         if (generation !== parseGeneration.current) return;
         toast({
-          title: "Spreadsheet parse failed",
-          description: error instanceof Error ? error.message : "Unable to read the uploaded file.",
+          title: t("spreadsheetParseFailed"),
+          description: error instanceof Error ? error.message : t("spreadsheetParseFallback"),
           tone: "error",
         });
       } finally {
         if (generation === parseGeneration.current) setBusy(null);
       }
     },
-    [invalidateSource, targetSchemaText, toast],
+    [invalidateSource, t, targetSchemaText, toast],
   );
 
   const handleParseSource = React.useCallback(async () => {
@@ -474,8 +468,8 @@ function MappingStudioForm({
     } catch (error) {
       if (!isCurrent()) return;
       toast({
-        title: "Source parse failed",
-        description: error instanceof Error ? error.message : "Unable to parse the supplied source contract.",
+        title: t("sourceParseFailed"),
+        description: error instanceof Error ? error.message : t("sourceParseFallback"),
         tone: "error",
       });
     } finally {
@@ -489,6 +483,7 @@ function MappingStudioForm({
     sourceColumns,
     sourceText,
     sourceType,
+    t,
     targetSchemaText,
     toast,
     ui.mappingStudio,
@@ -566,8 +561,8 @@ function MappingStudioForm({
     } catch (error) {
       if (!isCurrent()) return;
       toast({
-        title: "Review generation failed",
-        description: error instanceof Error ? error.message : "Unable to build the submit review.",
+        title: t("reviewFailed"),
+        description: error instanceof Error ? error.message : t("reviewFailedFallback"),
         tone: "error",
       });
     } finally {
@@ -581,6 +576,7 @@ function MappingStudioForm({
     requestConfigText,
     sampleRows,
     sourceColumns,
+    t,
     targetResourceKey,
     targetSchemaText,
     toast,
@@ -630,24 +626,24 @@ function MappingStudioForm({
       setStep("report");
       if (response.ok === false) {
         toast({
-          title: "Submit blocked",
+          title: t("submitBlocked"),
           description:
             (response as { error?: { message?: string } }).error?.message ||
-            "The studio returned a blocked or failed save result.",
+            t("submitBlockedFallback"),
           tone: "warning",
         });
       } else {
         toast({
-          title: "Mapping studio saved",
-          description: response.report?.id ? `Report ${response.report.id} created.` : "Submit completed.",
+          title: t("saved"),
+          description: response.report?.id ? t("savedReport", { id: response.report.id }) : t("savedDone"),
           tone: "success",
         });
       }
     } catch (error) {
       if (!isCurrent()) return;
       toast({
-        title: "Submit failed",
-        description: error instanceof Error ? error.message : "Unable to submit the mapping studio payload.",
+        title: t("submitFailed"),
+        description: error instanceof Error ? error.message : t("submitFailedFallback"),
         tone: "error",
       });
     } finally {
@@ -673,6 +669,7 @@ function MappingStudioForm({
     onSavePendingChange,
     testEnabled,
     sourceColumns,
+    t,
     targetResourceKey,
     targetSchemaText,
     toast,
@@ -686,38 +683,38 @@ function MappingStudioForm({
   return (
     <div className="space-y-6" data-testid={`${prefix}-ready`}>
       <PageHeader
-        title="Mapping Studio"
-        description="Parse source contracts, infer mappings, review automatic coercions, and submit with a persisted operation report."
+        title={t("title")}
+        description={t("description")}
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone="neutral">Step: {step}</Badge>
-        <Badge tone="info">Artifact: {artifact}</Badge>
-        <Badge tone="neutral">Source: {deriveSourceTypeLabel(sourceType)}</Badge>
+        <Badge tone="neutral">{t("stepBadge", { step })}</Badge>
+        <Badge tone="info">{t("artifactBadge", { artifact })}</Badge>
+        <Badge tone="neutral">{t("sourceBadge", { source: t(`sourceTypes.${sourceType}`) })}</Badge>
         {reviewResponse?.save_modes?.recommended ? (
-          <Badge tone="accent">Recommended save: {reviewResponse.save_modes.recommended}</Badge>
+          <Badge tone="accent">{t("recommendedSaveBadge", { mode: reviewResponse.save_modes.recommended })}</Badge>
         ) : null}
       </div>
 
-      <Section title="Source and target" collapsible={false}>
+      <Section title={t("sourceAndTarget")} collapsible={false}>
         <div className="grid gap-4 lg:grid-cols-2">
           <label className="space-y-2 text-sm text-ui-ink">
-            <span>Artifact</span>
+            <span>{t("artifact")}</span>
             <Select value={artifact} onChange={(event) => { invalidateSource(); setArtifact(event.target.value as MappingArtifact); }}>
               {ARTIFACT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
+                <option key={option} value={option}>
+                  {t(`artifacts.${option}`)}
                 </option>
               ))}
             </Select>
           </label>
 
           <label className="space-y-2 text-sm text-ui-ink">
-            <span>Source type</span>
+            <span>{t("sourceType")}</span>
             <Select value={sourceType} onChange={(event) => { invalidateSource(); setSourceType(event.target.value as SourceType); }}>
               {sourceOptionsForArtifact(artifact).map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
+                <option key={option} value={option}>
+                  {t(`sourceTypes.${option}`)}
                 </option>
               ))}
             </Select>
@@ -725,18 +722,18 @@ function MappingStudioForm({
 
           {artifact === "integration_plugin" ? (
             <label className="space-y-2 text-sm text-ui-ink">
-              <span>Plugin kind</span>
+              <span>{t("pluginKind")}</span>
               <Select value={pluginKind} onChange={(event) => { invalidateSource(); setPluginKind(event.target.value as PluginKind); }}>
-                <option value="webhook">Webhook</option>
-                <option value="api">API</option>
+                <option value="webhook">{t("pluginKindWebhook")}</option>
+                <option value="api">{t("pluginKindApi")}</option>
               </Select>
             </label>
           ) : null}
 
           <label className="space-y-2 text-sm text-ui-ink">
-            <span>Target resource (optional)</span>
+            <span>{t("targetResource")}</span>
             <Select value={targetResourceKey} onChange={(event) => { invalidateReview(); setTargetResourceKey(event.target.value); }}>
-              <option value="">Choose resource…</option>
+              <option value="">{t("chooseResource")}</option>
               {resourceOptions.map((resource) => (
                 <option key={resource.key} value={resource.key}>
                   {resource.label ?? resource.key}
@@ -749,7 +746,7 @@ function MappingStudioForm({
         {artifact === "tabular_import" ? (
           <div className="mt-4 space-y-4">
             <label className="space-y-2 text-sm text-ui-ink">
-              <span>Upload CSV/XLSX</span>
+              <span>{t("uploadFile")}</span>
               <Input type="file" accept={TABULAR_FILE_ACCEPT} onChange={handleSpreadsheetUpload} />
             </label>
             <React.Suspense fallback={<LoadingState variant="section" />}>
@@ -759,28 +756,28 @@ function MappingStudioForm({
         ) : (
           <div className="mt-4 space-y-4">
             <label className="space-y-2 text-sm text-ui-ink">
-              <span>Source contract / sample</span>
+              <span>{t("sourceContract")}</span>
               <Textarea
                 rows={10}
                 value={sourceText}
                 onChange={(event) => { invalidateSource(); setSourceText(event.target.value); }}
                 placeholder={
                   sourceType === "curl"
-                    ? "Paste cURL command"
+                    ? t("placeholderCurl")
                     : sourceType === "openapi"
-                      ? "Paste OpenAPI JSON"
-                      : "Paste JSON payload or body sample"
+                      ? t("placeholderOpenApi")
+                      : t("placeholderJson")
                 }
               />
             </label>
             {(artifact === "api_outbound" || (artifact === "integration_plugin" && pluginKind === "api")) ? (
               <label className="space-y-2 text-sm text-ui-ink">
-                <span>Request config JSON</span>
+                <span>{t("requestConfig")}</span>
                 <Textarea
                   rows={8}
                   value={requestConfigText}
                   onChange={(event) => { invalidateSource(); setRequestConfigText(event.target.value); }}
-                  placeholder='{"method":"POST","url_template":"https://example.com/orders","headers_template":{"content-type":"application/json"}}'
+                  placeholder={REQUEST_CONFIG_EXAMPLE}
                 />
               </label>
             ) : null}
@@ -789,28 +786,28 @@ function MappingStudioForm({
 
         <div className="mt-4 flex flex-wrap gap-2">
           <Button type="button" onClick={handleParseSource} disabled={busy !== null || registryLoading}>
-            {busy === "parse" || busy === "file" ? "Working…" : "Parse / infer"}
+            {busy === "parse" || busy === "file" ? t("working") : t("parse")}
           </Button>
-          {registryLoading ? <span className="text-sm text-ui-muted">Loading registry…</span> : null}
+          {registryLoading ? <span className="text-sm text-ui-muted">{t("loadingRegistry")}</span> : null}
         </div>
       </Section>
 
-      <Section title="Target schema and workflow" collapsible={false}>
+      <Section title={t("targetSchemaWorkflow")} collapsible={false}>
         <div className="grid gap-4 lg:grid-cols-2">
           <label className="space-y-2 text-sm text-ui-ink">
-            <span>Target schema JSON</span>
+            <span>{t("targetSchema")}</span>
             <Textarea
               rows={12}
               value={targetSchemaText}
               onChange={(event) => { invalidateReview(); setTargetSchemaText(event.target.value); }}
-              placeholder='{"type":"object","properties":{"status":{"type":"string"}}}'
+              placeholder={TARGET_SCHEMA_EXAMPLE}
             />
           </label>
           <div className="space-y-4">
             {artifact !== "tabular_import" ? (
               <div className="space-y-3">
                 <label className="space-y-2 text-sm text-ui-ink">
-                  <span>Workflow binding mode</span>
+                  <span>{t("bindingMode")}</span>
                   <Select
                     value={parsedBinding?.mode === "attach_existing" ? "attach_existing" : ""}
                     disabled={!parsedBinding}
@@ -826,12 +823,12 @@ function MappingStudioForm({
                       setWorkflowBindingText(stringifyPretty(next, "{}"));
                     }}
                   >
-                    <option value="">No workflow binding</option>
-                    <option value="attach_existing">Attach existing workflow</option>
+                    <option value="">{t("noBinding")}</option>
+                    <option value="attach_existing">{t("attachExisting")}</option>
                   </Select>
                 </label>
                 <label className="space-y-2 text-sm text-ui-ink">
-                  <span>Workflow template</span>
+                  <span>{t("workflowTemplate")}</span>
                   <Select
                     value={bindingTemplateId}
                     disabled={!parsedBinding || templateLookup.loading}
@@ -850,22 +847,22 @@ function MappingStudioForm({
                       }
                     }}
                   >
-                    <option value="">No workflow template</option>
+                    <option value="">{t("noTemplate")}</option>
                     {templateOptions.map(({ value, label }) => (
                       <option key={value} value={value}>{label}</option>
                     ))}
                   </Select>
                 </label>
-                {templateLookup.error ? <p role="status" className="text-xs text-ui-muted">Workflow templates are unavailable.</p> : null}
+                {templateLookup.error ? <p role="status" className="text-xs text-ui-muted">{t("templatesUnavailable")}</p> : null}
                 <details>
-                  <summary className="text-sm text-ui-muted">Advanced workflow binding</summary>
+                  <summary className="text-sm text-ui-muted">{t("advancedBinding")}</summary>
                   <label className="space-y-2 text-sm text-ui-ink">
-                    <span>Workflow binding JSON</span>
+                    <span>{t("bindingJson")}</span>
                     <Textarea
                       rows={12}
                       value={workflowBindingText}
                       onChange={(event) => { invalidateReview(); setWorkflowBindingText(event.target.value); }}
-                      placeholder='{"mode":"attach_existing","workflow_template_id":"..."}'
+                      placeholder={WORKFLOW_BINDING_EXAMPLE}
                     />
                   </label>
                 </details>
@@ -873,27 +870,27 @@ function MappingStudioForm({
             ) : null}
             {artifact === "integration_plugin" ? (
               <label className="space-y-2 text-sm text-ui-ink">
-                <span>Plugin name</span>
-                <Input value={pluginName} onChange={(event) => { invalidateSaveResponse(); setPluginName(event.target.value); }} placeholder="Customer integration plugin" />
+                <span>{t("pluginName")}</span>
+                <Input value={pluginName} onChange={(event) => { invalidateSaveResponse(); setPluginName(event.target.value); }} placeholder={t("pluginNamePlaceholder")} />
               </label>
             ) : null}
             <label className="space-y-2 text-sm text-ui-ink">
-              <span>Notes</span>
-              <Textarea rows={4} value={notes} onChange={(event) => { invalidateSaveResponse(); setNotes(event.target.value); }} placeholder="Short purpose, caveats, and review notes" />
+              <span>{t("notes")}</span>
+              <Textarea rows={4} value={notes} onChange={(event) => { invalidateSaveResponse(); setNotes(event.target.value); }} placeholder={t("notesPlaceholder")} />
             </label>
           </div>
         </div>
       </Section>
 
-      <Section title="Manual mapping" collapsible={false}>
+      <Section title={t("manualMapping")} collapsible={false}>
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)]">
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-medium text-ui-ink">Mapping rules</div>
-              <Button type="button" size="sm" variant="ghost" onClick={() => addRule()}>Add rule</Button>
+              <div className="text-sm font-medium text-ui-ink">{t("mappingRules")}</div>
+              <Button type="button" size="sm" variant="ghost" onClick={() => addRule()}>{t("addRule")}</Button>
             </div>
             {mappingRules.length === 0 ? (
-              <p className="text-sm text-ui-muted">No rules inferred yet. Parse a source or add rules manually.</p>
+              <p className="text-sm text-ui-muted">{t("noRules")}</p>
             ) : (
               <div className="space-y-3">
                 {mappingRules.map((rule, index) => (
@@ -903,7 +900,7 @@ function MappingStudioForm({
                   >
                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                       <label className="space-y-2 text-sm text-ui-ink">
-                        <span>Target field</span>
+                        <span>{t("targetField")}</span>
                         <Input
                           value={rule.target_field}
                           onFocus={() => setActiveRuleIndex(index)}
@@ -911,7 +908,7 @@ function MappingStudioForm({
                         />
                       </label>
                       <label className="space-y-2 text-sm text-ui-ink">
-                        <span>Source path / column</span>
+                        <span>{t("sourcePath")}</span>
                         <Input
                           value={rule.source_path ?? ""}
                           onFocus={() => setActiveRuleIndex(index)}
@@ -927,7 +924,7 @@ function MappingStudioForm({
                       </label>
                       <div className="flex items-end">
                         <Button type="button" size="sm" variant="ghost" onClick={() => removeRule(index)}>
-                          Remove
+                          {t("remove")}
                         </Button>
                       </div>
                     </div>
@@ -944,7 +941,7 @@ function MappingStudioForm({
 
           <React.Suspense fallback={<LoadingState variant="section" />}>
             <PayloadPathPicker
-              title={artifact === "tabular_import" ? "Detected columns" : "Detected source paths"}
+              title={artifact === "tabular_import" ? t("detectedColumns") : undefined}
               paths={sourcePaths}
               onSelect={handleUsePath}
               testIdPrefix={`${prefix}-paths`}
@@ -954,33 +951,33 @@ function MappingStudioForm({
 
         <div className="mt-4 flex flex-wrap gap-2">
           <Button type="button" onClick={handleReview} disabled={busy !== null}>
-            {busy === "review" ? "Reviewing…" : "Build review"}
+            {busy === "review" ? t("reviewing") : t("buildReview")}
           </Button>
         </div>
       </Section>
 
       {step === "review" ? (
-        <Section title="Review before submit" collapsible={false}>
+        <Section title={t("reviewSection")} collapsible={false}>
           {review ? (
             <div className="space-y-4">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone={blockingCount > 0 ? "danger" : "success"}>
-                  Blocking: {blockingCount}
+                  {t("blockingBadge", { count: blockingCount })}
                 </Badge>
                 <Badge tone="warning">
-                  Warnings: {review.review_summary?.warning_count ?? 0}
+                  {t("warningsBadge", { count: review.review_summary?.warning_count ?? 0 })}
                 </Badge>
                 <Badge tone="info">
-                  Conversions: {review.review_summary?.coercion_count ?? 0}
+                  {t("conversionsBadge", { count: review.review_summary?.coercion_count ?? 0 })}
                 </Badge>
               </div>
 
               {reviewResponse?.save_modes?.direct_allowed || reviewResponse?.save_modes?.draft_allowed ? (
                 <label className="space-y-2 text-sm text-ui-ink">
-                  <span>Save mode</span>
+                  <span>{t("saveMode")}</span>
                   <Select value={saveMode} onChange={(event) => { invalidateSaveResponse(); setSaveMode(event.target.value as "direct" | "draft"); }}>
-                    {reviewResponse?.save_modes?.direct_allowed ? <option value="direct">Direct runtime save</option> : null}
-                    {reviewResponse?.save_modes?.draft_allowed ? <option value="draft">Draft / review flow</option> : null}
+                    {reviewResponse?.save_modes?.direct_allowed ? <option value="direct">{t("saveModeDirect")}</option> : null}
+                    {reviewResponse?.save_modes?.draft_allowed ? <option value="draft">{t("saveModeDraft")}</option> : null}
                   </Select>
                 </label>
               ) : null}
@@ -991,15 +988,15 @@ function MappingStudioForm({
 
               <div className="flex flex-wrap gap-2">
                 <Button type="button" onClick={handleSubmit} disabled={busy !== null || savePending || blockingCount > 0}>
-                  {busy === "save" ? "Submitting…" : "Submit"}
+                  {busy === "save" ? t("submitting") : t("submit")}
                 </Button>
                 {blockingCount > 0 ? (
-                  <span className="text-sm text-ui-muted">Fix blocked issues before submitting.</span>
+                  <span className="text-sm text-ui-muted">{t("fixBlocked")}</span>
                 ) : null}
               </div>
             </div>
           ) : (
-            <p className="text-sm text-ui-muted">No review is available yet.</p>
+            <p className="text-sm text-ui-muted">{t("noReview")}</p>
           )}
         </Section>
       ) : null}
@@ -1010,7 +1007,7 @@ function MappingStudioForm({
           savedRevision={testSavedRevision} onEligibilityChange={handleEligibilityChange} appBasePath={appBasePath} />
       ) : null}
       {step === "report" ? (
-        <Section title="Submit report" collapsible={false}>
+        <Section title={t("submitReport")} collapsible={false}>
           <React.Suspense fallback={<LoadingState variant="section" />}>
             <OperationReportViewer report={report} result={saveResult} appBasePath={appBasePath} workflowTemplateLabels={templateLabels} />
           </React.Suspense>

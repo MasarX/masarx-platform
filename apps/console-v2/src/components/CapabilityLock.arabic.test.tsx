@@ -4,7 +4,7 @@ import { screen } from '@testing-library/react';
 import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { CAP, formatCapabilityLabel, formatCapabilityRequirement, formatCapabilityTitle } from '@/lib/capabilities';
-import { ar } from '@/lib/seed-raw/i18n/areas/capabilities';
+import ar from '@/lib/seed-raw/i18n/areas/ar/capabilities';
 import { CapabilityLock } from './CapabilityLock';
 
 function lookup(catalog: unknown, path: string): unknown {

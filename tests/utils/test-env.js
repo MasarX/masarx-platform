@@ -7,6 +7,13 @@ function missingEnvVars(vars) {
   return vars.filter((name) => !process.env[name]);
 }
 
+function assertEnv(vars, context) {
+  const missing = vars.filter((name) => !process.env[name]?.trim());
+  if (missing.length) {
+    throw new Error(`Missing environment variables for ${context}: ${missing.join(', ')}`);
+  }
+}
+
 function skipIfMissing(vars, context) {
   const missing = missingEnvVars(vars);
   if (missing.length) {
@@ -24,6 +31,7 @@ function skipIfMissing(vars, context) {
 }
 
 module.exports = {
+  assertEnv,
   missingEnvVars,
   skipIfMissing,
   requireEnv: skipIfMissing

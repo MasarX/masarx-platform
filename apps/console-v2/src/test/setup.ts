@@ -22,11 +22,15 @@ import { afterAll, afterEach, beforeAll, expect, vi } from 'vitest';
 expect.extend(jestDomMatchers);
 
 import { cleanup } from '@testing-library/react';
+import { loadConsoleCatalog } from '../lib/i18n-catalog';
 import { server } from './msw/server';
 
 vi.stubEnv('VITE_USE_SEED', 'true');
 vi.stubEnv('VITE_SUPABASE_URL', '');
 vi.stubEnv('VITE_SUPABASE_ANON_KEY', '');
+
+// Keep synchronous render helpers usable for tests that start in either locale.
+await Promise.all([loadConsoleCatalog('en'), loadConsoleCatalog('ar')]);
 
 // ---------- jsdom polyfills ----------
 // cmdk's CommandList uses ResizeObserver to auto-size; jsdom does not provide
