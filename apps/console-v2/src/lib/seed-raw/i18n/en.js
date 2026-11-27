@@ -212,6 +212,11 @@ export const en = {
     label: 'Evidence',
     expand: 'Expand decision trail',
   },
+  deliveryOption: {
+    branchPickup: 'Branch pickup',
+    safePlace: 'Safe place: {place}',
+    place: { reception: 'reception', neighbour: 'neighbour', other: 'other' },
+  },
   scope: {
     global: 'Global',
     tenant: 'Tenant',

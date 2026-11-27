@@ -5,6 +5,7 @@ const { spawnSync } = require('node:child_process');
 const { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { dirname, join, resolve } = require('node:path');
+const { use_api_bundle_limit_bytes } = require('../../config/edge/functions.json');
 
 const root = resolve(__dirname, '../..');
 const script = 'scripts/edge/verify-frozen-lock.cjs';
@@ -19,7 +20,10 @@ for (const scenario of ['clean lock', 'missing npm entry', 'changed integrity ha
     mkdirSync(dirname(destination), { recursive: true });
     writeFileSync(destination, content);
   };
-  write('config/edge/functions.json', JSON.stringify({ functions: [{ name: 'fixture-edge', enabled: true }] }));
+  write('config/edge/functions.json', JSON.stringify({
+    use_api_bundle_limit_bytes,
+    functions: [{ name: 'fixture-edge', enabled: true }],
+  }));
   write('supabase/functions/fixture-edge/index.ts', `import "npm:${packageName}";\n`);
   const lock = JSON.parse(readFileSync(join(root, 'deno.lock'), 'utf8'));
   if (scenario === 'missing npm entry') delete lock.npm[packageName];
@@ -30,7 +34,9 @@ for (const scenario of ['clean lock', 'missing npm entry', 'changed integrity ha
   mkdirSync(join(fixture, dirname(script)), { recursive: true });
   copyFileSync(join(root, script), join(fixture, script));
 
-  const result = spawnSync(process.execPath, [script], { cwd: fixture, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, [script], {
+    cwd: fixture, encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '' },
+  });
   assert.ifError(result.error);
   const hasManifest = existsSync(join(fixture, workdir, 'SHA256SUMS'));
   if (scenario === 'clean lock') {

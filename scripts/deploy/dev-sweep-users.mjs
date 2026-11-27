@@ -22,6 +22,28 @@ function mask(value) {
   console.log(`::add-mask::${value.replaceAll('%', '%25')}`);
 }
 
+async function reportQueryError(response, reason) {
+  // The status alone separates a token or scope refusal from a database error.
+  console.error(`${reason}_http_status=${response.status}`);
+  const error = await response.json();
+  // Supabase can wrap the PostgreSQL error in a message with additional row details.
+  const message = typeof error?.message === 'string' ? error.message : '';
+  const header = /^(?:Failed to run sql query: )?ERROR: +([0-9A-Z]{5}): +([^\r\n]*)/.exec(message);
+  const sqlstate = typeof error?.code === 'string' && /^[0-9A-Z]{5}$/.test(error.code) ? error.code : header?.[1];
+  if (!sqlstate) return;
+
+  const primary = header?.[2] ?? message.split(/[\r\n]/, 1)[0];
+  const constraint = error?.constraint ??
+    /^(?:duplicate key value|new row for relation "[^"]+"|insert or update on table "[^"]+") violates (?:unique|check|foreign key) constraint "([a-z_][a-z0-9_]*)"$/.exec(primary)?.[1];
+  const column = error?.column ??
+    /^(?:null value in column|column) "([a-z_][a-z0-9_]*)"(?: of relation "[^"]+")? (?:violates not-null constraint|does not exist)$/.exec(primary)?.[1];
+  const identifier = /^[a-z_][a-z0-9_]{0,62}$/;
+  let detail = '';
+  if (typeof constraint === 'string' && identifier.test(constraint)) detail = ` constraint=${constraint}`;
+  else if (typeof column === 'string' && identifier.test(column)) detail = ` column=${column}`;
+  console.error(`${reason}_sqlstate=${sqlstate}${detail}`);
+}
+
 async function request(url, headers, reason, method = 'GET', body) {
   try {
     const response = await fetch(url, {
@@ -33,6 +55,7 @@ async function request(url, headers, reason, method = 'GET', body) {
     });
     if (response.ok) return method === 'DELETE' ? null : await response.json();
     if (reason === 'auth_config') console.error(`auth_config_http_status=${response.status}`);
+    else if (url.endsWith('/database/query')) await reportQueryError(response, reason);
   } catch {
     // Provider errors can contain configuration, identities or request data.
   }
@@ -169,7 +192,7 @@ export async function provisionSweep(env) {
   const authUsers = `${projectUrl}/auth/v1/admin/users`;
   const query = (sql, parameters, reason, readOnly = false) => request(
     `${management}/database/query`, managementHeaders, reason, 'POST',
-    { query: sql, parameters, read_only: readOnly, disable_statement_timeout: false },
+    { query: sql, parameters, read_only: readOnly },
   );
   const digest = createHash('sha256').update(`dev-design-sweep:${projectRef}`).digest('hex');
   const suffix = digest.slice(0, 16);

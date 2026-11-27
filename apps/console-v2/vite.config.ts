@@ -54,6 +54,13 @@ export default defineConfig(({ command, mode }) => {
     root: __dirname,
     cacheDir: path.join(cacheRoot, 'node_modules/.vite'),
     plugins: [
+      seedEnabled && {
+        name: 'console-v2-seed-fonts',
+        transformIndexHtml: {
+          order: 'pre',
+          handler: (html) => html.replace(/<!-- live-fonts -->[\s\S]*?<!-- \/live-fonts -->/, ''),
+        },
+      },
       TanStackRouterVite({
         routesDirectory: './src/routes',
         generatedRouteTree: './src/routeTree.gen.ts',

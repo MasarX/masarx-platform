@@ -1,5 +1,7 @@
 import {
   formatUiError,
+  formatUiMessage,
+  UiMessageError,
   extractCapabilityDeniedKey,
   getUiErrorMessage,
   isCapabilityDeniedMessage,
@@ -15,11 +17,12 @@ test("sanitizeUiError redacts tokens and secrets", () => {
   expect(output).toContain("[redacted]");
 });
 
-test("formatUiError sanitizes error strings", () => {
+test("sanitizeUiError sanitizes error strings and formatUiError shows the fallback", () => {
   const input =
     ("Bearer " + [Buffer.from("{\"alg\":\"HS256\",\"typ\":\"JWT\"}").toString("base64url"),Buffer.from("payload-test-data-segment").toString("base64url"),"signaturevalue"].join("."));
-  const output = formatUiError(input, "fallback");
+  const output = sanitizeUiError(input);
   expect(output).toContain("[redacted]");
+  expect(formatUiError(input, "fallback")).toBe("fallback");
 });
 
 test("sanitizeUiError keeps capability keys readable", () => {
@@ -80,14 +83,60 @@ test.each([
   expect(formatUiError(error, "Try this action again.")).toBe("Try this action again.");
 });
 
-test("formatUiError resolves only string error fields and preserves safe validation", () => {
+test("formatUiError shows the fallback for unrecognised backend text; fields resolve to strings only", () => {
   expect(formatUiError({ message: { token: "synthetic-secret" }, details: "Email is required." }, "fallback"))
-    .toBe("Email is required.");
+    .toBe("fallback");
   expect(formatUiError({ code: 57014 }, "fallback")).toBe("fallback");
   expect(formatUiError({ error_description: "Password must have at least 12 characters." }, "fallback"))
-    .toBe("Password must have at least 12 characters.");
-  expect(formatUiError("  Enter a valid phone number.  ", "fallback"))
-    .toBe("Enter a valid phone number.");
+    .toBe("fallback");
+  expect(formatUiError("  Enter a valid phone number.  ", "fallback")).toBe("fallback");
+  expect(getUiErrorMessage({ message: { token: "synthetic-secret" }, details: "Email is required." }))
+    .toBe("Email is required.");
+  expect(formatUiMessage("  Enter a valid phone number.  ", "fallback")).toBe("Enter a valid phone number.");
+});
+
+test("formatUiError shows the fallback for a constraint violation", () => {
+  const error = {
+    code: "23505",
+    message: 'duplicate key value violates unique constraint "synthetic_items_name_key"',
+  };
+  expect(formatUiError(error, "Try again.")).toBe("Try again.");
+});
+
+test("formatUiError shows the fallback for an error with message, details and hint", () => {
+  const error = {
+    message: "Synthetic shipment row could not be saved",
+    details: "Key (synthetic_ref)=(ZZTEST000000) is not present in table synthetic_refs.",
+    hint: "Check the synthetic_refs table.",
+  };
+  expect(formatUiError(error, "Try again.")).toBe("Try again.");
+});
+
+test("app-authored text shows only through the explicit path", () => {
+  const text = "Choose a different template.";
+  expect(formatUiMessage(text, "fallback")).toBe(text);
+  expect(formatUiError(new UiMessageError(text), "fallback")).toBe(text);
+  expect(formatUiError(text, "fallback")).toBe("fallback");
+  expect(formatUiError(new Error(text), "fallback")).toBe("fallback");
+});
+
+test("the explicit path still sanitises", () => {
+  const secret = ["synthetic", "runtime", Date.now().toString(36)].join("-");
+  const output = formatUiMessage(`Request failed; token=${secret}`, "fallback");
+  expect(output).toContain("[redacted]");
+  expect(output).not.toContain(secret);
+  expect(formatUiError(new UiMessageError(`Request failed; token=${secret}`), "fallback")).not.toContain(secret);
+});
+
+test.each([
+  "",
+  "   ",
+  new Error("Choose a different template."),
+  { message: "Choose a different template." },
+  null,
+  undefined,
+])("the explicit path rejects empty text and non-text: %p", (input) => {
+  expect(formatUiMessage(input, "fallback")).toBe("fallback");
 });
 
 test.each([

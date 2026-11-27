@@ -14,6 +14,7 @@ const { shardFiles, shardEnvironment, shardResults, hostedBatches } = require('.
 
 const { prepareImages } = require('./images.cjs');
 const { install } = require('./tasks.cjs');
+const { buildSupabaseCliAsset } = require('../ops/ci/supabase-cli-asset.js');
 
 const root = process.cwd();
 const HOSTED_PORT_MIN = 15420;
@@ -37,6 +38,31 @@ async function hostedStackPorts(probe = canBindPort) {
     }
   }
   throw new Error(`Could not find three free hosted Supabase ports in ${HOSTED_PORT_MIN}-${HOSTED_PORT_MAX}`);
+}
+async function installHostedCli(checked, env, temp, bin) {
+  const asset = buildSupabaseCliAsset({ version: '2.116.0', platform: 'linux', arch: 'amd64' });
+  if (!/^[a-f0-9]{64}$/.test(asset.sha256 || '')) throw new Error('PIN_NEEDED: Supabase CLI archive checksum');
+  const response = await fetch(asset.download_url, { signal: AbortSignal.timeout(120000) });
+  if (!response.ok) throw new Error('Supabase CLI public asset download failed');
+  const archive = Buffer.from(await response.arrayBuffer());
+  if (crypto.createHash('sha256').update(archive).digest('hex') !== asset.sha256) throw new Error('Supabase CLI checksum mismatch');
+  const archivePath = path.join(temp, 'cli.tar.gz');
+  fs.writeFileSync(archivePath, archive, { mode: 0o600 });
+  await checked('tar', ['-xzf', archivePath, '-C', bin, 'supabase'], env);
+  return asset.sha256;
+}
+function writeHostedStackConfig(workdir, project, { shadowPort, apiPort, dbPort }, major, auth, seed = false) {
+  const sb = path.join(workdir, 'supabase');
+  fs.mkdirSync(path.join(sb, 'migrations'), { recursive: true });
+  const config = [
+    `project_id = "${project}"`, '[api]', 'enabled = true', `port = ${apiPort}`, 'schemas = ["api"]',
+    'extra_search_path = ["public", "extensions"]', '[db]', `port = ${dbPort}`,
+    `shadow_port = ${shadowPort}`, `major_version = ${major}`, '[db.seed]', `enabled = ${seed}`,
+    '[studio]', 'enabled = false', '[analytics]', 'enabled = false', '[auth]', 'enabled = true',
+    ...auth, '[storage]', 'enabled = true', '', bucketSections(fs.readFileSync('supabase/config.toml', 'utf8')),
+  ].join('\n');
+  fs.writeFileSync(path.join(sb, 'config.toml'), config, { mode: 0o600 });
+  return config;
 }
 async function disableHostedAutovacuum(databaseUrl, dbPort, admin, db, wait = delay) {
   const target = new URL(databaseUrl);
@@ -130,6 +156,15 @@ function timeHostedCloneCommand(summary, admin, ...commands) {
   const clone = /^CREATE DATABASE (pgtap_worker_\d+) TEMPLATE /.exec(commands[0]);
   if (!clone) return admin(...commands);
   return stage(summary, `database-clone:${clone[1]}`, () => admin(...commands));
+}
+
+function dropHostedDatabases(summary, admin, databases) {
+  return stage(summary, 'database-clone-cleanup', async () => {
+    // Each drop gets its own stage, so a slow drop is visible by name inside the combined cleanup.
+    for (const database of databases) {
+      await stage(summary, `database-clone-drop:${database}`, () => admin(`DROP DATABASE ${database} WITH (FORCE)`));
+    }
+  });
 }
 
 async function withHostedCloneIsolation(admin, restore, clone) {
@@ -270,8 +305,7 @@ async function runHostedShard({ selected, checked, testEnv, admin, summary, dock
       diskFloor(dockerRoot);
       results = await Promise.allSettled(workers.map((files, index) => execute(`worker-${index}`, files, index === 0 ? 'postgres' : databases[index - 1])));
     } finally {
-      if (created.length) await stage(summary, 'database-clone-cleanup', () =>
-        admin(15000, ...created.map(database => `DROP DATABASE ${database} WITH (FORCE)`)));
+      if (created.length) await dropHostedDatabases(summary, boundedAdmin, created);
     }
     // Shared state and database catalog assertions see only the canonical database and no concurrent tests.
     const [serialResult] = await Promise.allSettled([execute('worker-0-serial', serial)]);
@@ -379,7 +413,7 @@ async function imageGuard(pins, file, env, initContainer) {
   fs.writeFileSync(file, JSON.stringify(pins), { mode: 0o600 });
   const args = [file, host.slice(7), policyFile];
   if (initContainer) args.push(initContainer);
-  const child = fork('scripts/ci-hosted/docker-images.cjs', args, { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  const child = fork(path.join(__dirname, 'docker-images.cjs'), args, { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
   try {
     const port = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Digest guard startup timed out')), 10000);
@@ -438,7 +472,6 @@ async function qualify(diagnostic) {
   diagnostic.stage = 'local-contracts';
   // Reuse the existing loopback, version, client-image and full-pgTAP contracts.
   const local = require('../ops/ci/cloud-pool-db-local.js');
-  const { buildSupabaseCliAsset } = require('../ops/ci/supabase-cli-asset.js');
   const { major } = local.readSupabaseConfig();
   const lane = local.loadLaneConfig();
   if (String(major) !== String(lane.psqlClientMajor)) throw new Error('Postgres/psql major mismatch');
@@ -500,32 +533,14 @@ async function qualify(diagnostic) {
       cliEnv = guard.env;
     }
     diagnostic.stage = 'cli-download';
-    const asset = buildSupabaseCliAsset({ version: '2.116.0', platform: 'linux', arch: 'amd64' });
-    if (!/^[a-f0-9]{64}$/.test(asset.sha256 || '')) throw new Error('PIN_NEEDED: Supabase CLI archive checksum');
-    const response = await fetch(asset.download_url, { signal: AbortSignal.timeout(120000) });
-    if (!response.ok) throw new Error('Supabase CLI public asset download failed');
-    const archive = Buffer.from(await response.arrayBuffer());
-    if (crypto.createHash('sha256').update(archive).digest('hex') !== asset.sha256) throw new Error('Supabase CLI checksum mismatch');
-    const archivePath = path.join(temp, 'cli.tar.gz');
-    fs.writeFileSync(archivePath, archive, { mode: 0o600 });
-    await checked('tar', ['-xzf', archivePath, '-C', bin, 'supabase'], env);
+    await installHostedCli(checked, env, temp, bin);
     env.SUPABASE_CLI_BIN = cli;
     // This workdir owns an empty DB. No remote profiles, seed files or cached schema are copied.
     const sb = path.join(temp, 'supabase');
-    fs.mkdirSync(sb);
-    fs.mkdirSync(path.join(sb, 'migrations'));
     diagnostic.stage = 'stack-configuration';
-    const originalConfig = fs.readFileSync('supabase/config.toml', 'utf8');
-    const buckets = bucketSections(originalConfig);
     summary.stackPorts = await hostedStackPorts();
-    const { shadowPort, apiPort, dbPort } = summary.stackPorts;
-    fs.writeFileSync(path.join(sb, 'config.toml'), [
-      `project_id = "${project}"`, '[api]', 'enabled = true', `port = ${apiPort}`, 'schemas = ["api"]',
-      'extra_search_path = ["public", "extensions"]', '[db]', `port = ${dbPort}`,
-      `shadow_port = ${shadowPort}`, `major_version = ${major}`, '[db.seed]', 'enabled = false',
-      '[studio]', 'enabled = false', '[analytics]', 'enabled = false', '[auth]', 'enabled = true',
-      'site_url = "http://127.0.0.1:3001"', '[storage]', 'enabled = true', '', buckets,
-    ].join('\n'), { mode: 0o600 });
+    const { dbPort } = summary.stackPorts;
+    writeHostedStackConfig(temp, project, summary.stackPorts, major, ['site_url = "http://127.0.0.1:3001"']);
     diagnostic.stage = 'stack-start';
     started = true; // A partial start must also be stopped.
     console.log(`Stack service exclusions: ${lane.exclude.join(',')}`);
@@ -712,4 +727,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, timeHostedCloneCommand, withHostedCloneIsolation, pgtapDeadline };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, installHostedCli, writeHostedStackConfig, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, timeHostedCloneCommand, dropHostedDatabases, withHostedCloneIsolation, pgtapDeadline };

@@ -1,0 +1,80 @@
+name: DEV executor plan diagnostic
+
+'on': workflow_dispatch
+
+permissions:
+  contents: read
+
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
+jobs:
+  executor-plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: dev
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Read the closure delta and migration history
+        shell: bash
+        env:
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          unreadable() {
+            printf 'executor_plan=UNREADABLE reason=%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+          [[ "$SUPABASE_PROJECT_REF" =~ ^[a-z]{20}$ && -n "$SUPABASE_ACCESS_TOKEN" && -n "$PGPASSWORD" ]] || unreadable configuration
+          printf '::add-mask::%s\n' "$SUPABASE_PROJECT_REF"
+          pooler="$(
+            printf 'Authorization: Bearer %s\n' "$SUPABASE_ACCESS_TOKEN" |
+              curl --fail --silent --max-time 20 --header @- \
+                "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF/config/database/pooler" |
+              jq -ers 'select(length == 1) | .[0] | map(select(.database_type == "PRIMARY"))
+                | select(length == 1) | .[0].db_host | strings
+                | select(test("\\Aaws-[0-9]+-[a-z0-9-]+\\.pooler\\.supabase\\.com\\z"))' 2>/dev/null
+          )" || unreadable pooler
+          ca_file=config/certs/supabase-prod-ca-2021.crt
+          printf '700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7  %s\n' "$ca_file" |
+            sha256sum --check --status 2>/dev/null || unreadable ca
+          closure=supabase/migrations/20261126163709_revoke_public_function_execute.sql
+          grants="$(sed -n '/^GRANT EXECUTE ON FUNCTION$/,/^TO ui_rpc_executor;$/s/^  \(.*\)$/\1/p' "$closure" | sed 's/,$//')"
+          revokes="$(sed -n '/^REVOKE EXECUTE ON FUNCTION$/,/^FROM PUBLIC;$/s/^  \(.*\)$/\1/p' "$closure" | sed 's/,$//')"
+          readout="$(PGHOST="$pooler" PGPORT=5432 PGDATABASE=postgres PGUSER="postgres.$SUPABASE_PROJECT_REF" \
+            PGSSLMODE=verify-full PGSSLROOTCERT="$ca_file" PGGSSENCMODE=disable PGCONNECT_TIMEOUT=8 \
+            timeout 20s psql -X -w -A -q -t -v ON_ERROR_STOP=1 -v grants="$grants" -v revokes="$revokes" \
+              -f scripts/deploy/dev-executor-plan-diagnostic.sql 2>/dev/null)" || unreadable catalog-query
+          state="${readout%%$'\n'*}"
+          state_pattern='^history_latest=([0-9]{12,14}|unknown) closure_recorded=(true|false) closure_receipt=(true|false) predecessor_seal_valid=(true|false) public_targets=[0-9]+ direct_executor_targets=[0-9]+$'
+          if [[ "${readout##*$'\n'}" != 'diagnostic_status=complete' || ! "$state" =~ $state_pattern ]]; then
+            unreadable inputs-or-readout
+          fi
+          counts_pattern='^closure_added=[0-9]+ closure_removed=[0-9]+ closure_invalid=[0-9]+$'
+          row_pattern='^(before_extra|before_missing|projected_extra|projected_missing|already_in_receipt|invalid_addition) (function|relation|schema) (EXECUTE|SELECT|USAGE|INSERT|UPDATE|DELETE)( ([a-zA-Z_][a-zA-Z_0-9]*))?$'
+          {
+            printf '%s\n' "$state"
+            while IFS= read -r row; do
+              [[ "$row" != 'diagnostic_status=complete' ]] || continue
+              if [[ "$row" =~ $counts_pattern ]]; then
+                printf '%s\n' "$row"
+              elif [[ "$row" =~ $row_pattern ]]; then
+                name="${BASH_REMATCH[5]}"
+                if [[ -z "$name" ]] || ! git grep -qwF -e "$name" -- supabase/migrations; then
+                  name=redacted
+                fi
+                printf '%s %s %s name=%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "$name"
+              else
+                printf '%s\n' 'delta_object=redacted'
+              fi
+            done <<< "${readout#*$'\n'}"
+            printf '%s\n' 'diagnostic_status=complete'
+          } | tee -a "$GITHUB_STEP_SUMMARY"

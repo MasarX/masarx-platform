@@ -19,6 +19,22 @@ For intake changes, cover request authentication, acknowledgment behavior, dupli
 
 When adding a fixture, generate identifiers at setup and reuse them across requests and assertions. Keep SQL-only tests transactional and explicitly clean up rows created through the API.
 
+## Hosted suite coverage
+
+The required CI lint job inventories tracked test files, runner configurations and
+npm test commands. It compares the inventory with files selected by the hosted
+runners, the post-DEV browser report and the
+[suite quarantine](../../config/ci/test-suite-quarantine.json). The inventory step
+uses the runners' file-listing mode.
+
+Console V2 seed mode uses the app's fallback fonts so browser tests can run with
+external requests blocked.
+
+Wire new suites into an existing CI job where their dependencies are available.
+For a suite that needs unavailable infrastructure, record its scope, owning lead,
+reason, tracking issue and last active UTC date in the quarantine. CI fails on
+uncovered entries, expired quarantines and selectors that no longer cover a suite.
+
 ## Test Suites
 
 ### 1) Unit Tests (no DB)
@@ -46,6 +62,8 @@ Covers (examples):
 - Table/partition presence and invariants
 - Required RLS enablement and policies (user-facing tables)
 - Resolver/ladder expectations where applicable
+
+Hosted CI replays migrations from zero and checks `PUBLIC EXECUTE` in the Data API schema (`api`) and its application support schema (`public`). Internal schemas such as `workflow_handlers` have separate caller contracts and require their own catalog review before this guard can cover them. Revoke `EXECUTE` from `PUBLIC` and any unintended roles by exact signature when creating a function, then grant it only to intended callers. [Hosted function privilege guard](../../supabase/tests/pgtap/045b_public_function_execute.sql)
 
 ---
 
@@ -130,6 +148,10 @@ The suite uses zero retries and retains traces, screenshots, and video on failur
 - `E2E_WORKERS` sets the worker count. `E2E_WEB_SERVER_TIMEOUT_MS`, `E2E_TEST_TIMEOUT_MS`, and `E2E_EXPECT_TIMEOUT_MS` configure the startup, test, and assertion timeouts. `E2E_FORCE_CLEAN` replaces existing local app listeners and clears their Next.js caches before startup.
 
 Use the [E2E utilities](../../tests/e2e/utils/) for sign-in and sessions (`auth.ts`, `session.ts`), test accounts (`demo-accounts.ts`), origins and route prefixes (`base-urls.ts`, `base-paths.ts`), navigation and route coverage (`navigation.ts`, `coverage-routes.ts`), performance assertions (`performance.ts`), and runtime error checks (`error-guards.ts`, `runtime-errors.ts`).
+
+After the asserted route is ready, call `captureRouteEvidence(page, assertedLocator, { role, route, ledgerState })` from [evidence.ts](../../tests/e2e/utils/evidence.ts). Pass `rows` or `empty` for the pickup waves and requests ledgers and omit the field for Dashboard and Dispatch.
+Tag identity and record fields with `data-evidence-mask`. The helper requires `context-identity` on every route, `dashboard-identity` on Dashboard and `record-id` for populated pickup ledgers. It attaches a masked viewport PNG as `route-evidence-image` and its JSON entry as `route-evidence-record`.
+Use a sweep configuration with automatic screenshots, traces and video disabled.
 
 #### Landing E2E
 

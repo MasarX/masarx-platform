@@ -212,6 +212,11 @@ export const ar = {
     label: 'الإثبات',
     expand: 'توسيع سجل القرارات',
   },
+  deliveryOption: {
+    branchPickup: 'استلام من الفرع',
+    safePlace: 'مكان آمن: {place}',
+    place: { reception: 'الاستقبال', neighbour: 'الجار', other: 'مكان آخر' },
+  },
   scope: {
     global: 'عام',
     tenant: 'مؤسسة',

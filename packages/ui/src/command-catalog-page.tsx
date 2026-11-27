@@ -177,7 +177,7 @@ export async function CommandCatalogPage({
           {readError ? (
             <div role="status" aria-label={t("readStatusLabel")} aria-live="polite" aria-atomic="true"
               data-testid={`${testIdPrefix}-read-registry-degraded`}>
-              <p>{t("errors.readRegistry")}</p><p>{readError}</p>
+              <p>{t("errors.readRegistry")}</p>{readError !== t("errors.readRegistry") ? <p>{readError}</p> : null}
             </div>
           ) : null}
           <CommandCatalogFilters
