@@ -7,7 +7,10 @@ import supabase from '../ops/workspace/supabase-api.js';
 import preview from '../ops/workspace/preview-project.js';
 
 const config = new URL('../../config/dev/', import.meta.url);
-const recipient = fileURLToPath(new URL('sweep-recipient.crt', config));
+const recipientPins = [
+  ['sweep-recipient.crt', 'SWEEP_RECIPIENT_SHA256'],
+  ['sweep-recipient-hosted.crt', 'SWEEP_RECIPIENT_HOSTED_SHA256'],
+];
 const roles = JSON.parse(readFileSync(new URL('sweep-roles.json', config), 'utf8'));
 const marker = 'dev_design_sweep';
 const failure = Symbol('sweep failure');
@@ -152,7 +155,7 @@ async function ensureMembership(query, { id, email, organizationId, key, scope, 
   requireSweep(rows.length === 1 && rows[0].id === id, 'membership_conflict');
 }
 
-export async function provisionSweep(env) {
+export async function provisionSweep(env, recipientDirectory = fileURLToPath(config)) {
   requireSweep(env.GITHUB_ACTIONS === 'true' && env.DEPLOY_ENV === 'dev' &&
     env.GITHUB_EVENT_NAME === 'workflow_dispatch' && env.GITHUB_REF === 'refs/heads/main' &&
     env.GITHUB_REPOSITORY === 'MasarX/masarx-platform', 'dispatch_guard');
@@ -163,8 +166,12 @@ export async function provisionSweep(env) {
     [projectUrl, `${projectUrl}/`].includes(env.NEXT_PUBLIC_SUPABASE_URL) &&
     env.RUNNER_TEMP && !env.SUPABASE_MGMT_URL, 'dev_configuration');
 
-  const certificate = new X509Certificate(readFileSync(recipient));
-  requireSweep(certificate.fingerprint256 === env.SWEEP_RECIPIENT_SHA256, 'recipient_fingerprint');
+  const recipients = recipientPins.map(([filename, pin]) => {
+    const path = join(recipientDirectory, filename);
+    const certificate = new X509Certificate(readFileSync(path));
+    requireSweep(certificate.fingerprint256 === env[pin], 'recipient_fingerprint');
+    return path;
+  });
   const roleKeys = Object.keys(roles);
   requireSweep(roleKeys.length > 0 && Object.entries(roles).every(([key, role]) =>
     /^[a-z_]+$/.test(key) && !/admin|owner|service|platform/.test(key) &&
@@ -243,9 +250,10 @@ export async function provisionSweep(env) {
     credentials[key] = { email, password };
   }
 
-  const encrypted = spawnSync('openssl', ['cms', '-encrypt', '-aes256', '-binary', '-outform', 'DER', '-recip', recipient], {
-    input: JSON.stringify(credentials), windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'], timeout: 15_000,
-  });
+  const encrypted = spawnSync('openssl', [
+    'cms', '-encrypt', '-aes256', '-binary', '-outform', 'DER',
+    ...recipients.flatMap(path => ['-recip', path]),
+  ], { input: JSON.stringify(credentials), windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'], timeout: 15_000 });
   requireSweep(encrypted.status === 0 && encrypted.stdout?.length > 0, 'encryption');
   writeFileSync(join(env.RUNNER_TEMP, 'dev-sweep-credentials.cms'), encrypted.stdout, { flag: 'wx', mode: 0o600 });
   console.log(`users_ready=${roleKeys.length}`);
