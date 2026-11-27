@@ -196,7 +196,7 @@ describeIfDb('communications notification dispatch contracts (integration)', () 
       { accessScopeType: 'tenant', userType: 'ops_admin' },
     );
 
-    const recipientPhone = `9665${Math.floor(Math.random() * 90000000 + 10000000)}`;
+    const recipientPhone = '+12025550123';
     const recipientEmail = `recipient-${randomUUID().slice(0, 8)}@example.com`;
     const recipientId = await createRecipient(
       organization.id,

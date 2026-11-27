@@ -195,46 +195,6 @@
     "maxSkipped": 2
   },
   {
-    "file": "tests/integration/workflows/workflow-intake.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Fixture SQL or data does not match the migrated schema and settings",
-    "issue": "#574",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/comms-notification-dispatch.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Fixture SQL or data does not match the migrated schema and settings",
-    "issue": "#574",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/label/label-target-artifact-contract.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Fixture SQL or data does not match the migrated schema and settings",
-    "issue": "#574",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/geocoding.benchmark.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Fixture SQL or data does not match the migrated schema and settings",
-    "issue": "#574",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/label-renderer-edge.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Fixture SQL or data does not match the migrated schema and settings",
-    "issue": "#574",
-    "expires": "2026-12-08"
-  },
-  {
     "file": "tests/integration/workflows/dispatch-stop-exceptions.test.js",
     "kind": "known-failure",
     "runner": "Hosted integration",
