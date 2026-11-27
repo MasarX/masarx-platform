@@ -10,7 +10,7 @@ import { ReactElement, ReactNode } from 'react';
 import { render, type RenderOptions, type RenderResult } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '../lib/i18n';
-import { ThemeProvider } from '../lib/theme';
+import { THEME_STORAGE_KEY, ThemeProvider } from '../lib/theme';
 import { IdentityProvider, type IdentityProviderMockValue } from '../lib/identity';
 
 export interface RenderWithProvidersOptions
@@ -48,7 +48,7 @@ export function renderWithProviders(
   const { locale, theme, identity, capabilities, queryClient, ...rest } = opts;
 
   if (locale) localStorage.setItem('console-v2.locale', locale);
-  if (theme) localStorage.setItem('console-v2.theme', theme);
+  if (theme) localStorage.setItem(THEME_STORAGE_KEY, theme);
 
   const client = queryClient ?? makeQueryClient();
   const mockValue: IdentityProviderMockValue | undefined =

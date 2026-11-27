@@ -8,10 +8,7 @@ const {
   waitForMetricRow,
 } = require('../workflows/helpers/label-print-helpers');
 const { ensureStorageBucket, resolveStorageAdminKey } = require('../helpers/storage-admin');
-const {
-  isAuthSignatureModeError,
-  logAuthSignatureModeSkip,
-} = require('../helpers/auth-signature-mode');
+const { signedRendererHeaders } = require('../helpers/renderer-request');
 
 loadEnv();
 jest.setTimeout(300000);
@@ -24,27 +21,9 @@ const SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_KEY ||
   '';
 const STORAGE_ADMIN_KEY = resolveStorageAdminKey() || SERVICE_ROLE_KEY;
-const isTruthy = (value) => /^(1|true|yes)$/i.test(String(value || '').trim());
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const previewMode = isTruthy(process.env.PREVIEW_MODE) || isTruthy(process.env.CI_PREVIEW);
-const edgeRequireDbJwt = String(process.env.EDGE_REQUIRE_DB_JWT || '').trim() === '1';
-const skipInPreviewFallback = previewMode && !edgeRequireDbJwt;
-const labelRendererDbJwt =
-  String(process.env.LABEL_RENDERER_DB_JWT || process.env.EDGE_DB_JWT || '').trim();
-const skipForStrictDbJwtLocal = edgeRequireDbJwt && !labelRendererDbJwt;
-const LABEL_RENDERER_JWT = previewMode && !edgeRequireDbJwt
-  ? SERVICE_ROLE_KEY
-  : (process.env.LABEL_RENDERER_DB_JWT || SERVICE_ROLE_KEY || '');
 
-function skipForAuthSignatureMode(errorLike) {
-  if (!isAuthSignatureModeError(errorLike)) {
-    return false;
-  }
-  logAuthSignatureModeSkip('label-renderer-bundle.test', errorLike);
-  return true;
-}
-
-if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT || !STORAGE_ADMIN_KEY || skipInPreviewFallback || skipForStrictDbJwtLocal) {
+if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !STORAGE_ADMIN_KEY) {
   // eslint-disable-next-line jest/no-disabled-tests
   describe.skip('label renderer bundle scope/logging', () => {
     test.skip('skipped: missing env', () => {});
@@ -134,7 +113,6 @@ if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT 
     test('logs bundle decision and clamps expiry via label_print_policy', async () => {
       const orgId = randomUUID();
       const clientId = randomUUID();
-      const bundleToken = LABEL_RENDERER_JWT;
       const labelBucket = process.env.LABEL_RENDER_BUCKET || process.env.LABEL_RENDERER_BUCKET || 'labels';
       // eslint-disable-next-line no-console
       console.log('[bundle-test] Using label bucket:', labelBucket);
@@ -167,36 +145,27 @@ if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT 
       }
 
       // Ensure storage bucket exists via storage API (idempotent).
-      try {
-        await ensureStorageBucket({
-          supabaseUrl: SUPABASE_URL,
-          bucket: labelBucket,
-          storageAdminKey: STORAGE_ADMIN_KEY,
-        });
-      } catch (error) {
-        if (skipForAuthSignatureMode(error)) return;
-        throw error;
-      }
+      await ensureStorageBucket({
+        supabaseUrl: SUPABASE_URL,
+        bucket: labelBucket,
+        storageAdminKey: STORAGE_ADMIN_KEY,
+      });
 
       const filePath = `${orgId}/labels/${randomUUID()}.pdf`;
       await ensureLabelPdf(filePath);
-      const response = await fetchWithRetry(`${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/label-renderer`, {
+      const renderUrl = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/label-renderer`;
+      const response = await fetchWithRetry(renderUrl, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${bundleToken}`,
-          apikey: SUPABASE_ANON_KEY,
-        },
+        headers: await signedRendererHeaders(renderUrl),
         body: JSON.stringify({
           mode: 'bundle',
           organization_id: orgId,
           bundle: { organization_id: orgId, file_urls: [filePath], expires_seconds: 1000000 },
         }),
-      });
+      }, { attempts: 1 });
 
       const body = await readJsonOrText(response);
       if (response.status !== 200) {
-        if (skipForAuthSignatureMode(body)) return;
         // Surface failure reason to help diagnose
         throw new Error(`bundle request failed (${response.status}): ${JSON.stringify(body)}`);
       }

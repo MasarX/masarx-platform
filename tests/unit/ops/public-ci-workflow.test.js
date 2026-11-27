@@ -45,6 +45,12 @@ describe('public CI workflow contract', () => {
     for (const lane of ['unit', 'ui']) {
       expect(workflow.jobs[lane].steps.some(step => step.run === `node scripts/ci-hosted/base-guard.cjs jest.cjs ${lane}`)).toBe(true);
     }
+    const unit = workflow.jobs.unit.steps;
+    const installDeno = unit.find(step => step.name === 'Install pinned Deno');
+    const runUnit = unit.find(step => step.name === 'Run subject');
+    expect(installDeno.run).toBe('bash scripts/edge/install-pinned-deno.sh');
+    expect(installDeno.if).toBe(runUnit.if);
+    expect(unit.indexOf(installDeno)).toBeLessThan(unit.indexOf(runUnit));
     const appendOnly = workflow.jobs['append-only'].steps;
     const installPolicy = appendOnly.find(step => step.name === 'Check candidate install policy with base code');
     expect(installPolicy.run).toBe('node scripts/ci-hosted/base-guard.cjs install-policy.cjs');
@@ -65,7 +71,18 @@ describe('public CI workflow contract', () => {
     expect(jobs.typecheck.strategy).toBeUndefined();
     expect(jobs.typecheck.steps.at(-1).run).toContain('for subject in apps/console apps/portal apps/fieldops; do');
     expect(jobs.typecheck.steps.at(-1).run).toContain('node scripts/ci-hosted/tasks.cjs typecheck "$subject" || result=$?');
-    expect(jobs['build-console'].steps.at(-1).run).toBe('node scripts/ci-hosted/tasks.cjs build apps/console');
+    const consoleSteps = jobs['build-console'].steps;
+    const legacyBuildIndex = consoleSteps.findIndex(step => step.name === 'Build present console');
+    const liveBuildIndex = consoleSteps.findIndex(step => step.name === 'Build Console V2 in live mode');
+    const budgetIndex = consoleSteps.findIndex(step => step.name === 'Check live Console V2 bundle size');
+    expect(consoleSteps[legacyBuildIndex]?.run).toBe('node scripts/ci-hosted/tasks.cjs build apps/console');
+    expect(consoleSteps[liveBuildIndex]?.run).toBe(
+      `export VITE_SUPABASE_ANON_KEY="$(node -p "require('node:crypto').randomBytes(32).toString('hex')")"\n`
+      + 'npm run build --workspace @masarx/console-v2\n',
+    );
+    expect(consoleSteps[budgetIndex]?.run).toBe('npm run check:bundle-size --workspace @masarx/console-v2');
+    expect(liveBuildIndex).toBeGreaterThan(legacyBuildIndex);
+    expect(budgetIndex).toBeGreaterThan(liveBuildIndex);
     expect(jobs['build-portal-landing'].steps.slice(-2).map(step => step.run)).toEqual([
       'node scripts/ci-hosted/tasks.cjs build apps/portal',
       'node scripts/ci-hosted/tasks.cjs build landing',

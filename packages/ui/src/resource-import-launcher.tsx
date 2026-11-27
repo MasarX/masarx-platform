@@ -30,6 +30,7 @@ export function ResourceImportLauncher({
 }: ResourceImportLauncherProps) {
   const router = useRouter();
   const t = createUiTranslator("ui.resourcePage");
+  const tl = createUiTranslator("ui.resourceImport.launcher");
   const invalidateResourceList = useResourceListInvalidate(resourceKey);
   const { toast } = useToast();
   const reasonId = React.useId();
@@ -53,8 +54,8 @@ export function ResourceImportLauncher({
   const handleReportReady = () => {
     void invalidateResourceList().catch(() => {
       toast({
-        title: "Table refresh failed",
-        description: "The import report is still available. Refresh the table to see the latest records.",
+        title: tl("refreshFailedTitle"),
+        description: tl("refreshFailedDescription"),
         tone: "error",
       });
     });
@@ -92,14 +93,14 @@ export function ResourceImportLauncher({
         >
           <div className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-ui-border/40 bg-ui-paper/95 px-5 py-4 backdrop-blur">
             <DrawerHeader className="min-w-0">
-              <DrawerTitle>Universal import</DrawerTitle>
+              <DrawerTitle>{tl("title")}</DrawerTitle>
               <DrawerDescription>
-                Stay on the current table, upload a file, review the dry-run, and approve the import without leaving the page.
+                {tl("description")}
               </DrawerDescription>
             </DrawerHeader>
             <div className="flex flex-wrap items-center gap-2">
               <Button asChild size="sm" variant="ghost">
-                <a href={standaloneHref}>Open full page</a>
+                <a href={standaloneHref}>{tl("openFullPage")}</a>
               </Button>
               <Button
                 type="button"
@@ -107,7 +108,7 @@ export function ResourceImportLauncher({
                 variant="ghost"
                 onClick={() => setOpen(false)}
               >
-                Close
+                {tl("close")}
               </Button>
             </div>
           </div>

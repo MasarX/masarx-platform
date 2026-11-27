@@ -127,6 +127,11 @@ function serializeError(error: unknown) {
 
 const MAX_ERROR_TEXT_LENGTH = 8 * 1024;
 const WITHHELD_MESSAGE = "[REDACTED: message withheld]";
+const SAFE_OUTBOX_DIAGNOSTICS = new Set([
+  "AssertionError",
+  "Assertion failed",
+  "Unexpected token < in JSON",
+]);
 const WITHHELD_ERRORS = {
   auth: `${WITHHELD_MESSAGE} (auth)`,
   permission: `${WITHHELD_MESSAGE} (permission)`,
@@ -614,6 +619,7 @@ function shouldWithholdError(output: string) {
 }
 
 export function redactOutboxErrorText(value: string) {
+  if (SAFE_OUTBOX_DIAGNOSTICS.has(value)) return value;
   if (Object.values(WITHHELD_ERRORS).some(message => message === value)) return value;
   if (OUTSIDE_ALLOWED_CHARACTERS.test(value)) return WITHHELD_MESSAGE;
   const truncated = value.length > MAX_ERROR_TEXT_LENGTH;

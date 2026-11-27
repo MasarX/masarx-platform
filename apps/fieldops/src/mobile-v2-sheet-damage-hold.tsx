@@ -26,6 +26,8 @@ import {
   resolveMobileV2DamageHoldCtaTone,
 } from "./mobile-v2-sheet-readiness";
 import type { MobileV2DamageHoldReadback } from "./mobile-v2-rpc-hooks";
+import { damageSeverityLabel } from "./mobile-v2-damage-hold-policy";
+import { getStrings, resolveLocaleCode } from "./i18n";
 import {
   MOBILE_V2_FONT_MONO,
   MOBILE_V2_FONT_SANS,
@@ -100,6 +102,7 @@ export interface MobileV2DamageHoldSheetProps {
    * artboard. Defaults "button".
    */
   readonly photoCardLayout?: "button" | "card";
+  readonly locale?: string;
   readonly style?: StyleProp<ViewStyle>;
 }
 
@@ -111,17 +114,30 @@ function shortDamageHoldReadbackId(value: string): string {
   return value.length <= 8 ? value : value.slice(0, 8);
 }
 
-function formatDamageHoldSubmittedAt(value: string | null | undefined): string {
-  if (!value) return "Just now";
+function formatDamageHoldSubmittedAt(value: string | null | undefined, justNow: string): string {
+  if (!value) return justNow;
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "Just now";
+  if (Number.isNaN(parsed.getTime())) return justNow;
   return parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDamageHoldLine(
+  template: string,
+  hold: MobileV2DamageHoldReadback,
+  justNow: string,
+): string {
+  return template
+    .replace("{hold}", () => shortDamageHoldReadbackId(hold.holdId))
+    .replace("{decision}", () => shortDamageHoldReadbackId(hold.decisionLogId))
+    .replace("{time}", () => formatDamageHoldSubmittedAt(hold.submittedAt, justNow));
 }
 
 export function MobileV2DamageHoldSheet(
   props: MobileV2DamageHoldSheetProps,
 ): React.ReactElement {
   const { theme } = props;
+  const strings = getStrings(resolveLocaleCode(props.locale));
+  const copy = strings.damageHold;
   const picked = props.severities.find((s) => s.id === props.selectedSeverityId);
   const showNote = props.showNote !== false;
   const showRouteHint = props.showRouteHint !== false;
@@ -143,9 +159,9 @@ export function MobileV2DamageHoldSheet(
   });
   const ctaVariant: "danger" | "soft" = ctaTone === "danger" ? "danger" : "soft";
   const ctaPrimary = ctaTone === "primary";
-  const title = props.title ?? "Damage hold";
+  const title = props.title ?? copy.title;
   const subtitle =
-    props.subtitle ?? `Parcel ${props.parcelId} · quarantine + supervisor sign-off`;
+    props.subtitle ?? copy.subtitle.replace("{parcel}", () => props.parcelId);
 
   const busy = props.submitting === true || props.captureBusy === true;
   const [cameraOpen, setCameraOpen] = React.useState(false);
@@ -163,17 +179,17 @@ export function MobileV2DamageHoldSheet(
     if (cameraPermission?.granted !== true) {
       const nextPermission = await requestCameraPermission();
       if (nextPermission.granted !== true) {
-        setCameraError("Camera permission is required to capture damage evidence.");
+        setCameraError(copy.cameraPermission);
         return;
       }
     }
     setCameraOpen(true);
-  }, [busy, cameraPermission?.granted, props, requestCameraPermission]);
+  }, [busy, cameraPermission?.granted, copy, props, requestCameraPermission]);
   const captureCameraPhoto = React.useCallback(async (): Promise<void> => {
     if (busy) return;
     const camera = cameraRef.current;
     if (camera?.takePictureAsync === undefined) {
-      setCameraError("Camera is not ready yet.");
+      setCameraError(copy.cameraNotReady);
       return;
     }
     try {
@@ -184,7 +200,7 @@ export function MobileV2DamageHoldSheet(
       }) as Record<string, unknown>;
       const base64 = typeof photo.base64 === "string" ? photo.base64 : null;
       if (base64 === null || base64.trim() === "") {
-        throw new Error("Camera capture did not return image data.");
+        throw new Error(copy.captureNoData);
       }
       await Promise.resolve(props.onTogglePhoto({
         mimeType: "image/jpeg",
@@ -195,10 +211,10 @@ export function MobileV2DamageHoldSheet(
     } catch (error) {
       setCameraError(redactDisplayErrorText(
         error instanceof Error ? error.message : undefined,
-        "Unable to capture damage evidence.",
+        copy.captureFailed,
       ));
     }
-  }, [busy, props]);
+  }, [busy, copy, props]);
 
   return (
     <MobileV2BottomSheet
@@ -217,9 +233,9 @@ export function MobileV2DamageHoldSheet(
           icon="alert"
           disabled={!ready || props.submitting === true}
           onPress={props.onConfirm}
-          accessibilityLabel="Quarantine parcel"
+          accessibilityLabel={copy.quarantineLabel}
         >
-          Quarantine · notify supervisor
+          {copy.quarantineCta}
         </FxButton>
       }
     >
@@ -236,7 +252,7 @@ export function MobileV2DamageHoldSheet(
                 fontFamily: MOBILE_V2_FONT_SANS,
               }}
             >
-              Parcel barcode
+              {copy.parcelBarcode}
             </Text>
             <View
               style={{
@@ -248,7 +264,7 @@ export function MobileV2DamageHoldSheet(
               <TextInput
                 value={props.parcelBarcode ?? ""}
                 onChangeText={props.onParcelBarcodeChange ?? (() => {})}
-                placeholder="Scan or type"
+                placeholder={copy.scanOrType}
                 placeholderTextColor={theme.muted}
                 style={{
                   flex: 1,
@@ -266,7 +282,7 @@ export function MobileV2DamageHoldSheet(
               <Pressable
                 onPress={props.onParcelScan ?? (() => {})}
                 accessibilityRole="button"
-                accessibilityLabel="Scan parcel barcode"
+                accessibilityLabel={copy.scanParcelBarcode}
                 style={{
                   width: 44,
                   alignItems: "center",
@@ -295,7 +311,7 @@ export function MobileV2DamageHoldSheet(
               fontFamily: MOBILE_V2_FONT_SANS,
             }}
           >
-            Damage type
+            {copy.damageType}
           </Text>
           <FxRow gap={MOBILE_V2_SPACING.md} wrap>
             {props.severities.map((s) => {
@@ -305,14 +321,14 @@ export function MobileV2DamageHoldSheet(
                   key={s.id}
                   onPress={() => props.onSelectSeverity(s.id)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Select damage type ${s.label}`}
+                  accessibilityLabel={copy.selectType.replace("{type}", () => damageSeverityLabel(s, strings))}
                   accessibilityState={{ selected: on }}
                 >
                   <FxChip
                     theme={theme}
                     tone={on ? chipToneForColor(s.color) : "neutral"}
                   >
-                    {s.label}
+                    {damageSeverityLabel(s, strings)}
                   </FxChip>
                 </Pressable>
               );
@@ -333,12 +349,12 @@ export function MobileV2DamageHoldSheet(
                 fontFamily: MOBILE_V2_FONT_SANS,
               }}
             >
-              What's wrong with the parcel?
+              {copy.noteHeading}
             </Text>
             <TextInput
               value={props.note}
               onChangeText={props.onNoteChange}
-              placeholder="Describe the damage briefly"
+              placeholder={copy.notePlaceholder}
               placeholderTextColor={theme.muted}
               multiline
               numberOfLines={3}
@@ -370,7 +386,7 @@ export function MobileV2DamageHoldSheet(
               fontFamily: MOBILE_V2_FONT_SANS,
             }}
           >
-            Damage photo · required
+            {copy.photoHeading}
           </Text>
           {photoCardLayout === "card" ? (
             <Pressable
@@ -378,8 +394,8 @@ export function MobileV2DamageHoldSheet(
               accessibilityRole="button"
               accessibilityLabel={
                 props.photoCaptured
-                  ? "Damage photo captured — tap to retake"
-                  : "Add damage photo"
+                  ? copy.photoRetakeLabel
+                  : copy.addDamagePhoto
               }
               style={{
                 minHeight: 120,
@@ -408,7 +424,7 @@ export function MobileV2DamageHoldSheet(
                   fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold,
                 }}
               >
-                {props.photoCaptured ? "Captured · GPS + timestamp" : "Add photo"}
+                {props.photoCaptured ? copy.photoCapturedGps : copy.addPhoto}
               </Text>
             </Pressable>
           ) : (
@@ -417,8 +433,8 @@ export function MobileV2DamageHoldSheet(
               accessibilityRole="button"
               accessibilityLabel={
                 props.photoCaptured
-                  ? "Damage photo captured — tap to retake"
-                  : "Capture damage photo"
+                  ? copy.photoRetakeLabel
+                  : copy.capturePhoto
               }
               style={{
                 paddingVertical: MOBILE_V2_SPACING["3xl"],
@@ -445,7 +461,7 @@ export function MobileV2DamageHoldSheet(
                   fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold,
                 }}
               >
-                {props.photoCaptured ? "Photo captured · tap to retake" : "Capture damage photo"}
+                {props.photoCaptured ? copy.photoCapturedRetake : copy.capturePhoto}
               </Text>
             </Pressable>
           )}
@@ -491,7 +507,7 @@ export function MobileV2DamageHoldSheet(
                 disabled={busy}
                 style={{ flex: 1 } as never}
               >
-                Capture damage photo
+                {copy.capturePhoto}
               </FxButton>
               <FxButton
                 theme={theme}
@@ -500,7 +516,7 @@ export function MobileV2DamageHoldSheet(
                 onPress={() => setCameraOpen(false)}
                 disabled={busy}
               >
-                Cancel
+                {copy.cancel}
               </FxButton>
             </FxRow>
           </FxCol>
@@ -523,7 +539,7 @@ export function MobileV2DamageHoldSheet(
                 flex: 1,
               }}
             >
-              Parcel routes to Bay Q · supervisor notified.
+              {copy.routeHint}
             </Text>
           </View>
         ) : null}
@@ -548,7 +564,7 @@ export function MobileV2DamageHoldSheet(
                     fontFamily: MOBILE_V2_FONT_SANS,
                   }}
                 >
-                Damage hold saved, confirming
+                  {copy.savedConfirming}
                 </Text>
                 <Text
                   style={{
@@ -584,7 +600,7 @@ export function MobileV2DamageHoldSheet(
                     fontFamily: MOBILE_V2_FONT_SANS,
                   }}
                 >
-                  Hold queue confirmed
+                  {copy.queueConfirmed}
                 </Text>
                 <Text
                   style={{
@@ -593,7 +609,7 @@ export function MobileV2DamageHoldSheet(
                     fontFamily: MOBILE_V2_FONT_SANS,
                   }}
                 >
-                  {picked?.label ?? props.latestDamageHold.severityId} - {props.latestDamageHold.state}
+                  {picked !== undefined ? damageSeverityLabel(picked, strings) : props.latestDamageHold.severityId} - {props.latestDamageHold.state}
                 </Text>
                 {props.latestDamageHold.note ? (
                   <Text
@@ -613,9 +629,7 @@ export function MobileV2DamageHoldSheet(
                     fontFamily: MOBILE_V2_FONT_SANS,
                   }}
                 >
-                  Hold {shortDamageHoldReadbackId(props.latestDamageHold.holdId)} - decision{" "}
-                  {shortDamageHoldReadbackId(props.latestDamageHold.decisionLogId)} -{" "}
-                  {formatDamageHoldSubmittedAt(props.latestDamageHold.submittedAt)}
+                  {formatDamageHoldLine(copy.holdLine, props.latestDamageHold, copy.justNow)}
                 </Text>
               </FxCol>
             </FxRow>

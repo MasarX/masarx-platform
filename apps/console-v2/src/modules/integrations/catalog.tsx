@@ -848,14 +848,6 @@ function PluginBindingToggle({
         kind={enabled ? 'danger' : 'primary'}
         capability={CAP.INTEGRATION_PLUGINS_ACTIVATE}
         disabled={busy}
-        onPointerDown={(event) => {
-          event.preventDefault();
-          void runToggle();
-        }}
-        onMouseDown={(event) => {
-          event.preventDefault();
-          void runToggle();
-        }}
         onClick={() => {
           void runToggle();
         }}

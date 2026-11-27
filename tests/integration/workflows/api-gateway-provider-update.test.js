@@ -262,7 +262,7 @@ async function insertAddress(client, organizationId, clientId, overrides = {}) {
         $8::text,
         $9::text,
         $10::text,
-        'unvalidated',
+        'pending',
         now(),
         now()
       )`,

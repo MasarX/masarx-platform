@@ -32,6 +32,7 @@ import {
 import { getVerifiedAccessToken } from "@masarx/auth";
 import { getPublicConfig, getUiDefaults } from "@masarx/config";
 import { MissingEnvNotice } from "./missing-env";
+import { resolveLocaleDir } from "./i18n/direction";
 import { UiTelemetryReporter } from "./ui-telemetry";
 import { loadUiContextCached } from "./ui-context-cache";
 import { appFontClassName } from "./fonts";
@@ -189,9 +190,7 @@ export async function createAppContext({
   }
 
   const locale = config?.locale ?? "en";
-  const rtlLocales = getUiDefaults().rtlLocales;
-  const localeKey = locale.toLowerCase().split("-")[0] ?? locale.toLowerCase();
-  const isRtl = rtlLocales.includes(localeKey);
+  const isRtl = resolveLocaleDir(locale, getUiDefaults().rtlLocales) === "rtl";
   const messages = await loadMessages(locale);
   const t = createTranslator<any>({ locale, messages: messages as any });
   const appName = config?.appName ?? t("app.title");
