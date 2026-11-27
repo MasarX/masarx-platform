@@ -4,7 +4,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(63);
+SELECT plan(65);
 
 SELECT has_column('public', 'shipment_label_payload_v', 'organization_name', 'shipment_label_payload_v exposes organization_name');
 SELECT has_column('public', 'shipment_label_payload_v', 'client_name', 'shipment_label_payload_v exposes client_name');
@@ -710,7 +710,9 @@ SELECT result.* FROM (VALUES
   ('legacy_sub_without_role', 'none', '', '{}', 'ab230000-0000-4000-8000-000000000003', FALSE, FALSE, 'P0001'),
   ('json_service_over_scalar_tenant', 'none', 'authenticated', '{"role":"service_role"}', '', TRUE, TRUE, NULL),
   ('scalar_service', 'none', 'service_role', '{}', '', TRUE, TRUE, NULL),
-  ('renderer_non_uuid_subject', 'none', '', '{"role":"edge_label_renderer_role","sub":"edge-function"}', '', TRUE, NULL, NULL),
+  ('renderer_non_uuid_subject', 'edge_label_renderer_role', '', '{"role":"edge_label_renderer_role","sub":"edge-function"}', '', TRUE, NULL, NULL),
+  ('renderer_claim_authenticated_sql_role', 'authenticated', '', '{"role":"edge_label_renderer_role","sub":"edge-function"}', '', FALSE, NULL, '42501'),
+  ('renderer_claim_session_sql_role', 'none', '', '{"role":"edge_label_renderer_role","sub":"edge-function"}', '', FALSE, NULL, '42501'),
   ('same_tenant_json', 'none', '', '{"role":"authenticated","sub":"ab230000-0000-4000-8000-000000000002"}', '', TRUE, TRUE, NULL),
   ('reset_named_admin_no_jwt', 'none', '', '{}', '', TRUE, TRUE, NULL),
   ('sql_service_no_jwt', 'service_role', '', '{}', '', TRUE, TRUE, NULL),
