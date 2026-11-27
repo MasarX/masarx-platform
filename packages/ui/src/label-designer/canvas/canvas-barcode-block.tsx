@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import type { TemplateBlock } from "./canvas-types";
+import { loadBarcodeRenderer, type BarcodeRenderOptions } from "./barcode-encoders";
 import { getBarcodeConfig, normalizeBarcodeType } from "./barcode-types";
 import { createUiTranslator } from "../../i18n";
 
@@ -18,17 +19,6 @@ type CanvasBarcodeBlockProps = {
 
 // Cache for rendered barcode SVGs
 const svgCache = new Map<string, string>();
-
-// Lazy-loaded bwip-js reference
-let bwipPromise: Promise<{ toSVG: (opts: Record<string, unknown>) => string }> | null = null;
-
-function loadBwip() {
-  if (!bwipPromise) {
-    // @ts-expect-error -- bwip-js types are under nested browser export condition; typed via bwipPromise
-    bwipPromise = import("bwip-js") as Promise<{ toSVG: (opts: Record<string, unknown>) => string }>;
-  }
-  return bwipPromise;
-}
 
 export function CanvasBarcodeBlock({
   block,
@@ -60,13 +50,11 @@ export function CanvasBarcodeBlock({
 
     let cancelled = false;
 
-    loadBwip()
-      .then((bwip) => {
+    loadBarcodeRenderer()
+      .then((renderBarcode) => {
         if (cancelled) return;
 
-        const encoder = config.encoder;
-        const options: Record<string, unknown> = {
-          bcid: encoder,
+        const options: BarcodeRenderOptions = {
           text: data,
           scale: 2,
           includetext: block.human_readable !== false,
@@ -80,7 +68,7 @@ export function CanvasBarcodeBlock({
         }
 
         try {
-          const svg = bwip.toSVG(options);
+          const svg = renderBarcode(config.encoder, options);
           if (!cancelled) {
             svgCache.set(cacheKey, svg);
             setSvgContent(svg);

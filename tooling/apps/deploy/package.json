@@ -3,7 +3,7 @@
   "private": true,
   "dependencies": {
     "vercel": "66.6.0",
-    "wrangler": "4.165.0"
+    "wrangler": "4.166.0"
   },
   "overrides": {
     "ajv@>=8 <8.18.0": "8.18.0",

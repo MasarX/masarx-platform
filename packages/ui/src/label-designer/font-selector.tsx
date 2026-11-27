@@ -52,7 +52,7 @@ export function FontSelector({ value, onChange, id, label, disabled = false }: F
         <button
           id={id}
           type="button"
-          className="flex h-7 w-full items-center rounded border border-ui-border/50 bg-ui-paper/50 px-2 text-xs text-ui-ink hover:bg-blue-50 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="flex h-7 w-full items-center rounded border border-ui-border/50 bg-ui-paper/50 px-2 text-xs text-ui-ink hover:bg-ui-highlight focus:outline-none focus:ring-1 focus:ring-ui-accent"
           onClick={() => { if (!disabled) setOpen((value) => !value); }}
           disabled={disabled}
           data-testid={id || "font-selector"}
@@ -62,12 +62,12 @@ export function FontSelector({ value, onChange, id, label, disabled = false }: F
           </span>
         </button>
         {open && !disabled ? (
-          <div className="absolute left-0 top-8 z-50 w-full rounded-lg bg-white shadow-lg border border-ui-border/30 overflow-hidden">
+          <div className="absolute left-0 top-8 z-50 w-full rounded-lg bg-ui-surface shadow-lg border border-ui-border/30 overflow-hidden">
             {FONT_OPTIONS.map((option) => (
               <button
                 key={option.value}
                 type="button"
-                className={`flex h-8 w-full items-center px-2 text-xs hover:bg-blue-50 ${option.value === value ? "bg-blue-50 font-semibold" : ""}`}
+                className={`flex h-8 w-full items-center px-2 text-xs hover:bg-ui-highlight ${option.value === value ? "bg-ui-accent-soft font-semibold" : ""}`}
                 onClick={() => { if (!disabled) onChange(option.value); setOpen(false); }}
               >
                 <span style={{ fontFamily: option.family, fontWeight: option.weight }}>

@@ -30,7 +30,8 @@ function fixture({ addresses = [{ address: '8.8.8.8', family: 4 }], chunks = ['{
 
 test('pins all-public DNS to the actual socket and preserves hostname TLS checks/form encoding', async () => {
   const h = fixture();
-  expect(await h.run('https://identity.example.test/token', { refresh_token: 'secret&value', grant_type: 'refresh_token' }))
+  const refreshToken = ['fixture', 'refresh'].join('&');
+  expect(await h.run('https://identity.example.test/token', { refresh_token: refreshToken, grant_type: 'refresh_token' }))
     .toEqual({ status: 200, body: { access_token: 'secret' } });
   expect(h.lookup).toHaveBeenCalledWith('identity.example.test', { all: true, verbatim: true });
   expect(h.options).toMatchObject({ method: 'POST', agent: false, servername: 'identity.example.test', rejectUnauthorized: true });
@@ -40,7 +41,7 @@ test('pins all-public DNS to the actual socket and preserves hostname TLS checks
   expect(callback).toHaveBeenCalledWith(null, '8.8.8.8', 4);
   const all = jest.fn(); h.options.lookup('identity.example.test', { all: true }, all);
   expect(all).toHaveBeenCalledWith(null, [{ address: '8.8.8.8', family: 4 }]);
-  expect(h.pending.end).toHaveBeenCalledWith('refresh_token=secret%26value&grant_type=refresh_token');
+  expect(h.pending.end).toHaveBeenCalledWith('refresh_token=fixture%26refresh&grant_type=refresh_token');
 });
 
 test.each([

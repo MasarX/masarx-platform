@@ -37,7 +37,8 @@ test("sender scope resolves its authorized parent before requesting client optio
 test("fails closed when sender parent cannot be read", async () => {
   getResource.mockRejectedValue(new Error("scope denied"));
   const result = await loadPickupLookups({ access_scope: { scope_type: "sender", scope_id: "sender" } }, "request");
-  expect(result.error).toContain("scope denied");
+  expect(result.error).toBe("Sender scope unavailable.");
+  expect(result.error).not.toContain("scope denied");
   expect(listResource).not.toHaveBeenCalled();
 });
 
@@ -65,7 +66,8 @@ test("continues across backend-capped pages and deduplicates choices", async () 
 test("lookup failures remain visible and never fall back to unrestricted queries", async () => {
   listResource.mockRejectedValue(new Error("read denied"));
   const result = await loadPickupLookups({ org: { id: "tenant" } }, "request");
-  expect(result.error).toContain("read denied");
+  expect(result.error).toBe("Unable to load clients choices. Unable to load senders choices. Unable to load branches choices.");
+  expect(result.error).not.toContain("read denied");
   expect(result.options.clients).toEqual([]);
   expect(listResource).toHaveBeenCalledTimes(3);
 });
