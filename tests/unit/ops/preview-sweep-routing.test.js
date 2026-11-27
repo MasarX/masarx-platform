@@ -45,3 +45,27 @@ test('admits only fixed cell keys and numeric geometry in the preview workflow l
     line.replace('0.406250000', '1.100000000'),
   ]) expect(rejected).not.toMatch(filter);
 });
+
+test('keeps marker failure reasons while dropping DOM details and call logs', () => {
+  const workflow = readFileSync(resolve(__dirname, '../../../.github/workflows/public-ci.yml'), 'utf8');
+  const rules = [...workflow.matchAll(/-e 's\/(\^SWEEP-ERROR [^/]+)\/([^/]+)\/p'/g)];
+  const messages = [
+    'expect(locator).toBeVisible() failed',
+    'Error: strict mode violation: getByTestId("portal-resource-error") resolved to 2 elements:',
+    '    1) <p>Synthetic recipient</p>',
+    'Timeout:  15000ms',
+    '  - Target page, context or browser has been closed',
+    '  - waiting for getByText("Synthetic recipient")',
+    'Received: <element(s) not found>',
+  ];
+  const output = messages.flatMap(message => rules.flatMap(([, pattern, replacement]) => {
+    const match = new RegExp(pattern).exec('SWEEP-ERROR ' + message);
+    return match ? [replacement.replace(/\\([0-9])/g, (_, group) => match[Number(group)])] : [];
+  }));
+  expect(output).toEqual([
+    'SWEEP-ERROR expect(locator).toBeVisible() failed',
+    'SWEEP-ERROR strict mode violation: resolved to 2 elements',
+    'SWEEP-ERROR Timeout:  15000ms',
+    'SWEEP-ERROR Target page, context or browser has been closed',
+  ]);
+});

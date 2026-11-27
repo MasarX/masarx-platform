@@ -285,6 +285,25 @@
   const trackProofDialogTile = document.querySelector('[data-track-proof-dialog-tile]');
   const trackProofDialogImage = document.querySelector('[data-track-proof-dialog-image]');
   const trackProofDialogMeta = document.querySelector('[data-track-proof-dialog-meta]');
+  const trackOption = document.querySelector('[data-track-option]');
+  const trackOptionLoading = document.querySelector('[data-track-option-loading]');
+  const trackOptionNotice = document.querySelector('[data-track-option-notice]');
+  const trackOptionNoticeTitle = document.querySelector('[data-track-option-notice-title]');
+  const trackOptionNoticeText = document.querySelector('[data-track-option-notice-text]');
+  const trackOptionForm = document.querySelector('[data-track-option-form]');
+  const trackOptionChoices = document.querySelector('[data-track-option-choices]');
+  const trackOptionBranch = document.querySelector('[data-track-option-branch]');
+  const trackOptionBranchSelect = document.querySelector('[data-track-option-branch-select]');
+  const trackOptionBranchDetail = document.querySelector('[data-track-option-branch-detail]');
+  const trackOptionPlace = document.querySelector('[data-track-option-place]');
+  const trackOptionPlaces = document.querySelector('[data-track-option-places]');
+  const trackOptionOther = document.querySelector('[data-track-option-other]');
+  const trackOptionInstruction = document.querySelector('[data-track-option-instruction]');
+  const trackOptionCounter = document.querySelector('[data-track-option-counter]');
+  const trackOptionConsent = document.querySelector('[data-track-option-consent]');
+  const trackOptionConsentText = document.querySelector('[data-track-option-consent-text]');
+  const trackOptionSubmit = document.querySelector('[data-track-option-submit]');
+  const trackOptionStatus = document.querySelector('[data-track-option-status]');
   const trackMapPicker = document.querySelector('[data-track-map-picker]');
   const trackMapDialogPicker = document.querySelector('[data-track-map-picker-expanded]');
   const trackMapValue = document.querySelector('[data-track-map-value]');
@@ -348,6 +367,7 @@
     trackingRequestInFlight: {
       reschedule_date: false,
       location_change: false,
+      delivery_option: false,
     },
     trackingRequestSequence: 0,
     trackingRequestSlots: {
@@ -358,6 +378,8 @@
       location_change: null,
       live: null,
       proof: null,
+      options: null,
+      delivery_option: null,
     },
     mapPin: null,
     mapPinConfirmed: false,
@@ -366,6 +388,7 @@
     mapLocateSeq: 0,
     liveDelivery: { view: 'none', data: null, timer: null, lastFetchAt: 0, map: null, rect: null },
     proof: { view: 'none', data: null, items: [], dialogIndex: -1 },
+    options: { view: 'none', data: null },
   };
 
   function getIntakeConfig(formKey) {
@@ -1702,6 +1725,7 @@
     invalidateTrackingRequests();
     stopLiveDelivery();
     resetProof();
+    resetOptions();
     saveTrackingSession('');
     state.trackingReference = '';
     state.trackingPayload = null;
@@ -2651,6 +2675,297 @@
     }
   }
 
+  // --- Delivery options card (#410): home delivery, branch pickup, safe place ---
+
+  const OPTION_CHOICES = ['home_delivery', 'branch_pickup', 'safe_place'];
+  const OPTION_PLACES = ['reception', 'neighbour', 'other'];
+  // The server decides eligibility from the tenant policy (allowed statuses included); the page only skips non-delivery services.
+  function shouldLoadOptions(payload) {
+    const shipment = (payload?.tracking || payload)?.shipment || {};
+    return shipment.service_type === 'delivery';
+  }
+
+  function otherTrackingChangesOpen() {
+    const actions = (state.trackingPayload?.tracking || state.trackingPayload)?.actions || {};
+    return actions.reschedule?.enabled === true || actions.location_change?.enabled === true;
+  }
+
+  function setOptionView(view) {
+    state.options.view = view;
+    renderOptionCard();
+  }
+
+  function buildOptionRadios(fieldset, name, keys, withHint) {
+    if (!fieldset) return;
+    const lang = root.lang || 'en';
+    fieldset.querySelectorAll('label.choice').forEach((label) => label.remove());
+    keys.forEach((key) => {
+      const label = document.createElement('label');
+      label.className = 'choice';
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = name;
+      input.value = key;
+      input.required = true;
+      const text = document.createElement('span');
+      const title = document.createElement('span');
+      const titleKey = name === 'place' ? `track_option_place_${key}` : `track_option_${key}`;
+      title.dataset.i18n = titleKey;
+      title.textContent = getText(titleKey, lang) || '';
+      text.appendChild(title);
+      if (withHint) {
+        const hint = document.createElement('small');
+        hint.dataset.i18n = `${titleKey}_hint`;
+        hint.textContent = getText(`${titleKey}_hint`, lang) || '';
+        text.appendChild(hint);
+      }
+      label.append(input, text);
+      fieldset.appendChild(label);
+    });
+  }
+
+  function applyOptions(options) {
+    const choices = (Array.isArray(options.choices) ? options.choices : []).filter((key) => OPTION_CHOICES.includes(key));
+    const branches = (Array.isArray(options.branches) ? options.branches : [])
+      .filter((branch) => branch && branch.id != null && typeof branch.name === 'string' && branch.name.trim());
+    const places = (Array.isArray(options.safe_place?.places) ? options.safe_place.places : [])
+      .filter((key) => OPTION_PLACES.includes(key));
+    if (options.changes_open !== true || !choices.length) {
+      setOptionView(otherTrackingChangesOpen() ? 'none' : 'closed');
+      return;
+    }
+    const noBranches = choices.includes('branch_pickup') && !branches.length;
+    const shown = choices.filter((key) => (key !== 'branch_pickup' || branches.length) && (key !== 'safe_place' || places.length));
+    state.options.data = { branches, consentCopy: options.safe_place?.consent_copy ?? null, noBranches };
+    // Home alone is only a choice when it switches back from another option.
+    if (!shown.length || (shown.length === 1 && choices.length > 1)) {
+      setOptionView(noBranches ? 'empty' : 'none');
+      return;
+    }
+    if (trackOptionForm) trackOptionForm.reset();
+    buildOptionRadios(trackOptionChoices, 'option', shown, true);
+    buildOptionRadios(trackOptionPlaces, 'place', places, false);
+    clearOptionConsentError();
+    syncOptionSections();
+    setOptionView('ready');
+  }
+
+  function checkedOptionValue(name) {
+    const checked = trackOptionForm ? trackOptionForm.querySelector(`input[name="${name}"]:checked`) : null;
+    return checked ? checked.value : '';
+  }
+
+  function syncOptionSections() {
+    const option = checkedOptionValue('option');
+    const showBranch = option === 'branch_pickup';
+    const showPlace = option === 'safe_place';
+    const showOther = showPlace && checkedOptionValue('place') === 'other';
+    // Hidden controls are disabled so they neither block validation nor reach the payload.
+    if (trackOptionBranch) trackOptionBranch.hidden = !showBranch;
+    if (trackOptionBranchSelect) trackOptionBranchSelect.disabled = !showBranch;
+    if (trackOptionPlace) trackOptionPlace.hidden = !showPlace;
+    if (trackOptionPlaces) trackOptionPlaces.disabled = !showPlace;
+    if (trackOptionConsent) trackOptionConsent.disabled = !showPlace;
+    if (trackOptionOther) trackOptionOther.hidden = !showOther;
+    if (trackOptionInstruction) trackOptionInstruction.disabled = !showOther;
+  }
+
+  function formatBranchDistance(km) {
+    if (typeof km !== 'number' || !Number.isFinite(km)) return '';
+    try {
+      return new Intl.NumberFormat(root.lang || 'en', { style: 'unit', unit: 'kilometer', maximumFractionDigits: 1 }).format(km);
+    } catch {
+      return '';
+    }
+  }
+
+  function wallClock(value) {
+    const match = /^(\d{1,2}):(\d{2})/.exec(String(value || '').trim());
+    if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) return null;
+    return new Date(Date.UTC(2026, 0, 1, Number(match[1]), Number(match[2])));
+  }
+
+  function formatBranchHours(hours) {
+    // Opening hours are branch wall-clock times: format them in UTC so the viewer's zone cannot shift them.
+    const start = wallClock(hours?.opens_at);
+    const end = wallClock(hours?.closes_at);
+    if (!start || !end || end <= start) return '';
+    return formatTrackingTimeRange(start.toISOString(), end.toISOString(), { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' });
+  }
+
+  function formatBranchAddress(address) {
+    if (!address || typeof address !== 'object') return '';
+    if (typeof address.formatted === 'string' && address.formatted.trim()) return address.formatted.trim();
+    const parts = [address.line1 || address.street, address.district, address.city]
+      .filter((part) => typeof part === 'string' && part.trim())
+      .map((part) => part.trim());
+    try {
+      return new Intl.ListFormat(root.lang || 'en', { style: 'short', type: 'unit' }).format(parts);
+    } catch {
+      return parts.join(', ');
+    }
+  }
+
+  function renderOptionBranches() {
+    const data = state.options.data;
+    if (!trackOptionBranchSelect || !data) return;
+    const lang = root.lang || 'en';
+    const selected = trackOptionBranchSelect.value;
+    trackOptionBranchSelect.replaceChildren(...data.branches.map((branch) => {
+      const option = document.createElement('option');
+      option.value = String(branch.id);
+      const name = branch.name.trim();
+      const distance = formatBranchDistance(branch.distance_km);
+      option.textContent = distance
+        ? (getText('track_option_branch_option', lang) || '').replace('{name}', name).replace('{distance}', distance)
+        : name;
+      return option;
+    }));
+    if (selected && data.branches.some((branch) => String(branch.id) === selected)) trackOptionBranchSelect.value = selected;
+
+    if (!trackOptionBranchDetail) return;
+    const branch = data.branches.find((item) => String(item.id) === trackOptionBranchSelect.value) || data.branches[0];
+    const name = document.createElement('strong');
+    name.textContent = branch ? branch.name.trim() : '';
+    const parts = [name];
+    const address = formatBranchAddress(branch?.address);
+    if (address) {
+      const line = document.createElement('span');
+      const bdi = document.createElement('bdi');
+      bdi.textContent = address;
+      line.appendChild(bdi);
+      parts.push(line);
+    }
+    const hours = formatBranchHours(branch?.opening_hours);
+    if (hours) {
+      const line = document.createElement('span');
+      fillTextWithBdi(line, getText('track_option_branch_hours', lang), 'hours', hours);
+      parts.push(line);
+    }
+    const note = document.createElement('span');
+    note.textContent = getText('track_option_branch_id_note', lang) || '';
+    parts.push(note);
+    trackOptionBranchDetail.replaceChildren(...parts);
+  }
+
+  function renderOptionCounter() {
+    if (!trackOptionCounter) return;
+    const count = trackOptionInstruction ? trackOptionInstruction.value.length : 0;
+    const lang = root.lang || 'en';
+    trackOptionCounter.textContent = (getText('track_option_other_counter', lang) || '')
+      .replace('{count}', new Intl.NumberFormat(lang).format(count));
+  }
+
+  function resolveOptionConsentCopy() {
+    const lang = root.lang || 'en';
+    const copy = state.options.data?.consentCopy;
+    if (typeof copy === 'string' && copy.trim()) return copy.trim();
+    if (copy && typeof copy === 'object') {
+      const localized = copy[lang] ?? copy.en;
+      if (typeof localized === 'string' && localized.trim()) return localized.trim();
+    }
+    return getText('track_option_consent_default', lang) || '';
+  }
+
+  function clearOptionConsentError() {
+    if (trackOptionConsent) {
+      trackOptionConsent.removeAttribute('aria-invalid');
+      trackOptionConsent.removeAttribute('aria-describedby');
+    }
+    if (trackOptionStatus && trackOptionStatus.getAttribute('role') === 'alert') {
+      trackOptionStatus.removeAttribute('role');
+      trackOptionStatus.setAttribute('aria-live', 'polite');
+      setTrackingStatus(trackOptionStatus, '');
+    }
+  }
+
+  function validateOptionConsent() {
+    if (checkedOptionValue('option') !== 'safe_place' || trackOptionConsent?.checked) {
+      clearOptionConsentError();
+      return true;
+    }
+    // The button stays enabled; a missing consent is explained here and tied to the checkbox.
+    setTrackingStatus(trackOptionStatus, 'track_option_consent_required', 'error');
+    trackOptionStatus.setAttribute('role', 'alert');
+    trackOptionStatus.removeAttribute('aria-live');
+    trackOptionConsent.setAttribute('aria-invalid', 'true');
+    trackOptionConsent.setAttribute('aria-describedby', trackOptionStatus.id);
+    trackOptionConsent.focus();
+    return false;
+  }
+
+  function buildOptionPayload() {
+    const fd = new FormData(trackOptionForm);
+    const option = String(fd.get('option') || '');
+    if (option === 'branch_pickup') return { option, branch_id: String(fd.get('branch_id') || '') };
+    if (option !== 'safe_place') return { option };
+    const place = String(fd.get('place') || '');
+    return {
+      option,
+      place,
+      ...(place === 'other' ? { instruction: String(fd.get('instruction') || '').trim() } : {}),
+      consent: Boolean(trackOptionConsent?.checked),
+    };
+  }
+
+  function renderOptionCard() {
+    if (!trackOption) return;
+    const lang = root.lang || 'en';
+    const { view, data } = state.options;
+    trackOption.hidden = view === 'none';
+    if (view === 'loading') trackOption.setAttribute('aria-busy', 'true');
+    else trackOption.removeAttribute('aria-busy');
+    if (trackOptionLoading) trackOptionLoading.hidden = view !== 'loading';
+    if (trackOptionForm) trackOptionForm.hidden = view !== 'ready';
+
+    const noticeKey = view === 'closed'
+      ? 'track_option_closed'
+      : (view === 'empty' || (view === 'ready' && data?.noBranches)) ? 'track_option_no_branches' : '';
+    if (trackOptionNotice) trackOptionNotice.hidden = !noticeKey;
+    if (trackOptionNoticeTitle) trackOptionNoticeTitle.textContent = noticeKey ? getText(`${noticeKey}_title`, lang) || '' : '';
+    if (trackOptionNoticeText) trackOptionNoticeText.textContent = noticeKey ? getText(`${noticeKey}_text`, lang) || '' : '';
+
+    if (view !== 'ready') return;
+    renderOptionBranches();
+    renderOptionCounter();
+    if (trackOptionConsentText) trackOptionConsentText.textContent = resolveOptionConsentCopy();
+  }
+
+  function resetOptions() {
+    invalidateTrackingRequests(['options']);
+    if (trackOptionForm) trackOptionForm.reset();
+    clearOptionConsentError();
+    setTrackingStatus(trackOptionStatus, '');
+    state.options.data = null;
+    setOptionView('none');
+  }
+
+  async function loadOptions(payload = state.trackingPayload) {
+    const token = state.trackingSessionToken;
+    if (!token || state.trackingStage !== 'results' || !shouldLoadOptions(payload)) {
+      invalidateTrackingRequests(['options']);
+      setOptionView('none');
+      return;
+    }
+    const request = beginTrackingRequest('options');
+    setOptionView('loading');
+    try {
+      const { response, data } = await postTracking('options', { session_token: token }, request.controller);
+      if (!isCurrentTrackingRequest(request)) return;
+      const options = data?.delivery_options;
+      if (!response.ok || !data || data.ok === false || !options || typeof options !== 'object') {
+        // A failed load hides the card without side effects; an expired session shows on the next action.
+        setOptionView(data?.error?.code === 'changes_closed' && !otherTrackingChangesOpen() ? 'closed' : 'none');
+        return;
+      }
+      applyOptions(options);
+    } catch {
+      if (isCurrentTrackingRequest(request)) setOptionView('none');
+    } finally {
+      finishTrackingRequest(request);
+    }
+  }
+
   async function postTracking(action, body, controller = new AbortController()) {
     const url = resolveTrackingUrl(action);
     if (!url) throw new Error('missing_tracking_endpoint');
@@ -2799,7 +3114,7 @@
     if (controller.map) return controller;
 
     const map = L.map(container, {
-      zoomControl: true,
+      zoomControl: false,
       attributionControl: true,
       scrollWheelZoom: true,
       keyboard: true,
@@ -2813,6 +3128,8 @@
       maxZoom: mapRuntime.maxZoom,
     }).addTo(map);
 
+    // Leaflet corners are physical; keep zoom at inline-start so the map toggle (inline-end) never covers it in RTL.
+    L.control.zoom({ position: root.dir === 'rtl' ? 'topright' : 'topleft' }).addTo(map);
     map.attributionControl.setPrefix(false);
     map.setView([mapRuntime.defaultLat, mapRuntime.defaultLng], mapRuntime.defaultZoom);
     map.on('click', (event) => {
@@ -3063,6 +3380,7 @@
     if (state.trackingPayload) renderTrackingPayload(state.trackingPayload);
     renderLiveDeliveryCard();
     renderProofCard();
+    renderOptionCard();
     syncMapPinUi();
   }
 
@@ -3106,6 +3424,7 @@
       setTrackingStage('results');
       applyLiveDelivery(data);
       loadProof(data);
+      loadOptions(data);
     } catch {
       if (!isCurrentTrackingRequest(request)) return;
       saveTrackingSession('');
@@ -3220,6 +3539,7 @@
       setOwnedTrackingRequestStatus(request, '');
       startLiveDelivery(data);
       loadProof(data);
+      loadOptions(data);
     } catch (error) {
       if (!isCurrentTrackingRequest(request)) return;
       setOwnedTrackingRequestStatus(
@@ -3235,8 +3555,8 @@
   }
 
   async function submitTrackingRequest(kind) {
-    const form = kind === 'reschedule_date' ? trackRescheduleForm : trackLocationForm;
-    const statusEl = kind === 'reschedule_date' ? trackRescheduleStatus : trackLocationStatus;
+    const form = { reschedule_date: trackRescheduleForm, location_change: trackLocationForm, delivery_option: trackOptionForm }[kind];
+    const statusEl = { reschedule_date: trackRescheduleStatus, location_change: trackLocationStatus, delivery_option: trackOptionStatus }[kind];
     if (!form) return;
     if (hasTrackingMutationInFlight()) return;
     if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
@@ -3258,11 +3578,12 @@
       focusMapConfirmButton();
       return;
     }
+    if (kind === 'delivery_option' && !validateOptionConsent()) return;
     const turnstileToken = hasTurnstile() ? getTurnstileToken() : '';
 
     const fd = new FormData(form);
     const draft = captureTrackingRequestDraft(kind);
-    const payload = kind === 'reschedule_date'
+    const payload = kind === 'delivery_option' ? buildOptionPayload() : kind === 'reschedule_date'
       ? {
           requested_date: String(fd.get('requested_date') || '').trim(),
           notes: String(fd.get('notes') || '').trim(),
@@ -3290,11 +3611,17 @@
         button: trackLocationSubmitBtn,
         wasDisabled: Boolean(trackLocationSubmitBtn?.disabled),
       },
+      {
+        kind: 'delivery_option',
+        button: trackOptionSubmit,
+        wasDisabled: Boolean(trackOptionSubmit?.disabled),
+      },
     ];
     const wasLangToggleDisabled = Boolean(langToggle?.disabled);
     const releaseMutableControlLock = lockMutableControls([
       trackRescheduleForm,
       trackLocationForm,
+      trackOptionForm,
     ]);
     const request = beginTrackingRequest(kind, {
       release: () => {
@@ -3303,6 +3630,7 @@
           restoreTrackingRequestSubmitButton(buttonKind, button, wasDisabled);
         });
         releaseMutableControlLock();
+        syncOptionSections();
         reapplyTrackingMutationPolicy();
         if (langToggle) langToggle.disabled = wasLangToggleDisabled;
       },
@@ -3331,7 +3659,16 @@
           setTrackingStatus(trackLookupStatus, 'track_status_invalid_session', 'error');
           return;
         }
+        if (kind === 'delivery_option' && data?.error?.code === 'changes_closed') {
+          setOwnedTrackingRequestStatus(request, '');
+          setOptionView('closed');
+          return;
+        }
         setOwnedTrackingRequestStatus(request, resolveTrackingErrorKey(data?.error?.code), 'error');
+        return;
+      }
+      if (kind === 'delivery_option' && data.unchanged === true) {
+        setOwnedTrackingRequestStatus(request, 'track_option_status_unchanged', 'success');
         return;
       }
       const outcome = typeof data.outcome === 'string' ? data.outcome.trim().toLowerCase() : 'pending_review';
@@ -3664,6 +4001,22 @@
       });
       trackLocationForm.addEventListener('input', () => {
         if (!state.trackingRequestInFlight.location_change) setTrackingStatus(trackLocationStatus, '');
+      });
+    }
+
+    if (trackOptionForm) {
+      trackOptionForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        submitTrackingRequest('delivery_option');
+      });
+      trackOptionForm.addEventListener('input', (e) => {
+        if (!state.trackingRequestInFlight.delivery_option) clearOptionConsentError();
+        if (!state.trackingRequestInFlight.delivery_option) setTrackingStatus(trackOptionStatus, '');
+        if (e.target === trackOptionInstruction) renderOptionCounter();
+      });
+      trackOptionForm.addEventListener('change', (e) => {
+        syncOptionSections();
+        if (e.target === trackOptionBranchSelect) renderOptionBranches();
       });
     }
 
