@@ -82,7 +82,6 @@ apps/console-v2/src/modules/platform/release-proof.tsx 28
 apps/console-v2/src/modules/platform/users.tsx 160
 apps/console-v2/src/modules/support/cases.tsx 180
 apps/console-v2/src/modules/workflows/_bindings/condition-model.ts 7
-apps/console-v2/src/modules/workflows/bindings.tsx 183
 apps/console-v2/src/modules/workflows/review-queue.tsx 193
 apps/console-v2/src/modules/workflows/runs.tsx 269
 apps/console-v2/src/modules/workflows/templates.tsx 240
