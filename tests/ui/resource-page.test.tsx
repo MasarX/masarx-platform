@@ -654,7 +654,8 @@ describe("ResourcePage related reader composition", () => {
     const { listResource } = await renderRelated({ failBoxes: true });
     expect(listResource).toHaveBeenCalledTimes(3);
     openRelated("Shipment boxes");
-    expect(screen.getByText("Boxes read unavailable")).toBeInTheDocument();
+    expect(screen.getByText("ui.resourcePage.detail.related.loadFailed")).toBeInTheDocument();
+    expect(screen.queryByText("Boxes read unavailable", { exact: false })).not.toBeInTheDocument();
     expect(screen.getByText("ui.resourcePage.detail.related.unavailable")).toBeInTheDocument();
     expect(screen.queryByText("ui.resourcePage.detail.related.empty")).not.toBeInTheDocument();
     expect(screen.queryByText("Current box")).not.toBeInTheDocument();

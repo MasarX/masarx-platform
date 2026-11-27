@@ -3,7 +3,7 @@
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-// Per-chunk budgets in KB (raw size). Tune as the app grows.
+// Per-chunk budgets in KiB (raw size).
 //
 // Phase F (2026-04-27): seed-mode vs. live-mode dual budget. The seed catalog
 // under `src/lib/seed-raw/` (~10k LOC across 30+ modules) is now lazy-loaded
@@ -69,6 +69,7 @@ const BASELINE_CHUNK_BUDGETS = {
   'maplibre-gl-': 1050,
   'pdf-preview-': 430,
   'shipments-': 113,
+  'supabase-auth-client-': 63_104 / 1024, // Exact emitted size from the hosted live build for #629.
 };
 
 const BUDGETS = {
@@ -101,7 +102,7 @@ const files = readdirSync(dist).filter((f) => f.endsWith('.js'));
 const violations = [];
 
 for (const f of files) {
-  const sizeKB = statSync(join(dist, f)).size / 1024;
+  const sizeBytes = statSync(join(dist, f)).size;
   let budget = BUDGETS.default;
   for (const prefix of Object.keys(BUDGETS)) {
     if (prefix !== 'default' && f.startsWith(prefix)) {
@@ -109,13 +110,17 @@ for (const f of files) {
       break;
     }
   }
-  if (sizeKB > budget) violations.push({ file: f, sizeKB: sizeKB.toFixed(1), budget });
+  const budgetBytes = budget * 1024;
+  console.log(`  ${f}: ${sizeBytes} bytes`);
+  if (sizeBytes > budgetBytes) violations.push({ file: f, sizeBytes, budgetBytes });
 }
 
 const mode = SEED_ENABLED ? 'seed' : 'live';
 if (violations.length) {
   console.error(`Bundle size budget violations (mode=${mode}):`);
-  for (const v of violations) console.error(`  ${v.file}: ${v.sizeKB} KB > ${v.budget} KB`);
+  for (const v of violations) {
+    console.error(`  ${v.file}: ${v.sizeBytes} bytes > ${v.budgetBytes} bytes`);
+  }
   process.exit(1);
 }
 console.log(`All chunks within budget (mode=${mode}, index<=${BUDGETS['index-']} KB).`);
