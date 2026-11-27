@@ -12,6 +12,7 @@ import * as React from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Defs, G, Path, Pattern, Rect, Text as SvgText } from "react-native-svg";
 
+import { getStrings, resolveLocaleCode } from "./i18n";
 import { FxIcon } from "./mobile-v2-icon";
 import type { MobileV2IconName } from "./mobile-v2-icon-specs";
 import {
@@ -123,6 +124,8 @@ export interface MobileV2StopDetail {
 export interface MobileV2StopScreenProps {
   readonly theme: MobileV2Theme;
   readonly stop: MobileV2StopDetail;
+  /** Locale for translated accessibility status words; defaults to English. */
+  readonly locale?: string;
   readonly locationReadback?: MobileV2StopLocationReadback | null;
   readonly terminalState?: "done" | "failed" | "partial" | null;
   readonly intentReadback?: {
@@ -136,13 +139,13 @@ export interface MobileV2StopScreenProps {
   readonly onCopyAddress?: () => void;
   readonly onShareAddress?: () => void;
   readonly onScanParcel?: () => void;
-  /** Tap a parcel to open its detail / toggle scan state manually. */
+  /** Tap a parcel to open its detail. Parcel status renders only from the stop read-back. */
   readonly onParcelPress?: (parcelId: string) => void;
   /** Open the damaged-parcel hold sheet for this stop. */
   readonly onDamageHold?: () => void;
   /** Open the delivery reschedule sheet for this stop. */
   readonly onReschedule?: () => void;
-  /** Tap a proof checklist item to mark it done (e.g. photo captured). */
+  /** Tap a proof checklist item to open proof capture. Done state renders only from the stop read-back. */
   readonly onProofPress?: (key: string) => void;
   readonly onPodSubmit?: () => void;
   readonly onFail?: () => void;
@@ -388,6 +391,7 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
         : terminalState === "partial"
           ? { label: "Partial delivery recorded", icon: "alert" as const, tone: "warning" as const }
           : null;
+  const strings = getStrings(resolveLocaleCode(props.locale));
   const resolveParcelStatus = (parcel: MobileV2StopParcel): MobileV2StopParcel["status"] =>
     resolveMobileV2StopParcelStatus(parcel, stop.proofChecklist, stop.parcels);
 
@@ -1012,9 +1016,9 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                         ? () => props.onProofPress!(c.key)
                         : undefined
                     }
-                    accessibilityRole="checkbox"
-                    accessibilityLabel={c.label}
-                    accessibilityState={{ checked: done, disabled: isTerminal }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${c.label}, ${done ? strings.home.counter_done : strings.home.counter_pending}`}
+                    accessibilityState={{ disabled: isTerminal }}
                     disabled={isTerminal}
                     style={{
                       flexDirection: "row",

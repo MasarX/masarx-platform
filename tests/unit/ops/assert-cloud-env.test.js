@@ -1,3 +1,7 @@
+const { supabasePoolerHost } = require('../../fixtures/builders/hosts');
+
+const eastPooler1 = supabasePoolerHost(1, 'us-test-1');
+
 const {
   isSelectedDbHostFallback,
   validateCloudEnv,
@@ -219,7 +223,7 @@ describe('assert-cloud-env', () => {
           DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'pass',"@",'192.0.2.10',":",'5432',"/",'postgres'].join("")),
           DATABASE_URL_DIRECT: (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join("")),
           DATABASE_URL_POOLER:
-            (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-db-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres'].join("")),
+            (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-db-password',"@",eastPooler1,":",'5432',"/",'postgres'].join("")),
           DATABASE_URL_SELECTED_DSN_NAME: 'DATABASE_URL_POOLER+ipv4host',
           EDGE_REQUIRE_DB_JWT: '1',
           API_GATEWAY_DB_JWT: makeJwt({ role: 'edge_api_gateway_role' }),

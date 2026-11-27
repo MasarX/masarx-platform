@@ -50,7 +50,7 @@ const ensureTestShipment = async () => {
        now(),
        now()
      )
-     returning id, organization_id, client_id`,
+     returning id, organization_id, client_id, tracking_number`,
     [fallbackClient.organization_id, fallbackClient.client_id, tracking]
   );
   return rows[0];
@@ -84,6 +84,7 @@ describe('Label decision logging', () => {
         shipment.id
       ]);
       if (!existingBox) {
+        const boxNumber = 1;
         const insertBox = await pool.query(
           `insert into shipment_boxes (
              id, shipment_id, organization_id, client_id, box_number, barcode, created_at
@@ -93,12 +94,18 @@ describe('Label decision logging', () => {
              $1,
              $2,
              $3,
-             1,
-             concat('LBLTEST:', lpad((floor(random() * 1000000))::text, 6, '0')),
+             $4,
+             $5,
              now()
            )
            returning id`,
-          [shipment.id, shipment.organization_id, shipment.client_id]
+          [
+            shipment.id,
+            shipment.organization_id,
+            shipment.client_id,
+            boxNumber,
+            `${shipment.tracking_number}:${boxNumber}`
+          ]
         );
         insertedBoxId = insertBox.rows[0].id;
       }

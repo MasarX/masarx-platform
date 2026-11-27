@@ -1,5 +1,20 @@
 // en.js — English message catalog (full coverage)
 export const en = {
+  adapter: {
+    dispatchScanner: 'Console V2 Dispatch scanner',
+    pluginBlockingDiagnostic: 'Synthetic blocking diagnostic (demo branch).',
+    webhookReceiverTimeoutReadback: 'webhook-receiver edge invocation timed out; using canonical inbox readback',
+    workflowStep: 'Step',
+    labelDesignInvalid: 'label_design must be an object',
+    labelTemplatesMissing: 'label_design.templates missing',
+    labelTemplateInvalid: 'template must be an object',
+    labelPageMissing: 'renderer_config.page missing',
+    labelBlocksMissing: 'renderer_config.blocks missing',
+    labelDraftNotFound: 'Draft not found',
+    labelDraftNotEditable: 'Only draft rows are editable',
+    labelDraftNotArchivable: 'Only draft rows can be archived',
+    labelDraftValidationFailed: 'Draft validation failed',
+  },
   app: {
     name: 'MasarX',
     role: 'admin',
@@ -10,6 +25,11 @@ export const en = {
     // Starts with the visible label of the language button (WCAG 2.5.3).
     switchLanguage: 'AR, switch to Arabic',
     userMenu: 'user menu',
+    themeCycle: {
+      system: 'Theme: system (click to cycle)',
+      light: 'Theme: light (click to cycle)',
+      dark: 'Theme: dark (click to cycle)',
+    },
   },
   nav: {
     today: 'Today',
@@ -200,6 +220,11 @@ export const en = {
     label: 'Evidence',
     expand: 'Expand decision trail',
   },
+  deliveryOption: {
+    branchPickup: 'Branch pickup',
+    safePlace: 'Safe place: {place}',
+    place: { reception: 'reception', neighbour: 'neighbour', other: 'other' },
+  },
   scope: {
     global: 'Global',
     tenant: 'Tenant',
@@ -207,5 +232,33 @@ export const en = {
     sender: 'Sender',
     source: 'Source',
     resource: 'Resource',
+  },
+  shipmentHistory: {
+    referenceTitle: "{label} reference",
+    when: "When",
+    scanType: "Scan type",
+    barcode: "Barcode",
+    user: "User",
+    notes: "Notes",
+    noScans: "No scans yet.",
+    decisionStreamUnavailable: "One decision stream is unavailable, so this view is showing the shipment decision rows that could be read.",
+    category: "Category",
+    decision: "Decision",
+    outcome: "Outcome",
+    scope: "Scope",
+    resolution: "Resolution",
+    noDecisions: "No decisions recorded for this shipment.",
+    viewActivity: "View activity",
+    auditDenied: "Audit access denied",
+    auditPermissionRequired: "Audit activity permission is required.",
+    auditStreamUnavailable: "One audit stream is unavailable, so this view is showing the shipment audit records that could be read.",
+    source: "Source",
+    operation: "Operation",
+    actor: "Actor",
+    activity: "Activity",
+    noAuditChanges: "No audit changes recorded for this shipment.",
+    systemAudit: "System audit",
+    shipmentAction: "Shipment action",
+    linked: "Linked",
   },
 };

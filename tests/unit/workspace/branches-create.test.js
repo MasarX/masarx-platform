@@ -1,3 +1,8 @@
+const { supabasePoolerHost } = require('../../fixtures/builders/hosts');
+
+const westRegion = 'eu-test-1';
+const westPooler1 = supabasePoolerHost(1, westRegion);
+
 const fs = require('fs');
 const path = require('path');
 const {
@@ -15,7 +20,7 @@ function branchConfig(overrides = {}) {
     project_ref: 'abcdefghijklmnopqrst',
     status: 'ACTIVE_HEALTHY',
     name: 'api-branch-name',
-    region: 'eu-west-1',
+    region: westRegion,
     db_host: 'db.abcdefghijklmnopqrst.supabase.co',
     db_port: '6432',
     db_user: 'postgres.abcdefghijklmnopqrst',
@@ -71,7 +76,7 @@ describe('scripts/ops/branches/create.js', () => {
   test('hydrates branch-owned credentials and returns the exact official direct host', async () => {
     const getBranchConfigFn = jest.fn().mockResolvedValue(branchConfig());
     const resolvePoolerHostFn = jest.fn().mockResolvedValue(
-      'aws-1-eu-west-1.pooler.supabase.com',
+      westPooler1,
     );
 
     await expect(hydrateSelectedBranch({
@@ -94,8 +99,8 @@ describe('scripts/ops/branches/create.js', () => {
       branch_id: 'deprecated-branch-uuid',
       branch_parent_ref: 'uvwxyzabcdefghijklmn',
       project_ref: 'abcdefghijklmnopqrst',
-      region: 'eu-west-1',
-      pooler_host: 'aws-1-eu-west-1.pooler.supabase.com',
+      region: westRegion,
+      pooler_host: westPooler1,
       pooler_port: '5432',
       direct_db_host: 'db.abcdefghijklmnopqrst.supabase.co',
       db_pass: 'branch-owned-password',
@@ -161,7 +166,7 @@ describe('scripts/ops/branches/create.js', () => {
       nowFn: () => nowMs,
       sleepFn,
       resolvePoolerHostFn: jest.fn().mockResolvedValue(
-        'aws-1-eu-west-1.pooler.supabase.com',
+        westPooler1,
       ),
     });
 
@@ -199,7 +204,7 @@ describe('scripts/ops/branches/create.js', () => {
       nowFn: () => nowMs,
       sleepFn,
       resolvePoolerHostFn: jest.fn().mockResolvedValue(
-        'aws-1-eu-west-1.pooler.supabase.com',
+        westPooler1,
       ),
     })).resolves.toMatchObject({ db_pass: 'branch-owned-password' });
 

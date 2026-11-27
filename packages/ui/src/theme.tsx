@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { type ContextStore, useContextStore, useContextStoreValue } from "./context-store";
 
 export type ThemeMode = "light" | "dark" | "system";
 type ResolvedTheme = "light" | "dark";
@@ -12,10 +13,11 @@ type ThemeContextValue = {
   toggleTheme: () => void;
 };
 
-const THEME_STORAGE_KEY = "masarx-ui-theme";
+/** The one theme storage key every surface reads and writes. */
+export const THEME_STORAGE_KEY = "masarx-ui-theme";
 const THEME_ATTRIBUTE = "data-theme";
 
-const ThemeContext = React.createContext<ThemeContextValue | null>(null);
+const ThemeContext = React.createContext<ContextStore<ThemeContextValue> | null>(null);
 
 function resolveSystemTheme(): ResolvedTheme {
   if (typeof window === "undefined" || !window.matchMedia) {
@@ -64,28 +66,37 @@ function persistTheme(theme: ThemeMode) {
  * Theme provider that syncs system preference with stored overrides.
  */
 export function ThemeProvider({ children }: { children?: React.ReactNode }) {
-  const [theme, setTheme] = React.useState<ThemeMode>("system");
+  // "system" first so server and client render alike; the stored choice loads after mount.
+  const [theme, setThemeState] = React.useState<ThemeMode>("system");
   const [resolvedTheme, setResolvedTheme] =
     React.useState<ResolvedTheme>("light");
 
   React.useEffect(() => {
-    const stored = readStoredTheme();
-    setTheme(stored);
+    const storedTheme = readStoredTheme();
+    React.startTransition(() => setThemeState(storedTheme));
   }, []);
 
   React.useEffect(() => {
     const resolved = theme === "system" ? resolveSystemTheme() : theme;
-    setResolvedTheme(resolved);
+    React.startTransition(() => setResolvedTheme(resolved));
     applyTheme(resolved);
-    persistTheme(theme);
   }, [theme]);
 
+  // Storage is written only on a user's choice, so a mount (or StrictMode remount)
+  // never clears a stored theme before it has been read.
+  const setTheme = React.useCallback((next: ThemeMode) => {
+    persistTheme(next);
+    setThemeState(next);
+  }, []);
+
   React.useEffect(() => {
-    if (theme !== "system" || typeof window === "undefined") return;
+    if (theme !== "system" || typeof window === "undefined" || !window.matchMedia) {
+      return;
+    }
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const handleChange = () => {
       const resolved = resolveSystemTheme();
-      setResolvedTheme(resolved);
+      React.startTransition(() => setResolvedTheme(resolved));
       applyTheme(resolved);
     };
     if (media.addEventListener) {
@@ -97,21 +108,18 @@ export function ThemeProvider({ children }: { children?: React.ReactNode }) {
   }, [theme]);
 
   const toggleTheme = React.useCallback(() => {
-    setTheme((current) => {
-      if (current === "system") {
-        return resolvedTheme === "dark" ? "light" : "dark";
-      }
-      return current === "dark" ? "light" : "dark";
-    });
-  }, [resolvedTheme]);
+    const current = theme === "system" ? resolvedTheme : theme;
+    setTheme(current === "dark" ? "light" : "dark");
+  }, [theme, resolvedTheme, setTheme]);
 
   const value = React.useMemo(
     () => ({ theme, resolvedTheme, setTheme, toggleTheme }),
-    [theme, resolvedTheme, toggleTheme]
+    [theme, resolvedTheme, setTheme, toggleTheme]
   );
+  const store = useContextStore(value);
 
   return (
-    <ThemeContext.Provider value={value}>
+    <ThemeContext.Provider value={store}>
       {children ?? null}
     </ThemeContext.Provider>
   );
@@ -121,7 +129,7 @@ export function ThemeProvider({ children }: { children?: React.ReactNode }) {
  * Access theme state and toggle helpers.
  */
 export function useTheme(): ThemeContextValue {
-  const ctx = React.useContext(ThemeContext);
+  const ctx = useContextStoreValue(React.useContext(ThemeContext));
   if (ctx) return ctx;
   return {
     theme: "system",
