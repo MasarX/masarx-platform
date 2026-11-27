@@ -203,22 +203,6 @@
     "expires": "2026-12-08"
   },
   {
-    "file": "tests/integration/label/label-print-sync-worker-grace.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Fixture uses retired address validation status values",
-    "issue": "#571",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/geocoding.edge-intake.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Fixture uses retired address validation status values",
-    "issue": "#571",
-    "expires": "2026-12-08"
-  },
-  {
     "file": "tests/integration/workflows/api-gateway-provider-update.test.js",
     "kind": "known-failure",
     "runner": "Hosted integration",
@@ -283,22 +267,6 @@
     "expires": "2026-12-08"
   },
   {
-    "file": "tests/integration/workflows/engine-lifecycle.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Integration test references an undefined identifier",
-    "issue": "#573",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/ack/async-headers-and-provenance.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Integration test references an undefined identifier",
-    "issue": "#573",
-    "expires": "2026-12-08"
-  },
-  {
     "file": "tests/integration/workflows/workflow-intake.test.js",
     "kind": "known-failure",
     "runner": "Hosted integration",
@@ -308,22 +276,6 @@
   },
   {
     "file": "tests/integration/comms-notification-dispatch.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Fixture SQL or data does not match the migrated schema and settings",
-    "issue": "#574",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/label/label-target-artifact-contract.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Fixture SQL or data does not match the migrated schema and settings",
-    "issue": "#574",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/geocoding.benchmark.test.js",
     "kind": "known-failure",
     "runner": "Hosted integration",
     "reason": "Fixture SQL or data does not match the migrated schema and settings",
@@ -347,14 +299,6 @@
     "expires": "2026-12-08"
   },
   {
-    "file": "tests/integration/automation-marketplace-v1-completion.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Hosted results differ from the current integration assertions",
-    "issue": "#575",
-    "expires": "2026-12-08"
-  },
-  {
     "file": "tests/integration/tasks/tasks-ssot-core.test.js",
     "kind": "known-failure",
     "runner": "Hosted integration",
@@ -371,27 +315,11 @@
     "expires": "2026-12-08"
   },
   {
-    "file": "tests/integration/ack/ack-mapping.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Hosted results differ from the current integration assertions",
-    "issue": "#575",
-    "expires": "2026-12-08"
-  },
-  {
     "file": "tests/integration/mapping-studio-runtime-save.test.js",
     "kind": "known-failure",
     "runner": "Hosted integration",
     "reason": "Hosted results differ from the current integration assertions",
     "issue": "#575",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/label/waybill-layout-goldens.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Hosted waybill rendering fingerprint differs from the golden",
-    "issue": "#576",
     "expires": "2026-12-08"
   }
 ]
