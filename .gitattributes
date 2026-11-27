@@ -8,3 +8,16 @@ scripts/edge/vendor-notices/saxes-5.0.1-LICENSE text eol=lf
 supabase/functions/resource-import-studio/_vendor/** text eol=lf
 # The database CA is verified byte-for-byte against its upstream SHA-256.
 config/certs/supabase-prod-ca-2021.crt -text
+
+# Package manager lockfiles.
+package-lock.json linguist-generated=true
+deno.lock linguist-generated=true
+
+# Outputs from the OpenAPI generator and the Edge ExcelJS artifact builder.
+/docs/api/openapi.json linguist-generated=true
+/supabase/functions/resource-import-studio/_vendor/** linguist-generated=true
+
+# TanStack Router and test-generated baselines.
+/apps/console-v2/src/routeTree.gen.ts linguist-generated=true
+/apps/console-v2/tests/visual/**/*-snapshots/*.png linguist-generated=true
+/tests/fixtures/label/waybill-layout-goldens.json linguist-generated=true
