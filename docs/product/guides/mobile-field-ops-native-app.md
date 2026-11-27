@@ -40,6 +40,10 @@ Native tool routes (mobile `href`)
   - `/mobile/outbox` (queued/failed writes; retry/clear flows)
   - `/mobile/scan` (manual + camera barcode capture -> `record_scan_event_v1`)
     - Scan input mode is policy/platform-driven (`camera`/`scanner`) with persisted user preference and safe fallback per platform.
+    - The stop parcel API uses `api.record_scan_event_v1` with `scan_type: stop_parcel`, an assigned `route_stop_id`, the parcel barcode and an idempotency key. The server derives the route branch from the stop and uses it to resolve policy.
+    - To opt in at a scope, save a v3 `scan_policy` row that accepts `stop_parcel` and sets `manual_entry.enabled` and `manual_entry.reason_codes`. Use active codes from the `stop_scan_manual_entry_reason` lookup. The resolved policy returns the configured choices and retains its camera and scanner list for earlier app versions.
+    - Manual requests use `metadata.scan_input_mode: manual_entry` and `metadata.scan_reason_code`, with optional text in `metadata.scan_reason_note`. The scan ledger records the reason with the resolved policy version, actor and timestamps.
+    - After a confirmed write, refetch `api.resolve_fieldops_stop_detail_v1` and render the matching parcel's `status`. A parcel scan leaves proof-of-delivery state to the proof workflow.
     - While driving lock is active, scan capture/submit is blocked and the UI remains explicit about lock state.
     - Warehouse checkpoint scans are sequence-enforced and append-only: `warehouse_checkpoint` capture must follow the resolved checkpoint order, bulk manifest/container capture must fan out through `api.record_scan_events_batch_v1`, and corrections must append a new supervised scan row instead of mutating the original event.
   - `/mobile/location` (one-shot capture -> `record_location_ping_v1`)
