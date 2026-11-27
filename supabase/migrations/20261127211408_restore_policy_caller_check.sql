@@ -41,10 +41,37 @@ BEGIN
     v_context := '{}'::jsonb;
   END IF;
 
-  -- A request retains its identity inside a definer. SQL service calls need no JWT.
-  v_has_privileged_scope := COALESCE(v_role = 'service_role', FALSE)
-    OR COALESCE(v_role = 'edge_label_renderer_role' AND p_scope_path IS NOT NULL
-                AND p_category IN ('label_design', 'label_print_policy', 'shipment_reference_policy'), FALSE);
+  -- A request retains its SQL role inside a definer. Edge lookups are limited to their workflow categories.
+  v_has_privileged_scope := COALESCE(v_role = 'service_role', FALSE);
+  IF v_role = v_sql_role THEN
+    IF p_scope_path IS NOT NULL THEN
+      v_has_privileged_scope := v_has_privileged_scope OR COALESCE(
+        (v_role IN ('edge_api_gateway_role', 'edge_webhook_role', 'edge_api_caller_role', 'edge_label_renderer_role')
+          AND p_category IN ('workflow_defaults', 'worker_cadence', 'outbound_retry_policy',
+                             'provider_failover_policy', 'provider_usage_policy'))
+        OR (v_role = 'edge_label_renderer_role'
+          AND p_category IN ('label_design', 'label_print_policy', 'shipment_reference_policy'))
+        OR (v_role = 'edge_api_caller_role' AND p_category = 'outbound_egress_policy')
+        OR (v_role IN ('edge_api_gateway_role', 'edge_webhook_role') AND p_category = 'shipment_operation_policy'),
+        FALSE
+      );
+      IF NOT v_has_privileged_scope AND v_role = 'edge_api_gateway_role'
+          AND v_context ? 'webhook_source_id' THEN
+        -- Provider account categories are configured by enabled routes.
+        SELECT EXISTS (
+          SELECT 1 FROM public.api_routes r
+          JOIN public.api_route_packs p ON p.id = r.pack_id
+          JOIN public.webhook_sources s ON s.id = public.mapping_studio_try_uuid_v1(v_context ->> 'webhook_source_id')
+          WHERE r.enabled AND p.enabled AND s.enabled
+            AND s.organization_id = public.mapping_studio_try_uuid_v1(v_context ->> 'organization_id')
+            AND COALESCE(NULLIF(r.policy #>> '{provider_account,category}', ''),
+                         NULLIF(r.policy #>> '{auth,binding_category}', '')) = p_category
+        ) INTO v_has_privileged_scope;
+      END IF;
+    ELSIF v_role = 'edge_api_gateway_role' THEN
+      v_has_privileged_scope := COALESCE(p_category IN ('public_tracking_policy', 'shipment_promise_policy'), FALSE);
+    END IF;
+  END IF;
   IF NOT v_has_privileged_scope AND v_has_uuid_subject THEN
     v_has_privileged_scope := COALESCE(public.is_platform_user(), FALSE);
   END IF;
@@ -245,6 +272,22 @@ BEGIN
 END;
 $function$;
 
+CREATE FUNCTION public.outbound_job_matches_organization_v1(p_job_id UUID, p_organization_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SET search_path TO public, pg_temp
+AS $function$
+BEGIN
+  RETURN p_organization_id IS NOT NULL
+    AND public.resolve_organization_id_strict('outbound_call', p_job_id) = p_organization_id;
+EXCEPTION WHEN raise_exception THEN
+  RETURN FALSE;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.outbound_job_matches_organization_v1(UUID, UUID)
+  FROM PUBLIC, anon, authenticated, service_role;
+
 -- Record-bound callers use the same lookup as callers supplying a policy context.
 DO $migration$
 DECLARE
@@ -294,6 +337,26 @@ $function$$checked$;
       ('public.resolve_mobile_shell_policy(text,jsonb)',
        $before$jsonb_build_object('organization_id', v_caller_org) || v_context$before$,
        $after$v_context || jsonb_build_object('organization_id', v_caller_org)$after$),
+      ('public.claim_pending_jobs(integer)',
+       $before$BEGIN
+    -- Keep the fail-closed policy read.$before$,
+       $after$    v_scope_to_caller boolean := current_setting('role', true) = 'authenticated'
+        AND NOT COALESCE(public.is_platform_user(), FALSE);
+    v_caller_org uuid := CASE WHEN v_scope_to_caller THEN public.current_user_org_id() END;
+BEGIN
+    -- Keep the fail-closed policy read.$after$),
+      ('public.claim_pending_jobs(integer)',
+       $before$         WHERE oc.status = 'pending'
+           AND oc.renderer_credential_ref IS NULL$before$,
+       $after$         WHERE oc.status = 'pending'
+           AND (NOT v_scope_to_caller OR public.outbound_job_matches_organization_v1(oc.id, v_caller_org))
+           AND oc.renderer_credential_ref IS NULL$after$),
+      ('public.claim_pending_jobs(integer)',
+       $before$         WHERE oc2.status = 'pending'
+           AND oc2.renderer_credential_ref IS NULL$before$,
+       $after$         WHERE oc2.status = 'pending'
+           AND (NOT v_scope_to_caller OR public.outbound_job_matches_organization_v1(oc2.id, v_caller_org))
+           AND oc2.renderer_credential_ref IS NULL$after$),
       ('public.ensure_task_type_from_catalog_internal_v1(uuid,text,jsonb)',
        'public.resolve_settings_row_from_policy_context_v1(',
        'public.resolve_settings_row_from_bound_policy_context_v1('),

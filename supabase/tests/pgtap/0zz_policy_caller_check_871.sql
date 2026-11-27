@@ -2,7 +2,132 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 
-SELECT plan(235);
+SELECT plan(243);
+
+CREATE FUNCTION pg_temp.policy_scope_id(p_category TEXT, p_context JSONB) RETURNS UUID
+LANGUAGE sql SECURITY DEFINER SET search_path TO public, pg_temp AS $test$
+  SELECT scope_id FROM public.resolve_settings_row_from_context(p_category, p_context);
+$test$;
+
+CREATE FUNCTION pg_temp.policy_claim_one_job() RETURNS UUID
+LANGUAGE sql SECURITY DEFINER SET search_path TO public, pg_temp AS $test$
+  SELECT job_id FROM public.claim_pending_jobs(1);
+$test$;
+
+CREATE FUNCTION pg_temp.check_edge_policy_callers(
+  p_org UUID, p_client UUID, p_other_client UUID, p_actor UUID
+) RETURNS SETOF TEXT
+LANGUAGE plpgsql AS $test$
+DECLARE
+  v_source UUID := gen_random_uuid();
+  v_sender UUID := gen_random_uuid();
+  v_mapping UUID := gen_random_uuid();
+  v_provider UUID := gen_random_uuid();
+  v_pack UUID := gen_random_uuid();
+  v_version UUID := gen_random_uuid();
+  v_template UUID := gen_random_uuid();
+  v_template_step UUID := gen_random_uuid();
+  v_run UUID := gen_random_uuid();
+  v_step UUID := gen_random_uuid();
+  v_own_job UUID := gen_random_uuid();
+  v_other_job UUID := gen_random_uuid();
+  v_token TEXT := gen_random_uuid()::text;
+  v_category TEXT := 'fixture_account_' || replace(v_source::text, '-', '');
+  v_path TEXT := '/pgtap/policy-account/' || v_source;
+  v_value JSONB := '{"company_id":"999999","enabled":true}';
+  v_context JSONB := jsonb_build_object('organization_id', p_org, 'client_id', p_client,
+    'sender_id', v_sender, 'webhook_source_id', v_source);
+  v_claims JSONB := jsonb_build_object('sub', 'edge-function', 'role', 'edge_api_gateway_role', 'aud', 'authenticated');
+  v_denial CONSTANT TEXT := 'Policy context is outside the permitted organization scope';
+  v_result JSONB;
+  v_job UUID;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '', TRUE);
+  PERFORM set_config('request.jwt.claim.role', '', TRUE);
+  PERFORM set_config('request.jwt.claims', '', TRUE);
+  PERFORM public.create_next_partitions();
+
+  INSERT INTO public.senders(id, client_id, name, status)
+    VALUES (v_sender, p_client, 'Policy fixture', 'active');
+  INSERT INTO public.mapping_configs(id, mapping_type, mapping_key, mapping_config, mapping_version)
+    VALUES (v_mapping, 'webhook_inbound', 'policy-' || v_mapping, '{}', 1);
+  INSERT INTO public.webhook_sources(id, organization_id, source_identifier, name, provider_type,
+    auth_token, mapping_config_id, rate_limit_per_hour, enabled, sender_id)
+    VALUES (v_source, p_org, 'policy-' || v_source, 'Policy fixture', 'api_gateway',
+      v_token, v_mapping, 1000, TRUE, v_sender);
+  INSERT INTO public.providers(id, organization_id, name, provider_type, enabled, metadata)
+    VALUES (v_provider, p_org, 'policy-' || v_provider, '3pl', TRUE, '{"base_url":"https://example.test"}');
+  INSERT INTO public.api_route_packs(id, name) VALUES (v_pack, 'policy-' || v_pack);
+  INSERT INTO public.api_routes(pack_id, route_name, method, path_template, scope_type, scope_id, provider_id, policy)
+    VALUES (v_pack, 'policy-fixture', 'POST', v_path, 'source', v_source, v_provider,
+      jsonb_build_object('provider_account', jsonb_build_object('category', v_category)));
+  INSERT INTO public.settings_versions_p0(id, category, scope_type, scope_id, scope_hash, version, value,
+    schema_version, change_reason, approved_at, effective_from)
+    VALUES (v_version, v_category, 'tenant', p_org, p_org, 1, v_value, 1, 'Policy fixture', now(), now());
+  INSERT INTO public.settings(category, scope_type, scope_id, scope_hash, settings_version_id, cached_value)
+    VALUES (v_category, 'tenant', p_org, p_org, v_version, v_value);
+
+  INSERT INTO public.workflow_templates(id, name, version, status, scope_type)
+    VALUES (v_template, 'policy-' || v_template, 1, 'active', 'global');
+  INSERT INTO public.workflow_template_steps(id, workflow_template_id, sequence_order, operation_name,
+    transition_condition, handler_key, handler_version, enabled)
+    VALUES (v_template_step, v_template, 1, 'workflow_control', 'always', 'workflow_control', 'v1', TRUE);
+  INSERT INTO public.workflow_runs(id, workflow_template_id, workflow_template_version, entry_point, workflow_status, context)
+    VALUES (v_run, v_template, 1, 'test', 'pending', jsonb_build_object('organization_id', p_org));
+  INSERT INTO public.workflow_run_steps(id, workflow_run_id, workflow_template_step_id, sequence_order,
+    step_status, operation_name, handler_key, handler_version, max_retries, enqueued_at)
+    VALUES (v_step, v_run, v_template_step, 1, 'pending', 'workflow_control', 'workflow_control', 'v1', 1, now());
+  PERFORM set_config('app.workflow_run_id', v_run::text, TRUE);
+  PERFORM set_config('app.workflow_run_step_id', v_step::text, TRUE);
+  PERFORM set_config('platform.workflow_engine', '1', TRUE);
+  PERFORM set_config('platform.workflow_run_step_id', v_step::text, TRUE);
+
+  PERFORM set_config('request.jwt.claim.role', 'edge_api_gateway_role', TRUE);
+  PERFORM set_config('request.jwt.claims', v_claims::text, TRUE);
+  EXECUTE 'SET LOCAL ROLE edge_api_gateway_role';
+  RETURN NEXT is(pg_temp.policy_scope_id(v_category, v_context), p_org,
+    'Gateway resolves the configured account for its source organization');
+  RETURN NEXT throws_ok(format('SELECT pg_temp.policy_scope_id(%L, %L::jsonb)', 'tabular_import_policy', v_context),
+    '42501', v_denial, 'Gateway scope is limited to configured lookups');
+  v_result := public.workflow_intake_api_gateway_v1(v_token, 'POST', v_path, '', '{}', '{}');
+  EXECUTE 'RESET ROLE';
+  RETURN NEXT is(v_result->>'action', 'proxy', 'Intake accepts the configured account');
+
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  RETURN NEXT throws_ok(format('SELECT pg_temp.policy_scope_id(%L, %L::jsonb)', v_category, v_context),
+    '42501', v_denial, 'Gateway lookup requires the database role');
+  EXECUTE 'RESET ROLE';
+
+  PERFORM set_config('request.jwt.claim.role', 'edge_webhook_role', TRUE);
+  PERFORM set_config('request.jwt.claims', (v_claims || '{"role":"edge_webhook_role"}')::text, TRUE);
+  EXECUTE 'SET LOCAL ROLE edge_webhook_role';
+  RETURN NEXT lives_ok(format('SELECT pg_temp.policy_scope_id(%L, %L::jsonb)', 'workflow_defaults', v_context),
+    'Webhook resolves workflow defaults for its source');
+  EXECUTE 'RESET ROLE';
+
+  PERFORM set_config('request.jwt.claim.role', 'edge_api_caller_role', TRUE);
+  PERFORM set_config('request.jwt.claims', (v_claims || '{"role":"edge_api_caller_role"}')::text, TRUE);
+  EXECUTE 'SET LOCAL ROLE edge_api_caller_role';
+  RETURN NEXT lives_ok(format('SELECT pg_temp.policy_scope_id(%L, %L::jsonb)', 'outbound_retry_policy', v_context),
+    'API caller resolves retry policy for its work');
+  EXECUTE 'RESET ROLE';
+
+  PERFORM set_config('request.jwt.claim.role', '', TRUE);
+  PERFORM set_config('request.jwt.claims', '', TRUE);
+  INSERT INTO public.outbound_calls(id, call_type, target_type, target_id, method, url, status, priority, scheduled_at)
+    VALUES (v_own_job, 'provider_api', 'client', p_client, 'POST', 'https://example.test/own', 'pending', 10000, now()),
+           (v_other_job, 'provider_api', 'client', p_other_client, 'POST', 'https://example.test/other', 'pending', 10001, now());
+  PERFORM set_config('request.jwt.claim.sub', p_actor::text, TRUE);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', TRUE);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', p_actor, 'role', 'authenticated')::text, TRUE);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  v_job := pg_temp.policy_claim_one_job();
+  EXECUTE 'RESET ROLE';
+  RETURN NEXT is(v_job, v_own_job, 'Inline worker claims a job for the active organization');
+  RETURN NEXT ok((SELECT lease_expires_at IS NULL FROM public.outbound_calls WHERE id = v_other_job),
+    'Inline worker leaves other organizations available for background work');
+END;
+$test$;
 
 CREATE FUNCTION pg_temp.check_policy_callers() RETURNS SETOF TEXT
 LANGUAGE plpgsql AS $test$
@@ -265,6 +390,7 @@ BEGIN
     WHERE has_function_privilege(role_name, 'public.resolve_settings_row_from_bound_policy_context_v1(text,jsonb)', 'EXECUTE')
        OR has_function_privilege(role_name, 'public.marketplace_policy_lookup_bound_v1(text,jsonb)', 'EXECUTE')
   ), 'Record-bound lookup implementations are owner-only');
+  RETURN QUERY SELECT * FROM pg_temp.check_edge_policy_callers(v_org, v_own_client, v_client, v_actor);
 END;
 $test$;
 
