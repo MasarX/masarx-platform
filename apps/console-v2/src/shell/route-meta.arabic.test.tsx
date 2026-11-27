@@ -8,12 +8,13 @@ vi.mock('@tanstack/react-router', async () => {
 
 import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
+import type { IdentityProviderMockValue } from '@/lib/identity';
 import { ROUTE_TITLES, buildRouteBreadcrumbs, buildRouteHead } from '@/lib/route-meta';
 import en from '@/lib/seed-raw/i18n/areas/en/routes';
 import ar from '@/lib/seed-raw/i18n/areas/ar/routes';
 import { Topbar } from './Topbar';
 
-const IDENTITY = {
+const IDENTITY: IdentityProviderMockValue = {
   capabilities: ['all'],
   user: { name: 'Test Operator', access_scope_type: 'tenant', access_scope_id: null, organization_id: 'org_test' },
   scope: { tenant: { id: 'org_test', label: 'Test Logistics', rank: 2 } },
