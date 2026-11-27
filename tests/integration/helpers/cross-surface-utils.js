@@ -391,14 +391,12 @@ async function createShipmentViaTabularImport(client, input) {
     throw new Error(`tabular import did not materialize shipment ${trackingNumber}`);
   }
 
-  const { rows: importRunRows } = await client.query(
-    `SELECT report_id
-       FROM public.tabular_import_runs
-      WHERE id = $1::uuid`,
+  const { rows: readbackRows } = await client.query(
+    `SELECT public.ui_get_tabular_import_run_v1($1::uuid) AS run`,
     [preparedRun.run_id],
   );
-
-  const importedRow = processedRun.rows?.find(row => row.target_record_id === shipmentId);
+  const readback = parseRpcResult(readbackRows[0]?.run, 'ui_get_tabular_import_run_v1');
+  const importedRow = readback.rows?.find(row => row.target_record_id === shipmentId);
   return {
     shipmentId,
     workflowRunId: importedRow?.workflow_run_id,
@@ -406,7 +404,7 @@ async function createShipmentViaTabularImport(client, input) {
     trackingNumber,
     clientReferenceNumber: shipmentRows[0]?.client_reference_number || clientReferenceNumber,
     importRunId: preparedRun.run_id,
-    reportId: importRunRows[0]?.report_id ?? null,
+    reportId: readback.report_id ?? null,
     result: importedRow?.primary_result,
   };
 }

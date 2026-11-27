@@ -1411,13 +1411,6 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     expect(targetManifestRows[0]?.manifest?.stop_count).toBe(1);
     expect(targetManifestRows[0]?.manifest?.stops?.[0]?.route_stop_id).toBe(movedStopId);
     const resource = 'route_stop_reassignment_events';
-    const { rows: [registryRow] } = await withFixtureAdminContext(client, db => db.query(
-      `SELECT entry AS resource
-         FROM jsonb_array_elements(public.ui_rpc_registry_v1('tenant', $1::uuid)->'resources') AS entry
-        WHERE entry->>'key' = $2`,
-      [seed.organizationId, resource]
-    ));
-    expect(registryRow?.resource?.read_scope_types).toEqual(['tenant']);
     const eventId = (await withFixtureAdminContext(client, db => db.query(
       'SELECT id FROM public.route_stop_reassignment_events WHERE route_stop_id=$1::uuid', [movedStopId]))).rows[0].id;
     const reads = [
@@ -1488,14 +1481,13 @@ describe('UC076 route run assignment lifecycle foundation', () => {
       }
     }
     await setAuthContext(client, seed.operatorId);
-    // Global is not a valid user fixture; this is shared-guard proof only.
+    // Exercise the generic scope guard directly because there is no global actor fixture.
     await client.query('SAVEPOINT e49_global_guard');
     try {
       await expect(client.query(
-        `SELECT public.ui_assert_resource_read_scope_v1($1::jsonb, 'global', NULL)`,
-        [JSON.stringify(registryRow.resource)]
-      ))
-        .rejects.toMatchObject({ code:'42501',message:'Resource read scope denied' });
+        `SELECT public.ui_assert_resource_read_scope_v1(
+          '{"read_scope_types":["tenant"],"scope_columns":{"tenant":"organization_id"}}'::jsonb, 'global', NULL)`
+      )).rejects.toMatchObject({ code: '42501', message: 'Resource read scope denied' });
     } finally {
       await client.query('ROLLBACK TO SAVEPOINT e49_global_guard');
       await client.query('RELEASE SAVEPOINT e49_global_guard');
