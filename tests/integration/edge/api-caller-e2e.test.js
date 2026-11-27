@@ -22,15 +22,15 @@ const INVOKE_JWT =
   process.env.API_CALLER_DB_JWT ||
   process.env.EDGE_DB_JWT ||
   '';
-const RECEIPT_CONTRACT = 'masarx.deployed-api-caller-guarded-egress.v1';
+const RECEIPT_CONTRACT = 'masarx.deployed-api-caller-guarded-egress.v2';
 const COMPONENT_AUTHORITY = 'unsigned_component_only';
 
 jest.setTimeout(45_000);
 
-function required(name) {
-  const value = String(process.env[name] || '').trim();
-  if (!value) throw new Error(`[api-caller-e2e] Missing required proof input: ${name}`);
-  return value;
+function required(name, { trim = true } = {}) {
+  const value = String(process.env[name] || '');
+  if (!value.trim()) throw new Error(`[api-caller-e2e] Missing required proof input: ${name}`);
+  return trim ? value.trim() : value;
 }
 
 function requiredFullSha(name) {
@@ -68,32 +68,69 @@ function writeReceipt(receiptPath, receipt) {
   fs.writeFileSync(target, `${JSON.stringify(receipt, null, 2)}\n`, 'utf8');
 }
 
+function assertRunIdentity(runId, runAttempt) {
+  const valid = (value) => typeof value === 'string' && /^[1-9][0-9]*$/.test(value);
+  if (!valid(runId) || !valid(runAttempt)) {
+    throw new Error('[api-caller-e2e] Run identity is missing or invalid');
+  }
+}
+
+function privateTargetDenialEvidence() {
+  return { http_status: 502, job_status: 'permanently_failed', transport_status: 0, denial_code_matches_expected: true };
+}
+
+function controlledPublicProbeEvidence() {
+  return { http_status: 200, job_status: 'completed', egress_ip_matches_expected: true };
+}
+
+function isPublishableCheck(check) {
+  const plainObject = (value) => value != null && Object.getPrototypeOf(value) === Object.prototype;
+  if (!plainObject(check) ||
+      !Reflect.ownKeys(check).every((key) => ['id', 'status', 'failure_class', 'evidence'].includes(key)) ||
+      !['private_target_denial', 'controlled_public_probe', 'exact_test_cleanup'].includes(check.id) ||
+      !['passed', 'failed', 'not_run'].includes(check.status) ||
+      (Object.hasOwn(check, 'failure_class') && check.failure_class !== 'cleanup_failed')) {
+    return false;
+  }
+  if (!Object.hasOwn(check, 'evidence')) return true;
+  const { evidence } = check;
+  return plainObject(evidence) && Reflect.ownKeys(evidence).every((key) => {
+    const value = evidence[key];
+    return ['http_status', 'job_status', 'transport_status', 'denial_code_matches_expected',
+      'egress_ip_matches_expected', 'target_count'].includes(key) &&
+      (typeof value === 'boolean' || Number.isFinite(value) || ['permanently_failed', 'completed'].includes(value));
+  });
+}
+
 function buildComponentReceipt({
   candidateSha,
   activeDeploymentSha,
-  publicProbeUrl,
-  expectedPublicIp,
-  policyDeniedCode,
+  runId,
+  runAttempt,
   checks,
   generatedAt = new Date().toISOString(),
 }) {
-  if (!/^[a-f0-9]{40}$/.test(String(candidateSha || '')) || candidateSha !== activeDeploymentSha) {
+  if (typeof candidateSha !== 'string' || !/^[a-f0-9]{40}$/.test(candidateSha) || candidateSha !== activeDeploymentSha) {
     throw new Error('[api-caller-e2e] Candidate SHA is invalid or stale for the active deployment');
   }
-  const failureCount = checks.filter((check) => check.status !== 'passed').length;
+  assertRunIdentity(runId, runAttempt);
+  const publicChecks = Array.isArray(checks) ? Array.from(checks) : null;
+  if (!publicChecks?.every(isPublishableCheck)) {
+    throw new Error('[api-caller-e2e] Receipt evidence is not publishable');
+  }
+  const failureCount = publicChecks.filter((check) => check.status !== 'passed').length;
   const receipt = {
     schema_version: RECEIPT_CONTRACT,
     authority: COMPONENT_AUTHORITY,
     requires_external_signature: true,
     status: failureCount ? 'failed' : 'passed',
     candidate_sha: candidateSha,
+    run_id: runId,
+    run_attempt: runAttempt,
     generated_at: generatedAt,
-    public_probe_origin_sha256: sha256(new URL(publicProbeUrl).origin),
-    expected_public_ip_sha256: sha256(expectedPublicIp),
-    denial_code_sha256: sha256(policyDeniedCode),
-    check_count: checks.length,
+    check_count: publicChecks.length,
     failure_count: failureCount,
-    checks,
+    checks: publicChecks,
   };
   receipt.receipt_sha256 = sha256(JSON.stringify(receipt));
   return receipt;
@@ -101,6 +138,13 @@ function buildComponentReceipt({
 
 describe('API Caller deployed receipt component contract', () => {
   const candidateSha = '0123456789abcdef0123456789abcdef01234567';
+  const receiptInputs = {
+    candidateSha,
+    activeDeploymentSha: candidateSha,
+    runId: '123456789',
+    runAttempt: '1',
+    generatedAt: '2026-07-20T00:00:00.000Z',
+  };
 
   test('selects deployed proof only for an explicit non-empty proof lane', () => {
     expect(isDeployedProofEnabled({ RUN_EDGE_E2E: 'true' })).toBe(false);
@@ -118,17 +162,16 @@ describe('API Caller deployed receipt component contract', () => {
     })).toBe(true);
   });
 
-  test('emits only an exact-SHA unsigned component with hash-only network evidence', () => {
+  test('emits only an exact-SHA unsigned component with redacted network evidence', () => {
     const receipt = buildComponentReceipt({
       candidateSha,
       activeDeploymentSha: candidateSha,
-      publicProbeUrl: 'https://probe.example.test/egress',
-      expectedPublicIp: '8.8.8.8',
-      policyDeniedCode: 'NON_PUBLIC_DESTINATION_DENIED',
+      runId: receiptInputs.runId,
+      runAttempt: receiptInputs.runAttempt,
       checks: [{
         id: 'controlled_public_probe',
         status: 'passed',
-        evidence: { observed_egress_ip_sha256: sha256('8.8.8.8') },
+        evidence: { egress_ip_matches_expected: true },
       }],
       generatedAt: '2026-07-20T00:00:00.000Z',
     });
@@ -152,11 +195,61 @@ describe('API Caller deployed receipt component contract', () => {
     expect(() => buildComponentReceipt({
       candidateSha: candidate,
       activeDeploymentSha: active,
-      publicProbeUrl: 'https://probe.example.test/egress',
-      expectedPublicIp: '8.8.8.8',
-      policyDeniedCode: 'NON_PUBLIC_DESTINATION_DENIED',
+      runId: receiptInputs.runId,
+      runAttempt: receiptInputs.runAttempt,
       checks: [],
     })).toThrow(/invalid or stale/);
+  });
+
+  test('binds exact run identity strings into the receipt digest', () => {
+    const { receipt_sha256: digest, ...receipt } = buildComponentReceipt({ ...receiptInputs, checks: [] });
+    expect(receipt.run_id).toBe(receiptInputs.runId);
+    expect(receipt.run_attempt).toBe(receiptInputs.runAttempt);
+    expect(digest).toBe(sha256(JSON.stringify(receipt)));
+    expect(buildComponentReceipt({ ...receiptInputs, runAttempt: '2', checks: [] }).receipt_sha256).not.toBe(digest);
+  });
+
+  test.each(['runId', 'runAttempt'].flatMap((field) =>
+    [undefined, '', '0', '01', '1.5', '-1', 'abc', '12 ', 12].map((value) => [field, value]),
+  ))('rejects invalid %s in the receipt identity %#', (field, value) => {
+    expect(() => buildComponentReceipt({ ...receiptInputs, [field]: value, checks: [] }))
+      .toThrow('[api-caller-e2e] Run identity is missing or invalid');
+  });
+
+  test('publishes only the v2 receipt fields and redacted deployed check evidence', () => {
+    const receipt = buildComponentReceipt({ ...receiptInputs, checks: [
+      { id: 'private_target_denial', status: 'passed', evidence: privateTargetDenialEvidence() },
+      { id: 'controlled_public_probe', status: 'passed', evidence: controlledPublicProbeEvidence() },
+    ] });
+    expect(receipt.schema_version).toBe('masarx.deployed-api-caller-guarded-egress.v2');
+    expect(Object.keys(receipt)).toEqual([
+      'schema_version', 'authority', 'requires_external_signature', 'status', 'candidate_sha', 'run_id',
+      'run_attempt', 'generated_at', 'check_count', 'failure_count', 'checks', 'receipt_sha256',
+    ]);
+    const { receipt_sha256: digest, ...payload } = JSON.parse(JSON.stringify(receipt));
+    expect(digest).toMatch(/^[a-f0-9]{64}$/);
+    function assertNoNetworkHashes(entries) {
+      for (const [key, value] of Object.entries(entries)) {
+        expect(key).not.toMatch(/_sha256$/);
+        if (typeof value === 'string') expect(value).not.toMatch(/^[a-f0-9]{64}$/i);
+        else if (value !== null && typeof value === 'object') assertNoNetworkHashes(value);
+      }
+    }
+    assertNoNetworkHashes(payload);
+  });
+
+  test.each([
+    ...['a'.repeat(64), 'https://probe.example.test', '203.0.113.1', 'free text', {}, [], null, Infinity]
+      .map((value) => ({ evidence: { job_status: value } })),
+    { unexpected: true },
+    { id: 'unknown' },
+    { status: 'unknown' },
+    { failure_class: 'unknown' },
+    { evidence: { unexpected_sha256: true } },
+  ])('rejects unpublished check fields and values %#', (override) => {
+    const checks = [{ id: 'controlled_public_probe', status: 'passed', ...override }];
+    expect(() => buildComponentReceipt({ ...receiptInputs, checks }))
+      .toThrow('[api-caller-e2e] Receipt evidence is not publishable');
   });
 
   test('maps only the exact live private-target denial to the configured code', () => {
@@ -184,6 +277,8 @@ runIfDeployedProof('API Caller guarded egress deployed proof', () => {
   let expectedPublicIp;
   let candidateSha;
   let activeDeploymentSha;
+  let runId;
+  let runAttempt;
   let policyDeniedCode;
   let receiptPath;
   const proofChecks = new Map([
@@ -205,6 +300,9 @@ runIfDeployedProof('API Caller guarded egress deployed proof', () => {
     if (candidateSha !== activeDeploymentSha) {
       throw new Error('[api-caller-e2e] Candidate SHA is stale for the active deployment');
     }
+    runId = required('GITHUB_RUN_ID', { trim: false });
+    runAttempt = required('GITHUB_RUN_ATTEMPT', { trim: false });
+    assertRunIdentity(runId, runAttempt);
     policyDeniedCode = requiredDenialCode('API_CALLER_GUARDED_EGRESS_POLICY_DENIED_CODE');
     receiptPath = required('API_CALLER_DEPLOYED_EGRESS_PROOF_RECEIPT_PATH');
     pool = new Pool({ connectionString: databaseUrl });
@@ -243,9 +341,8 @@ runIfDeployedProof('API Caller guarded egress deployed proof', () => {
     const receipt = buildComponentReceipt({
       candidateSha,
       activeDeploymentSha,
-      publicProbeUrl,
-      expectedPublicIp,
-      policyDeniedCode,
+      runId,
+      runAttempt,
       checks,
     });
     writeReceipt(receiptPath, receipt);
@@ -368,13 +465,7 @@ runIfDeployedProof('API Caller guarded egress deployed proof', () => {
     proofChecks.set('private_target_denial', {
       id: 'private_target_denial',
       status: 'passed',
-      evidence: {
-        http_status: 502,
-        job_status: 'permanently_failed',
-        transport_status: 0,
-        denial_code_sha256: sha256(denialCode),
-        denied_target_origin_sha256: sha256(new URL(privateUrl).origin),
-      },
+      evidence: privateTargetDenialEvidence(),
     });
   });
 
@@ -405,11 +496,7 @@ runIfDeployedProof('API Caller guarded egress deployed proof', () => {
     proofChecks.set('controlled_public_probe', {
       id: 'controlled_public_probe',
       status: 'passed',
-      evidence: {
-        http_status: 200,
-        job_status: 'completed',
-        observed_egress_ip_sha256: sha256(expectedPublicIp),
-      },
+      evidence: controlledPublicProbeEvidence(),
     });
   });
 });

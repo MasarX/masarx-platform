@@ -3565,13 +3565,6 @@
       "calls": "‏الاستدعاءات",
       "avgResponse": "‏متوسط الاستجابة"
     },
-    "dispatchBoard": {
-      "unassigned": "‏غير مُعيَّن",
-      "allJobsAssigned": "‏تم تعيين جميع المهام",
-      "drivers": "‏السائقون",
-      "eta": "‏الوقت المتوقع",
-      "noJobsDropHere": "‏لا توجد مهام — أسقط هنا للتعيين"
-    },
     "pickupStatus": {
       "unknown": "غير معروف",
       "statuses": {
@@ -3606,7 +3599,9 @@
       "dismissAriaLabel": "‏تجاهل قائمة الإعداد"
     },
     "kanbanBoard": {
-      "noItems": "‏لا توجد عناصر"
+      "noItems": "‏لا توجد عناصر",
+      "moveTo": "‏نقل إلى عمود…",
+      "moveCard": "‏نقل إلى عمود: {card}"
     },
     "pickupOperations": {
       "form": {

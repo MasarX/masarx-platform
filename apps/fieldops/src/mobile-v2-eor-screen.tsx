@@ -18,6 +18,7 @@ import { FxButton, FxCard, FxCol, FxMetric, FxRow, FxSectionHead } from "./mobil
 import { FxIcon } from "./mobile-v2-icon";
 import type { MobileV2IconName } from "./mobile-v2-icon-specs";
 import { formatMobileV2CurrencyCompact } from "./mobile-v2-ops-helpers";
+import { getStrings, resolveLocaleCode } from "./i18n";
 import {
   MOBILE_V2_FONT_SANS,
   MOBILE_V2_SPACING,
@@ -61,6 +62,7 @@ export interface MobileV2EorScreenProps {
   readonly isCompleting?: boolean;
   readonly onToggle: (id: string) => void;
   readonly onComplete?: () => void;
+  readonly locale?: string;
   readonly style?: StyleProp<ViewStyle>;
 }
 
@@ -72,15 +74,16 @@ function humanizeEorReconState(value: string): string {
     .join(" ");
 }
 
-function formatReconSubmittedAt(value: string | null): string {
-  if (value === null) return "Just now";
+function formatReconSubmittedAt(value: string | null, justNow: string): string {
+  if (value === null) return justNow;
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "Just now";
+  if (Number.isNaN(parsed.getTime())) return justNow;
   return parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 export function MobileV2EorScreen(props: MobileV2EorScreenProps): React.ReactElement {
   const { theme, summary, checklist, checked } = props;
+  const copy = getStrings(resolveLocaleCode(props.locale)).eor;
   const allDone = checklist.every((i) => checked.has(i.id));
   const denom = Math.max(1, summary.delivered + summary.failed);
   const onTimePct = Math.round((summary.delivered / denom) * 100);
@@ -102,7 +105,7 @@ export function MobileV2EorScreen(props: MobileV2EorScreenProps): React.ReactEle
             <View style={{ alignItems: "center" }}>
               <FxMetric
                 theme={theme}
-                label="Delivered"
+                label={copy.delivered}
                 value={String(summary.delivered)}
                 unit={`/${summary.total}`}
                 tone="success"
@@ -113,7 +116,7 @@ export function MobileV2EorScreen(props: MobileV2EorScreenProps): React.ReactEle
             <View style={{ alignItems: "center" }}>
               <FxMetric
                 theme={theme}
-                label="Failed"
+                label={copy.failed}
                 value={String(summary.failed)}
                 tone="danger"
               />
@@ -123,7 +126,7 @@ export function MobileV2EorScreen(props: MobileV2EorScreenProps): React.ReactEle
             <View style={{ alignItems: "center" }}>
               <FxMetric
                 theme={theme}
-                label="On-time"
+                label={copy.onTime}
                 value={String(onTimePct)}
                 unit="%"
                 tone="accent"
@@ -133,7 +136,7 @@ export function MobileV2EorScreen(props: MobileV2EorScreenProps): React.ReactEle
         </FxRow>
 
         {/* Hand-back checklist */}
-        <FxSectionHead theme={theme} label="Hand-back checklist" />
+        <FxSectionHead theme={theme} label={copy.checklist} />
         <View
           style={{
             backgroundColor: theme.border,
@@ -237,7 +240,7 @@ export function MobileV2EorScreen(props: MobileV2EorScreenProps): React.ReactEle
                       fontFamily: MOBILE_V2_FONT_SANS,
                     }}
                   >
-                    Latest reconciliation saved
+                    {copy.reconSaved}
                   </Text>
                   <Text
                     style={{
@@ -246,7 +249,7 @@ export function MobileV2EorScreen(props: MobileV2EorScreenProps): React.ReactEle
                       fontFamily: MOBILE_V2_FONT_SANS,
                     }}
                   >
-                    {`${humanizeEorReconState(lastRecon.state)} · ${formatReconSubmittedAt(lastRecon.submittedAt)}`}
+                    {`${humanizeEorReconState(lastRecon.state)} · ${formatReconSubmittedAt(lastRecon.submittedAt, copy.justNow)}`}
                   </Text>
                 </FxCol>
               </FxRow>
@@ -255,16 +258,16 @@ export function MobileV2EorScreen(props: MobileV2EorScreenProps): React.ReactEle
                 <FxCard theme={theme} soft padding={10} style={{ flex: 1 }}>
                   <FxMetric
                     theme={theme}
-                    label="Parcels"
+                    label={copy.parcels}
                     value={String(lastRecon.parcelsCount)}
-                    unit={lastRecon.mismatchCount > 0 ? `/${lastRecon.mismatchCount} mismatch` : ""}
+                    unit={lastRecon.mismatchCount > 0 ? copy.mismatchUnit.replace("{count}", () => String(lastRecon.mismatchCount)) : ""}
                     tone={lastRecon.mismatchCount > 0 ? "warning" : "success"}
                   />
                 </FxCard>
                 <FxCard theme={theme} soft padding={10} style={{ flex: 1 }}>
                   <FxMetric
                     theme={theme}
-                    label="Cash variance"
+                    label={copy.cashVariance}
                     value={formatMobileV2CurrencyCompact(lastRecon.cashVariance, currency)}
                     tone={lastRecon.cashVariance === 0 ? "success" : "warning"}
                   />
@@ -278,7 +281,10 @@ export function MobileV2EorScreen(props: MobileV2EorScreenProps): React.ReactEle
                   fontFamily: MOBILE_V2_FONT_SANS,
                 }}
               >
-                {`Declared ${formatMobileV2CurrencyCompact(lastRecon.cashDeclared, currency)} · counted ${formatMobileV2CurrencyCompact(lastRecon.cashCounted, currency)} · wallet ${lastRecon.walletStatus}`}
+                {copy.cashLine
+                  .replace("{declared}", () => formatMobileV2CurrencyCompact(lastRecon.cashDeclared, currency))
+                  .replace("{counted}", () => formatMobileV2CurrencyCompact(lastRecon.cashCounted, currency))
+                  .replace("{wallet}", () => lastRecon.walletStatus)}
               </Text>
             </FxCol>
           </FxCard>
@@ -298,7 +304,7 @@ export function MobileV2EorScreen(props: MobileV2EorScreenProps): React.ReactEle
                     fontFamily: MOBILE_V2_FONT_SANS,
                   }}
                 >
-                  Shift performance
+                  {copy.performance}
                 </Text>
                 <Text
                   style={{
@@ -323,14 +329,14 @@ export function MobileV2EorScreen(props: MobileV2EorScreenProps): React.ReactEle
           icon={allDone ? "check-double" : "alert"}
           onPress={props.onComplete}
           disabled={props.isCompleting === true}
-          accessibilityLabel={allDone ? "Hand back and end shift" : "Complete checklist to finish"}
+          accessibilityLabel={allDone ? copy.handBackLabel : copy.completeChecklist}
           style={{ marginTop: MOBILE_V2_SPACING.md }}
         >
           {props.isCompleting === true
-            ? "Saving reconciliation"
+            ? copy.saving
             : allDone
-              ? "Hand back & end shift"
-              : "Complete checklist to finish"}
+              ? copy.handBack
+              : copy.completeChecklist}
         </FxButton>
       </ScrollView>
     </View>

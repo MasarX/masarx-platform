@@ -8,12 +8,14 @@ const projectRef = 'a'.repeat(20);
 
 function sweepEnv() {
   const certificate = new X509Certificate(readFileSync(join(__dirname, '../../../config/dev/sweep-recipient.crt')));
+  const hostedCertificate = new X509Certificate(readFileSync(join(__dirname, '../../../config/dev/sweep-recipient-hosted.crt')));
   return {
     GITHUB_ACTIONS: 'true', DEPLOY_ENV: 'dev', GITHUB_EVENT_NAME: 'workflow_dispatch',
     GITHUB_REF: 'refs/heads/main', GITHUB_REPOSITORY: 'MasarX/masarx-platform',
     SUPABASE_PROJECT_REF: projectRef, NEXT_PUBLIC_SUPABASE_URL: buildSupabaseProjectUrl(projectRef),
     SUPABASE_ACCESS_TOKEN: randomBytes(24).toString('hex'),
-    SWEEP_RECIPIENT_SHA256: certificate.fingerprint256, RUNNER_TEMP: tmpdir(),
+    SWEEP_RECIPIENT_SHA256: certificate.fingerprint256,
+    SWEEP_RECIPIENT_HOSTED_SHA256: hostedCertificate.fingerprint256, RUNNER_TEMP: tmpdir(),
   };
 }
 

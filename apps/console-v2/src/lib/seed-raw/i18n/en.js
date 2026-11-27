@@ -25,6 +25,7 @@ export const en = {
     // Starts with the visible label of the language button (WCAG 2.5.3).
     switchLanguage: 'AR, switch to Arabic',
     userMenu: 'user menu',
+    navigation: 'Navigation',
     themeCycle: {
       system: 'Theme: system (click to cycle)',
       light: 'Theme: light (click to cycle)',
@@ -76,7 +77,15 @@ export const en = {
     trackingMap: { eyebrow: 'Operate', accent: 'Tracking', plain: 'map' },
     hubs: { eyebrow: 'Network', accent: 'Hubs', plain: '& zones' },
     partners: { eyebrow: 'Network', accent: 'Partners', plain: '— marketplace participants' },
-    geocoding: { eyebrow: 'Network', accent: 'Geocoding', plain: '& addresses' },
+    geocoding: {
+      eyebrow: 'Network', accent: 'Geocoding', plain: '& addresses',
+      scopeTypes: {
+        loading: 'Loading scope types…',
+        error: 'Could not load scope types.',
+        emptyTitle: 'No scope types registered',
+        emptyHint: 'The scope type registry has no rows, so geocoding policies cannot be configured at any scope. Ask a platform administrator to register scope types.',
+      },
+    },
     clients: { eyebrow: 'Customers', accent: 'Clients', plain: '— ladder rank 2' },
     senders: { eyebrow: 'Customers', accent: 'Senders', plain: '— ladder rank 3' },
     recipients: { eyebrow: 'Customers', accent: 'Recipients', plain: '' },

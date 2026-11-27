@@ -14,7 +14,6 @@
 
 import * as React from "react";
 import { redactDisplayErrorText } from "./mobile-display-error";
-import { getStrings, resolveLocaleCode, type FieldOpsStrings } from "./i18n";
 import {
   ActivityIndicator,
   LayoutChangeEvent,
@@ -31,11 +30,11 @@ import {
 import { CameraView, useCameraPermissions } from "expo-camera";
 import Svg, { Path } from "react-native-svg";
 
+import { getStrings, resolveLocaleCode, type FieldOpsStrings } from "./i18n";
 import { FxIcon } from "./mobile-v2-icon";
 import { formatMobileV2CurrencyCompact } from "./mobile-v2-ops-helpers";
 import {
   buildMobileV2SignatureArtifactCaptureInput,
-  formatMobileV2PodArtifactMethodList,
   listMissingMobileV2PodArtifactMethods,
   type MobileV2PodArtifactCaptureInput,
   type MobileV2PodArtifactKind,
@@ -53,6 +52,7 @@ import {
 } from "./mobile-v2-primitives";
 import {
   filterPodFailReasons,
+  resolveMobileV2PodFailReasonLabel,
   resolvePodSubmitGate,
   type MobileV2PodFailReason,
   type MobileV2PodMethod,
@@ -78,13 +78,31 @@ import {
 // faithful port keeps only what ScrPOD actually renders.
 // ---------------------------------------------------------------------------
 
-const POD_STEP_TITLE: Readonly<Record<MobileV2PodMethod, string>> = Object.freeze({
-  scan: "Scan parcel barcode",
-  photo: "Parcel photo",
-  sig: "Customer signature",
-  otp: "Enter OTP",
-  id: "ID verification",
-  cod: "Collect cash",
+type PodStringKey = keyof FieldOpsStrings["pod"];
+
+const POD_STEP_TITLE_KEY: Readonly<Record<MobileV2PodMethod, PodStringKey>> = Object.freeze({
+  scan: "stepScan",
+  photo: "stepPhoto",
+  sig: "stepSig",
+  otp: "stepOtp",
+  id: "stepId",
+  cod: "stepCod",
+});
+
+// Same English as formatMobileV2PodArtifactMethodList, but translatable.
+const POD_METHOD_LABEL_KEY: Readonly<Record<MobileV2PodMethod, PodStringKey>> = Object.freeze({
+  scan: "methodScan",
+  photo: "methodPhoto",
+  sig: "methodSig",
+  otp: "methodOtp",
+  id: "methodId",
+  cod: "methodCod",
+});
+
+const POD_MISSING_LABEL_KEY: Readonly<Record<"photo" | "note" | "escalate_ack", PodStringKey>> = Object.freeze({
+  photo: "flagPhoto",
+  note: "flagNote",
+  escalate_ack: "missingEscalateAck",
 });
 
 interface PodWizardContext {
@@ -136,7 +154,7 @@ export interface MobileV2PodScreenProps {
   readonly customerPhone?: string;
   /** COD amount due, rendered in the COD step. */
   readonly codAmount?: number;
-  /** Display locale (for example "ar-SA"); picks the EN or AR accessible names. */
+  /** Display locale for wizard text and accessibility labels; defaults to English. */
   readonly locale?: string;
   /** True while the final write + same-context confirmation is pending. */
   readonly submitting?: boolean;
@@ -172,11 +190,11 @@ const EMPTY_MOBILE_V2_POD_ARTIFACTS: ReadonlyArray<MobileV2PodCapturedArtifact> 
 export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactElement {
   const { theme, policy } = props;
   const t = theme;
+  const strings = getStrings(resolveLocaleCode(props.locale));
   const hasCod = props.hasCod ?? false;
-  const customer = props.customerName ?? "the recipient";
-  const phone = props.customerPhone ?? "the recipient";
+  const customer = props.customerName ?? strings.pod.theRecipient;
+  const phone = props.customerPhone ?? strings.pod.theRecipient;
   const codAmount = props.codAmount ?? 0;
-  const otpStrings = getStrings(resolveLocaleCode(props.locale)).podOtp;
   const scanParcels = React.useMemo(() => {
     const source: ReadonlyArray<MobileV2PodScanParcel> =
       props.scanExpectedParcels !== undefined
@@ -214,7 +232,11 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
   const safeIndex = Math.min(stepIndex, stepCount - 1);
   const activeStep: MobileV2PodMethod = steps[safeIndex] ?? "scan";
   const isFinalStep = safeIndex >= stepCount - 1;
-  const stepTitle = POD_STEP_TITLE[activeStep];
+  const stepTitle = strings.pod[POD_STEP_TITLE_KEY[activeStep]];
+  const stepSubtitle = strings.pod.stepOf
+    .replace("{step}", () => String(safeIndex + 1))
+    .replace("{count}", () => String(stepCount))
+    .replace("{customer}", () => customer);
 
   // Fail-flow state (preserved from the prior screen contract).
   const [hasPhoto, setHasPhoto] = React.useState(false);
@@ -300,14 +322,14 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
     } catch (error) {
       const message = redactDisplayErrorText(
         error instanceof Error ? error.message : undefined,
-        "Unable to register POD artifact.",
+        strings.pod.registerFailed,
       );
       setCaptureError(message);
       throw error;
     } finally {
       setCapturingKind(null);
     }
-  }, [props.onCaptureArtifact, replaceArtifact]);
+  }, [props.onCaptureArtifact, replaceArtifact, strings]);
 
   const openCameraCapture = React.useCallback(async (
     method: MobileV2PodMethod,
@@ -318,18 +340,18 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
     if (cameraPermission?.granted !== true) {
       const nextPermission = await requestCameraPermission();
       if (nextPermission.granted !== true) {
-        setCaptureError("Camera permission is required to capture POD evidence.");
+        setCaptureError(strings.pod.cameraPermissionRequired);
         return;
       }
     }
     setCameraCapture({ method, kind, usage });
-  }, [cameraPermission?.granted, requestCameraPermission]);
+  }, [cameraPermission?.granted, requestCameraPermission, strings]);
 
   const captureCameraArtifact = React.useCallback(async (): Promise<void> => {
     if (cameraCapture === null || capturingKind !== null) return;
     const camera = cameraRef.current;
     if (camera?.takePictureAsync === undefined) {
-      setCaptureError("Camera is not ready yet.");
+      setCaptureError(strings.pod.cameraNotReady);
       return;
     }
     try {
@@ -340,7 +362,7 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
       }) as Record<string, unknown>;
       const base64 = typeof photo.base64 === "string" ? photo.base64 : null;
       if (base64 === null || base64.trim() === "") {
-        throw new Error("Camera capture did not return image data.");
+        throw new Error(strings.pod.cameraNoImage);
       }
       await registerArtifact({
         kind: cameraCapture.kind,
@@ -362,10 +384,10 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
     } catch (error) {
       setCaptureError(redactDisplayErrorText(
         error instanceof Error ? error.message : undefined,
-        "Unable to capture POD evidence.",
+        strings.pod.captureFailed,
       ));
     }
-  }, [cameraCapture, capturingKind, registerArtifact]);
+  }, [cameraCapture, capturingKind, registerArtifact, strings]);
 
   const captureSignatureArtifact = React.useCallback(async (input: {
     readonly strokes: ReadonlyArray<ReadonlyArray<MobileV2SignaturePoint>>;
@@ -391,22 +413,20 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
   const artifactGateHint = React.useMemo(() => {
     const missing = isFinalStep ? allMissingArtifactMethods : activeMissingArtifactMethods;
     if (missing.length === 0) return null;
-    const missingList = formatMobileV2PodArtifactMethodList(missing);
-    return isFinalStep
-      ? `Register required POD artifacts before commit: ${missingList}.`
-      : `Register ${missingList} before continuing.`;
-  }, [activeMissingArtifactMethods, allMissingArtifactMethods, isFinalStep]);
+    const missingList = missing.map((method) => strings.pod[POD_METHOD_LABEL_KEY[method]]).join(", ");
+    return (isFinalStep ? strings.pod.gateFinal : strings.pod.gateStep).replace("{list}", () => missingList);
+  }, [activeMissingArtifactMethods, allMissingArtifactMethods, isFinalStep, strings]);
   const scanGateHint = React.useMemo(() => {
     if (activeStep !== "scan") return null;
-    if (scanExpectedCodes.length === 0) return "No parcel barcode is available for scan proof.";
+    if (scanExpectedCodes.length === 0) return strings.pod.noBarcodeForScan;
     return scannedCodes.length > 0
       ? null
-      : `Confirm at least one parcel barcode. Full delivery needs all ${scanExpectedCodes.length}; a strict subset commits partial delivery.`;
-  }, [activeStep, scanExpectedCodes, scannedCodes.length]);
+      : strings.pod.scanGate.replace("{count}", () => String(scanExpectedCodes.length));
+  }, [activeStep, scanExpectedCodes, scannedCodes.length, strings]);
   const otpGateHint = React.useMemo(() => {
     if (activeStep !== "otp") return null;
-    return otpCode.length >= 4 ? null : "Enter the recipient OTP before continuing.";
-  }, [activeStep, otpCode.length]);
+    return otpCode.length >= 4 ? null : strings.pod.otpGate;
+  }, [activeStep, otpCode.length, strings]);
   const stepGateHint = artifactGateHint ?? scanGateHint ?? otpGateHint;
 
   React.useEffect(() => {
@@ -477,7 +497,7 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
         <Pressable
           onPress={props.onExit}
           accessibilityRole="button"
-          accessibilityLabel="Back"
+          accessibilityLabel={strings.shell.back}
           style={{
             width: 36,
             height: 36,
@@ -508,7 +528,7 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
               fontFamily: MOBILE_V2_FONT_SANS,
             }}
           >
-            {`Step ${safeIndex + 1} of ${stepCount} · ${customer}`}
+            {stepSubtitle}
           </Text>
         </View>
       </View>
@@ -547,6 +567,7 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
           <PodStepBody
             step={activeStep}
             theme={theme}
+            strings={strings}
             ctx={wizardCtx}
             artifacts={artifacts}
             captureError={captureError}
@@ -570,7 +591,6 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
             onConfirmAllScans={() => setScannedCodes(scanExpectedCodes)}
             onClearScans={() => setScannedCodes(Object.freeze([]))}
             otpCode={otpCode}
-            otpStrings={otpStrings}
             onOtpCodeChange={setOtpCode}
             codTenderedAmount={codTenderedAmount}
             onCodTenderedAmountChange={setCodTenderedAmount}
@@ -589,9 +609,9 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
                 <FxRow gap={MOBILE_V2_SPACING.lg} align="center">
                   <FxIcon name="alert" size={20} color={t.warning} />
                   <Text style={{ ...sansSemibold, color: t.ink, fontSize: MOBILE_V2_TYPE_SIZES.bodyStrong, flex: 1 }}>
-                    Fail reason
+                    {strings.pod.failReason}
                   </Text>
-                  <Pressable onPress={props.onCloseFailSheet} accessibilityRole="button" accessibilityLabel="Close fail sheet">
+                  <Pressable onPress={props.onCloseFailSheet} accessibilityRole="button" accessibilityLabel={strings.pod.closeFailSheet}>
                     <FxIcon name="x" size={18} color={t.muted} />
                   </Pressable>
                 </FxRow>
@@ -599,6 +619,7 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
                 <FxCol gap={MOBILE_V2_SPACING.md}>
                   {visibleReasons.map((r) => {
                     const active = r.code === activeReasonCode;
+                    const reasonLabel = resolveMobileV2PodFailReasonLabel(r, strings);
                     return (
                       <Pressable
                         key={r.code}
@@ -610,7 +631,7 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
                           setEscalateAck(false);
                         }}
                         accessibilityRole="radio"
-                        accessibilityLabel={r.label}
+                        accessibilityLabel={reasonLabel}
                         accessibilityState={{ selected: active }}
                         style={{
                           backgroundColor: active ? t.accentSoft : t.surface,
@@ -623,7 +644,7 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
                       >
                         <FxRow gap={MOBILE_V2_SPACING.md}>
                           <Text style={{ ...sansSemibold, color: t.ink, fontSize: MOBILE_V2_TYPE_SIZES.bodyStrong, flex: 1 }}>
-                            {r.label}
+                            {reasonLabel}
                           </Text>
                           <Text
                             style={{
@@ -637,11 +658,11 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
                           </Text>
                         </FxRow>
                         <FxRow gap={MOBILE_V2_SPACING.sm} wrap>
-                          {r.reattempt ? <FxChip theme={theme} tone="info" dense>reattempt</FxChip> : null}
-                          {r.photo ? <FxChip theme={theme} tone="warning" dense>photo</FxChip> : null}
-                          {r.note ? <FxChip theme={theme} tone="info" dense>note</FxChip> : null}
-                          {r.escalate ? <FxChip theme={theme} tone="danger" dense>escalate</FxChip> : null}
-                          {r.codOnly ? <FxChip theme={theme} tone="info" dense>cod-only</FxChip> : null}
+                          {r.reattempt ? <FxChip theme={theme} tone="info" dense>{strings.pod.flagReattempt}</FxChip> : null}
+                          {r.photo ? <FxChip theme={theme} tone="warning" dense>{strings.pod.flagPhoto}</FxChip> : null}
+                          {r.note ? <FxChip theme={theme} tone="info" dense>{strings.pod.flagNote}</FxChip> : null}
+                          {r.escalate ? <FxChip theme={theme} tone="danger" dense>{strings.pod.flagEscalate}</FxChip> : null}
+                          {r.codOnly ? <FxChip theme={theme} tone="info" dense>{strings.pod.flagCodOnly}</FxChip> : null}
                         </FxRow>
                       </Pressable>
                     );
@@ -650,7 +671,7 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
 
                 {activeReason !== null ? (
                   <FxCol gap={MOBILE_V2_SPACING.lg}>
-                    <FxSectionHead theme={theme} label="Required artefacts" />
+                    <FxSectionHead theme={theme} label={strings.pod.requiredArtefacts} />
                     <FxRow gap={MOBILE_V2_SPACING.md} wrap>
                       {activeReason.photo ? (
                         <Pressable
@@ -659,19 +680,19 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
                           accessibilityState={{ checked: hasPhoto }}
                         >
                           <FxChip theme={theme} tone={hasPhoto ? "success" : "warning"} icon={hasPhoto ? "check" : "camera"}>
-                            {hasPhoto ? "Photo captured" : "Capture photo"}
+                            {hasPhoto ? strings.pod.photoCaptured : strings.pod.capturePhoto}
                           </FxChip>
                         </Pressable>
                       ) : null}
                       {activeReason.note ? (
                         <FxChip theme={theme} tone={hasNote ? "success" : "info"} icon={hasNote ? "check" : "doc"}>
-                          {hasNote ? "Note added" : "Note required"}
+                          {hasNote ? strings.pod.noteAdded : strings.pod.noteRequired}
                         </FxChip>
                       ) : null}
                       {activeReason.escalate ? (
                         <Pressable onPress={() => setEscalateAck((p) => !p)} accessibilityRole="checkbox" accessibilityState={{ checked: escalateAck }}>
                           <FxChip theme={theme} tone={escalateAck ? "success" : "danger"} icon={escalateAck ? "check" : "shield"}>
-                            {escalateAck ? "Escalated to dispatch" : "Acknowledge escalation"}
+                            {escalateAck ? strings.pod.escalated : strings.pod.acknowledgeEscalation}
                           </FxChip>
                         </Pressable>
                       ) : null}
@@ -686,13 +707,13 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
                             fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold,
                           }}
                         >
-                          Driver note
+                          {strings.pod.driverNote}
                         </Text>
                         <TextInput
                           value={failNoteText}
                           onChangeText={setFailNoteText}
-                          accessibilityLabel="Failed delivery note"
-                          placeholder="What happened at the stop?"
+                          accessibilityLabel={strings.pod.failedNoteLabel}
+                          placeholder={strings.pod.failedNotePlaceholder}
                           placeholderTextColor={t.muted}
                           multiline
                           style={{
@@ -720,7 +741,8 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
                           fontWeight: MOBILE_V2_TYPE_WEIGHTS.medium,
                         }}
                       >
-                        Missing: {submitGate.missing.join(", ")}
+                        {strings.pod.missing.replace("{items}", () =>
+                          submitGate.missing.map((item) => strings.pod[POD_MISSING_LABEL_KEY[item]]).join(", "))}
                       </Text>
                     ) : null}
                   </FxCol>
@@ -744,7 +766,7 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
                     }
                   }}
                 >
-                  {activeReason === null ? "Pick a reason" : submitGate?.canSubmit ? "Submit fail" : "Complete required artefacts"}
+                  {activeReason === null ? strings.pod.pickReason : submitGate?.canSubmit ? strings.pod.submitFail : strings.pod.completeArtefacts}
                 </FxButton>
               </FxCol>
             </FxCard>
@@ -774,7 +796,7 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
             icon="x"
             onPress={props.onCloseFailSheet}
           >
-            Cancel — back to delivery
+            {strings.pod.cancelBackToDelivery}
           </FxButton>
         ) : (
           <FxButton
@@ -787,12 +809,12 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
             disabled={props.submitting === true || capturingKind !== null || stepGateHint !== null}
           >
             {isFinalStep && props.submitting === true
-              ? "Committing..."
+              ? strings.pod.committing
               : isFinalStep
                 ? (scanExpectedCodes.length > 1 && scannedCodes.length > 0 && scannedCodes.length < scanExpectedCodes.length
-                    ? "Commit partial POD"
-                    : "Commit POD")
-                : "Capture & continue"}
+                    ? strings.pod.commitPartial
+                    : strings.pod.commit)
+                : strings.pod.captureContinue}
           </FxButton>
         )}
         {props.failSheetOpen ? null : (
@@ -814,6 +836,7 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
 function PodStepBody(props: {
   readonly step: MobileV2PodMethod;
   readonly theme: MobileV2Theme;
+  readonly strings: FieldOpsStrings;
   readonly ctx: PodWizardContext;
   readonly artifacts: ReadonlyArray<MobileV2PodCapturedArtifact>;
   readonly captureError: string | null;
@@ -827,7 +850,6 @@ function PodStepBody(props: {
   readonly onConfirmAllScans: () => void;
   readonly onClearScans: () => void;
   readonly otpCode: string;
-  readonly otpStrings: FieldOpsStrings["podOtp"];
   readonly onOtpCodeChange: (code: string) => void;
   readonly codTenderedAmount: number;
   readonly onCodTenderedAmountChange: (amount: number) => void;
@@ -847,6 +869,7 @@ function PodStepBody(props: {
       return (
         <PodScanBody
           theme={props.theme}
+          strings={props.strings}
           parcels={props.scanParcels}
           expectedCodes={props.scanExpectedCodes}
           scannedCodes={props.scannedCodes}
@@ -859,6 +882,7 @@ function PodStepBody(props: {
       return (
         <PodPhotoBody
           theme={props.theme}
+          strings={props.strings}
           taken={hasArtifact("photo", "photo")}
           busy={props.capturingKind === "photo"}
           captureError={props.captureError}
@@ -873,6 +897,7 @@ function PodStepBody(props: {
       return (
         <PodSigBody
           theme={props.theme}
+          strings={props.strings}
           customer={props.ctx.customer}
           captured={hasArtifact("sig", "signature")}
           busy={props.capturingKind === "signature"}
@@ -881,18 +906,12 @@ function PodStepBody(props: {
         />
       );
     case "otp":
-      return (
-        <PodOtpBody
-          theme={props.theme}
-          strings={props.otpStrings}
-          code={props.otpCode}
-          onChangeCode={props.onOtpCodeChange}
-        />
-      );
+      return <PodOtpBody theme={props.theme} strings={props.strings} code={props.otpCode} onChangeCode={props.onOtpCodeChange} />;
     case "id":
       return (
         <PodIdBody
           theme={props.theme}
+          strings={props.strings}
           customer={props.ctx.customer}
           captured={hasArtifact("id", "identity")}
           busy={props.capturingKind === "identity"}
@@ -908,6 +927,7 @@ function PodStepBody(props: {
       return (
         <PodCodBody
           theme={props.theme}
+          strings={props.strings}
           amount={props.ctx.codAmount}
           currency={props.ctx.codCurrency}
           tendered={props.codTenderedAmount}
@@ -918,6 +938,7 @@ function PodStepBody(props: {
       return (
         <PodScanBody
           theme={props.theme}
+          strings={props.strings}
           parcels={props.scanParcels}
           expectedCodes={props.scanExpectedCodes}
           scannedCodes={props.scannedCodes}
@@ -956,6 +977,7 @@ function PodArtifactGateMessage(props: {
 /** PodScan — camera viewfinder card with a match chip + counter. */
 function PodScanBody(props: {
   readonly theme: MobileV2Theme;
+  readonly strings: FieldOpsStrings;
   readonly parcels: ReadonlyArray<MobileV2PodScanParcel>;
   readonly expectedCodes: ReadonlyArray<string>;
   readonly scannedCodes: ReadonlyArray<string>;
@@ -964,9 +986,10 @@ function PodScanBody(props: {
   readonly onClearScans: () => void;
 }): React.ReactElement {
   const t = props.theme;
+  const pod = props.strings.pod;
   const expectedCount = props.expectedCodes.length;
   const scannedCount = props.scannedCodes.length;
-  const primaryCode = props.expectedCodes[0] ?? "No parcel barcode";
+  const primaryCode = props.expectedCodes[0] ?? pod.noParcelBarcode;
   const allScanned = expectedCount > 0 && scannedCount >= expectedCount;
   const scannedSet = new Set(props.scannedCodes);
   const partialScanned = scannedCount > 0 && scannedCount < expectedCount;
@@ -1011,10 +1034,12 @@ function PodScanBody(props: {
       <View style={{ padding: 14 }}>
         <FxRow gap={MOBILE_V2_SPACING.lg}>
           <FxChip theme={t} tone={allScanned ? "success" : "warning"} dense icon={allScanned ? "check" : "scan"}>
-            {allScanned ? "Full match" : partialScanned ? "Partial match" : "Scan pending"}
+            {allScanned ? pod.fullMatch : partialScanned ? pod.partialMatch : pod.scanPending}
           </FxChip>
           <FxChip theme={t} dense mono>
-            {`${scannedCount} of ${expectedCount}`}
+            {pod.scanCount
+              .replace("{scanned}", () => String(scannedCount))
+              .replace("{expected}", () => String(expectedCount))}
           </FxChip>
         </FxRow>
         <View style={{ marginTop: 12, rowGap: 8 }}>
@@ -1024,7 +1049,9 @@ function PodScanBody(props: {
               <Pressable
                 key={parcel.code}
                 accessibilityRole="button"
-                accessibilityLabel={`Parcel ${index + 1} ${parcel.code}`}
+                accessibilityLabel={pod.parcelA11y
+                  .replace("{index}", () => String(index + 1))
+                  .replace("{code}", () => parcel.code)}
                 onPress={() => props.onToggleScanCode(parcel.code)}
                 style={{
                   borderWidth: 1,
@@ -1051,7 +1078,7 @@ function PodScanBody(props: {
                   {parcel.code}
                 </Text>
                 <FxChip theme={t} tone={scanned ? "success" : "neutral"} dense>
-                  {scanned ? "Scanned" : "Tap to scan"}
+                  {scanned ? pod.scanned : pod.tapToScan}
                 </FxChip>
               </Pressable>
             );
@@ -1067,7 +1094,7 @@ function PodScanBody(props: {
               fontWeight: MOBILE_V2_TYPE_WEIGHTS.medium,
             }}
           >
-            This will commit a partial delivery for the scanned parcel subset.
+            {pod.partialWarning}
           </Text>
         ) : null}
         <FxButton
@@ -1080,7 +1107,7 @@ function PodScanBody(props: {
           disabled={expectedCount === 0 || allScanned}
           style={{ marginTop: 12 }}
         >
-          {allScanned ? "All scans confirmed" : "Confirm all parcels"}
+          {allScanned ? pod.allScansConfirmed : pod.confirmAllParcels}
         </FxButton>
         {scannedCount > 0 && !allScanned ? (
           <FxButton
@@ -1092,7 +1119,7 @@ function PodScanBody(props: {
             onPress={props.onClearScans}
             style={{ marginTop: 8 }}
           >
-            Clear partial scan
+            {pod.clearPartialScan}
           </FxButton>
         ) : null}
         <Text
@@ -1103,7 +1130,7 @@ function PodScanBody(props: {
             fontFamily: MOBILE_V2_FONT_SANS,
           }}
         >
-          Scan confirmation must match parcel barcodes before POD can continue.
+          {pod.scanHelp}
         </Text>
       </View>
     </FxCard>
@@ -1113,6 +1140,7 @@ function PodScanBody(props: {
 /** PodPhoto — tap-to-capture parcel photo tile + geo-tag chips. */
 function PodPhotoBody(props: {
   readonly theme: MobileV2Theme;
+  readonly strings: FieldOpsStrings;
   readonly taken: boolean;
   readonly busy: boolean;
   readonly captureError: string | null;
@@ -1130,12 +1158,13 @@ function PodPhotoBody(props: {
         taken={props.taken}
         onCapture={props.onOpenCamera}
         height={240}
-        label="Tap to capture parcel photo"
-        accessibilityLabel={props.taken ? "Parcel photo captured - tap to retake" : "Capture parcel photo"}
+        label={props.strings.pod.photoTileLabel}
+        accessibilityLabel={props.taken ? props.strings.pod.photoRetakeA11y : props.strings.pod.capturePhotoA11y}
       />
       {props.cameraOpen ? (
         <PodCameraCapturePanel
           theme={t}
+          strings={props.strings}
           cameraRef={props.cameraRef}
           busy={props.busy}
           onCapture={props.onCaptureCameraArtifact}
@@ -1144,20 +1173,20 @@ function PodPhotoBody(props: {
       ) : null}
       <FxRow gap={MOBILE_V2_SPACING.lg} wrap>
         <FxChip theme={t} tone="info" dense icon="pin">
-          Geo-tagged
+          {props.strings.pod.geoTagged}
         </FxChip>
         <FxChip theme={t} dense mono>
           26.4 N / 50.1 E
         </FxChip>
         {props.taken ? (
           <FxChip theme={t} tone="success" dense icon="check">
-            Registered
+            {props.strings.pod.registered}
           </FxChip>
         ) : null}
       </FxRow>
       {props.captureError !== null ? <PodCaptureError theme={t} message={props.captureError} /> : null}
       <Text style={{ fontSize: 12, color: t.muted, fontFamily: MOBILE_V2_FONT_SANS }}>
-        Capture registers delivery proof before commit.
+        {props.strings.pod.photoHelp}
       </Text>
     </View>
   );
@@ -1165,6 +1194,7 @@ function PodPhotoBody(props: {
 
 function PodCameraCapturePanel(props: {
   readonly theme: MobileV2Theme;
+  readonly strings: FieldOpsStrings;
   readonly cameraRef: React.MutableRefObject<{ takePictureAsync?: (options?: Record<string, unknown>) => Promise<unknown> } | null>;
   readonly busy: boolean;
   readonly onCapture: () => Promise<void>;
@@ -1189,7 +1219,7 @@ function PodCameraCapturePanel(props: {
             onPress={() => { void props.onCapture(); }}
             disabled={props.busy}
           >
-            {props.busy ? "Registering..." : "Capture evidence"}
+            {props.busy ? props.strings.pod.registering : props.strings.pod.captureEvidence}
           </FxButton>
           <FxButton
             theme={t}
@@ -1199,7 +1229,7 @@ function PodCameraCapturePanel(props: {
             onPress={props.onCancel}
             disabled={props.busy}
           >
-            Cancel
+            {props.strings.confirm.cancelButton}
           </FxButton>
           {props.busy ? <ActivityIndicator color={t.accent} /> : null}
         </FxRow>
@@ -1229,6 +1259,7 @@ function PodCaptureError(props: {
 /** PodSig — signature pad surface + recipient chip and clear action. */
 function PodSigBody(props: {
   readonly theme: MobileV2Theme;
+  readonly strings: FieldOpsStrings;
   readonly customer: string;
   readonly captured: boolean;
   readonly busy: boolean;
@@ -1341,7 +1372,7 @@ function PodSigBody(props: {
                   fontFamily: MOBILE_V2_FONT_SANS,
                 }}
               >
-                Tap to draw with finger
+                {props.strings.pod.signHere}
               </Text>
             </FxCol>
           )}
@@ -1349,10 +1380,10 @@ function PodSigBody(props: {
       </FxCard>
       <FxRow justify="space-between">
         <FxChip theme={t} dense>
-          {`Recipient: ${props.customer}`}
+          {props.strings.pod.recipientChip.replace("{name}", () => props.customer)}
         </FxChip>
         <FxButton theme={t} variant="ghost" size="sm" icon="x" onPress={clear} disabled={props.busy}>
-          Clear
+          {props.strings.pod.clear}
         </FxButton>
       </FxRow>
       <FxRow gap={MOBILE_V2_SPACING.md} wrap>
@@ -1370,7 +1401,7 @@ function PodSigBody(props: {
             });
           }}
         >
-          {props.busy ? "Registering..." : props.captured ? "Signature registered" : "Register signature"}
+          {props.busy ? props.strings.pod.registering : props.captured ? props.strings.pod.signatureRegistered : props.strings.pod.registerSignature}
         </FxButton>
         {props.busy ? <ActivityIndicator color={t.accent} /> : null}
       </FxRow>
@@ -1385,7 +1416,7 @@ function PodSigBody(props: {
  */
 function PodOtpBody(props: {
   readonly theme: MobileV2Theme;
-  readonly strings: FieldOpsStrings["podOtp"];
+  readonly strings: FieldOpsStrings;
   readonly code: string;
   readonly onChangeCode: (code: string) => void;
 }): React.ReactElement {
@@ -1406,7 +1437,7 @@ function PodOtpBody(props: {
           fontFamily: MOBILE_V2_FONT_SANS,
         }}
       >
-        Enter the 4-digit OTP
+        {props.strings.pod.otpPrompt}
       </Text>
       <View style={{ alignSelf: "center", padding: 4 }}>
         {/* The boxes only mirror the input's value, so screen readers skip them. */}
@@ -1445,8 +1476,8 @@ function PodOtpBody(props: {
           onChangeText={setCode}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          accessibilityLabel={props.strings.label}
-          accessibilityHint={props.strings.hint}
+          accessibilityLabel={props.strings.podOtp.label}
+          accessibilityHint={props.strings.podOtp.hint}
           keyboardType="number-pad"
           textContentType="oneTimeCode"
           autoComplete="sms-otp"
@@ -1465,10 +1496,10 @@ function PodOtpBody(props: {
       </View>
       <FxRow justify="space-between" style={{ marginTop: 14 }}>
         <FxButton theme={t} variant="ghost" size="sm" onPress={() => setCode("")}>
-          Clear
+          {props.strings.pod.clear}
         </FxButton>
         <FxButton theme={t} variant="ghost" size="sm" icon="message">
-          Resend SMS
+          {props.strings.pod.resendSms}
         </FxButton>
       </FxRow>
     </FxCard>
@@ -1478,6 +1509,7 @@ function PodOtpBody(props: {
 /** PodId — national-ID match card with scan / in-person confirm actions. */
 function PodIdBody(props: {
   readonly theme: MobileV2Theme;
+  readonly strings: FieldOpsStrings;
   readonly customer: string;
   readonly captured: boolean;
   readonly busy: boolean;
@@ -1513,10 +1545,10 @@ function PodIdBody(props: {
               fontFamily: MOBILE_V2_FONT_SANS,
             }}
           >
-            National ID match
+            {props.strings.pod.idMatch}
           </Text>
           <Text style={{ fontSize: 12, color: t.muted, fontFamily: MOBILE_V2_FONT_SANS }}>
-            Recipient must show ID matching:{" "}
+            {props.strings.pod.idMustMatch}{" "}
             <Text style={{ color: t.ink, fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold }}>
               {props.customer}
             </Text>
@@ -1527,6 +1559,7 @@ function PodIdBody(props: {
         <View style={{ marginTop: 12 }}>
           <PodCameraCapturePanel
             theme={t}
+            strings={props.strings}
             cameraRef={props.cameraRef}
             busy={props.busy}
             onCapture={props.onCaptureCameraArtifact}
@@ -1544,10 +1577,10 @@ function PodIdBody(props: {
           disabled={props.busy}
           onPress={props.onOpenCamera}
         >
-          {props.captured ? "ID artifact registered" : "Scan ID document"}
+          {props.captured ? props.strings.pod.idRegistered : props.strings.pod.scanId}
         </FxButton>
         <FxButton theme={t} variant="ghost" full icon="user" size="md">
-          Confirm in-person check
+          {props.strings.pod.confirmInPerson}
         </FxButton>
       </FxCol>
       {props.captureError !== null ? (
@@ -1562,6 +1595,7 @@ function PodIdBody(props: {
 /** PodCod — amount due hero + tendered presets + change-to-give readout. */
 function PodCodBody(props: {
   readonly theme: MobileV2Theme;
+  readonly strings: FieldOpsStrings;
   readonly amount: number;
   readonly currency: string;
   readonly tendered: number;
@@ -1586,7 +1620,7 @@ function PodCodBody(props: {
   };
   return (
     <FxCard theme={t}>
-      <Text style={labelStyle}>Amount due</Text>
+      <Text style={labelStyle}>{props.strings.pod.amountDue}</Text>
       <Text
         style={{
           fontSize: 36,
@@ -1600,14 +1634,14 @@ function PodCodBody(props: {
         {money(amount)}
       </Text>
       <View style={{ height: 1, backgroundColor: t.border, marginVertical: 14 }} />
-      <Text style={[labelStyle, { marginBottom: 6 }]}>Tendered</Text>
+      <Text style={[labelStyle, { marginBottom: 6 }]}>{props.strings.pod.tendered}</Text>
       <FxRow gap={MOBILE_V2_SPACING.md} wrap>
         {presets.map((v, i) => (
           <Pressable
             key={`${v}-${i}`}
             onPress={() => props.onTenderedChange(v)}
             accessibilityRole="button"
-            accessibilityLabel={`Tendered ${money(v)}`}
+            accessibilityLabel={props.strings.pod.tenderedA11y.replace("{amount}", () => money(v))}
             accessibilityState={{ selected: tendered === v }}
           >
             <FxChip theme={t} tone={tendered === v ? "accent" : "neutral"} mono>
@@ -1618,7 +1652,7 @@ function PodCodBody(props: {
       </FxRow>
       <FxRow justify="space-between" style={{ marginTop: 14 }}>
         <Text style={{ fontSize: 12, color: t.muted, fontFamily: MOBILE_V2_FONT_SANS }}>
-          Change to give
+          {props.strings.pod.changeToGive}
         </Text>
         <Text
           style={{

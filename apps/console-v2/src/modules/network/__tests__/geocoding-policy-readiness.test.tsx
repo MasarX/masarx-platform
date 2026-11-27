@@ -37,3 +37,26 @@ it('offers geocoding configuration once the scope registry is available', async 
     listSpy.mockRestore();
   }
 });
+
+it('names the missing scope types when the scope registry has no rows', async () => {
+  const user = userEvent.setup();
+  const listResource = api.ui_list_resource_v1;
+  const listSpy = vi.spyOn(api, 'ui_list_resource_v1').mockImplementation(async (resource, options) => {
+    if (resource === 'scope_type_registry') {
+      return { rows: [], total: 0, page: 0, page_size: 50 } as Awaited<ReturnType<typeof listResource>>;
+    }
+    return listResource(resource, options);
+  });
+
+  try {
+    renderWithProviders(<GeocodingModule />, { capabilities: ['all'] });
+    await user.click(screen.getByRole('tab', { name: /Policy & attempts/i }));
+
+    expect(await screen.findByText('No scope types registered')).toBeInTheDocument();
+    expect(screen.getByText(/scope type registry has no rows/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Something went wrong/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Configure Geocoding/i })).not.toBeInTheDocument();
+  } finally {
+    listSpy.mockRestore();
+  }
+});
