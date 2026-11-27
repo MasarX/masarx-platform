@@ -49,6 +49,7 @@ import {
   type DurationFormatPolicy,
   type SavedView,
 } from './_review-queue/views';
+import { fill, useI18n } from '@/lib/i18n';
 
 type FilterId = 'mine' | 'queue' | 'all' | 'breach' | 'snoozed';
 type SortMode = 'sla_due' | 'priority' | 'created';
@@ -407,6 +408,7 @@ interface SLARingProps {
 }
 
 function SLARing({ percent, warnPct, dangerPct, variant = 'list' }: SLARingProps) {
+  const { t } = useI18n();
   const r = 8;
   const c = 2 * Math.PI * r;
   const off = c - (Math.min(100, percent) / 100) * c;
@@ -415,7 +417,7 @@ function SLARing({ percent, warnPct, dangerPct, variant = 'list' }: SLARingProps
   return (
     <span
       className={`wf-sla-ring wf-sla-ring--${tone} wf-sla-ring--${variant}`}
-      title={`${percent.toFixed(0)}% to SLA breach`}
+      title={fill(t('workflowReviewQueue.slaRing.toSlaBreach'), { value: String(percent.toFixed(0)) })}
     >
       <svg viewBox="0 0 22 22" width={size} height={size}>
         <circle cx="11" cy="11" r={r} fill="none" stroke="currentColor" strokeOpacity="0.15" strokeWidth="2" />
@@ -555,12 +557,13 @@ function AuditActivityPanel({
   rows: AuditTableChangeRow[];
   taskEvents: TaskEventRow[];
 }) {
+  const { t } = useI18n();
   if (!canReadAuditLog && !canReadTaskEvents) {
     return (
       <div className="timeline" data-testid="wf-rq-audit-activity" style={{ padding: '0 14px 14px' }}>
         <StateView
           kind="denied"
-          hint="Task or audit activity permission is required to view the operator activity trail."
+          hint={t('workflowReviewQueue.auditActivityPanel.taskOrAuditActivity')}
         />
       </div>
     );
@@ -568,14 +571,14 @@ function AuditActivityPanel({
   if (isLoading) {
     return (
       <div className="timeline" data-testid="wf-rq-audit-activity" style={{ padding: '0 14px 14px' }}>
-        <StateView kind="loading" hint="Loading operator activity..." />
+        <StateView kind="loading" hint={t('workflowReviewQueue.auditActivityPanel.loadingOperatorActivity')} />
       </div>
     );
   }
   if (isError) {
     return (
       <div className="timeline" data-testid="wf-rq-audit-activity" style={{ padding: '0 14px 14px' }}>
-        <StateView kind="error" hint="Could not load operator activity through the canonical read path." />
+        <StateView kind="error" hint={t('workflowReviewQueue.auditActivityPanel.couldNotLoadOperator')} />
       </div>
     );
   }
@@ -584,8 +587,8 @@ function AuditActivityPanel({
       <div className="timeline" data-testid="wf-rq-audit-activity" style={{ padding: '0 14px 14px' }}>
         <StateView
           kind="empty"
-          title="No operator activity"
-          hint="No matching task, subject, or trace activity is available for this review."
+          title={t('workflowReviewQueue.auditActivityPanel.noOperatorActivity')}
+          hint={t('workflowReviewQueue.auditActivityPanel.noMatchingTaskSubject')}
         />
       </div>
     );
@@ -596,7 +599,7 @@ function AuditActivityPanel({
         <div key={row.id ?? `${row.task_id}-${taskEventTimestamp(row)}`} className="timeline__row">
           <span className="timeline__node" />
           <span className="timeline__time mono">
-            {taskEventTimestamp(row) ? new Date(taskEventTimestamp(row)!).toLocaleString() : 'unknown'}
+            {taskEventTimestamp(row) ? new Date(taskEventTimestamp(row)!).toLocaleString() : t('workflowReviewQueue.auditActivityPanel.unknown')}
           </span>
           <div className="timeline__body">
             <div className="timeline__action">{taskEventActionLabel(row)}</div>
@@ -608,14 +611,14 @@ function AuditActivityPanel({
         <div key={row.id ?? `${row.table_name}-${row.created_at}`} className="timeline__row">
           <span className="timeline__node" />
           <span className="timeline__time mono">
-            {row.created_at ? new Date(row.created_at).toLocaleString() : 'unknown'}
+            {row.created_at ? new Date(row.created_at).toLocaleString() : t('workflowReviewQueue.auditActivityPanel.unknown')}
           </span>
           <div className="timeline__body">
             <div className="timeline__action">{`${auditActionLabel(row.op)} - ${auditSubjectLabel(row.table_name)}`}</div>
             <div className="timeline__detail mono">
-              {`Actor ${compactActivityReference(row.changed_by)} - record ${compactActivityReference(auditPkId(row))} - ${auditChangedKeys(row)}`}
+              {fill(t('workflowReviewQueue.auditActivityPanel.actorRecord'), { value: String(compactActivityReference(row.changed_by)), value2: String(compactActivityReference(auditPkId(row))), value3: String(auditChangedKeys(row)) })}
             </div>
-            {row.correlation_id ? <div className="timeline__detail mono">Activity reference recorded</div> : null}
+            {row.correlation_id ? <div className="timeline__detail mono">{t('workflowReviewQueue.auditActivityPanel.activityReferenceRecorded')}</div> : null}
           </div>
         </div>
       ))}
@@ -623,19 +626,16 @@ function AuditActivityPanel({
   );
 }
 
-const FILTERS: Array<{ id: FilterId; label: string; tone?: string; icon?: string }> = [
-  { id: 'mine', label: 'Assigned to me', icon: 'user' },
-  { id: 'queue', label: 'Unassigned', icon: 'inbox' },
-  { id: 'all', label: 'All' },
-  { id: 'breach', label: 'SLA breached', tone: 'danger' },
-  { id: 'snoozed', label: 'Snoozed', tone: 'neutral' },
+// Labels come from the workflowReviewQueue.filters and .sortModes catalog entries.
+const FILTERS: Array<{ id: FilterId; tone?: string; icon?: string }> = [
+  { id: 'mine', icon: 'user' },
+  { id: 'queue', icon: 'inbox' },
+  { id: 'all' },
+  { id: 'breach', tone: 'danger' },
+  { id: 'snoozed', tone: 'neutral' },
 ];
 
-const SORT_MODES: Array<{ id: SortMode; label: string }> = [
-  { id: 'sla_due', label: 'SLA due' },
-  { id: 'priority', label: 'Priority' },
-  { id: 'created', label: 'Created' },
-];
+const SORT_MODES: Array<{ id: SortMode }> = [{ id: 'sla_due' }, { id: 'priority' }, { id: 'created' }];
 
 function prioritySortOrder(task: Task): number {
   const row = lookupRow('task_priority', String(task.priority ?? '')) as
@@ -667,6 +667,7 @@ interface UserRow {
 }
 
 export function ReviewQueueModule() {
+  const { t } = useI18n();
   const modal = useModal();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -771,7 +772,7 @@ export function ReviewQueueModule() {
 
   const allTasks = useMemo<Task[]>(() => {
     const base = (tasksQuery.data ?? []) as Task[];
-    return base.map((t) => ({ ...t, ...(overrides[t.id] || {}) }));
+    return base.map((taskRow) => ({ ...taskRow, ...(overrides[taskRow.id] || {}) }));
   }, [tasksQuery.data, overrides]);
 
   const runs = (runsQuery.data?.rows ?? []) as WorkflowRun[];
@@ -806,13 +807,13 @@ export function ReviewQueueModule() {
 
   const filteredTasks = useMemo<Task[]>(() => {
     let rows: Task[];
-    if (activeFilter === 'mine') rows = allTasks.filter((t) => t.assigned_to === me);
-    else if (activeFilter === 'queue') rows = allTasks.filter((t) => !t.assigned_to);
+    if (activeFilter === 'mine') rows = allTasks.filter((taskRow) => taskRow.assigned_to === me);
+    else if (activeFilter === 'queue') rows = allTasks.filter((taskRow) => !taskRow.assigned_to);
     else if (activeFilter === 'breach')
-      rows = allTasks.filter((t) => slaPercent(t, noSlaDefaultPctResolved, nowTick) >= 100);
-    else if (activeFilter === 'snoozed') rows = allTasks.filter((t) => isTaskSnoozed(t.status));
+      rows = allTasks.filter((taskRow) => slaPercent(taskRow, noSlaDefaultPctResolved, nowTick) >= 100);
+    else if (activeFilter === 'snoozed') rows = allTasks.filter((taskRow) => isTaskSnoozed(taskRow.status));
     else rows = allTasks;
-    const searched = search.trim() ? rows.filter((t) => matchesSearch(t, search)) : rows;
+    const searched = search.trim() ? rows.filter((taskRow) => matchesSearch(taskRow, search)) : rows;
     return [...searched].sort((left, right) => {
       if (sortMode === 'priority') {
         return prioritySortOrder(left) - prioritySortOrder(right)
@@ -832,7 +833,7 @@ export function ReviewQueueModule() {
       setActiveTaskId(null);
       return;
     }
-    if (!activeTaskId || !filteredTasks.find((t) => t.id === activeTaskId)) {
+    if (!activeTaskId || !filteredTasks.find((taskRow) => taskRow.id === activeTaskId)) {
       setActiveTaskId(filteredTasks[0]!.id);
     }
   }, [filteredTasks, activeTaskId]);
@@ -851,7 +852,7 @@ export function ReviewQueueModule() {
   }, [allTasks, activeTaskId]);
 
   const activeTask = useMemo(
-    () => filteredTasks.find((t) => t.id === activeTaskId) || null,
+    () => filteredTasks.find((taskRow) => taskRow.id === activeTaskId) || null,
     [filteredTasks, activeTaskId]
   );
   const activeSettlementId = useMemo(() => {
@@ -903,11 +904,11 @@ export function ReviewQueueModule() {
 
   const counts = useMemo(
     () => ({
-      mine: allTasks.filter((t) => t.assigned_to === me).length,
-      queue: allTasks.filter((t) => !t.assigned_to).length,
+      mine: allTasks.filter((taskRow) => taskRow.assigned_to === me).length,
+      queue: allTasks.filter((taskRow) => !taskRow.assigned_to).length,
       all: allTasks.length,
-      breach: allTasks.filter((t) => slaPercent(t, noSlaDefaultPctResolved, nowTick) >= 100).length,
-      snoozed: allTasks.filter((t) => isTaskSnoozed(t.status)).length,
+      breach: allTasks.filter((taskRow) => slaPercent(taskRow, noSlaDefaultPctResolved, nowTick) >= 100).length,
+      snoozed: allTasks.filter((taskRow) => isTaskSnoozed(taskRow.status)).length,
     }),
     [allTasks, me, nowTick, noSlaDefaultPctResolved]
   );
@@ -1043,44 +1044,44 @@ export function ReviewQueueModule() {
   }
 
   const claim = useCallback(
-    async (t: Task) => {
+    async (taskRow: Task) => {
       // Claim persists through canonical assign_task_v1; the local mirror only
       // reconciles visible state after the backend accepts the assignment.
       try {
         const assigned = await assignTask.mutateAsync({
-          task_id: t.id,
+          task_id: taskRow.id,
           assigned_to: me,
-          idempotency_key: `console-review-queue:claim:${t.id}:${me}`,
+          idempotency_key: `console-review-queue:claim:${taskRow.id}:${me}`,
           notes: 'Claimed from Console V2 review queue',
         });
-        patchTask(t.id, taskReadbackPatch(assigned.task) ?? { assigned_to: me });
+        patchTask(taskRow.id, taskReadbackPatch(assigned.task) ?? { assigned_to: me });
         const refreshedTasks = await refetchTaskQueueReadback();
         recordTaskActionReadback({
           kind: 'claim',
-          task: t,
+          task: taskRow,
           refreshedTasks,
           taskEventId: taskEventIdFromReadback(assigned),
           expectedAssignedTo: me,
         });
-        pushToast(`Claimed · ${t.task_id}`, 'good');
+        pushToast(fill(t('workflowReviewQueue.reviewQueueModule.claimed'), { task_id: String(taskRow.task_id) }), 'good');
       } catch (err) {
-        pushToast('Task claim could not be completed. Review the task and try again.', 'danger');
+        pushToast(t('workflowReviewQueue.reviewQueueModule.taskClaimCouldNot'), 'danger');
         return;
       }
     },
-    [assignTask, me]
+    [assignTask, me, t]
   );
 
   const completeTaskAction = useCallback(
     async (
-      t: Task,
+      taskEntry: Task,
       action: ActionDescriptor,
       payload: Record<string, unknown> = {},
       configuredNextStatus?: string,
     ) => {
       const next_status = stringFromUnknown(configuredNextStatus) || nextStatusForAction(action.kind);
       if (!next_status) {
-        pushToast(`${action.label} failed: the next status is not configured.`, 'danger');
+        pushToast(fill(t('workflowReviewQueue.reviewQueueModule.failedTheNextStatus'), { label: String(action.label) }), 'danger');
         return false;
       }
       const actionPayload = { ...payload };
@@ -1091,12 +1092,12 @@ export function ReviewQueueModule() {
           ? snoozeOptions.find((entry) => entry.value === defaultSnoozeKey)
           : null;
         if (!option) {
-          pushToast(`${action.label} failed - default snooze option is not configured`, 'danger');
+          pushToast(fill(t('workflowReviewQueue.reviewQueueModule.failedDefaultSnoozeOption'), { label: String(action.label) }), 'danger');
           return false;
         }
         const computedSnoozeUntil = snoozeUntil(option);
         if (!computedSnoozeUntil) {
-          pushToast(`${action.label} failed - option ${option.value} has invalid duration_seconds`, 'danger');
+          pushToast(fill(t('workflowReviewQueue.reviewQueueModule.failedOptionHasInvalid'), { label: String(action.label), value: String(option.value) }), 'danger');
           return false;
         }
         actionSnoozeUntil = computedSnoozeUntil;
@@ -1104,32 +1105,32 @@ export function ReviewQueueModule() {
       }
       try {
         const transitioned = await transitionTask.mutateAsync({
-          taskId: t.id,
+          taskId: taskEntry.id,
           transition: { next_status, action_kind: action.kind, payload: actionPayload },
         });
         const patch: Partial<Task> = taskReadbackPatch(transitioned.task) ?? { status: next_status };
         if (actionSnoozeUntil && !stringFromUnknown(patch.snooze_until)) {
           patch.snooze_until = actionSnoozeUntil;
         }
-        patchTask(t.id, patch);
+        patchTask(taskEntry.id, patch);
         const refreshedTasks = await refetchTaskQueueReadback();
         recordTaskActionReadback({
           kind: action.kind,
-          task: t,
+          task: taskEntry,
           refreshedTasks,
           taskEventId: taskEventIdFromReadback(transitioned),
           expectedStatus: next_status,
           expectedSnoozeUntil: actionSnoozeUntil || null,
           confirmedSnoozeUntil: actionSnoozeUntil || null,
         });
-        const parentRunId = taskParentWorkflowRunId(t);
+        const parentRunId = taskParentWorkflowRunId(taskEntry);
         let workflowWakeError: Error | null = null;
         const shouldWakeParentWorkflow =
           parentRunId && ['completed', 'rejected', 'canceled', 'cancelled'].includes(next_status);
         if (shouldWakeParentWorkflow) {
           const progressPayload = {
-            task_id: t.id,
-            completed_task_id: t.id,
+            task_id: taskEntry.id,
+            completed_task_id: taskEntry.id,
             task_action_kind: action.kind,
             task_payload: actionPayload,
           };
@@ -1151,44 +1152,44 @@ export function ReviewQueueModule() {
         }
         if (workflowWakeError) {
           pushToast(
-            `Task completed · workflow wake failed - ${workflowWakeError.message ?? 'unknown error'}`,
+            fill(t('workflowReviewQueue.reviewQueueModule.taskCompletedWorkflowWake'), { value: String(workflowWakeError.message ?? 'unknown error') }),
             'danger',
           );
         } else {
-          pushToast(`Applied · ${action.label}`, 'good');
+          pushToast(fill(t('workflowReviewQueue.reviewQueueModule.applied'), { label: String(action.label) }), 'good');
         }
         return true;
       } catch (err) {
-        pushToast('Task action could not be completed. Review the task and try again.', 'danger');
+        pushToast(t('workflowReviewQueue.reviewQueueModule.taskActionCouldNot'), 'danger');
         return false;
       }
     },
-    [defaultSnoozeKey, queryClient, runsQuery, snoozeOptions, tasksQuery, transitionTask]
+    [defaultSnoozeKey, queryClient, runsQuery, snoozeOptions, tasksQuery, transitionTask, t]
   );
 
   const resolve = useCallback(
-    async (t: Task) => {
-      const action = resolveAllowedActions(t).find((entry) => entry.kind === 'resolve');
+    async (taskEntry: Task) => {
+      const action = resolveAllowedActions(taskEntry).find((entry) => entry.kind === 'resolve');
       if (!action) {
-        pushToast('Resolve failed · resolve is not available for this task', 'danger');
+        pushToast(t('workflowReviewQueue.reviewQueueModule.resolveFailedResolveIs'), 'danger');
         return;
       }
-      await completeTaskAction(t, action);
+      await completeTaskAction(taskEntry, action);
     },
-    [completeTaskAction]
+    [completeTaskAction, t]
   );
 
   const openCompletionPayloadModal = useCallback(
-    (t: Task, action: ActionDescriptor, schema: CompletionPayloadSchema) => {
+    (taskRow: Task, action: ActionDescriptor, schema: CompletionPayloadSchema) => {
       const fields = (schema.fields ?? []).filter((field) => stringFromUnknown(field.key));
-      const parentWorkflowRunId = taskParentWorkflowRunId(t);
+      const parentWorkflowRunId = taskParentWorkflowRunId(taskRow);
       const parentWorkflowRun = parentWorkflowRunId
         ? runs.find((run) => run.id === parentWorkflowRunId) ?? null
         : null;
       const payload: Record<string, unknown> = {};
       for (const field of fields) {
         const key = stringFromUnknown(field.key);
-        const value = fieldDefaultValue(field, t, activeSettlement, parentWorkflowRun);
+        const value = fieldDefaultValue(field, taskRow, activeSettlement, parentWorkflowRun);
         if (value !== undefined && value !== null) payload[key] = value;
       }
 
@@ -1237,7 +1238,7 @@ export function ReviewQueueModule() {
             ) : null}
             {schema.requires_session_type ? (
               <div className="chip chip--xs chip--info">
-                Session required · {schema.requires_session_type.replace(/_/g, ' ')}
+                {fill(t('workflowReviewQueue.reviewQueueModule.sessionRequired'), { value: String(schema.requires_session_type.replace(/_/g, ' ')) })}
               </div>
             ) : null}
             {fields.map(renderInput)}
@@ -1245,7 +1246,7 @@ export function ReviewQueueModule() {
         ),
         footer: (
           <div style={{ display: 'flex', gap: '8px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('workflowReviewQueue.reviewQueueModule.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
               label={schema.submit_label ?? action.label}
               kind="primary"
@@ -1261,11 +1262,11 @@ export function ReviewQueueModule() {
                     const value = input ? normalizeFieldValue(field, input.value) : payload[key];
                     payload[key] = value;
                     if (field.required && (value === undefined || value === null || String(value).trim() === '')) {
-                      pushToast(`${field.label ?? key} is required`, 'danger');
+                      pushToast(fill(t('workflowReviewQueue.reviewQueueModule.isRequired'), { value: String(field.label ?? key) }), 'danger');
                       return;
                     }
                     if (field.type === 'number' && typeof value !== 'number') {
-                      pushToast(`${field.label ?? key} must be numeric`, 'danger');
+                      pushToast(fill(t('workflowReviewQueue.reviewQueueModule.mustBeNumeric'), { value: String(field.label ?? key) }), 'danger');
                       return;
                     }
                   }
@@ -1274,20 +1275,20 @@ export function ReviewQueueModule() {
                     const opened = await open_ops_session_v1({
                       session_type: requiredSessionType,
                       branch_id: stringFromUnknown(activeSettlement?.branch_id) || null,
-                      idempotency_key: `console-review-queue:${t.id}:${requiredSessionType}`,
+                      idempotency_key: `console-review-queue:${taskRow.id}:${requiredSessionType}`,
                       metadata: {
                         source: 'console-v2/workflows/review-queue',
-                        task_id: t.id,
-                        task_type_key: taskTypeValue(t),
+                        task_id: taskRow.id,
+                        task_type_key: taskTypeValue(taskRow),
                         settlement_batch_id: activeSettlementId ?? null,
                       },
                     });
                     payload.ops_session_id = opened.ops_session_id;
                   }
-                  const completed = await completeTaskAction(t, action, payload, schema.next_status);
+                  const completed = await completeTaskAction(taskRow, action, payload, schema.next_status);
                   if (completed) modal.close();
                 } catch (err) {
-                  pushToast('Task action could not be completed. Review the task and try again.', 'danger');
+                  pushToast(t('workflowReviewQueue.reviewQueueModule.taskActionCouldNot'), 'danger');
                 }
               }}
             />
@@ -1295,17 +1296,17 @@ export function ReviewQueueModule() {
         ),
       });
     },
-    [activeSettlement, activeSettlementId, completeTaskAction, modal, runs],
+    [activeSettlement, activeSettlementId, completeTaskAction, modal, runs, t],
   );
 
   const apply = useCallback(
-    async (t: Task, action: ActionDescriptor) => {
-      const schema = taskCompletionSchema(t, action);
+    async (taskRow: Task, action: ActionDescriptor) => {
+      const schema = taskCompletionSchema(taskRow, action);
       if (schema) {
-        openCompletionPayloadModal(t, action, schema);
+        openCompletionPayloadModal(taskRow, action, schema);
         return;
       }
-      await completeTaskAction(t, action);
+      await completeTaskAction(taskRow, action);
     },
     [completeTaskAction, openCompletionPayloadModal]
   );
@@ -1317,19 +1318,19 @@ export function ReviewQueueModule() {
    *  surfaces a danger toast and aborts; persists through `useTransitionTask`
    *  so the seam mock receives the row-driven payload. */
   const snoozeOne = useCallback(
-    async (t: Task, durationKey: string | undefined) => {
+    async (taskRow: Task, durationKey: string | undefined) => {
       if (!durationKey) {
-      pushToast('Snooze failed · default snooze option is not configured', 'danger');
+      pushToast(t('workflowReviewQueue.reviewQueueModule.snoozeFailedDefaultSnooze'), 'danger');
         return;
       }
       const option = snoozeOptions.find((o) => o.value === durationKey);
       if (!option) {
-      pushToast(`Snooze failed · snooze option ${durationKey} is not configured`, 'danger');
+      pushToast(fill(t('workflowReviewQueue.reviewQueueModule.snoozeFailedSnoozeOption'), { durationKey: String(durationKey) }), 'danger');
         return;
       }
       const snooze_until = snoozeUntil(option);
       if (!snooze_until) {
-        pushToast(`Snooze failed · option ${durationKey} has invalid duration_seconds`, 'danger');
+        pushToast(fill(t('workflowReviewQueue.reviewQueueModule.snoozeFailedOptionHas'), { durationKey: String(durationKey) }), 'danger');
         return;
       }
       // Cycle E2 (Workflows P1 #6) — `next_status` for the snooze
@@ -1338,82 +1339,82 @@ export function ReviewQueueModule() {
       // snooze→status mapping is SSOT-driven (single seed insert to
       // re-route).
       const nextStatus = nextStatusForAction('snooze');
-      const actionKey = `${t.id}:snooze`;
+      const actionKey = `${taskRow.id}:snooze`;
       if (!startTaskAction(actionKey)) return;
       try {
         const transitioned = await transitionTask.mutateAsync({
-          taskId: t.id,
+          taskId: taskRow.id,
           transition: {
             next_status: nextStatus,
             action_kind: 'snooze',
             payload: { snooze_until },
           },
         });
-        patchTask(t.id, {
+        patchTask(taskRow.id, {
           ...(taskReadbackPatch(transitioned.task) ?? {}),
           snooze_until,
         });
         const refreshedTasks = await refetchTaskQueueReadback();
         recordTaskActionReadback({
           kind: 'snooze',
-          task: t,
+          task: taskRow,
           refreshedTasks,
           taskEventId: taskEventIdFromReadback(transitioned),
           expectedStatus: nextStatus,
           expectedSnoozeUntil: snooze_until,
           confirmedSnoozeUntil: snooze_until,
         });
-        pushToast(`Snoozed · ${t.task_id} for ${durationKey}`, 'info');
+        pushToast(fill(t('workflowReviewQueue.reviewQueueModule.snoozedFor'), { task_id: String(taskRow.task_id), durationKey: String(durationKey) }), 'info');
       } catch (err) {
-        pushToast('Task snooze could not be saved. Review the task and try again.', 'danger');
+        pushToast(t('workflowReviewQueue.reviewQueueModule.taskSnoozeCouldNot'), 'danger');
       }
       finishTaskAction(actionKey);
     },
-    [transitionTask, snoozeOptions]
+    [transitionTask, snoozeOptions, t]
   );
 
   const escalateOne = useCallback(
-    async (t: Task) => {
+    async (taskRow: Task) => {
       // Cycle E2 (Workflows P1 #6) — `next_status` for the escalate
       // transition resolves canonically through `nextStatusForAction
       // ('escalate')`. Replaces the literal `next_status: 'escalated'`.
       const nextStatus = nextStatusForAction('escalate');
       try {
         const transitioned = await transitionTask.mutateAsync({
-          taskId: t.id,
+          taskId: taskRow.id,
           transition: { next_status: nextStatus, action_kind: 'escalate' },
         });
-        patchTask(t.id, taskReadbackPatch(transitioned.task) ?? { status: nextStatus });
+        patchTask(taskRow.id, taskReadbackPatch(transitioned.task) ?? { status: nextStatus });
         const refreshedTasks = await refetchTaskQueueReadback();
         recordTaskActionReadback({
           kind: 'escalate',
-          task: t,
+          task: taskRow,
           refreshedTasks,
           taskEventId: taskEventIdFromReadback(transitioned),
           expectedStatus: nextStatus,
         });
-        pushToast(`Escalated · ${t.task_id}`, 'warn');
+        pushToast(fill(t('workflowReviewQueue.reviewQueueModule.escalated'), { task_id: String(taskRow.task_id) }), 'warn');
       } catch (err) {
-        pushToast('Task escalation could not be saved. Review the task and try again.', 'danger');
+        pushToast(t('workflowReviewQueue.reviewQueueModule.taskEscalationCouldNot'), 'danger');
       }
     },
-    [transitionTask]
+    [transitionTask, t]
   );
 
-  function openAssignPicker(t: Task) {
+  function openAssignPicker(taskRow: Task) {
     if (usersList.length === 0) {
       modal.open({
-        title: 'Assign to user',
+        title: t('workflowReviewQueue.reviewQueueModule.assignToUser'),
         body: (
           <StateView
             kind="error"
-            title="User selection is not available"
-            hint="User options must be configured before this assignment action can be used."
+            title={t('workflowReviewQueue.reviewQueueModule.userSelectionIsNot')}
+            hint={t('workflowReviewQueue.reviewQueueModule.userOptionsMustBe')}
           />
         ),
         footer: (
           <div style={{ display: 'flex', gap: '8px' }}>
-            <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('workflowReviewQueue.reviewQueueModule.close')} kind="ghost" onClick={() => modal.close()} />
           </div>
         ),
       });
@@ -1421,11 +1422,11 @@ export function ReviewQueueModule() {
     }
     let pickedId = usersList[0]!.id;
     modal.open({
-      title: 'Assign to user',
+      title: t('workflowReviewQueue.reviewQueueModule.assignToUser'),
       body: (
         <div style={{ padding: '8px 14px' }}>
           <select
-            aria-label="Assign review task user"
+            aria-label={t('workflowReviewQueue.reviewQueueModule.assignReviewTaskUser')}
             className="dt-inline-input"
             defaultValue={pickedId}
             onChange={(e) => {
@@ -1442,32 +1443,32 @@ export function ReviewQueueModule() {
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('workflowReviewQueue.reviewQueueModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Assign"
+            label={t('workflowReviewQueue.reviewQueueModule.assign')}
             kind="primary"
             capability={CAP.TASKS_WRITE}
             onClick={async () => {
               try {
                 const assigned = await assignTask.mutateAsync({
-                  task_id: t.id,
+                  task_id: taskRow.id,
                   assigned_to: pickedId,
-                  idempotency_key: `console-review-queue:assign:${t.id}:${pickedId}`,
+                  idempotency_key: `console-review-queue:assign:${taskRow.id}:${pickedId}`,
                   notes: 'Assigned from Console V2 review queue',
                 });
-                patchTask(t.id, taskReadbackPatch(assigned.task) ?? { assigned_to: pickedId });
+                patchTask(taskRow.id, taskReadbackPatch(assigned.task) ?? { assigned_to: pickedId });
                 const refreshedTasks = await refetchTaskQueueReadback();
                 recordTaskActionReadback({
                   kind: 'assign',
-                  task: t,
+                  task: taskRow,
                   refreshedTasks,
                   taskEventId: taskEventIdFromReadback(assigned),
                   expectedAssignedTo: pickedId,
                 });
                 modal.close();
-                pushToast(`Assigned ${t.task_id} to ${pickedId}`, 'good');
+                pushToast(fill(t('workflowReviewQueue.reviewQueueModule.assignedTo'), { task_id: String(taskRow.task_id), pickedId: String(pickedId) }), 'good');
               } catch (err) {
-                pushToast('Task assignment could not be saved. Review the assignee and try again.', 'danger');
+                pushToast(t('workflowReviewQueue.reviewQueueModule.taskAssignmentCouldNot'), 'danger');
               }
             }}
           />
@@ -1478,10 +1479,10 @@ export function ReviewQueueModule() {
 
   async function bulkAction(kind: 'claim' | 'resolve' | 'escalate') {
     if (!selected.size) {
-      pushToast('No tasks selected', 'info');
+      pushToast(t('workflowReviewQueue.reviewQueueModule.noTasksSelected'), 'info');
       return;
     }
-    const tasks = filteredTasks.filter((t) => selected.has(t.id));
+    const tasks = filteredTasks.filter((taskRow) => selected.has(taskRow.id));
     // W62-Workflows (Cycle F-R-2 P1-1) — bulk dispatch is row-driven via
     // `task_action_kind.<kind>.metadata.bulk_strategy`:
     //   • `assignment`        → canonical assign_task_v1, then local mirror.
@@ -1497,17 +1498,17 @@ export function ReviewQueueModule() {
     if (strategy === 'assignment') {
       try {
         const assignmentResults = await Promise.all(
-          tasks.map((t) =>
+          tasks.map((taskRow) =>
             assignTask.mutateAsync({
-              task_id: t.id,
+              task_id: taskRow.id,
               assigned_to: me,
-              idempotency_key: `console-review-queue:bulk-claim:${t.id}:${me}`,
+              idempotency_key: `console-review-queue:bulk-claim:${taskRow.id}:${me}`,
               notes: 'Bulk claimed from Console V2 review queue',
             }),
           ),
         );
-        tasks.forEach((t, index) => {
-          patchTask(t.id, taskReadbackPatch(assignmentResults[index]?.task) ?? { assigned_to: me });
+        tasks.forEach((taskRow, index) => {
+          patchTask(taskRow.id, taskReadbackPatch(assignmentResults[index]?.task) ?? { assigned_to: me });
         });
         const refreshedTasks = await refetchTaskQueueReadback();
         recordBulkTaskReadback({
@@ -1518,13 +1519,13 @@ export function ReviewQueueModule() {
           expectedAssignedTo: me,
         });
       } catch (err) {
-        pushToast('Bulk task action could not be completed. Review the selected tasks and try again.', 'danger');
+        pushToast(t('workflowReviewQueue.reviewQueueModule.bulkTaskActionCould'), 'danger');
         return;
       }
     } else if (strategy === 'status_transition') {
       const to_status = nextStatusForAction(kind);
       if (!to_status) {
-        pushToast(`${kind} failed: the next status is not configured.`, 'danger');
+        pushToast(fill(t('workflowReviewQueue.reviewQueueModule.failedTheNextStatus2'), { kind: String(kind) }), 'danger');
         return;
       }
       // Phase C5: route through the canonical bulk_transition_tasks_v1 RPC
@@ -1537,11 +1538,11 @@ export function ReviewQueueModule() {
       // call sites send the canonical key.
       try {
         const result = await bulkTransitionTasks.mutateAsync({
-          task_ids: tasks.map((t) => t.id),
+          task_ids: tasks.map((taskRow) => taskRow.id),
           to_status,
           action_kind: kind,
         });
-        tasks.forEach((t) => patchTask(t.id, { status: to_status }));
+        tasks.forEach((taskRow) => patchTask(taskRow.id, { status: to_status }));
         const refreshedTasks = await refetchTaskQueueReadback();
         const outcomes = bulkOutcomeRows(result);
         recordBulkTaskReadback({
@@ -1552,11 +1553,11 @@ export function ReviewQueueModule() {
           expectedStatus: to_status,
         });
       } catch (err) {
-        pushToast('Bulk task action could not be completed. Review the selected tasks and try again.', 'danger');
+        pushToast(t('workflowReviewQueue.reviewQueueModule.bulkTaskActionCould'), 'danger');
         return;
       }
     } else {
-      pushToast(`${kind} failed: the bulk action is not configured.`, 'danger');
+      pushToast(fill(t('workflowReviewQueue.reviewQueueModule.failedTheBulkAction'), { kind: String(kind) }), 'danger');
       return;
     }
     setSelected(new Set());
@@ -1565,22 +1566,22 @@ export function ReviewQueueModule() {
 
   function bulkReassign() {
     if (!selected.size) {
-      pushToast('No tasks selected', 'info');
+      pushToast(t('workflowReviewQueue.reviewQueueModule.noTasksSelected'), 'info');
       return;
     }
     if (usersList.length === 0) {
       modal.open({
-        title: 'Reassign selected to',
+        title: t('workflowReviewQueue.reviewQueueModule.reassignSelectedTo'),
         body: (
           <StateView
             kind="error"
-            title="User selection is not available"
-            hint="User options must be configured before reassignment."
+            title={t('workflowReviewQueue.reviewQueueModule.userSelectionIsNot')}
+            hint={t('workflowReviewQueue.reviewQueueModule.userOptionsMustBe2')}
           />
         ),
         footer: (
           <div style={{ display: 'flex', gap: '8px' }}>
-            <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('workflowReviewQueue.reviewQueueModule.close')} kind="ghost" onClick={() => modal.close()} />
           </div>
         ),
       });
@@ -1588,11 +1589,11 @@ export function ReviewQueueModule() {
     }
     let pickedId = usersList[0]!.id;
     modal.open({
-      title: 'Reassign selected to',
+      title: t('workflowReviewQueue.reviewQueueModule.reassignSelectedTo'),
       body: (
         <div style={{ padding: '8px 14px' }}>
           <select
-            aria-label="Reassign selected review tasks user"
+            aria-label={t('workflowReviewQueue.reviewQueueModule.reassignSelectedReviewTasks')}
             className="dt-inline-input"
             defaultValue={pickedId}
             onChange={(e) => {
@@ -1609,26 +1610,26 @@ export function ReviewQueueModule() {
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('workflowReviewQueue.reviewQueueModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Reassign"
+            label={t('workflowReviewQueue.reviewQueueModule.reassign')}
             kind="primary"
             capability={CAP.TASKS_WRITE}
             onClick={async () => {
-              const tasks = filteredTasks.filter((t) => selected.has(t.id));
+              const tasks = filteredTasks.filter((taskRow) => selected.has(taskRow.id));
               try {
                 const assignmentResults = await Promise.all(
-                  tasks.map((t) =>
+                  tasks.map((taskRow) =>
                     assignTask.mutateAsync({
-                      task_id: t.id,
+                      task_id: taskRow.id,
                       assigned_to: pickedId,
-                      idempotency_key: `console-review-queue:bulk-reassign:${t.id}:${pickedId}`,
+                      idempotency_key: `console-review-queue:bulk-reassign:${taskRow.id}:${pickedId}`,
                       notes: 'Bulk reassigned from Console V2 review queue',
                     }),
                   ),
                 );
-                tasks.forEach((t, index) => {
-                  patchTask(t.id, taskReadbackPatch(assignmentResults[index]?.task) ?? { assigned_to: pickedId });
+                tasks.forEach((taskRow, index) => {
+                  patchTask(taskRow.id, taskReadbackPatch(assignmentResults[index]?.task) ?? { assigned_to: pickedId });
                 });
                 const refreshedTasks = await refetchTaskQueueReadback();
                 recordBulkTaskReadback({
@@ -1640,9 +1641,9 @@ export function ReviewQueueModule() {
                 });
                 setSelected(new Set());
                 modal.close();
-                pushToast(`Reassigned ${tasks.length} to ${pickedId}`, 'good');
+                pushToast(fill(t('workflowReviewQueue.reviewQueueModule.reassignedTo'), { length: String(tasks.length), pickedId: String(pickedId) }), 'good');
               } catch (err) {
-                pushToast('Task reassignment could not be saved. Review the task and try again.', 'danger');
+                pushToast(t('workflowReviewQueue.reviewQueueModule.taskReassignmentCouldNot'), 'danger');
               }
             }}
           />
@@ -1653,22 +1654,22 @@ export function ReviewQueueModule() {
 
   function openSnoozePicker() {
     if (!selected.size) {
-      pushToast('No tasks selected', 'info');
+      pushToast(t('workflowReviewQueue.reviewQueueModule.noTasksSelected'), 'info');
       return;
     }
     if (snoozeOptions.length === 0) {
       modal.open({
-        title: 'Snooze for…',
+        title: t('workflowReviewQueue.reviewQueueModule.snoozeFor'),
         body: (
           <StateView
             kind="error"
-      title="Snooze options are not configured"
-      hint="This option is not configured yet. Ask an administrator to finish setup."
+      title={t('workflowReviewQueue.reviewQueueModule.snoozeOptionsAreNot')}
+      hint={t('workflowReviewQueue.reviewQueueModule.thisOptionIsNot')}
           />
         ),
         footer: (
           <div style={{ display: 'flex', gap: '8px' }}>
-            <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('workflowReviewQueue.reviewQueueModule.close')} kind="ghost" onClick={() => modal.close()} />
           </div>
         ),
       });
@@ -1676,7 +1677,7 @@ export function ReviewQueueModule() {
     }
     let pickedId = snoozeOptions[0]!.value;
     modal.open({
-      title: 'Snooze for…',
+      title: t('workflowReviewQueue.reviewQueueModule.snoozeFor'),
       body: (
         <div style={{ padding: '8px 14px' }}>
           <select
@@ -1696,25 +1697,25 @@ export function ReviewQueueModule() {
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('workflowReviewQueue.reviewQueueModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Snooze"
+            label={t('workflowReviewQueue.reviewQueueModule.snooze')}
             kind="primary"
             capability={CAP.TASKS_WRITE}
             onClick={async () => {
-              const tasks = filteredTasks.filter((t) => selected.has(t.id));
+              const tasks = filteredTasks.filter((taskRow) => selected.has(taskRow.id));
               // W27 Cycle D closure: resolve the canonical option (with
               // duration_seconds) before computing the offset. Missing or
               // malformed canonical row aborts the bulk action with a
               // danger toast — no silent fallback.
               const option = snoozeOptions.find((o) => o.value === pickedId);
               if (!option) {
-      pushToast(`Snooze failed · snooze option ${pickedId} is not configured`, 'danger');
+      pushToast(fill(t('workflowReviewQueue.reviewQueueModule.snoozeFailedSnoozeOption2'), { pickedId: String(pickedId) }), 'danger');
                 return;
               }
               const snooze_until = snoozeUntil(option);
               if (!snooze_until) {
-                pushToast(`Snooze failed · option ${pickedId} has invalid duration_seconds`, 'danger');
+                pushToast(fill(t('workflowReviewQueue.reviewQueueModule.snoozeFailedOptionHas2'), { pickedId: String(pickedId) }), 'danger');
                 return;
               }
               // Phase C5: route through canonical bulk_transition_tasks_v1.
@@ -1733,12 +1734,12 @@ export function ReviewQueueModule() {
               const bulkNextStatus = nextStatusForAction('snooze');
               try {
                 const result = await bulkTransitionTasks.mutateAsync({
-                  task_ids: tasks.map((t) => t.id),
+                  task_ids: tasks.map((taskRow) => taskRow.id),
                   to_status: bulkNextStatus,
                   payload: { snooze_until },
                   action_kind: 'snooze',
                 });
-                tasks.forEach((t) => patchTask(t.id, { status: bulkNextStatus, snooze_until }));
+                tasks.forEach((taskRow) => patchTask(taskRow.id, { status: bulkNextStatus, snooze_until }));
                 const refreshedTasks = await refetchTaskQueueReadback();
                 const outcomes = bulkOutcomeRows(result);
                 recordBulkTaskReadback({
@@ -1752,9 +1753,9 @@ export function ReviewQueueModule() {
                 });
                 setSelected(new Set());
                 modal.close();
-                pushToast(`Snoozed ${tasks.length} tasks for ${pickedId}`, 'good');
+                pushToast(fill(t('workflowReviewQueue.reviewQueueModule.snoozedTasksFor'), { length: String(tasks.length), pickedId: String(pickedId) }), 'good');
               } catch (err) {
-                pushToast('Task snooze could not be saved. Review the task and try again.', 'danger');
+                pushToast(t('workflowReviewQueue.reviewQueueModule.taskSnoozeCouldNot'), 'danger');
               }
             }}
           />
@@ -1763,7 +1764,7 @@ export function ReviewQueueModule() {
     });
   }
 
-  function openContextMenu(t: Task) {
+  function openContextMenu(taskRow: Task) {
     // W27 Cycle D closure: write actions (claim/resolve/snooze/escalate)
     // are gated on `canWriteTasks` (CAP.TASKS_WRITE) so the FE matches
     // the server-side `tasks.write` enforcement and the operator never
@@ -1777,28 +1778,28 @@ export function ReviewQueueModule() {
       ? snoozeOptions.find((o) => o.value === defaultSnoozeKey)
       : null;
     const acts: Array<{ label: string; onPick: () => void }> = [
-      { label: 'Open detail', onPick: () => setActiveTaskId(t.id) },
+      { label: t('workflowReviewQueue.reviewQueueModule.openDetail'), onPick: () => setActiveTaskId(taskRow.id) },
     ];
     if (canWriteTasks) {
-      acts.push({ label: 'Claim', onPick: () => claim(t) });
-      acts.push({ label: 'Resolve', onPick: () => void resolve(t) });
+      acts.push({ label: t('workflowReviewQueue.reviewQueueModule.claim'), onPick: () => claim(taskRow) });
+      acts.push({ label: t('workflowReviewQueue.reviewQueueModule.resolve'), onPick: () => void resolve(taskRow) });
       if (defaultOption) {
         acts.push({
-          label: `Snooze ${defaultOption.label}`,
-          onPick: () => void snoozeOne(t, defaultOption.value),
+          label: fill(t('workflowReviewQueue.reviewQueueModule.snooze2'), { label: String(defaultOption.label) }),
+          onPick: () => void snoozeOne(taskRow, defaultOption.value),
         });
       }
       acts.push({
-        label: 'Escalate',
-        onPick: () => void escalateOne(t),
+        label: t('workflowReviewQueue.reviewQueueModule.escalate'),
+        onPick: () => void escalateOne(taskRow),
       });
     }
     acts.push({
-      label: 'Open in new tab',
-            onPick: () => window.open(`/workflows/review-queue?focus=${encodeURIComponent(t.id)}`, '_blank'),
+      label: t('workflowReviewQueue.reviewQueueModule.openInNewTab'),
+            onPick: () => window.open(`/workflows/review-queue?focus=${encodeURIComponent(taskRow.id)}`, '_blank'),
     });
     modal.open({
-      title: t.task_id,
+      title: taskRow.task_id,
       body: (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {acts.map((a) => (
@@ -1817,54 +1818,54 @@ export function ReviewQueueModule() {
           ))}
         </div>
       ),
-      footer: <Button label="Close" kind="ghost" onClick={() => modal.close()} />,
+      footer: <Button label={t('workflowReviewQueue.reviewQueueModule.close')} kind="ghost" onClick={() => modal.close()} />,
     });
   }
 
   function openSaveViewPicker() {
     let nameInput = '';
     modal.open({
-      title: 'Save view',
+      title: t('workflowReviewQueue.reviewQueueModule.saveView'),
       body: (
         <div style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
           <label
             htmlFor="wf-rq-view-name"
             style={{ fontSize: '11px', color: 'var(--ink-3)' }}
           >
-            View name
+            {t('workflowReviewQueue.reviewQueueModule.viewName')}
           </label>
           <input
             id="wf-rq-view-name"
             type="text"
             className="dt-inline-input"
-            placeholder="e.g. NDR · my queue"
+            placeholder={t('workflowReviewQueue.reviewQueueModule.eGNdrMy')}
             onChange={(e) => {
               nameInput = e.target.value;
             }}
             autoFocus
           />
           <div className="mono" style={{ fontSize: '10.5px', color: 'var(--ink-3)' }}>
-            Captures filter <strong>{activeFilter}</strong>
-            {search ? <> + search “{search}”</> : null}
+            {fill(t('workflowReviewQueue.reviewQueueModule.capturesFilter'), { activeFilter: String(activeFilter) })}
+            {search ? <> {fill(t('workflowReviewQueue.reviewQueueModule.search'), { search: String(search) })}</> : null}
           </div>
         </div>
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('workflowReviewQueue.reviewQueueModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Save"
+            label={t('workflowReviewQueue.reviewQueueModule.save')}
             kind="primary"
             onClick={() => {
               const label = nameInput.trim();
               if (!label) {
-                pushToast('View name is required', 'warn');
+                pushToast(t('workflowReviewQueue.reviewQueueModule.viewNameIsRequired'), 'warn');
                 return;
               }
               saveView(label, activeFilter, search);
               setSavedViews(listSavedViews());
               modal.close();
-              pushToast(`Saved view · ${label}`, 'good');
+              pushToast(fill(t('workflowReviewQueue.reviewQueueModule.savedView'), { label: String(label) }), 'good');
             }}
           />
         </div>
@@ -1950,7 +1951,7 @@ export function ReviewQueueModule() {
       // Closes REAUDIT3/WORKFLOWS.md P1-2.
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         if (!canWriteTasks) {
-          pushToast('Permission denied · task update permission required to resolve', 'warn');
+          pushToast(t('workflowReviewQueue.reviewQueueModule.permissionDeniedTaskUpdate'), 'warn');
           e.preventDefault();
           return;
         }
@@ -1961,7 +1962,7 @@ export function ReviewQueueModule() {
       if (!activeTask) return;
       if (e.key === 'c' || e.key === 'C') {
         if (!canWriteTasks) {
-          pushToast('Permission denied · task update permission required to claim', 'warn');
+          pushToast(t('workflowReviewQueue.reviewQueueModule.permissionDeniedTaskUpdate2'), 'warn');
           e.preventDefault();
           return;
         }
@@ -1971,7 +1972,7 @@ export function ReviewQueueModule() {
       }
       if (e.key === 'e' || e.key === 'E') {
         if (!canWriteTasks) {
-          pushToast('Permission denied · task update permission required to escalate', 'warn');
+          pushToast(t('workflowReviewQueue.reviewQueueModule.permissionDeniedTaskUpdate3'), 'warn');
           e.preventDefault();
           return;
         }
@@ -1981,7 +1982,7 @@ export function ReviewQueueModule() {
       }
       if (e.key === 's' || e.key === 'S') {
         if (!canWriteTasks) {
-          pushToast('Permission denied · task update permission required to snooze', 'warn');
+          pushToast(t('workflowReviewQueue.reviewQueueModule.permissionDeniedTaskUpdate4'), 'warn');
           e.preventDefault();
           return;
         }
@@ -1989,7 +1990,7 @@ export function ReviewQueueModule() {
           // Page-level strict guard renders a danger StateView when this is
           // unresolved, but the keyboard listener is registered before that
           // guard returns; surface explicitly instead of synthesising a key.
-          pushToast('Snooze unavailable · default snooze option is not configured', 'danger');
+          pushToast(t('workflowReviewQueue.reviewQueueModule.snoozeUnavailableDefaultSnooze'), 'danger');
           e.preventDefault();
           return;
         }
@@ -2002,7 +2003,7 @@ export function ReviewQueueModule() {
         const a = acts[parseInt(e.key, 10) - 1];
         if (a) {
           if (!canWriteTasks) {
-            pushToast(`Permission denied · task update permission required for ${a.label}`, 'warn');
+            pushToast(fill(t('workflowReviewQueue.reviewQueueModule.permissionDeniedTaskUpdate5'), { label: String(a.label) }), 'warn');
             e.preventDefault();
             return;
           }
@@ -2013,21 +2014,21 @@ export function ReviewQueueModule() {
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [filteredTasks, activeTaskId, activeTask, resolve, apply, claim, escalateOne, snoozeOne, canWriteTasks, defaultSnoozeKey]);
+  }, [filteredTasks, activeTaskId, activeTask, resolve, apply, claim, escalateOne, snoozeOne, canWriteTasks, defaultSnoozeKey, t]);
 
   if (!canRead) {
     return (
       <div className="page wf-rq">
         <PageHeader
           moduleKey="wf-review"
-          eyebrow="Workflows"
+          eyebrow={t('workflowReviewQueue.reviewQueueModule.workflows')}
           titleAccent="Review"
           titlePlain="queue"
         />
         <StateView
           kind="denied"
           capability={CAP.TASKS_READ}
-          hint="You do not have permission to view the review queue."
+          hint={t('workflowReviewQueue.reviewQueueModule.youDoNotHave')}
         />
       </div>
     );
@@ -2036,7 +2037,7 @@ export function ReviewQueueModule() {
   if (slaPolicy.isLoading || uiPresentationPolicy.isLoading) {
     return (
       <div className="page wf-rq">
-        <PageHeader moduleKey="wf-review" eyebrow="Workflows" titleAccent="Review" titlePlain="queue" />
+        <PageHeader moduleKey="wf-review" eyebrow={t('workflowReviewQueue.reviewQueueModule.workflows')} titleAccent="Review" titlePlain="queue" />
         <StateView kind="loading" />
       </div>
     );
@@ -2045,11 +2046,11 @@ export function ReviewQueueModule() {
   if (slaRingWarnPct == null || slaRingDangerPct == null || noSlaDefaultPct == null) {
     return (
       <div className="page wf-rq">
-        <PageHeader moduleKey="wf-review" eyebrow="Workflows" titleAccent="Review" titlePlain="queue" />
+        <PageHeader moduleKey="wf-review" eyebrow={t('workflowReviewQueue.reviewQueueModule.workflows')} titleAccent="Review" titlePlain="queue" />
         <StateView
           kind="error"
-          title="Review queue timing settings are not configured"
-          hint="Ask an administrator to finish setup before using the review queue."
+          title={t('workflowReviewQueue.reviewQueueModule.reviewQueueTimingSettings')}
+          hint={t('workflowReviewQueue.reviewQueueModule.askAnAdministratorTo')}
         />
       </div>
     );
@@ -2061,11 +2062,11 @@ export function ReviewQueueModule() {
   if (!uiPresentationPolicy.isLoading && defaultSnoozeKey == null) {
     return (
       <div className="page wf-rq">
-        <PageHeader moduleKey="wf-review" eyebrow="Workflows" titleAccent="Review" titlePlain="queue" />
+        <PageHeader moduleKey="wf-review" eyebrow={t('workflowReviewQueue.reviewQueueModule.workflows')} titleAccent="Review" titlePlain="queue" />
         <StateView
           kind="error"
-        title="Default snooze option is not configured"
-        hint="This option is not configured yet. Ask an administrator to finish setup."
+        title={t('workflowReviewQueue.reviewQueueModule.defaultSnoozeOptionIs')}
+        hint={t('workflowReviewQueue.reviewQueueModule.thisOptionIsNot')}
         />
       </div>
     );
@@ -2076,7 +2077,7 @@ export function ReviewQueueModule() {
       <div className="page wf-rq">
         <PageHeader
           moduleKey="wf-review"
-          eyebrow="Workflows"
+          eyebrow={t('workflowReviewQueue.reviewQueueModule.workflows')}
           titleAccent="Review"
           titlePlain="queue"
           pills={[]}
@@ -2091,7 +2092,7 @@ export function ReviewQueueModule() {
       <div className="page wf-rq">
         <PageHeader
           moduleKey="wf-review"
-          eyebrow="Workflows"
+          eyebrow={t('workflowReviewQueue.reviewQueueModule.workflows')}
           titleAccent="Review"
           titlePlain="queue"
           pills={[]}
@@ -2101,38 +2102,38 @@ export function ReviewQueueModule() {
     );
   }
 
-  const t = activeTask;
-  const parentWorkflowRunId = t ? taskParentWorkflowRunId(t) : '';
+  const item = activeTask;
+  const parentWorkflowRunId = item ? taskParentWorkflowRunId(item) : '';
   const linkedRun =
-    t &&
+    item &&
     runs.find(
       (r) =>
         (parentWorkflowRunId && r.id === parentWorkflowRunId) ||
-        r.id === t.workflow_run_id ||
+        r.id === item.workflow_run_id ||
         (typeof r.template_id === 'string' &&
-          taskTypeValue(t) &&
-          r.template_id.includes(taskTypeValue(t).split('_')[0] ?? ''))
+          taskTypeValue(item) &&
+          r.template_id.includes(taskTypeValue(item).split('_')[0] ?? ''))
     );
-  const activeTaskTerminal = t ? isTaskTerminal(t.status) : false;
-  const activeTaskActions = t && !activeTaskTerminal ? resolveAllowedActions(t) : [];
-  const completionPrimaryAction = t && !activeTaskTerminal
-    ? activeTaskActions.find((action) => taskCompletionSchema(t, action))
+  const activeTaskTerminal = item ? isTaskTerminal(item.status) : false;
+  const activeTaskActions = item && !activeTaskTerminal ? resolveAllowedActions(item) : [];
+  const completionPrimaryAction = item && !activeTaskTerminal
+    ? activeTaskActions.find((action) => taskCompletionSchema(item, action))
     : null;
   const primaryTaskAction = completionPrimaryAction
     ?? activeTaskActions.find((action) => action.kind === 'resolve')
     ?? null;
-  const completionPrimarySchema = t && completionPrimaryAction
-    ? taskCompletionSchema(t, completionPrimaryAction)
+  const completionPrimarySchema = item && completionPrimaryAction
+    ? taskCompletionSchema(item, completionPrimaryAction)
     : null;
 
   // Decision evidence chip target — prefer the explicit workflow_run_id
   // (canonical FK once `tasks.workflow_run_id` is wired) and fall back to the
   // task_id so the link is always meaningful.
-  const evidenceFocusId = t ? (t.workflow_run_id ?? t.task_id ?? t.id) : null;
-  const activeAuditCorrelationIds = t ? taskAuditCorrelationIds(t, linkedRun) : new Set<string>();
-  const activeAuditRows = t
+  const evidenceFocusId = item ? (item.workflow_run_id ?? item.task_id ?? item.id) : null;
+  const activeAuditCorrelationIds = item ? taskAuditCorrelationIds(item, linkedRun) : new Set<string>();
+  const activeAuditRows = item
     ? auditChanges
-        .filter((row) => auditMatchesTask(row, t, activeAuditCorrelationIds))
+        .filter((row) => auditMatchesTask(row, item, activeAuditCorrelationIds))
         .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))
     : [];
   const bulkTaskReadbackComplete = bulkTaskReadback
@@ -2154,17 +2155,17 @@ export function ReviewQueueModule() {
     <div className="page wf-rq">
       <PageHeader
         moduleKey="wf-review"
-        eyebrow="Workflows"
+        eyebrow={t('workflowReviewQueue.reviewQueueModule.workflows')}
         titleAccent="Review"
         titlePlain="queue"
         pills={[
           <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
-          <span key="src" className="chip chip--xs mono">Task queue · task catalog</span>,
+          <span key="src" className="chip chip--xs mono">{t('workflowReviewQueue.reviewQueueModule.taskQueueTaskCatalog')}</span>,
         ]}
         actions={[
           <Button
             key="bulk-claim"
-            label="Bulk claim"
+            label={t('workflowReviewQueue.reviewQueueModule.bulkClaim')}
             iconName="check"
             kind="ghost"
             capability={CAP.TASKS_WRITE}
@@ -2172,10 +2173,10 @@ export function ReviewQueueModule() {
           />,
           <Button
             key="filter"
-            label="Filter"
+            label={t('workflowReviewQueue.reviewQueueModule.filter')}
             iconName="filter"
             kind="ghost"
-            onClick={() => pushToast('Use filter chips above the list', 'info')}
+            onClick={() => pushToast(t('workflowReviewQueue.reviewQueueModule.useFilterChipsAbove'), 'info')}
           />,
         ]}
       />
@@ -2192,7 +2193,7 @@ export function ReviewQueueModule() {
                 setActiveTaskId(null);
               }}
             >
-              <span>{f.label}</span>
+              <span>{t(`workflowReviewQueue.filters.${f.id}`)}</span>
               <span className="mono" style={{ color: 'var(--ink-2)' }}>
                 {String(count)}
               </span>
@@ -2208,9 +2209,9 @@ export function ReviewQueueModule() {
             onContextMenu={(e) => {
               e.preventDefault();
               removeSavedView(v.id);
-              pushToast(`Removed view · ${v.label}`, 'info');
+              pushToast(fill(t('workflowReviewQueue.reviewQueueModule.removedView'), { label: String(v.label) }), 'info');
             }}
-            title="Click to apply · right-click to remove"
+            title={t('workflowReviewQueue.reviewQueueModule.clickToApplyRight')}
           >
             <Icon name="check" size={10} />
             <span>{v.label}</span>
@@ -2222,22 +2223,22 @@ export function ReviewQueueModule() {
           type="text"
           data-testid="wf-rq-search"
           className="wf-rq-search"
-          placeholder="Search task id, subject, queue…"
+          placeholder={t('workflowReviewQueue.reviewQueueModule.searchTaskIdSubject')}
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
             setActiveTaskId(null);
           }}
-          aria-label="Search tasks"
+          aria-label={t('workflowReviewQueue.reviewQueueModule.searchTasks')}
         />
         <Button
-          label="Save view"
+          label={t('workflowReviewQueue.reviewQueueModule.saveView')}
           iconName="check"
           kind="ghost"
           onClick={() => openSaveViewPicker()}
         />
         <div className="wf-rq-shortcut-hint mono">
-          j/k navigate · c claim · e escalate · s snooze · / search · 1-9 action · ⌘↵ resolve · Esc blur
+          {t('workflowReviewQueue.reviewQueueModule.jKNavigateC')}
         </div>
       </div>
       <div className="wf-rq-body">
@@ -2245,22 +2246,22 @@ export function ReviewQueueModule() {
           {filteredTasks.length === 0 ? (
             <StateView
               kind="empty"
-              title="No tasks"
+              title={t('workflowReviewQueue.reviewQueueModule.noTasks')}
               hint={
                 activeFilter === 'mine'
-                  ? 'Nothing assigned to you. Check the queue.'
-                  : 'No tasks match this filter.'
+                  ? t('workflowReviewQueue.reviewQueueModule.nothingAssignedToYou')
+                  : t('workflowReviewQueue.reviewQueueModule.noTasksMatchThis')
               }
             />
           ) : (
             <>
               <div className="wf-rq-list__head">
                 <span className="mono">
-                  {filteredTasks.length} task{filteredTasks.length === 1 ? '' : 's'}
+                  {fill(filteredTasks.length === 1 ? t('workflowReviewQueue.reviewQueueModule.taskCountOne') : t('workflowReviewQueue.reviewQueueModule.taskCountOther'), { count: String(filteredTasks.length) })}
                 </span>
                 <div style={{ flex: 1 }} />
                 <select
-                  aria-label="Sort review queue"
+                  aria-label={t('workflowReviewQueue.reviewQueueModule.sortReviewQueue')}
                   className="dt-inline-input"
                   value={sortMode}
                   onChange={(event) => setSortMode(event.target.value as SortMode)}
@@ -2268,12 +2269,12 @@ export function ReviewQueueModule() {
                 >
                   {SORT_MODES.map((mode) => (
                     <option key={mode.id} value={mode.id}>
-                      {mode.label}
+                      {t(`workflowReviewQueue.sortModes.${mode.id}`)}
                     </option>
                   ))}
                 </select>
               </div>
-              <div className="wf-rq-list__items" role="list" aria-label="Review queue tasks">
+              <div className="wf-rq-list__items" role="list" aria-label={t('workflowReviewQueue.reviewQueueModule.reviewQueueTasks')}>
                 {filteredTasks.map((task) => {
                   // W34c bug fix: slaPercent signature is
                   // (task, noSlaDefaultPct, nowMs?). The prior call passed
@@ -2289,7 +2290,7 @@ export function ReviewQueueModule() {
                       key={task.id}
                       role="listitem"
                       aria-current={isActive ? 'true' : undefined}
-                      aria-label={`Task ${task.task_id ?? task.id}: ${taskSubject(task)}`}
+                      aria-label={fill(t('workflowReviewQueue.reviewQueueModule.task2'), { value: String(task.task_id ?? task.id), value2: String(taskSubject(task)) })}
                       tabIndex={0}
                       className={`wf-rq-row ${isActive ? 'is-active' : ''} ${isSelected ? 'is-selected' : ''} ${lookupRow('task_status', task.status)?.metadata?.is_terminal === true ? 'is-completed' : ''}`}
                       onClick={(e) => {
@@ -2321,7 +2322,7 @@ export function ReviewQueueModule() {
                       <input
                         type="checkbox"
                         className="wf-rq-row__check"
-                        aria-label={`Select task ${task.task_id ?? task.id}`}
+                        aria-label={fill(t('workflowReviewQueue.reviewQueueModule.selectTask'), { value: String(task.task_id ?? task.id) })}
                         checked={isSelected}
                         onClick={(e) => e.stopPropagation()}
                         onChange={() => {
@@ -2350,7 +2351,7 @@ export function ReviewQueueModule() {
                             if (!row) {
                               return (
                                 <Chip
-                                  label={`task_type/${taskTypeValue(task) || 'unset'} (missing)`}
+                                  label={fill(t('workflowReviewQueue.reviewQueueModule.taskTypeMissing'), { value: String(taskTypeValue(task) || 'unset') })}
                                   kind="danger"
                                   size="xs"
                                 />
@@ -2365,7 +2366,7 @@ export function ReviewQueueModule() {
                             const r = statusTone(task.status);
                             return r.tone && r.label
                               ? <Chip label={r.label} kind={r.tone} size="xs" />
-                              : <Chip label={`task_status/${task.status} (missing)`} kind="danger" size="xs" />;
+                              : <Chip label={fill(t('workflowReviewQueue.reviewQueueModule.taskStatusMissing'), { status: String(task.status) })} kind="danger" size="xs" />;
                           })()}
                         </div>
                         <div className="wf-rq-row__subject">{taskSubject(task)}</div>
@@ -2374,10 +2375,10 @@ export function ReviewQueueModule() {
                           <span style={{ opacity: 0.4, margin: '0 6px' }}>·</span>
                           <span>
                             {isTaskSnoozed(task.status) && task.snooze_until
-                              ? `wakes in ${formatSlaCountdown(task.snooze_until, durationFormatPolicy, nowTick)}`
+                              ? fill(t('workflowReviewQueue.reviewQueueModule.wakesIn'), { value: String(formatSlaCountdown(task.snooze_until, durationFormatPolicy, nowTick)) })
                               : task.sla_due_at
-                                ? `SLA in ${formatSlaCountdown(task.sla_due_at, durationFormatPolicy, nowTick)}`
-                                : 'no SLA'}
+                                ? fill(t('workflowReviewQueue.reviewQueueModule.slaIn'), { value: String(formatSlaCountdown(task.sla_due_at, durationFormatPolicy, nowTick)) })
+                                : t('workflowReviewQueue.reviewQueueModule.noSla')}
                           </span>
                         </div>
                       </div>
@@ -2389,11 +2390,11 @@ export function ReviewQueueModule() {
           )}
         </aside>
         <section className="wf-rq-detail">
-          {!t ? (
+          {!item ? (
             <StateView
               kind="empty"
-              title="No task selected"
-              hint="Pick a task from the list, or press j/k to navigate."
+              title={t('workflowReviewQueue.reviewQueueModule.noTaskSelected')}
+              hint={t('workflowReviewQueue.reviewQueueModule.pickATaskFrom')}
             />
           ) : (
             <>
@@ -2408,11 +2409,11 @@ export function ReviewQueueModule() {
                       color: 'var(--ink-3)',
                     }}
                   >
-                    <span className="mono">{t.task_id}</span>
+                    <span className="mono">{item.task_id}</span>
                     <span>·</span>
-                    <span>{taskTypeLabel(t)}</span>
+                    <span>{taskTypeLabel(item)}</span>
                   </div>
-                  <h2 className="wf-rq-detail__title">{taskSubject(t)}</h2>
+                  <h2 className="wf-rq-detail__title">{taskSubject(item)}</h2>
                   <div
                     style={{
                       display: 'flex',
@@ -2422,32 +2423,32 @@ export function ReviewQueueModule() {
                     }}
                   >
                     {(() => {
-                      const r = statusTone(t.status);
+                      const r = statusTone(item.status);
                       return r.tone && r.label
                         ? <Chip label={r.label} kind={r.tone} size="xs" />
-                        : <Chip label={`task_status/${t.status} (missing)`} kind="danger" size="xs" />;
+                        : <Chip label={fill(t('workflowReviewQueue.reviewQueueModule.taskStatusMissing'), { status: String(item.status) })} kind="danger" size="xs" />;
                     })()}
-                    {isTaskSnoozed(t.status) && t.snooze_until ? (
+                    {isTaskSnoozed(item.status) && item.snooze_until ? (
                       <Chip
-                        label={`wakes in ${formatSlaCountdown(t.snooze_until, durationFormatPolicy, nowTick)}`}
+                        label={fill(t('workflowReviewQueue.reviewQueueModule.wakesIn'), { value: String(formatSlaCountdown(item.snooze_until, durationFormatPolicy, nowTick)) })}
                         kind="info"
                         size="xs"
                       />
                     ) : null}
-                    <SLARing percent={slaPercent(t, noSlaDefaultPct, nowTick)} warnPct={slaRingWarnPct} dangerPct={slaRingDangerPct} variant="inline" />
+                    <SLARing percent={slaPercent(item, noSlaDefaultPct, nowTick)} warnPct={slaRingWarnPct} dangerPct={slaRingDangerPct} variant="inline" />
                     <span
                       className="mono"
                       style={{ fontSize: '11px', color: 'var(--ink-3)' }}
                     >
-                      {t.sla_due_at
-                        ? `SLA · ${new Date(t.sla_due_at).toLocaleString()}`
-                        : 'no SLA'}
+                      {item.sla_due_at
+                        ? fill(t('workflowReviewQueue.reviewQueueModule.sla'), { value: String(new Date(item.sla_due_at).toLocaleString()) })
+                        : t('workflowReviewQueue.reviewQueueModule.noSla')}
                     </span>
                     <button
                       type="button"
                       data-testid="wf-rq-evidence"
                       className="wf-rq-evidence-btn"
-                      title="Open decision evidence trail"
+                      title={t('workflowReviewQueue.reviewQueueModule.openDecisionEvidenceTrail')}
                       onClick={() => {
                         if (!evidenceFocusId) return;
                         navigate({
@@ -2457,7 +2458,7 @@ export function ReviewQueueModule() {
                       }}
                     >
                       <Chip
-                        label={`evidence · ${evidenceFocusId ?? '—'}`}
+                        label={fill(t('workflowReviewQueue.reviewQueueModule.evidence'), { value: String(evidenceFocusId ?? '—') })}
                         kind="info"
                         size="xs"
                       />
@@ -2467,73 +2468,73 @@ export function ReviewQueueModule() {
                 {!activeTaskTerminal ? (
                   <div className="wf-rq-detail__actions">
                     <Button
-                      label="Claim"
+                      label={t('workflowReviewQueue.reviewQueueModule.claim')}
                       iconName="check"
                       kind="ghost"
                       capability={CAP.TASKS_WRITE}
-                      onClick={() => void claim(t)}
+                      onClick={() => void claim(item)}
                     />
                     <Button
-                      label={completionPrimarySchema?.submit_label ?? primaryTaskAction?.label ?? "No task action"}
+                      label={completionPrimarySchema?.submit_label ?? primaryTaskAction?.label ?? t('workflowReviewQueue.reviewQueueModule.noTaskAction')}
                       iconName="check"
                       kind="primary"
                       disabled={!primaryTaskAction}
-                      title={primaryTaskAction ? undefined : 'No row-allowed task action is available'}
+                      title={primaryTaskAction ? undefined : t('workflowReviewQueue.reviewQueueModule.noRowAllowedTask')}
                       capability={CAP.TASKS_WRITE}
                       onClick={() => {
                         if (completionPrimaryAction) {
-                          void apply(t, completionPrimaryAction);
+                          void apply(item, completionPrimaryAction);
                           return;
                         }
-                        if (primaryTaskAction) void apply(t, primaryTaskAction);
+                        if (primaryTaskAction) void apply(item, primaryTaskAction);
                       }}
                     />
                   </div>
                 ) : (
-                  <Chip label="No actions available" kind="neutral" size="xs" />
+                  <Chip label={t('workflowReviewQueue.reviewQueueModule.noActionsAvailable')} kind="neutral" size="xs" />
                 )}
               </header>
               <div className="wf-rq-detail__kv">
                 <div className="wf-rq-detail__kv-row">
-                  <span className="wf-rq-detail__kv-key mono">Queue</span>
-                  <span className="mono">{taskQueueValue(t) || '—'}</span>
+                  <span className="wf-rq-detail__kv-key mono">{t('workflowReviewQueue.reviewQueueModule.queue')}</span>
+                  <span className="mono">{taskQueueValue(item) || '—'}</span>
                 </div>
                 <div className="wf-rq-detail__kv-row">
-                  <span className="wf-rq-detail__kv-key mono">Assigned to</span>
-                  {t.assigned_to ? (
-                    <span className="mono">{t.assigned_to}</span>
+                  <span className="wf-rq-detail__kv-key mono">{t('workflowReviewQueue.reviewQueueModule.assignedTo2')}</span>
+                  {item.assigned_to ? (
+                    <span className="mono">{item.assigned_to}</span>
                   ) : (
                     <button
                       type="button"
                       className="btn btn--sm btn--ghost"
                       disabled={!canWriteTasks || usersQuery.isPending}
-                      title={canWriteTasks ? 'Assign task' : 'Task update permission required'}
-                      onClick={() => openAssignPicker(t)}
+                      title={canWriteTasks ? t('workflowReviewQueue.reviewQueueModule.assignTask') : t('workflowReviewQueue.reviewQueueModule.taskUpdatePermissionRequired')}
+                      onClick={() => openAssignPicker(item)}
                     >
-                      + Assign
+                      {t('workflowReviewQueue.reviewQueueModule.assign2')}
                     </button>
                   )}
                 </div>
                 <div className="wf-rq-detail__kv-row">
-                  <span className="wf-rq-detail__kv-key mono">Created</span>
+                  <span className="wf-rq-detail__kv-key mono">{t('workflowReviewQueue.reviewQueueModule.created')}</span>
                   <span className="mono" style={{ fontSize: '11px' }}>
-                    {t.created_at ? new Date(t.created_at).toLocaleString() : '—'}
+                    {item.created_at ? new Date(item.created_at).toLocaleString() : '—'}
                   </span>
                 </div>
                 <div className="wf-rq-detail__kv-row">
-                  <span className="wf-rq-detail__kv-key mono">Priority</span>
+                  <span className="wf-rq-detail__kv-key mono">{t('workflowReviewQueue.reviewQueueModule.priority')}</span>
                   {(() => {
                     // W76 (Cycle F-R-16 P1) — canonical default priority resolves
                     // through `task_priority` row `is_default: true` (mirrors W75
                     // templates.tsx:1314 / W68 runs.tsx defaultStepKind pattern).
                     // Replaces literal `|| 'normal'` fallback past `_default`.
                     // AGENTS.md §2 ZERO HARDCODING + §4 SSOT + §6 row-driven.
-                    const priorityValue = taskPriorityValue(t);
+                    const priorityValue = taskPriorityValue(item);
                     const priorityRow = lookupRow('task_priority', priorityValue);
                     if (!priorityRow) {
                       return (
                         <Chip
-                          label={`task_priority/${priorityValue} (missing)`}
+                          label={fill(t('workflowReviewQueue.reviewQueueModule.taskPriorityMissing'), { priorityValue: String(priorityValue) })}
                           kind="danger"
                           size="xs"
                         />
@@ -2551,7 +2552,7 @@ export function ReviewQueueModule() {
               </div>
               {linkedRun ? (
                 <>
-                  <div className="wf-insp__section-eyebrow">Linked workflow run</div>
+                  <div className="wf-insp__section-eyebrow">{t('workflowReviewQueue.reviewQueueModule.linkedWorkflowRun')}</div>
                   <div style={{ padding: '0 14px 10px' }}>
                     <button
                       type="button"
@@ -2569,7 +2570,7 @@ export function ReviewQueueModule() {
                         if (!runRow) {
                           return (
                             <Chip
-                              label="Run status label is not configured"
+                              label={t('workflowReviewQueue.reviewQueueModule.runStatusLabelIs')}
                               kind="danger"
                               size="xs"
                             />
@@ -2596,13 +2597,13 @@ export function ReviewQueueModule() {
                         {stringFromUnknown(linkedRun.template_name) ||
                           stringFromUnknown(linkedRun.workflow_template_id) ||
                           stringFromUnknown(linkedRun.template_id) ||
-                          'Workflow run'}
+                          t('workflowReviewQueue.reviewQueueModule.workflowRun')}
                       </span>
                     </button>
                   </div>
                 </>
               ) : null}
-              <div className="wf-insp__section-eyebrow">Description</div>
+              <div className="wf-insp__section-eyebrow">{t('workflowReviewQueue.reviewQueueModule.description')}</div>
               <div
                 style={{
                   padding: '0 14px 12px',
@@ -2611,15 +2612,15 @@ export function ReviewQueueModule() {
                   lineHeight: 1.5,
                 }}
               >
-                {t.description || synthesizeDescription(t)}
+                {item.description || synthesizeDescription(item)}
               </div>
-              <div className="wf-insp__section-eyebrow">Allowed actions</div>
+              <div className="wf-insp__section-eyebrow">{t('workflowReviewQueue.reviewQueueModule.allowedActions')}</div>
               <div className="wf-rq-actions-grid">
                 {activeTaskActions.length === 0 ? (
                   <p className="state__hint" style={{ margin: 0 }}>
                     {activeTaskTerminal
-                      ? 'No actions available for terminal task.'
-                      : 'No row-allowed task actions are available.'}
+                      ? t('workflowReviewQueue.reviewQueueModule.noActionsAvailableFor')
+                      : t('workflowReviewQueue.reviewQueueModule.noRowAllowedTask2')}
                   </p>
                 ) : activeTaskActions.map((a) => {
                   // W74-Workflows (Cycle F-R-14 P2-1) — row-driven snooze gating.
@@ -2632,7 +2633,7 @@ export function ReviewQueueModule() {
                   // AGENTS.md §2 (ZERO HARDCODING) + §6 (row-driven by configuration).
                   const isSnoozed =
                     lookupRow('task_action_kind', a.kind)?.metadata?.is_snooze_action === true
-                    && isTaskSnoozed(t.status);
+                    && isTaskSnoozed(item.status);
                   return (
                     <button
                       key={a.kind}
@@ -2641,7 +2642,7 @@ export function ReviewQueueModule() {
                       data-action-kind={a.kind}
                       aria-pressed={isSnoozed ? 'true' : undefined}
                       className="wf-rq-action"
-                      onClick={() => void apply(t, a)}
+                      onClick={() => void apply(item, a)}
                     >
                       <Icon name={a.icon} size={12} />
                       <span>{a.label}</span>
@@ -2650,7 +2651,7 @@ export function ReviewQueueModule() {
                   );
                 })}
               </div>
-              <div className="wf-insp__section-eyebrow">Activity</div>
+              <div className="wf-insp__section-eyebrow">{t('workflowReviewQueue.reviewQueueModule.activity')}</div>
               <AuditActivityPanel
                 canReadAuditLog={canReadAuditLog}
                 canReadTaskEvents={canRead}
@@ -2666,39 +2667,39 @@ export function ReviewQueueModule() {
       {selected.size > 0 ? (
         <div className="wf-rq-bulkbar">
           <span className="mono" style={{ fontWeight: 600 }}>
-            {selected.size} selected
+            {fill(t('workflowReviewQueue.reviewQueueModule.selected'), { size: String(selected.size) })}
           </span>
           <div style={{ flex: 1 }} />
           <Button
-            label="Claim"
+            label={t('workflowReviewQueue.reviewQueueModule.claim')}
             iconName="check"
             kind="ghost"
             capability={CAP.TASKS_WRITE}
             onClick={() => void bulkAction('claim')}
           />
           <Button
-            label="Resolve"
+            label={t('workflowReviewQueue.reviewQueueModule.resolve')}
             iconName="check"
             kind="primary"
             capability={CAP.TASKS_WRITE}
             onClick={() => void bulkAction('resolve')}
           />
           <Button
-            label="Snooze…"
+            label={t('workflowReviewQueue.reviewQueueModule.snooze3')}
             iconName="lock"
             kind="ghost"
             capability={CAP.TASKS_WRITE}
             onClick={() => openSnoozePicker()}
           />
           <Button
-            label="Escalate"
+            label={t('workflowReviewQueue.reviewQueueModule.escalate')}
             iconName="warn"
             kind="danger"
             capability={CAP.TASKS_WRITE}
             onClick={() => void bulkAction('escalate')}
           />
           <Button
-            label="Reassign"
+            label={t('workflowReviewQueue.reviewQueueModule.reassign')}
             iconName="shuffle"
             kind="ghost"
             capability={CAP.TASKS_WRITE}
@@ -2710,7 +2711,7 @@ export function ReviewQueueModule() {
             className="btn btn--sm btn--ghost"
             onClick={() => setSelected(new Set())}
           >
-            Clear
+            {t('workflowReviewQueue.reviewQueueModule.clear')}
           </button>
         </div>
       ) : null}
@@ -2718,7 +2719,7 @@ export function ReviewQueueModule() {
         <section
           className="wf-rq-bulkbar"
           data-testid="wf-rq-task-readback"
-          aria-label="Task action saved result"
+          aria-label={t('workflowReviewQueue.reviewQueueModule.taskActionSavedResult')}
           style={{
             bottom: selected.size > 0 ? (bulkTaskReadback ? '126px' : '58px') : (bulkTaskReadback ? '84px' : '16px'),
             alignItems: 'flex-start',
@@ -2727,9 +2728,9 @@ export function ReviewQueueModule() {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
-            <Chip label="Task action result" kind="info" size="xs" />
+            <Chip label={t('workflowReviewQueue.reviewQueueModule.taskActionResult')} kind="info" size="xs" />
             <Chip
-              label={taskActionReadbackComplete ? 'Confirmed from saved data' : 'Waiting for saved data'}
+              label={taskActionReadbackComplete ? t('workflowReviewQueue.reviewQueueModule.confirmedFromSavedData') : t('workflowReviewQueue.reviewQueueModule.waitingForSavedData')}
               kind={taskActionReadbackComplete ? 'good' : 'warn'}
               size="xs"
             />
@@ -2745,30 +2746,30 @@ export function ReviewQueueModule() {
               className="btn btn--sm btn--ghost"
               onClick={() => setTaskActionReadback(null)}
             >
-              Dismiss
+              {t('workflowReviewQueue.reviewQueueModule.dismiss')}
             </button>
           </div>
           <div className="mono" style={{ color: 'var(--ink-2)', fontSize: '11px' }}>
-            Task confirmed
+            {t('workflowReviewQueue.reviewQueueModule.taskConfirmed')}
           </div>
           {taskActionReadback.taskEventId ? (
             <div className="mono" style={{ color: 'var(--ink-2)', fontSize: '11px' }}>
-              Activity recorded
+              {t('workflowReviewQueue.reviewQueueModule.activityRecorded')}
             </div>
           ) : null}
           {taskActionReadback.expectedAssignedTo ? (
             <div className="mono" style={{ color: 'var(--ink-2)', fontSize: '11px' }}>
-              Assignment confirmed {taskActionReadback.expectedAssignedTo}
+              {fill(t('workflowReviewQueue.reviewQueueModule.assignmentConfirmed'), { expectedAssignedTo: String(taskActionReadback.expectedAssignedTo) })}
             </div>
           ) : null}
           {taskActionReadback.expectedStatus ? (
             <div className="mono" style={{ color: 'var(--ink-2)', fontSize: '11px' }}>
-              Status confirmed {taskActionReadback.expectedStatus}
+              {fill(t('workflowReviewQueue.reviewQueueModule.statusConfirmed'), { expectedStatus: String(taskActionReadback.expectedStatus) })}
             </div>
           ) : null}
           {taskActionReadback.expectedSnoozeUntil ? (
             <div className="mono" style={{ color: 'var(--ink-2)', fontSize: '11px' }}>
-              Wake time confirmed {taskActionReadback.confirmedSnoozeUntil ?? 'pending'}
+              {fill(t('workflowReviewQueue.reviewQueueModule.wakeTimeConfirmed'), { value: String(taskActionReadback.confirmedSnoozeUntil ?? t('workflowReviewQueue.reviewQueueModule.pending')) })}
             </div>
           ) : null}
         </section>
@@ -2777,7 +2778,7 @@ export function ReviewQueueModule() {
         <section
           className="wf-rq-bulkbar"
           data-testid="wf-rq-bulk-readback"
-          aria-label="Bulk task action saved result"
+          aria-label={t('workflowReviewQueue.reviewQueueModule.bulkTaskActionSaved')}
           style={{
             bottom: selected.size > 0 ? '58px' : '16px',
             alignItems: 'flex-start',
@@ -2786,9 +2787,9 @@ export function ReviewQueueModule() {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
-            <Chip label="Bulk action result" kind="info" size="xs" />
+            <Chip label={t('workflowReviewQueue.reviewQueueModule.bulkActionResult')} kind="info" size="xs" />
             <Chip
-              label={bulkTaskReadbackComplete ? 'Confirmed from saved data' : 'Waiting for saved data'}
+              label={bulkTaskReadbackComplete ? t('workflowReviewQueue.reviewQueueModule.confirmedFromSavedData') : t('workflowReviewQueue.reviewQueueModule.waitingForSavedData')}
               kind={bulkTaskReadbackComplete ? 'good' : 'warn'}
               size="xs"
             />
@@ -2796,8 +2797,7 @@ export function ReviewQueueModule() {
               {bulkTaskActionLabel(bulkTaskReadback.kind)}
             </span>
             <span className="mono" style={{ color: 'var(--ink-3)' }}>
-              confirmed {bulkTaskReadback.confirmedTaskIds.length}/{bulkTaskReadback.total}
-              {' '}| activity {bulkTaskReadback.taskEventIds.length}/{bulkTaskReadback.total}
+              {fill(t('workflowReviewQueue.reviewQueueModule.confirmedActivity'), { length: String(bulkTaskReadback.confirmedTaskIds.length), total: String(bulkTaskReadback.total), length2: String(bulkTaskReadback.taskEventIds.length), total2: String(bulkTaskReadback.total) })}
             </span>
             <div style={{ flex: 1 }} />
             <button
@@ -2805,30 +2805,30 @@ export function ReviewQueueModule() {
               className="btn btn--sm btn--ghost"
               onClick={() => setBulkTaskReadback(null)}
             >
-              Dismiss
+              {t('workflowReviewQueue.reviewQueueModule.dismiss')}
             </button>
           </div>
           <div className="mono" style={{ color: 'var(--ink-2)', fontSize: '11px' }}>
-            Tasks confirmed
+            {t('workflowReviewQueue.reviewQueueModule.tasksConfirmed')}
           </div>
           {bulkTaskReadback.taskEventIds.length > 0 ? (
             <div className="mono" style={{ color: 'var(--ink-2)', fontSize: '11px' }}>
-              Activity recorded
+              {t('workflowReviewQueue.reviewQueueModule.activityRecorded')}
             </div>
           ) : null}
           {bulkTaskReadback.expectedAssignedTo ? (
             <div className="mono" style={{ color: 'var(--ink-2)', fontSize: '11px' }}>
-              Assignment confirmed {bulkTaskReadback.expectedAssignedTo}
+              {fill(t('workflowReviewQueue.reviewQueueModule.assignmentConfirmed'), { expectedAssignedTo: String(bulkTaskReadback.expectedAssignedTo) })}
             </div>
           ) : null}
           {bulkTaskReadback.expectedStatus ? (
             <div className="mono" style={{ color: 'var(--ink-2)', fontSize: '11px' }}>
-              Status confirmed {bulkTaskReadback.expectedStatus}
+              {fill(t('workflowReviewQueue.reviewQueueModule.statusConfirmed'), { expectedStatus: String(bulkTaskReadback.expectedStatus) })}
             </div>
           ) : null}
           {bulkTaskReadback.expectedSnoozeUntil ? (
             <div className="mono" style={{ color: 'var(--ink-2)', fontSize: '11px' }}>
-              Wake time confirmed {bulkTaskReadback.confirmedSnoozeUntil ?? 'pending'}
+              {fill(t('workflowReviewQueue.reviewQueueModule.wakeTimeConfirmed'), { value: String(bulkTaskReadback.confirmedSnoozeUntil ?? t('workflowReviewQueue.reviewQueueModule.pending')) })}
             </div>
           ) : null}
         </section>
