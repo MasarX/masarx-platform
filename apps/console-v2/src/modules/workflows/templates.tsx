@@ -47,6 +47,7 @@ import {
   useStartWorkflowRun,
 } from '@/lib/queries';
 import { useCapability, useIdentity } from '@/lib/identity';
+import { useT } from '@/lib/i18n';
 import * as api from '@/lib/api';
 import { lookupRow } from '@/lib/api';
 import {
@@ -2214,6 +2215,7 @@ function HistoryTab({
 type PaletteTab = 'templates' | 'operations' | 'snippets';
 
 export function TemplatesModule() {
+  const t = useT();
   const navigate = useNavigate();
   const drawer = useDrawer();
   const modal = useModal();
@@ -3111,6 +3113,8 @@ export function TemplatesModule() {
           name: activeStep.label,
         },
         'workflow template step',
+        undefined,
+        t,
       ),
     );
   }

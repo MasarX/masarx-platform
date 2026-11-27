@@ -1,4 +1,4 @@
-import { translateAdapterMessage } from '../i18n';
+import { loadConsoleCatalog, translateAdapterMessage } from '../i18n-catalog';
 import {
   backendOutcomeError,
   type BasketCreateMutationResult,
@@ -1594,7 +1594,10 @@ async function attachConsoleDispatchScanDevice(
       return 'console-v2';
     }
   })();
-  const identifier = await sha256Hex(`${origin}:${readOrCreateDispatchScanDeviceSeed()}`);
+  const [identifier] = await Promise.all([
+    sha256Hex(`${origin}:${readOrCreateDispatchScanDeviceSeed()}`),
+    loadConsoleCatalog('en'),
+  ]);
   const live = await liveRpc<Record<string, unknown> | Record<string, unknown>[]>('register_user_device_v1', {
     p_device: {
       device_platform: 'web',

@@ -1,4 +1,4 @@
-import { translateAdapterMessage } from '../i18n';
+import { translateAdapterMessage } from '../i18n-catalog';
 import { CAP } from '../capabilities';
 import {
   backendOutcomeError,
