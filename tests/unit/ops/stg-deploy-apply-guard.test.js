@@ -44,6 +44,18 @@ afterEach(() => {
 });
 
 function githubFetch(devConclusion, stgConclusion) {
+  const tagSha = 'b'.repeat(40);
+  const ciRun = {
+    head_sha: sha, event: 'merge_group', head_branch: 'gh-readonly-queue/main/pr-1-fixture', check_suite_id: 11,
+  };
+  const ciGate = {
+    id: 12, name: 'ci-gate', head_sha: sha, app: { slug: 'github-actions' }, check_suite: { id: ciRun.check_suite_id },
+    status: 'completed', conclusion: 'success',
+  };
+  const devDeploy = {
+    id: 4, run_number: 4, run_attempt: 1, head_branch: 'main', head_sha: sha, event: 'push',
+    status: 'completed', conclusion: 'success',
+  };
   const history = [
     { id: 1, workflow: 'deploy.yml', branch: 'main', age: 3, name: 'database', conclusion: devConclusion },
     { id: 2, workflow: 'deploy-stg.yml', branch: 'v1.0.0-rc.1', age: 2, name: 'deploy / database', conclusion: stgConclusion },
@@ -51,6 +63,20 @@ function githubFetch(devConclusion, stgConclusion) {
   return jest.fn(async input => {
     const { pathname, searchParams } = new URL(input);
     if (pathname.endsWith('/git/ref/heads/main')) return Response.json({ object: { sha } });
+    if (pathname.endsWith('/git/ref/tags/v1.0.0-rc.2')) {
+      return Response.json({ object: { type: 'tag', sha: tagSha } });
+    }
+    if (pathname.endsWith('/git/tags/' + tagSha)) return Response.json({ object: { type: 'commit', sha } });
+    if (pathname.endsWith('/compare/' + sha + '...' + sha)) return Response.json({ status: 'identical' });
+    if (pathname.endsWith('/commits/' + sha + '/check-runs')) return Response.json({ check_runs: [ciGate] });
+    if (pathname.endsWith('/actions/workflows/public-ci.yml/runs')) return Response.json({ workflow_runs: [ciRun] });
+    if (pathname.endsWith('/actions/workflows/deploy.yml/runs') && searchParams.has('head_sha')) {
+      return Response.json({ workflow_runs: [devDeploy] });
+    }
+    if (pathname.endsWith('/actions/runs/4/attempts/1/jobs')) return Response.json({ jobs: [{
+      name: 'database', status: 'completed', conclusion: 'success',
+      steps: [{ name: 'Record database push attempt', conclusion: 'success' }],
+    }] });
     const workflow = /\/actions\/workflows\/([^/]+)\/runs$/.exec(pathname)?.[1];
     if (workflow) {
       const branch = searchParams.get('branch');
