@@ -195,30 +195,6 @@
     "maxSkipped": 2
   },
   {
-    "file": "tests/integration/label/label-print-sync-worker-grace.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Fixture uses retired address validation status values",
-    "issue": "#571",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/geocoding.edge-intake.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Fixture uses retired address validation status values",
-    "issue": "#571",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/workflows/api-gateway-provider-update.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Fixture uses retired address validation status values",
-    "issue": "#571",
-    "expires": "2026-12-08"
-  },
-  {
     "file": "tests/integration/label/label-renderer-bundle.test.js",
     "kind": "known-failure",
     "runner": "Hosted integration",
