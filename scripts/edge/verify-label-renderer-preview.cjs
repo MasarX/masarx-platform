@@ -67,13 +67,71 @@ function reportWorkerError(container, responseMessage) {
   console.error(`LABEL_RENDERER_EDGE_ERROR class=${errorClass} message=${message} frames=${frames.join(',') || 'unavailable'}`);
 }
 
+function reportRendererMapping(container, renderer) {
+  const logs = docker(['logs', container]);
+  const detail = [logs.stdout, logs.stderr].filter(Boolean).join('\n');
+  const frame = detail.match(/\brenderer\/index\.ts:(\d{1,6}):(\d{1,8})\b/);
+  if (!frame) return;
+  const output = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP, 'renderer-eszip-'));
+  const image = resolveEdgeRuntimeCacheImage(root, { SUPABASE_CLI_VERSION: '2.116.0' }, fs);
+  const run = (...args) => docker([
+    'run', '--rm', '--network', 'none', '--platform', 'linux/amd64',
+    '--mount', 'type=bind,source=' + renderer + ',target=/renderer,readonly',
+    '--mount', 'type=bind,source=' + output + ',target=/diagnostic',
+    image, ...args,
+  ]);
+  const bundled = run('bundle', '--entrypoint', '/renderer/index.ts', '--output', '/diagnostic/renderer.eszip');
+  const unbundled = bundled.status === 0
+    ? run('unbundle', '--eszip', '/diagnostic/renderer.eszip', '--output', '/diagnostic/extracted')
+    : null;
+  if (unbundled?.status !== 0) {
+    console.error('LABEL_RENDERER_EDGE_MAP extract=bundle-%s-unbundle-%s', bundled.status, unbundled?.status);
+    return;
+  }
+
+  const ts = require('typescript');
+  const { SourceMap } = require('node:module');
+  const files = fs.readdirSync(path.join(output, 'extracted'), { recursive: true });
+  console.error('LABEL_RENDERER_EDGE_MAP extract=index-%s-maps-%s',
+    files.filter(file => path.basename(file) === 'index.ts').length,
+    files.filter(file => file.endsWith('.map')).length);
+  for (const file of files.filter(file => path.basename(file) === 'index.ts')) {
+    const emitted = path.join(output, 'extracted', file);
+    const text = fs.readFileSync(emitted, 'utf8');
+    const parsed = ts.createSourceFile(emitted, text, ts.ScriptTarget.Latest, true);
+    const lines = parsed.getLineStarts();
+    const index = Number(frame[1]) - 1;
+    if (index >= lines.length) {
+      console.error('LABEL_RENDERER_EDGE_MAP extract=lines-%s', lines.length);
+      continue;
+    }
+    const token = ts.getTokenAtPosition(parsed, lines[index] + Number(frame[2]) - 1);
+    const safeToken = value => /^[$A-Za-z_][$\w]{0,79}$/.test(value) ? value : 'unavailable';
+    const callee = token.parent?.parent?.expression;
+    const localHead = [token.parent?.name, token.parent?.parent?.name, callee]
+      .filter(node => node && ts.isIdentifier(node)).map(node => safeToken(node.text));
+    console.error('LABEL_RENDERER_EDGE_MAP extract=token-%s-parent-%s-context-%s',
+      ts.isIdentifier(token) ? safeToken(token.text) : 'unavailable', ts.SyntaxKind[token.parent.kind], localHead.join(','));
+    const detachedMap = emitted + '.map';
+    const inlineMap = text.match(/^\/\/# sourceMappingURL=data:application\/json[^,]*,([A-Za-z0-9+/=]+)$/m)?.[1];
+    const mapText = inlineMap ? Buffer.from(inlineMap, 'base64').toString('utf8')
+      : fs.existsSync(detachedMap) ? fs.readFileSync(detachedMap, 'utf8') : null;
+    if (mapText) {
+      const mapped = new SourceMap(JSON.parse(mapText)).findEntry(index, Number(frame[2]) - 1);
+      console.error('LABEL_RENDERER_EDGE_MAP frozen_line=%s frozen_column=%s',
+        mapped.originalLine + 1, mapped.originalColumn + 1);
+    }
+  }
+}
+
 async function main() {
   let container;
+  let renderer;
   let responseMessage;
   let stage = 'bundle_input';
   try {
     if (!process.env.EDGE_FROZEN_WORKDIR) throw new Error(stage);
-    const renderer = path.resolve(process.env.EDGE_FROZEN_WORKDIR, 'supabase/functions/label-renderer');
+    renderer = path.resolve(process.env.EDGE_FROZEN_WORKDIR, 'supabase/functions/label-renderer');
     if (!fs.statSync(path.join(renderer, 'index.ts'), { throwIfNoEntry: false })?.isFile()) throw new Error(stage);
 
     stage = 'runtime_image';
@@ -123,6 +181,7 @@ async function main() {
   } catch {
     console.error(`LABEL_RENDERER_EDGE_FAIL stage=${stage}`);
     reportWorkerError(container, responseMessage);
+    reportRendererMapping(container, renderer);
     process.exitCode = 1;
   } finally {
     if (container && docker(['rm', '--force', container]).status !== 0) {
