@@ -22,7 +22,7 @@ beforeAll(async () => {
 
 // Execute the real entrypoint and private construction boundaries with substituted
 // external modules. This is isolate-loading proof, not native JWT/PDF/DB proof.
-function loadRenderer({ pdfLoad, bidiFailure, env = {}, client, fetch, File } = {}) {
+function loadRenderer({ pdfLoad, pdfModule, bidiFailure, env = {}, client, fetch, File } = {}) {
   const imports = [];
   const reachedPdf = new Error('fixture reached PDF construction');
   const createPdf = jest.fn(() => { throw reachedPdf; });
@@ -47,7 +47,7 @@ function loadRenderer({ pdfLoad, bidiFailure, env = {}, client, fetch, File } = 
   }).outputText;
   const execute = vm.runInContext('(function(require,module,exports){\n' + compiled + expose + '\n})',
     sandbox, { filename, timeout: 2000 });
-  const pdf = {
+  const pdf = pdfModule ?? {
     PDFDocument: { create: createPdf }, rgb: jest.fn(), degrees: jest.fn(),
     StandardFonts: { Helvetica: 'Helvetica', HelveticaBold: 'HelveticaBold' },
   };
@@ -167,6 +167,7 @@ describe('label renderer internal errors', () => {
     const fileFailure = new Error('fixture artifact detail');
     const File = jest.fn(() => { throw fileFailure; });
     const renderer = loadRenderer({
+      pdfModule: require('pdf-lib'),
       env: { ...previewEnv, LABEL_RENDERER_DB_JWT: 'fixture-db-jwt' },
       client: {
         rpc: jest.fn(name => ({
@@ -178,7 +179,6 @@ describe('label renderer internal errors', () => {
       fetch: jest.fn().mockResolvedValue(Response.json({})),
       File,
     });
-    renderer.createPdf.mockImplementation(require('pdf-lib').PDFDocument.create);
     const response = await renderer.api.handleBundleRequest(
       { organization_id: 'fixture-org', expires_seconds: 60 },
       { kind: 'provider', providerName: 'fixture' },
