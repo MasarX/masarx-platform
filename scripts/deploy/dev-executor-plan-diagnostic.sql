@@ -97,13 +97,12 @@ SELECT 'closure_added=' || (SELECT count(*) FROM closure_added)
   || ' closure_removed=' || (SELECT count(*) FROM closure_removed)
   || ' closure_invalid=' || (SELECT count(*) FROM closure_invalid)
 UNION ALL
-SELECT concat_ws(' ', d.phase, d.object_kind,
-  COALESCE(n.nspname || '.' || COALESCE(f.proname, c.relname), s.nspname, '[unresolved]'), d.privilege)
+SELECT concat_ws(' ', d.phase, d.object_kind, d.privilege,
+  substring(COALESCE(f.proname, c.relname, s.nspname)::text FROM '^[a-zA-Z_][a-zA-Z_0-9]*$'))
 FROM delta d
 LEFT JOIN pg_proc f ON d.object_kind = 'function' AND f.oid = d.object_id
 LEFT JOIN pg_class c ON d.object_kind = 'relation' AND c.oid = d.object_id
-LEFT JOIN pg_namespace s ON d.object_kind = 'schema' AND s.oid = d.object_id
-LEFT JOIN pg_namespace n ON n.oid = COALESCE(f.pronamespace, c.relnamespace);
+LEFT JOIN pg_namespace s ON d.object_kind = 'schema' AND s.oid = d.object_id;
 ROLLBACK;
 \echo diagnostic_status=complete
 \else

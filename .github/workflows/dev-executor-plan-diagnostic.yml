@@ -59,14 +59,19 @@ jobs:
             unreadable inputs-or-readout
           fi
           counts_pattern='^closure_added=[0-9]+ closure_removed=[0-9]+ closure_invalid=[0-9]+$'
-          row_pattern='^(before_extra|before_missing|projected_extra|projected_missing|already_in_receipt|invalid_addition) (function|relation|schema) ([a-z_][a-z_0-9]*(\.[a-z_][a-z_0-9]*)?) (EXECUTE|SELECT|USAGE|INSERT|UPDATE|DELETE)$'
+          row_pattern='^(before_extra|before_missing|projected_extra|projected_missing|already_in_receipt|invalid_addition) (function|relation|schema) (EXECUTE|SELECT|USAGE|INSERT|UPDATE|DELETE)( ([a-zA-Z_][a-zA-Z_0-9]*))?$'
           {
             printf '%s\n' "$state"
             while IFS= read -r row; do
               [[ "$row" != 'diagnostic_status=complete' ]] || continue
-              if [[ "$row" =~ $counts_pattern ]] ||
-                 { [[ "$row" =~ $row_pattern ]] && git grep -iqwF -e "${BASH_REMATCH[3]}" -- supabase/migrations; }; then
+              if [[ "$row" =~ $counts_pattern ]]; then
                 printf '%s\n' "$row"
+              elif [[ "$row" =~ $row_pattern ]]; then
+                name="${BASH_REMATCH[5]}"
+                if [[ -z "$name" ]] || ! git grep -qwF -e "$name" -- supabase/migrations; then
+                  name=redacted
+                fi
+                printf '%s %s %s name=%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "$name"
               else
                 printf '%s\n' 'delta_object=redacted'
               fi
