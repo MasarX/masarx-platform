@@ -1,10 +1,9 @@
 const { appendFileSync, readFileSync } = require('node:fs');
 const { RETRYABLE_NETWORK_ERROR_CODES } = require('../ops/ci/github-api-retry');
 
-const workflow = '/actions/workflows/deploy.yml/runs';
 const attemptMarker = 'Record database push attempt';
 const legacyDeploy = 'Apply migrations and deploy registered edge functions';
-const historyWindow = 30 * 24 * 60 * 60 * 1000;
+const defaultHistoryDays = '30';
 const deploymentBranches = ['main', 'dev'];
 class HistoryLimitError extends Error {}
 
@@ -20,6 +19,14 @@ async function* pages(get, path, field) {
 }
 
 async function evaluate(get, env, record) {
+  const workflowRef = env.GITHUB_WORKFLOW_REF;
+  const workflowFile = workflowRef
+    ? /^[^/]+\/[^/]+\/\.github\/workflows\/([^/@]+\.ya?ml)@refs\/.+$/.exec(workflowRef)?.[1]
+    : 'deploy.yml';
+  if (!workflowFile) throw new Error('Invalid GITHUB_WORKFLOW_REF');
+  const workflow = '/actions/workflows/' + encodeURIComponent(workflowFile) + '/runs';
+  const isTag = env.GITHUB_REF?.startsWith('refs/tags/');
+
   const shaPattern = /^[0-9a-f]{40}$/;
   const tip = (await get('/git/ref/heads/main'))?.object?.sha;
   if (typeof tip !== 'string' || !shaPattern.test(tip)) throw new Error('Invalid main tip');
@@ -54,16 +61,26 @@ async function evaluate(get, env, record) {
   }
 
   const now = Date.now();
-  const isoSecond = time => new Date(time).toISOString().replace(/\.\d{3}Z$/, 'Z');
-  const created = encodeURIComponent(`${isoSecond(now - historyWindow)}..${isoSecond(now)}`);
+  const maxHistoryDays = 400;
+  const historyDays = (isTag && env.DB_APPLY_HISTORY_DAYS) || defaultHistoryDays;
+  const historyStart = new Date(now - Number(historyDays) * 24 * 60 * 60 * 1000);
+  // GitHub returns no runs for a created= range starting before 1970, which would read as "no previous apply".
+  if (!/^[1-9]\d*$/.test(historyDays) || Number(historyDays) > maxHistoryDays) {
+    throw new Error(`DB_APPLY_HISTORY_DAYS must be a positive whole number of days, at most ${maxHistoryDays}`);
+  }
+  const isoSecond = date => date.toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const created = encodeURIComponent(`${isoSecond(historyStart)}..${isoSecond(new Date(now))}`);
   let latest;
-  for (const branch of deploymentBranches) {
-    for await (const run of pages(get, `${workflow}?branch=${branch}&created=${created}`, 'workflow_runs')) {
+  for (const branch of isTag ? [''] : deploymentBranches) {
+    const branchFilter = branch ? 'branch=' + branch + '&' : '';
+    for await (const run of pages(get, `${workflow}?${branchFilter}created=${created}`, 'workflow_runs')) {
       for (let attempt = run.run_attempt; attempt >= 1; attempt--) {
         if (String(run.id) === env.GITHUB_RUN_ID && attempt >= Number(env.GITHUB_RUN_ATTEMPT)) continue;
         const path = `/actions/runs/${run.id}/attempts/${attempt}/jobs?`;
         for await (const job of pages(get, path, 'jobs')) {
-          if (job.name !== 'database' || job.status !== 'completed') continue;
+          const isDatabase = job.name === 'database'
+            || (isTag && typeof job.name === 'string' && job.name.endsWith(' / database'));
+          if (!isDatabase || job.status !== 'completed') continue;
           // Missing step data cannot rule out an apply attempt.
           const steps = Array.isArray(job.steps) ? job.steps : undefined;
           const marker = steps?.find(step => step.name === attemptMarker);
@@ -88,7 +105,7 @@ async function evaluate(get, env, record) {
   } else if (latest.conclusion === 'success') {
     record(`G2: previous apply at run ${latest.id} concluded success`);
   } else {
-    const rearmed = env.DEV_DB_REARMED_AT;
+    const rearmed = isTag ? env.DB_REARMED_AT : env.DEV_DB_REARMED_AT;
     const rearmedAt = Date.parse(rearmed);
     if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(rearmed ?? '') ||
         !(rearmedAt > latest.completedAt && rearmedAt <= now)) {
@@ -98,6 +115,10 @@ async function evaluate(get, env, record) {
     record(`G2: re-armed after run ${latest.id}`);
   }
   return 'allow';
+}
+
+function databaseHeader(env, section) {
+  return '## ' + (env.DEPLOY_ENV || 'dev').toUpperCase() + ' database ' + section;
 }
 
 function summarize(log, status, elapsed, env) {
@@ -132,7 +153,7 @@ function summarize(log, status, elapsed, env) {
     return privateValues.some(value => value && name.includes(value)) ? 'Redacted' : `\`${name}\``;
   };
   return [
-    '## DEV database apply', '',
+    databaseHeader(env, 'apply'), '',
     `- SHA: ${env.GITHUB_SHA}`,
     `- Migration push duration: ${elapsed}s`,
     `- Migrations applied: ${names.length}${status === '0' ? '' : ' (confirmed from CLI progress; push failed)'}`,
@@ -188,7 +209,7 @@ async function guard(env, fetchRequest = fetch) {
     appendFileSync(env.GITHUB_STEP_SUMMARY, `- ${decision}\n`);
     console.log(decision);
   };
-  appendFileSync(env.GITHUB_STEP_SUMMARY, '## DEV database guard\n\n');
+  appendFileSync(env.GITHUB_STEP_SUMMARY, databaseHeader(env, 'guard') + '\n\n');
   try {
     const result = await evaluate(get, env, record);
     if (result === 'refused') return 1;
