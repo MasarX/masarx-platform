@@ -22,6 +22,8 @@ interface I18nCtx {
   fmtTime: (iso: string | number | Date) => string;
   fmtCurrency: (amount: number, currency?: string) => string;
   fmtNumber: (n: number, opts?: Intl.NumberFormatOptions) => string;
+  /** Time from now in the app locale, such as "5m ago" or "in 2h", in the largest whole unit up to days. */
+  fmtRelative: (iso: string | number | Date | null | undefined, now?: number) => string;
 }
 
 // Display zone, decided here only: the tenant's `tenant_default_timezone.iana`
@@ -123,6 +125,20 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     [intlLocale]
   );
 
+  const fmtRelative = useCallback(
+    (iso: string | number | Date | null | undefined, now = Date.now()) => {
+      if (iso == null || iso === '') return '—';
+      const ms = new Date(iso).getTime();
+      if (Number.isNaN(ms)) return '—';
+      const s = Math.trunc((ms - now) / 1000);
+      const abs = Math.abs(s);
+      const [value, unit]: [number, Intl.RelativeTimeFormatUnit] =
+        abs < 60 ? [s, 'second'] : abs < 3600 ? [Math.trunc(s / 60), 'minute'] : abs < 86400 ? [Math.trunc(s / 3600), 'hour'] : [Math.trunc(s / 86400), 'day'];
+      return new Intl.RelativeTimeFormat(intlLocale, { style: 'narrow' }).format(value, unit);
+    },
+    [intlLocale]
+  );
+
   // Keeps the current language on screen until the next catalog has loaded.
   const setLocale = useCallback((next: Locale) => {
     requested.current = next;
@@ -151,8 +167,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       fmtTime,
       fmtCurrency,
       fmtNumber,
+      fmtRelative,
     }),
-    [locale, dir, setLocale, t, timeZone, fmtDateTime, fmtTime, fmtCurrency, fmtNumber]
+    [locale, dir, setLocale, t, timeZone, fmtDateTime, fmtTime, fmtCurrency, fmtNumber, fmtRelative]
   );
 
   // After every hook, so the hook order is the same on every render.
