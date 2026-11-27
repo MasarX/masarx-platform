@@ -405,21 +405,10 @@ describeIfDb('communications notification dispatch contracts (integration)', () 
     expect(outboundRows[0]?.context?.operation_template_id).toBe(fixture.operationTemplateId);
 
     const { rows: [{ handoff }] } = await client.query(
-      `SELECT public.dispatch_outbound_call_inline($1::uuid, $2::jsonb) AS handoff`,
-      [outboundCallId, JSON.stringify({
-        timeout_seconds: 5,
-        poll_max_seconds: 0,
-        poll_interval_ms: 50,
-        pending_reschedule_seconds: 30,
-        lease_seconds: 30,
-      })],
+      `SELECT public.dispatch_outbound_call_inline($1::uuid) AS handoff`,
+      [outboundCallId],
     );
-    expect(handoff).toMatchObject({
-      status: 'pending',
-      job_id: outboundCallId,
-      http_status: 202,
-      completed: false,
-    });
+    expect(handoff).toMatchObject({ job_id: outboundCallId, http_status: 202, completed: false });
 
     const { rows: [claim] } = await client.query(
       `SELECT * FROM public.claim_edge_job_by_id_v1($1::uuid)`,

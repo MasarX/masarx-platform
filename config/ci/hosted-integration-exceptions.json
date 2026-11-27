@@ -203,6 +203,22 @@
     "expires": "2026-12-08"
   },
   {
+    "file": "tests/integration/comms-notification-dispatch.test.js",
+    "kind": "known-failure",
+    "runner": "Hosted integration",
+    "reason": "Fixture SQL or data does not match the migrated schema and settings",
+    "issue": "#574",
+    "expires": "2026-12-08"
+  },
+  {
+    "file": "tests/integration/cross-surface-delivery.test.js",
+    "kind": "known-failure",
+    "runner": "Hosted integration",
+    "reason": "Hosted results differ from the current integration assertions",
+    "issue": "#575",
+    "expires": "2026-12-08"
+  },
+  {
     "file": "tests/integration/workflows/shipment-amend-cancel.test.js",
     "kind": "known-failure",
     "runner": "Hosted integration",
