@@ -30,7 +30,7 @@ const IDENTITY = {
     name: 'Test Operator',
     initials: 'TO',
     email: 'operator@example.test',
-    access_scope_type: 'tenant',
+    access_scope_type: 'tenant' as const,
     access_scope_id: null,
     organization_id: 'org_test',
   },
