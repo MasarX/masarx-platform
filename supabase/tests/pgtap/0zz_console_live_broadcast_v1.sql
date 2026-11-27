@@ -157,7 +157,7 @@ BEGIN
   RETURN NEXT is((SELECT count(*)::int FROM realtime.messages WHERE topic = v_routes), 0,
     'with a wide policy, an anonymous actor still receives no Console invalidations');
   RETURN NEXT throws_ok(v_publish_routes, '42501',
-    'new row violates row-level security policy for table "messages"',
+    'new row violates row-level security policy "console_live_client_write_boundary" for table "messages"',
     'with a wide policy, an anonymous actor still cannot publish Console invalidations');
   RESET ROLE;
 
@@ -186,7 +186,7 @@ BEGIN
   SET LOCAL ROLE authenticated;
   PERFORM set_config('realtime.topic', v_routes, true);
   RETURN NEXT throws_ok(v_publish_routes, '42501',
-    'new row violates row-level security policy for table "messages"',
+    'new row violates row-level security policy "console_live_client_write_boundary" for table "messages"',
     'with a wide policy, a tenant operator still cannot publish Console invalidations');
   RESET ROLE;
 END;
