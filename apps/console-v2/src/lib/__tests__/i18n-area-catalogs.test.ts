@@ -1,6 +1,8 @@
 // Area catalogs: every English key has an Arabic value with the same placeholders.
 import { act, renderHook, type RenderHookResult } from '@testing-library/react';
+import { useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import { I18nProvider, useI18n } from '../i18n';
 import { englishT, getConsoleCatalog } from '../i18n-catalog';
 
 type Tree = { [key: string]: string | Tree };
@@ -100,7 +102,7 @@ describe('i18n area catalogs', () => {
 
       loadCatalog.mockClear();
       view.rerender();
-      expect(loadCatalog).toHaveBeenCalledWith('en');
+      expect(loadCatalog).not.toHaveBeenCalled();
 
       await act(() => view.result.current.toggleLocale());
       expect(loadCatalog).toHaveBeenCalledWith('ar');
@@ -124,6 +126,44 @@ describe('i18n area catalogs', () => {
       vi.doUnmock('../seed-raw/i18n/ar.js');
       consoleError.mockRestore();
       loadCatalog.mockRestore();
+      localStorage.removeItem('console-v2.locale');
+    }
+  });
+
+  it('flushes effect updates and keeps child state when a loaded provider renders and rerenders', async () => {
+    let mounts = 0;
+    function useProbe(label: string) {
+      const i18n = useI18n();
+      const [mountId] = useState(() => ++mounts);
+      const [seen, setSeen] = useState('');
+      useEffect(() => {
+        setSeen(label);
+      }, [label]);
+      return { i18n, mountId, seen };
+    }
+    const consoleError = vi.spyOn(console, 'error');
+    localStorage.setItem('console-v2.locale', 'en');
+    try {
+      const view = renderHook(({ label }: { label: string }) => useProbe(label), {
+        wrapper: I18nProvider,
+        initialProps: { label: 'first' },
+      });
+      // A synchronous render flushes the child's effect update, as it does without the provider.
+      expect(view.result.current.seen).toBe('first');
+
+      view.rerender({ label: 'second' });
+      expect(view.result.current.seen).toBe('second');
+
+      await act(() => view.result.current.i18n.toggleLocale());
+      expect(view.result.current.i18n.locale).toBe('ar');
+      expect(view.result.current.seen).toBe('second');
+      expect(view.result.current.mountId).toBe(1);
+      expect(mounts).toBe(1);
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(consoleError.mock.calls.flat().join('\n')).not.toMatch(/suspended inside an `act` scope/);
+    } finally {
+      consoleError.mockRestore();
       localStorage.removeItem('console-v2.locale');
     }
   });
