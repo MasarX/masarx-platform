@@ -129,7 +129,7 @@ export function Palette<T extends PaletteItem = PaletteItem>({
           <Dialog.Overlay className="palette-root__backdrop" />
           <Dialog.Content
             className={paletteClasses}
-            aria-label="Command palette"
+            aria-label={t('shell.palette.label')}
             onOpenAutoFocus={(e) => {
               // cmdk's input picks up focus naturally via autoFocus; let it
               // drive initial focus rather than Radix's first-focusable rule.
@@ -138,13 +138,13 @@ export function Palette<T extends PaletteItem = PaletteItem>({
           >
             {/* Hidden accessible title + description satisfy Radix Dialog AT
                 semantics without changing the visual layout. */}
-            <Dialog.Title style={srOnly}>Command palette</Dialog.Title>
+            <Dialog.Title style={srOnly}>{t('shell.palette.label')}</Dialog.Title>
             <Dialog.Description style={{ display: 'none' }}>
-              Search, filter, and choose an action.
+              {t('shell.palette.description')}
             </Dialog.Description>
 
             <Command
-              label="Command palette"
+              label={t('shell.palette.label')}
               shouldFilter={true}
               // Substring match across label/key/section (mirrors legacy).
               filter={(value, search) => {
@@ -163,14 +163,14 @@ export function Palette<T extends PaletteItem = PaletteItem>({
                   value={query}
                   onValueChange={setQuery}
                 />
-                {showChrome ? <span className="kbd">esc</span> : null}
+                {showChrome ? <span className="kbd">esc</span> : null}{/* i18n-literal-ok key cap */}
               </div>
               <Command.List className="palette__list">
                 <Command.Empty
                   className="palette__item is-disabled"
                   style={{ pointerEvents: 'none' }}
                 >
-                  {t('app.search.empty', 'No matches')}
+                  {t('shell.palette.empty')}
                 </Command.Empty>
                 {groups.map((group, gi) => {
                   const heading = group.section ? (

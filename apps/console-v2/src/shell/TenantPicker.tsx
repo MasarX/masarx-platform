@@ -22,6 +22,7 @@ import { useIdentity } from '@/lib/identity';
 import { useCompleteResourceList } from '@/lib/queries';
 import { Chip } from '@/components/Chip';
 import { Icon } from '@/components/Icon';
+import { fill, useT } from '@/lib/i18n';
 
 /**
  * Mirrors `public.organizations` (id + display name suffices for the picker).
@@ -46,6 +47,7 @@ export interface TenantPickerProps {
 export function TenantPicker({ className }: TenantPickerProps) {
   const { isPlatformUser, scope, switchScope } = useIdentity();
   const [open, setOpen] = useState(false);
+  const t = useT();
   const popRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
 
@@ -114,11 +116,11 @@ export function TenantPicker({ className }: TenantPickerProps) {
   return (
     <div className={wrapperClass} data-testid="tenant-picker">
       <Chip
-        label="Platform"
+        label={t('shell.tenantPicker.platform')}
         kind="info"
         size="xs"
         className="tenant-picker__badge"
-        title="Platform user — cross-tenant reach"
+        title={t('shell.tenantPicker.platformTitle')}
       />
       <button
         ref={btnRef}
@@ -126,7 +128,7 @@ export function TenantPicker({ className }: TenantPickerProps) {
         className="tenant-picker__trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={`Active tenant: ${activeLabel}. Click to switch tenant.`}
+        aria-label={fill(t('shell.tenantPicker.triggerLabel'), { name: activeLabel })}
         onClick={() => setOpen((v) => !v)}
       >
         <Icon name="building" size={12} />
@@ -140,32 +142,32 @@ export function TenantPicker({ className }: TenantPickerProps) {
           ref={popRef}
           className="tenant-picker__pop"
           role="listbox"
-          aria-label="Switch tenant"
+          aria-label={t('shell.tenantPicker.switch')}
         >
           <div className="tenant-picker__head">
-            <span className="tenant-picker__heading">Switch tenant</span>
+            <span className="tenant-picker__heading">{t('shell.tenantPicker.switch')}</span>
             <span className="tenant-picker__hint">
-              Cross-tenant reads stay in effect.
+              {t('shell.tenantPicker.hint')}
             </span>
           </div>
           <label className="tenant-picker__search-label" htmlFor="tenant-picker-search">
-            Search tenants
+            {t('shell.tenantPicker.search')}
           </label>
           <input
             id="tenant-picker-search"
             className="tenant-picker__search"
             type="search"
             value={search}
-            placeholder="Name or organization ID"
+            placeholder={t('shell.tenantPicker.searchPlaceholder')}
             onChange={(event) => setSearch(event.target.value)}
           />
           <ul className="tenant-picker__list">
             {orgsQuery.isLoading ? (
-              <li className="tenant-picker__empty">Loading organizations…</li>
+              <li className="tenant-picker__empty">{t('shell.tenantPicker.loading')}</li>
             ) : orgs.length === 0 ? (
-              <li className="tenant-picker__empty">No organizations available.</li>
+              <li className="tenant-picker__empty">{t('shell.tenantPicker.none')}</li>
             ) : filteredOrgs.length === 0 ? (
-              <li className="tenant-picker__empty">No tenants match this search.</li>
+              <li className="tenant-picker__empty">{t('shell.tenantPicker.noMatch')}</li>
             ) : (
               filteredOrgs.map((org) => {
                 const isActive = org.id === activeId;
@@ -183,7 +185,7 @@ export function TenantPicker({ className }: TenantPickerProps) {
                       onClick={() => handlePick(org)}
                     >
                       <span className="tenant-picker__item-name">{org.name}</span>
-                      <span className="tenant-picker__item-id mono">{org.id}</span>
+                      <span className="tenant-picker__item-id mono" dir="ltr">{org.id}</span>
                     </button>
                   </li>
                 );

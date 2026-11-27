@@ -6,6 +6,7 @@
 import { useCallback, type CSSProperties, type MouseEvent } from 'react';
 import { useLocation } from '@tanstack/react-router';
 import { Icon } from '@/components/Icon';
+import { useT } from '@/lib/i18n';
 import { useIdentity } from '@/lib/identity';
 import { useConsoleNavigator } from '@/lib/useConsoleNavigator';
 import {
@@ -45,10 +46,11 @@ function NavItemLink({
   onClick?: () => void;
 }) {
   const navigateTo = useConsoleNavigator();
+  const t = useT();
   const className = ['nav-item', active ? 'is-active' : '', allowed ? '' : 'is-locked']
     .filter(Boolean)
     .join(' ');
-  const title = !allowed ? navItemAccessLabel(item) : item.label;
+  const title = !allowed ? navItemAccessLabel(item, t) : item.label;
   const handleClick = (e: MouseEvent<HTMLAnchorElement>) => {
     if (!allowed) {
       e.preventDefault();
@@ -85,6 +87,7 @@ export function Sidenav({ pinned, onTogglePin, onHoverGroup, onOpenGroup }: Side
   const identity = useIdentity();
   const navigation = loadNavigation();
   const currentRoute = location.pathname || '/';
+  const t = useT();
 
   const handleGroupHover = useCallback(
     (group: NavSection, target: HTMLElement | null) => {
@@ -100,14 +103,14 @@ export function Sidenav({ pinned, onTogglePin, onHoverGroup, onOpenGroup }: Side
   }, [pinned, onHoverGroup]);
 
   return (
-    <aside id="primary-nav" className="sidenav" role="navigation" aria-label="Primary">
+    <aside id="primary-nav" className="sidenav" role="navigation" aria-label={t('shell.sidenav.label')}>
       <div className="sidenav__pin">
         <button
           className="icon-btn sidenav__pin-btn"
           type="button"
-          aria-label={pinned ? 'Unpin sidebar' : 'Pin sidebar open'}
+          aria-label={pinned ? t('shell.sidenav.unpin') : t('shell.sidenav.pin')}
           aria-pressed={pinned}
-          title="Pin (⌘\\)"
+          title={t('shell.sidenav.pinTitle')}
           onClick={onTogglePin}
         >
           <Icon name="pin" size={13} />
@@ -186,6 +189,7 @@ export function SidenavFlyout({
   const location = useLocation();
   const navigateTo = useConsoleNavigator();
   const identity = useIdentity();
+  const t = useT();
   if (!group || !anchorRect) return null;
   const currentRoute = location.pathname || '/';
   const viewportHeight = typeof window === 'undefined' ? 720 : window.innerHeight;
@@ -224,7 +228,7 @@ export function SidenavFlyout({
             key={item.key}
             href={item.routePath}
             className={className}
-            title={!allowed ? navItemAccessLabel(item) : item.label}
+            title={!allowed ? navItemAccessLabel(item, t) : item.label}
             aria-disabled={!allowed ? 'true' : undefined}
             onClick={(e: MouseEvent<HTMLAnchorElement>) => {
               if (!allowed) {

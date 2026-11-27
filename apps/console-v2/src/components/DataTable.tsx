@@ -40,7 +40,7 @@ import {
   type ReactNode,
 } from 'react';
 import * as api from '@/lib/api';
-import { useI18n } from '@/lib/i18n';
+import { fill, useI18n, useT } from '@/lib/i18n';
 import { Icon } from '@/components/Icon';
 import { Chip } from '@/components/Chip';
 import { StateView } from '@/components/StateView';
@@ -293,6 +293,7 @@ function humanizeLookupValue(value: unknown): string {
 }
 
 function ChipFromLookup({ category, value }: { category: string; value: unknown }): ReactNode {
+  const t = useT();
   if (value == null) return <span className="mono">—</span>;
   const row = getLookupRow(category, value);
   if (!row) {
@@ -305,7 +306,7 @@ function ChipFromLookup({ category, value }: { category: string; value: unknown 
         label={humanizeLookupValue(value)}
         kind="danger"
         size="xs"
-        title={`Lookup row missing: ${category}/${String(value)}`}
+        title={fill(t('shell.table.lookupMissing'), { ref: `${category}/${String(value)}` })}
       />
     );
   }
@@ -345,7 +346,8 @@ function downloadCsv(filename: string, csv: string): void {
 
 function exportSelectionCsv<T extends Record<string, unknown>>(
   rows: T[],
-  cols: Array<DataTableColumn<T>>
+  cols: Array<DataTableColumn<T>>,
+  t: (path: string) => string
 ): void {
   if (!rows.length) return;
   const visible = cols.filter((c) => !c.hidden);
@@ -353,7 +355,7 @@ function exportSelectionCsv<T extends Record<string, unknown>>(
   const lines = rows.map((r) => visible.map((c) => csvCell(r[c.key])).join(','));
   const csv = [head, ...lines].join('\n');
   downloadCsv(`selection-${Date.now()}.csv`, csv);
-  pushToast(`Exported ${rows.length} rows`, 'good');
+  pushToast(fill(t('shell.table.exported'), { n: rows.length }), 'good');
 }
 
 // ---------- Palette item shape (re-uses canonical Palette type so any
@@ -389,7 +391,9 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
     rowDeepLink,
   } = props;
 
-  const { fmtCurrency, fmtDateTime, fmtNumber } = useI18n();
+  const { fmtCurrency, fmtDateTime, fmtNumber, t } = useI18n();
+  // The default view keeps its stored English seed name; show it in the active language.
+  const viewName = (id: string, v: { name?: string }) => (id === 'default' ? t('shell.table.defaultView') : v.name || id);
   const { hasCapability } = useIdentity();
 
   function requiredCapabilities(action: { capability?: string; capabilities?: string[] }): string[] {
@@ -398,7 +402,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
 
   function missingPermissionLabel(missing: string[]): string | undefined {
     if (!missing.length) return undefined;
-    return missing.map(formatCapabilityTitle).join(' and ');
+    return missing.map((capability) => formatCapabilityTitle(capability, t)).join(t('shell.table.and'));
   }
 
   // ---------- Per-instance overlays ----------
@@ -677,42 +681,42 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
   const universalRowActions = useMemo<Array<DataTableAction<T>>>(() => {
     const acts: Array<DataTableAction<T>> = [];
     if (onRowClick) {
-      acts.push({ label: 'Open', icon: 'right', onClick: (r) => onRowClick(r) });
+      acts.push({ label: t('shell.table.open'), icon: 'right', onClick: (r) => onRowClick(r) });
     }
     if (rowDeepLink) {
       acts.push({
-        label: 'Open in new tab',
+        label: t('shell.table.openNewTab'),
         icon: 'external',
         onClick: (r) => window.open(normalizeConsoleHref(rowDeepLink(r)), '_blank'),
       });
     }
     acts.push({
-      label: 'Copy reference',
+      label: t('shell.table.copyReference'),
       icon: 'copy',
       onClick: (r) => {
         const reference = displayReferenceForRow(r);
         if (!reference) {
-          pushToast('No display reference available for this row', 'warn');
+          pushToast(t('shell.table.noReference'), 'warn');
           return;
         }
         navigator.clipboard?.writeText(reference);
-        pushToast('Record reference copied', 'good');
+        pushToast(t('shell.table.referenceCopied'), 'good');
       },
     });
     acts.push({
-      label: 'Decision trail',
+      label: t('shell.table.decisionTrail'),
       icon: 'audit',
       onClick: (r) => {
         // Prefer the wired-up drawer hook; fall back to a standalone drawer.
         if (drawer && typeof drawer.open === 'function') {
-          drawer.open(buildDecisionTrailDrawerSpec(r as Record<string, unknown>, entityKind));
+          drawer.open(buildDecisionTrailDrawerSpec(r as Record<string, unknown>, entityKind, undefined, t));
         } else {
           setDtRow(r);
         }
       },
     });
     return acts;
-  }, [onRowClick, rowDeepLink, drawer, entityKind, displayReferenceForRow]);
+  }, [onRowClick, rowDeepLink, drawer, entityKind, displayReferenceForRow, t]);
 
   const allRowActions = useMemo<Array<DataTableAction<T>>>(
     () => [...rowActions0, ...universalRowActions],
@@ -722,27 +726,27 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
   const universalBulkActions = useMemo<Array<DataTableBulkAction<T>>>(
     () => [
       {
-        label: 'Export selected',
+        label: t('shell.table.exportSelected'),
         icon: 'download',
         kind: 'ghost',
-        onClick: (rs) => exportSelectionCsv(rs, columns),
+        onClick: (rs) => exportSelectionCsv(rs, columns, t),
       },
       {
-        label: 'Copy references',
+        label: t('shell.table.copyReferences'),
         icon: 'copy',
         kind: 'ghost',
         onClick: (rs) => {
           const references = rs.map((r) => displayReferenceForRow(r)).filter(Boolean);
           if (!references.length) {
-            pushToast('No display references available for selected rows', 'warn');
+            pushToast(t('shell.table.noReferences'), 'warn');
             return;
           }
           navigator.clipboard?.writeText(references.join('\n'));
-          pushToast(`Copied ${references.length} record references`, 'good');
+          pushToast(fill(t('shell.table.referencesCopied'), { n: references.length }), 'good');
         },
       },
     ],
-    [columns, displayReferenceForRow]
+    [columns, displayReferenceForRow, t]
   );
 
   const allBulkActions = useMemo<Array<DataTableBulkAction<T>>>(
@@ -764,7 +768,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
       // expected to ship in this same milestone.
       const labels = items.map((it, i) => `${i + 1}. ${it.label}`).join('\n');
       const choice = window.prompt(
-        `${placeholder || 'Pick…'}\n${labels}\n\nEnter number:`
+        `${placeholder || t('shell.table.pick')}\n${labels}\n\n${t('shell.table.enterNumber')}`
       );
       const idx = Number(choice) - 1;
       if (Number.isFinite(idx) && items[idx]) items[idx]!.onPick?.();
@@ -777,20 +781,20 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
     const views = getViews();
     const items: PaletteItem[] = [
       ...Object.entries(views).map(([id, v]) => ({
-        label: `${id === activeViewId ? '✓ ' : '  '}${v.name || id}`,
+        label: `${id === activeViewId ? '✓ ' : '  '}${viewName(id, v)}`,
         key: id,
-        section: 'Views',
+        section: t('shell.table.section.views'),
         meta: id === 'default' ? '' : '⌫ del',
         onPick: () => applyView(id),
       })),
       {
-        label: '＋ Create new view from current settings',
+        label: t('shell.table.createView'),
         key: '__new__',
-        section: 'Manage',
+        section: t('shell.table.section.manage'),
         onPick: () => {
           const name = window.prompt(
-            'Name this view:',
-            `View ${Object.keys(views).length + 1}`
+            t('shell.table.nameView'),
+            fill(t('shell.table.newViewName'), { n: Object.keys(views).length + 1 })
           );
           if (name) createView(name);
         },
@@ -798,27 +802,27 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
     ];
     if (activeViewId !== 'default') {
       items.push({
-        label: '✎ Rename current view',
+        label: t('shell.table.renameView'),
         key: '__rename__',
-        section: 'Manage',
+        section: t('shell.table.section.manage'),
         onPick: () => {
-          const name = window.prompt('New name:', getActiveView().name || '');
+          const name = window.prompt(t('shell.table.newName'), getActiveView().name || '');
           if (name) renameView(activeViewId, name);
         },
       });
       items.push({
-        label: '🗑 Delete current view',
+        label: t('shell.table.deleteView'),
         key: '__delete__',
-        section: 'Manage',
+        section: t('shell.table.section.manage'),
         onPick: () => {
-          if (window.confirm(`Delete "${getActiveView().name}"?`)) deleteView(activeViewId);
+          if (window.confirm(fill(t('shell.table.deleteConfirm'), { name: getActiveView().name ?? '' }))) deleteView(activeViewId);
         },
       });
     }
     items.push({
-      label: 'Reset all (filters + sort + group)',
+      label: t('shell.table.resetAll'),
       key: '__reset__',
-      section: 'Reset',
+      section: t('shell.table.section.reset'),
       onPick: () => {
         setFilters({});
         setSort(null);
@@ -826,18 +830,18 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
         setColumns((prev) => prev.map((c) => ({ ...c, hidden: false })));
       },
     });
-    openPaletteSafe(items, 'Switch / manage views…');
+    openPaletteSafe(items, t('shell.table.viewsMenu'));
   }
 
   function openFilterMenu() {
     const filterable = columns.filter((c) => c.filterable !== false);
     const items: PaletteItem[] = filterable.map((c) => ({
-      label: `Filter by ${c.label}`,
+      label: fill(t('shell.table.filterBy'), { label: c.label }),
       key: c.key,
-      section: 'Columns',
+      section: t('shell.table.section.columns'),
       onPick: () => promptFilter(c),
     }));
-    openPaletteSafe(items, 'Filter…');
+    openPaletteSafe(items, t('shell.table.filterMenu'));
   }
 
   function promptFilter(col: DataTableColumn<T>) {
@@ -870,7 +874,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
       });
       return;
     }
-    const v = window.prompt(`Filter ${col.label} contains:`, String(current ?? ''));
+    const v = window.prompt(fill(t('shell.table.filterPrompt'), { label: col.label }), String(current ?? ''));
     if (v == null) return;
     if (!v) {
       setFilters((prev) => {
@@ -889,7 +893,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
       ...sortable.map((c) => ({
         label: `${c.label} ↑`,
         key: `${c.key}:asc`,
-        section: 'Ascending',
+        section: t('shell.table.section.ascending'),
         onPick: () => {
           setSort(c.key);
           setSortDir('asc');
@@ -898,76 +902,76 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
       ...sortable.map((c) => ({
         label: `${c.label} ↓`,
         key: `${c.key}:desc`,
-        section: 'Descending',
+        section: t('shell.table.section.descending'),
         onPick: () => {
           setSort(c.key);
           setSortDir('desc');
         },
       })),
       {
-        label: 'Clear sort',
+        label: t('shell.table.clearSort'),
         key: 'clear',
-        section: 'Reset',
+        section: t('shell.table.section.reset'),
         onPick: () => setSort(null),
       },
     ];
-    openPaletteSafe(items, 'Sort…');
+    openPaletteSafe(items, t('shell.table.sortMenu'));
   }
 
   function openGroupMenu() {
     const items: PaletteItem[] = [
       {
-        label: 'No grouping',
+        label: t('shell.table.noGrouping'),
         key: 'none',
-        section: 'Reset',
+        section: t('shell.table.section.reset'),
         onPick: () => setGroupBy(null),
       },
       ...columns
         .filter((c) => c.lookup || c.type === 'select')
         .map((c) => ({
-          label: `Group by ${c.label}`,
+          label: fill(t('shell.table.groupBy'), { label: c.label }),
           key: c.key,
-          section: 'Columns',
+          section: t('shell.table.section.columns'),
           onPick: () => setGroupBy(c.key),
         })),
     ];
-    openPaletteSafe(items, 'Group…');
+    openPaletteSafe(items, t('shell.table.groupMenu'));
   }
 
   function openColumnsMenu() {
     const items: PaletteItem[] = columns.map((c) => ({
       label: `${c.hidden ? '☐' : '☑'} ${c.label}`,
       key: c.key,
-      section: 'Toggle visibility',
+      section: t('shell.table.section.toggleVisibility'),
       onPick: () =>
         setColumns((prev) => prev.map((p) => (p.key === c.key ? { ...p, hidden: !p.hidden } : p))),
     }));
-    openPaletteSafe(items, 'Columns…');
+    openPaletteSafe(items, t('shell.table.columnsMenu'));
   }
 
   function openDensityMenu() {
     const items: PaletteItem[] = [
       {
-        label: 'Compact',
+        label: t('shell.density.compactLabel'),
         key: 'compact',
-        section: 'Density',
+        section: t('shell.table.section.density'),
         onPick: () => setDensity('compact'),
       },
       {
-        label: 'Comfortable',
+        label: t('shell.density.comfortableLabel'),
         key: 'comfortable',
-        section: 'Density',
+        section: t('shell.table.section.density'),
         onPick: () => setDensity('comfortable'),
       },
-      { label: 'Cozy', key: 'cozy', section: 'Density', onPick: () => setDensity('cozy') },
+      { label: t('shell.density.cozyLabel'), key: 'cozy', section: t('shell.table.section.density'), onPick: () => setDensity('cozy') },
       {
-        label: 'Inherit (global)',
+        label: t('shell.density.inherit'),
         key: 'inherit',
-        section: 'Reset',
+        section: t('shell.table.section.reset'),
         onPick: () => setDensity(null),
       },
     ];
-    openPaletteSafe(items, 'Density…');
+    openPaletteSafe(items, t('shell.table.densityMenu'));
   }
 
   function openRowContext(row: T) {
@@ -984,7 +988,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
       return {
         label: a.label,
         key: a.label,
-        section: a.kind === 'danger' ? 'Danger' : 'Actions',
+        section: a.kind === 'danger' ? t('shell.table.section.danger') : t('shell.table.section.actions'),
         meta: !allowed ? missingPermissionLabel(missing) : actionDisabled ? disabledReason ?? a.meta : a.meta,
         disabled: !allowed || actionDisabled,
         onPick: () => {
@@ -993,15 +997,15 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
         },
       };
     });
-    openPaletteSafe(items, 'Row actions…');
+    openPaletteSafe(items, t('shell.table.rowActionsMenu'));
   }
 
   function openGroupActionsMenu(key: unknown, group: T[]) {
     const items: PaletteItem[] = [
       {
-        label: `Select all in group (${group.length})`,
+        label: fill(t('shell.table.selectGroupCount'), { n: group.length }),
         key: 'sel-all',
-        section: 'Selection',
+        section: t('shell.table.section.selection'),
         onPick: () => {
           setSelected((prev) => {
             const next = new Set(prev);
@@ -1011,9 +1015,9 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
         },
       },
       {
-        label: 'Clear selection in group',
+        label: t('shell.table.clearGroupSelection'),
         key: 'sel-none',
-        section: 'Selection',
+        section: t('shell.table.section.selection'),
         onPick: () => {
           setSelected((prev) => {
             const next = new Set(prev);
@@ -1023,9 +1027,9 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
         },
       },
       {
-        label: 'Collapse other groups',
+        label: t('shell.table.collapseOthers'),
         key: 'collapse-others',
-        section: 'View',
+        section: t('shell.table.section.view'),
         onPick: () => {
           if (!groupBy) return;
           const allKeys = Array.from(groupRows(processed, groupBy).keys());
@@ -1035,20 +1039,20 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
         },
       },
       {
-        label: 'Expand all groups',
+        label: t('shell.table.expandAll'),
         key: 'expand-all',
-        section: 'View',
+        section: t('shell.table.section.view'),
         onPick: () => setCollapsedGroups(new Set()),
       },
       ...groupActions.map((a) => ({
         label: a.label,
         key: `ga-${a.label}`,
-        section: 'Group actions',
+        section: t('shell.table.section.groupActions'),
         meta: a.meta,
         onPick: () => a.onClick?.(group, key),
       })),
     ];
-    openPaletteSafe(items, 'Group actions…');
+    openPaletteSafe(items, t('shell.table.groupActionsMenu'));
   }
 
   function pickReference(
@@ -1073,18 +1077,18 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
         label: source.display(r),
         key: String(source.value(r) ?? ''),
         meta: source.sub?.(r),
-        section: source.section || 'Items',
+        section: source.section || t('shell.table.section.items'),
       }));
     }
     if (allowClear) {
-      items.unshift({ label: '— clear —', key: null, section: 'Action' });
+      items.unshift({ label: t('shell.table.clearChoice'), key: null, section: t('shell.table.section.action') });
     }
     // Wrap onPick into a single closure so the palette can fire it with the chosen key.
     const wrapped: PaletteItem[] = items.map((it) => ({
       ...it,
       onPick: () => onPick(it.key),
     }));
-    openPaletteSafe(wrapped, `Pick ${title || 'value'}…`);
+    openPaletteSafe(wrapped, fill(t('shell.table.pickValue'), { title: title || t('shell.table.value') }));
   }
 
   // ---------- Inline editor commit ----------
@@ -1093,15 +1097,15 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
     try {
       const res = await onCellEdit?.(row, col.key, newValue, false);
       if (res?.ok === false) {
-        pushToast('Edit could not be saved. Try again.', 'danger');
+        pushToast(t('shell.table.editFailed'), 'danger');
         setEditing(null);
         return;
       }
       // Mutate local rows (caller is also expected to refresh via res.diff / rows).
       setRows((prev) => prev.map((r) => (r === row ? { ...r, [col.key]: newValue } : r)));
-      pushToast(`Saved · ${col.label}`, 'good');
+      pushToast(fill(t('shell.table.saved'), { label: col.label }), 'good');
     } catch {
-      pushToast('Edit could not be saved. Try again.', 'danger');
+      pushToast(t('shell.table.editFailed'), 'danger');
     } finally {
       setEditing(null);
     }
@@ -1204,7 +1208,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
       <td
         key={c.key}
         className={cls || undefined}
-        title={isEditableCell ? 'Double-click to edit' : undefined}
+        title={isEditableCell ? t('shell.table.doubleClickEdit') : undefined}
         onDoubleClick={
           isEditableCell
             ? (e) => {
@@ -1261,12 +1265,12 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
     );
     const csv = [head, ...lines].join('\n');
     downloadCsv(`${viewKey || 'table'}-${Date.now()}.csv`, csv);
-    pushToast(`Exported ${processed.length} rows`, 'good');
+    pushToast(fill(t('shell.table.exported'), { n: processed.length }), 'good');
   }
 
   function saveCurrentToView() {
     persist();
-    pushToast(`Saved to "${getActiveView().name || 'Default'}"`, 'good');
+    pushToast(fill(t('shell.table.savedToView'), { name: viewName(activeViewId, getActiveView()) }), 'good');
   }
 
   // ---------- Scroll listener for virtualization ----------
@@ -1324,10 +1328,10 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
           type="button"
           className="dt-tb-view"
           onClick={openViewMenu}
-          title="Switch / manage views"
+          title={t('shell.table.switchViews')}
         >
           <span className="mono" style={{ fontWeight: 600 }}>
-            {view.name || 'Default'}
+            {viewName(activeViewId, view)}
           </span>
           <span className="dt-tb-view__count">· {Object.keys(views).length}</span>
           <span style={{ fontSize: '8px', opacity: 0.6 }}>▾</span>
@@ -1339,9 +1343,9 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
               type="button"
               className="dt-tb-view-tab"
               onClick={() => applyView(id)}
-              title={`Switch to "${v.name || id}"`}
+              title={fill(t('shell.table.switchTo'), { name: viewName(id, v) })}
             >
-              {v.name || id}
+              {viewName(id, v)}
             </button>
           )
         )}
@@ -1351,7 +1355,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
           </span>
           <input
             type="text"
-            placeholder="Search…"
+            placeholder={t('shell.table.search')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -1359,38 +1363,38 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
         <div className="dt-tb-spacer" />
         {ibtn(
           'filter',
-          filterCount ? `${filterCount} filters` : 'Filter',
+          filterCount ? fill(t('shell.table.filters'), { n: filterCount }) : t('shell.table.filter'),
           filterCount > 0,
           openFilterMenu,
           filterCount || null
         )}
         {ibtn(
           'list',
-          sort ? `Sort · ${sort} ${sortDir === 'asc' ? '↑' : '↓'}` : 'Sort',
+          sort ? fill(t('shell.table.sortActive'), { key: sort, dir: sortDir === 'asc' ? '↑' : '↓' }) : t('shell.table.sort'),
           !!sort,
           openSortMenu
         )}
         {ibtn(
           'layers',
-          groupBy ? `Group by ${groupBy}` : 'Group',
+          groupBy ? fill(t('shell.table.groupBy'), { label: groupBy }) : t('shell.table.group'),
           !!groupBy,
           openGroupMenu
         )}
         {ibtn(
           'grid',
-          `Columns · ${visibleColumns().length}/${columns.length}`,
+          fill(t('shell.table.columnsCount'), { shown: visibleColumns().length, total: columns.length }),
           false,
           openColumnsMenu
         )}
         {ibtn(
           'settings',
-          `Density · ${density || 'inherit'}`,
+          fill(t('shell.table.densityActive'), { density: density ? t(`shell.density.${density}`, density) : t('shell.density.inheritShort') }),
           !!density,
           openDensityMenu
         )}
         <span className="dt-tb-divider" />
-        {ibtn('download', 'Export CSV', false, exportCsv)}
-        {ibtn('refresh', 'Save current settings to view', false, saveCurrentToView)}
+        {ibtn('download', t('shell.table.exportCsv'), false, exportCsv)}
+        {ibtn('refresh', t('shell.table.saveView'), false, saveCurrentToView)}
         <span className="dt-tb-count mono">
           {processed.length}/{rows.length}
         </span>
@@ -1415,7 +1419,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
               <button
                 type="button"
                 className="chip-clear"
-                aria-label="Clear filter"
+                aria-label={t('shell.table.clearFilter')}
                 onClick={() =>
                   setFilters((prev) => {
                     const next = { ...prev };
@@ -1431,11 +1435,11 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
         })}
         {sort ? (
           <span className="chip">
-            <span>{`Sort: ${sort} ${sortDir === 'asc' ? '↑' : '↓'}`}</span>
+            <span>{fill(t('shell.table.sortChip'), { key: sort, dir: sortDir === 'asc' ? '↑' : '↓' })}</span>
             <button
               type="button"
               className="chip-clear"
-              aria-label="Clear sort"
+              aria-label={t('shell.table.clearSort')}
               onClick={() => setSort(null)}
             >
               ×
@@ -1444,11 +1448,11 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
         ) : null}
         {groupBy ? (
           <span className="chip">
-            <span>{`Group: ${groupBy}`}</span>
+            <span>{fill(t('shell.table.groupChip'), { key: groupBy })}</span>
             <button
               type="button"
               className="chip-clear"
-              aria-label="Clear group"
+              aria-label={t('shell.table.clearGroup')}
               onClick={() => setGroupBy(null)}
             >
               ×
@@ -1466,7 +1470,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
     if (!count) return null;
     return (
       <div className="dt-bulkbar">
-        <span className="mono" style={{ fontWeight: 600 }}>{`${count} selected`}</span>
+        <span className="mono" style={{ fontWeight: 600 }}>{fill(t('shell.table.selected'), { n: count })}</span>
         <div style={{ flex: 1 }} />
         {allBulkActions.map((a, i) => {
           const missing = requiredCapabilities(a).filter((capability) => !hasCapability(capability));
@@ -1509,7 +1513,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
           className="btn btn--sm btn--ghost"
           onClick={() => setSelected(new Set())}
         >
-          Clear
+          {t('shell.table.clear')}
         </button>
       </div>
     );
@@ -1527,7 +1531,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
             <th className="dt-checkbox">
               <input
                 type="checkbox"
-                aria-label="Select all"
+                aria-label={t('shell.table.selectAll')}
                 checked={allChecked}
                 onChange={(e) => {
                   if (e.target.checked) {
@@ -1546,7 +1550,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
               key={c.key}
               className={c.align === 'right' ? 'cell-num' : undefined}
               style={c.width ? { width: c.width } : undefined}
-              title={c.editable ? `${c.label} · double-click cells to edit` : c.label}
+              title={c.editable ? fill(t('shell.table.editableColumn'), { label: c.label }) : c.label}
               onClick={
                 c.sortable !== false
                   ? () => {
@@ -1562,7 +1566,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
             >
               <span>{c.label}</span>
               {c.editable ? (
-                <span className="dt-th-mark" title="editable">
+                <span className="dt-th-mark" title={t('shell.table.editable')}>
                   {' ✎'}
                 </span>
               ) : null}
@@ -1572,7 +1576,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
             </th>
           ))}
           {allRowActions.length ? (
-            <th className="dt-th-actions" aria-label="Row actions" />
+            <th className="dt-th-actions" aria-label={t('shell.table.rowActions')} />
           ) : null}
         </tr>
       </thead>
@@ -1593,7 +1597,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
         key={k}
         className={trClass || undefined}
         tabIndex={canOpenRow ? 0 : undefined}
-        aria-label={canOpenRow ? `Open ${entityKind ?? 'record'} ${rowLabel}` : undefined}
+        aria-label={canOpenRow ? fill(t('shell.table.openRow'), { kind: entityKind ?? t('shell.table.record'), id: rowLabel }) : undefined}
         onClick={(e) => {
           // Mirror the demo guard: don't trigger row-click on form/action interactions.
           const target = e.target as HTMLElement;
@@ -1624,7 +1628,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
           <td className="dt-checkbox">
             <input
               type="checkbox"
-              aria-label="Select row"
+              aria-label={t('shell.table.selectRow')}
               checked={selected.has(k)}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => {
@@ -1644,7 +1648,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
             <button
               type="button"
               className="icon-btn"
-              aria-label="Row actions"
+              aria-label={t('shell.table.rowActions')}
               onClick={(e) => {
                 e.stopPropagation();
                 openRowContext(r);
@@ -1707,7 +1711,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
               <button
                 type="button"
                 className="dt-group-toggle"
-                aria-label={collapsed ? 'Expand group' : 'Collapse group'}
+                aria-label={collapsed ? t('shell.table.expandGroup') : t('shell.table.collapseGroup')}
                 onClick={(e) => {
                   e.stopPropagation();
                   setCollapsedGroups((prev) => {
@@ -1723,7 +1727,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
               {allowSelection ? (
                 <input
                   type="checkbox"
-                  aria-label="Select all in group"
+                  aria-label={t('shell.table.selectGroup')}
                   className="dt-group-check"
                   checked={allSelectedInGroup}
                   onClick={(e) => e.stopPropagation()}
@@ -1761,7 +1765,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
               <button
                 type="button"
                 className="dt-group-agg mono"
-                title="Cycle: count → sum → avg"
+                title={t('shell.table.cycleAgg')}
                 onClick={(e) => {
                   e.stopPropagation();
                   setGroupAggMode((m) =>
@@ -1776,7 +1780,7 @@ export function DataTable<T extends Record<string, unknown> = Record<string, unk
                 <button
                   type="button"
                   className="dt-group-menu"
-                  title="Group actions"
+                  title={t('shell.table.groupActions')}
                   onClick={(e) => {
                     e.stopPropagation();
                     openGroupActionsMenu(key, group);

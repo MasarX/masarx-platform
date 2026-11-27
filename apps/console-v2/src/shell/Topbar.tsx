@@ -4,7 +4,7 @@
 import { useMemo } from 'react';
 import { Icon } from '@/components/Icon';
 import { Kbd } from '@/components/Kbd';
-import { useI18n } from '@/lib/i18n';
+import { fill, useI18n } from '@/lib/i18n';
 import { useTheme } from '@/lib/theme';
 import { useIdentity } from '@/lib/identity';
 import { buildRouteBreadcrumbs, type RouteBreadcrumb } from '@/lib/route-meta';
@@ -54,17 +54,19 @@ export function Topbar({
   const { locale, toggleLocale, t } = useI18n();
   const { theme, density, cycleTheme, cycleDensity } = useTheme();
   const location = useLocation();
+  const themeLabel = t(`app.themeCycle.${theme}`);
 
   const initials = useMemo(() => initialsOf(user?.name ?? ''), [user?.name]);
   const role = user?.role ?? 'user';
-  const tenantLabel = scope?.tenant?.label?.trim() || 'Active tenant';
+  // With no tenant row the pill shows neutral catalog labels ("Active tenant", "Tenant scope"), never a seeded tenant.
+  const tenantLabel = scope?.tenant?.label?.trim() || t('shell.topbar.activeTenant');
   const subLabel =
     scope?.client?.label?.trim() ||
     (user?.access_scope_type === 'platform'
-      ? 'Platform scope'
+      ? t('shell.topbar.platformScope')
       : user?.access_scope_type === 'sender'
-        ? 'Sender scope'
-        : 'Tenant scope');
+        ? t('shell.topbar.senderScope')
+        : t('shell.topbar.tenantScope'));
   const breadcrumbs: RouteBreadcrumb[] =
     crumbs && crumbs.length > 0
       ? crumbs.map((label) => ({ label }))
@@ -76,7 +78,7 @@ export function Topbar({
         <button
           className="icon-btn topbar__nav-toggle"
           type="button"
-          aria-label={t('app.navigation')}
+          aria-label={t('shell.topbar.navigation')}
           aria-expanded={navOpen}
           aria-controls="primary-nav"
           onClick={onToggleNav}
@@ -84,7 +86,7 @@ export function Topbar({
           <Icon name="list" size={16} />
         </button>
       ) : null}
-      <div className="topbar__brand" aria-label="MasarX Console">
+      <div className="topbar__brand" aria-label={t('shell.topbar.brandLabel')}>
         <span className="brand-mark" aria-hidden="true">
           <svg viewBox="0 0 20 20" width={18} height={18}>
             <rect x="0" y="0" width="20" height="20" rx="4" fill="var(--accent)" />
@@ -97,14 +99,14 @@ export function Topbar({
             />
           </svg>
         </span>
-        <span className="brand-name">MasarX</span>
+        <span className="brand-name">{t('app.name')}</span>
         <span className="brand-sep">/</span>
-        <span className="brand-app">console</span>
+        <span className="brand-app">{t('shell.topbar.console')}</span>
         <span className="brand-sep">·</span>
-        <span className="brand-role mono">{role}</span>
+        <span className="brand-role mono" dir="ltr">{role}</span>
       </div>
 
-      <nav className="topbar__crumbs" aria-label="Breadcrumb">
+      <nav className="topbar__crumbs" aria-label={t('shell.topbar.breadcrumb')}>
         {breadcrumbs.map((part, i) => (
           <span key={`${part.label}-${i}`} className="crumb-wrap">
             {i > 0 ? <span className="crumb-sep">›</span> : null}
@@ -158,7 +160,7 @@ export function Topbar({
           }
         }}
       >
-        <span className="scope-pill__rank" aria-hidden="true">T</span>
+        <span className="scope-pill__rank" aria-hidden="true">{t('shell.topbar.tenantRank')}</span>
         <span className="scope-pill__name">{tenantLabel}</span>
         <span className="scope-sep" aria-hidden="true">·</span>
         <span className="scope-pill__sub mono">{subLabel}</span>
@@ -171,8 +173,8 @@ export function Topbar({
         <button
           className="icon-btn"
           type="button"
-          aria-label="Cycle density"
-          title={`Density: ${density} (click to cycle)`}
+          aria-label={t('shell.topbar.cycleDensity')}
+          title={fill(t('shell.topbar.densityTitle'), { density: t(`shell.density.${density}`, density) })}
           onClick={cycleDensity}
         >
           <Icon name="list" size={14} />
@@ -184,13 +186,13 @@ export function Topbar({
           aria-label={t('app.switchLanguage')}
           onClick={toggleLocale}
         >
-          {locale === 'en' ? 'AR' : 'EN'}
+          <span lang={locale === 'en' ? 'ar' : 'en'}>{t('shell.topbar.otherLocale')}</span>
         </button>
         <button
           className="icon-btn"
           type="button"
-          aria-label="Toggle theme"
-          title={t(`app.themeCycle.${theme}`)}
+          aria-label={themeLabel}
+          title={themeLabel}
           onClick={cycleTheme}
         >
           <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -200,7 +202,7 @@ export function Topbar({
         <button
           className="icon-btn"
           type="button"
-          aria-label="Notifications"
+          aria-label={t('shell.notifications')}
           onClick={onToggleNotifs}
         >
           <Icon name="bell" size={14} />
