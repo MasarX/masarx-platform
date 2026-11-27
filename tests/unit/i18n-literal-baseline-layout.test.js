@@ -48,7 +48,22 @@ describe('split i18n literal baseline', () => {
     expect(check(current, readBaseline(dir))).toEqual([
       `${geocoding}: 2 literals, baseline allows 1; move the new ones to the catalogs`,
       `${marketplace}: 1 new literal(s); move them to the catalogs. First: line 3 "Shipments"`,
-      `${zones}: no literals left; delete its baseline line`,
+      `${zones}: no literals left; delete its allowance file or row`,
+    ]);
+  });
+
+  test('rejects an allowance file outside its mirrored source directory', () => {
+    const misplaced = path.join(dir, path.basename(allowancePath(geocoding)));
+    fs.renameSync(allowancePath(geocoding), misplaced);
+    expect(readBaseline(dir).problems).toEqual([
+      `${path.basename(misplaced)}:1: expected ${path.relative(dir, allowancePath(geocoding))} for ${geocoding}`,
+    ]);
+  });
+
+  test('rejects a row for another source in a correctly placed allowance file', () => {
+    fs.writeFileSync(allowancePath(zones), `${marketplace} 1\n${zones} 2\n`);
+    expect(readBaseline(dir).problems).toEqual([
+      `${path.relative(dir, allowancePath(zones))}:1: expected ${path.relative(dir, allowancePath(marketplace))} for ${marketplace}`,
     ]);
   });
 
@@ -56,6 +71,7 @@ describe('split i18n literal baseline', () => {
     const duplicate = allowancePath(marketplace);
     fs.writeFileSync(duplicate, `${geocoding} 3\n`);
     expect(readBaseline(dir).problems).toEqual([
+      `${path.relative(dir, duplicate)}:1: expected ${path.relative(dir, allowancePath(geocoding))} for ${geocoding}`,
       `baseline lists ${geocoding} twice (also in ${path.relative(dir, duplicate)})`,
     ]);
   });

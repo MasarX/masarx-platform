@@ -29,6 +29,7 @@ import {
   useUpdateZone,
 } from '@/lib/queries';
 import { pushToast } from '@/components/toastStore';
+import { fill, useT } from '@/lib/i18n';
 import { lookupRow } from '@/lib/api';
 import type { ChipKind } from '@/components/Chip';
 import { zoneStatusOf } from './_zone-status';
@@ -263,13 +264,14 @@ function CanonicalChip({
   category: string;
   value: string;
   className?: string;
-  labelOverride?: string;
+  labelOverride?: ReactNode;
 }) {
+  const t = useT();
   const row = lookupRow(category, value);
   if (!row) {
     return (
       <Chip
-        label={`${category}/${value} (missing)`}
+        label={fill(t('zones.missing'), { ref: `${category}/${value}` })}
         kind="danger"
         size="xs"
         className={className}
@@ -328,6 +330,7 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
   const fmtPct = (v: number, digits = 0) =>
     fmtNumber(v, { style: 'percent', maximumFractionDigits: digits });
   const canWrite = useCapability(CAP.ZONES_WRITE);
+  const t = useT();
   const { user } = useIdentity();
   const reviewerId = user?.id ?? null;
 
@@ -377,11 +380,11 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
   const [selectedDistrictKey, setSelectedDistrictKey] = useState<string | null>(null);
 
   const kvRows: KvRow[] = [
-    { key: 'name', label: 'Name', value: zone.name, capability: CAP.ZONES_WRITE },
-    { key: 'slug', label: 'Slug', value: zone.slug, mono: true, capability: CAP.ZONES_WRITE },
+    { key: 'name', label: t('zones.drawer.fields.name'), value: zone.name, capability: CAP.ZONES_WRITE },
+    { key: 'slug', label: t('zones.drawer.fields.slug'), value: zone.slug, mono: true, capability: CAP.ZONES_WRITE },
     {
       key: 'description',
-      label: 'Description',
+      label: t('zones.drawer.fields.description'),
       value: zone.description ?? zone.notes ?? '',
       capability: CAP.ZONES_WRITE,
     },
@@ -390,17 +393,17 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
     // chose to forward (seed populates them inline today).
     {
       key: 'color_token',
-      label: 'Color token',
+      label: t('zones.drawer.fields.colorToken'),
       value: zone.color_token ?? 'neutral',
       lookup: 'zone_color_token',
       capability: CAP.ZONES_WRITE,
     },
-    { key: 'status', label: 'Status', value: zoneStatusOf(zone), mono: true, editable: false },
-    { key: 'hub_code', label: 'Hub', value: zone.hub_code ?? '—', mono: true, editable: false },
-    { key: 'updated_at', label: 'Updated', value: zone.updated_at ? fmtDateTime(zone.updated_at) : '—', mono: true, editable: false },
-    { key: 'extent', label: 'Geometry extent', value: geometryExtent(zone.geometry), mono: true, editable: false },
-    { key: 'districts', label: 'Districts', value: fmtNumber(linkedDistricts.length), mono: true, editable: false },
-    { key: 'branches', label: 'Branches serving', value: fmtNumber(linkedBranches.length), mono: true, editable: false },
+    { key: 'status', label: t('zones.drawer.fields.status'), value: zoneStatusOf(zone), mono: true, editable: false },
+    { key: 'hub_code', label: t('zones.drawer.fields.hub'), value: zone.hub_code ?? '—', mono: true, editable: false },
+    { key: 'updated_at', label: t('zones.drawer.fields.updated'), value: zone.updated_at ? fmtDateTime(zone.updated_at) : '—', mono: true, editable: false },
+    { key: 'extent', label: t('zones.drawer.fields.extent'), value: geometryExtent(zone.geometry), mono: true, editable: false },
+    { key: 'districts', label: t('zones.drawer.fields.districts'), value: fmtNumber(linkedDistricts.length), mono: true, editable: false },
+    { key: 'branches', label: t('zones.drawer.fields.branches'), value: fmtNumber(linkedBranches.length), mono: true, editable: false },
   ];
 
   async function handleProfileEdit(key: string, value: unknown) {
@@ -413,10 +416,10 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
           : { [key]: next };
     try {
       await updateZoneMut.mutateAsync({ zone_id: zone.id, patch });
-      pushToast(`Updated zone ${zone.name}.`, 'good');
+      pushToast(fill(t('zones.drawer.updated'), { name: zone.name }), 'good');
       onTimelineMutate();
     } catch (error) {
-      pushToast(`Zone update failed: ${(error as Error).message}`, 'danger');
+      pushToast(fill(t('zones.drawer.updateFailed'), { error: (error as Error).message }), 'danger');
     }
   }
 
@@ -427,28 +430,28 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
         reason: 'console_v2_zone_retire',
         metadata: { source: 'console_v2_zones_drawer' },
       });
-      pushToast(`Retired zone ${zone.name}.`, 'warn');
+      pushToast(fill(t('zones.drawer.retired'), { name: zone.name }), 'warn');
       onTimelineMutate();
     } catch (error) {
-      pushToast(`Zone retire failed: ${(error as Error).message}`, 'danger');
+      pushToast(fill(t('zones.drawer.retireFailed'), { error: (error as Error).message }), 'danger');
     }
   }
 
   const districtColumns: Array<DataTableColumn<ZoneDistrictRow>> = [
     {
       key: '_selected',
-      label: 'Select',
+      label: t('zones.drawer.cols.select'),
       width: '64px',
       render: (_raw, row) => {
         const key = zoneDistrictSelectionKeyOf(row);
         const did = zoneDistrictIdOf(row);
         const name = did ? districtIndex.get(did)?.name : undefined;
-        const label = name ? `${name} ${did}` : did || key || 'district';
+        const label = name ? `${name} ${did}` : did || key || t('zones.drawer.districtFallback');
         return (
           <input
             type="radio"
             name={`zone-district-${zone.id}`}
-            aria-label={`Select district ${label}`}
+            aria-label={fill(t('zones.drawer.selectDistrict'), { label })}
             checked={key.length > 0 && selectedDistrictKey === key}
             onClick={(event) => event.stopPropagation()}
             onChange={() => {
@@ -460,7 +463,7 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
     },
     {
       key: 'district_id',
-      label: 'District',
+      label: t('zones.drawer.cols.district'),
       mono: true,
       sortable: true,
       filterable: true,
@@ -475,12 +478,12 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
     },
     // W17-2 — `role` column removed (no canonical analog). Linked-at remains
     // as the SSOT timestamp signal for the row.
-    { key: 'created_at', label: 'Linked', format: 'datetime', sortable: true },
+    { key: 'created_at', label: t('zones.drawer.cols.linked'), format: 'datetime', sortable: true },
   ];
 
   const branchColumns: Array<DataTableColumn<BranchZoneRow>> = [
-    { key: 'branch_id', label: 'Branch', mono: true, sortable: true, filterable: true },
-    { key: 'branch_label', label: 'Label', sortable: true, filterable: true },
+    { key: 'branch_id', label: t('zones.drawer.cols.branch'), mono: true, sortable: true, filterable: true },
+    { key: 'branch_label', label: t('zones.drawer.cols.label'), sortable: true, filterable: true },
     // W17-2 — `role` derived from canonical `priority` via `priorityToBand()`.
     // W27 Cycle D Network closure (P1 #2): chip routes through canonical
     // `branch_zone_band` lookup (primary/secondary/fallback) so tone
@@ -488,7 +491,7 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
     // `band === 'primary' ? 'good' : 'info'` ternary.
     {
       key: 'priority',
-      label: 'Band',
+      label: t('zones.drawer.cols.band'),
       sortable: true,
       filterable: true,
       render: (_raw, row) => {
@@ -513,7 +516,7 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
     // unseeded gap to operators (TimelineLog renders the type as a plain
     // string, so the missing key is visible inline rather than as a chip).
     const kindRow = lookupRow('zone_change_kind', kind);
-    const kindLabel = kindRow?.label ?? `zone_change_kind/${kind} (missing)`;
+    const kindLabel = kindRow?.label ?? fill(t('zones.missing'), { ref: `zone_change_kind/${kind}` });
     // Canonical SSOT: zone_override_status lookup category. The
     // TimelineLog `tone` enum is a strict subset of ChipKind
     // ('good' | 'warn' | 'danger' | 'info' | 'neutral') — missing rows
@@ -539,12 +542,12 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
     const summaryKind = statusMeta.summary_kind;
     const summaryLine =
       summaryKind === 'pending'
-        ? `Pending review · ${JSON.stringify(meta)}`
+        ? fill(t('zones.drawer.pendingReview'), { meta: JSON.stringify(meta) })
         : summaryKind === 'approved'
-          ? `Approved by ${reviewedBy ?? '—'} on ${reviewedAt ? fmtDateTime(reviewedAt) : '—'}`
+          ? fill(t('zones.drawer.approvedBy'), { who: reviewedBy ?? '—', at: reviewedAt ? fmtDateTime(reviewedAt) : '—' })
           : summaryKind === 'denied'
-            ? `Denied by ${reviewedBy ?? '—'} on ${reviewedAt ? fmtDateTime(reviewedAt) : '—'}`
-            : `zone_override_status/${o.status} (missing canonical metadata)`;
+            ? fill(t('zones.drawer.deniedBy'), { who: reviewedBy ?? '—', at: reviewedAt ? fmtDateTime(reviewedAt) : '—' })
+            : fill(t('zones.missingMetadata'), { ref: `zone_override_status/${o.status}` });
     return {
     id: o.id,
     at: o.created_at,
@@ -554,7 +557,7 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
     detail: (
       <div style={{ padding: '8px 14px' }}>
         <div className="state__hint" style={{ fontSize: '11px', marginBottom: '6px' }}>
-          <span className="mono">metadata</span> · canonical jsonb
+          <span className="mono"><bdi>metadata</bdi></span> · {t('zones.drawer.canonicalJsonb')}{/* i18n-literal-ok: jsonb column name */}
         </div>
         <pre
           className="mono"
@@ -574,7 +577,7 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
           <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
             {allowedActions.includes('approve') ? (
               <Button
-                label="Approve"
+                label={t('zones.drawer.approve')}
                 iconName="check"
                 kind="primary"
                 size="sm"
@@ -591,16 +594,16 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
                       ...(reviewerId ? { reviewed_by: reviewerId } : {}),
                     })
                     .then(() => {
-                      pushToast(`Approved override ${o.id}`, 'good');
+                      pushToast(fill(t('zones.drawer.approved'), { id: o.id }), 'good');
                       onTimelineMutate();
                     })
-                    .catch(() => pushToast('Approve failed — see audit log.', 'danger'));
+                    .catch(() => pushToast(t('zones.drawer.approveFailed'), 'danger'));
                 }}
               />
             ) : null}
             {allowedActions.includes('deny') ? (
               <Button
-                label="Deny"
+                label={t('zones.drawer.deny')}
                 iconName="x"
                 kind="danger"
                 size="sm"
@@ -614,10 +617,10 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
                       ...(reviewerId ? { reviewed_by: reviewerId } : {}),
                     })
                     .then(() => {
-                      pushToast(`Denied override ${o.id}`, 'warn');
+                      pushToast(fill(t('zones.drawer.denied'), { id: o.id }), 'warn');
                       onTimelineMutate();
                     })
-                    .catch(() => pushToast('Deny failed — see audit log.', 'danger'));
+                    .catch(() => pushToast(t('zones.drawer.denyFailed'), 'danger'));
                 }}
               />
             ) : null}
@@ -643,9 +646,9 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
     <div style={{ padding: '0 14px' }}>
       <div className="kpi-strip" style={{ marginTop: '4px' }}>
         <KPICard
-          label="Shipments today"
+          label={t('zones.drawer.perf.shipmentsToday')}
           value={fmtNumber(perf.shipments_today)}
-          delta={`${fmtNumber(perf.shipments_week)} this week`}
+          delta={fill(t('zones.drawer.perf.thisWeek'), { n: fmtNumber(perf.shipments_week) })}
           tone={perf.shipments_today > 0 ? 'info' : 'neutral'}
           spark={perf.spark_today}
         />
@@ -654,9 +657,9 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
             Replaces inline 0.9/0.8/0.85/0.7 magic numbers. Missing
             policy → neutral tone via consumer null-checks. */}
         <KPICard
-          label="On-time"
+          label={t('zones.drawer.perf.onTime')}
           value={perf.on_time_pct == null ? '—' : fmtPct(perf.on_time_pct, 0)}
-          delta="rolling 7-day"
+          delta={t('zones.drawer.perf.rolling')}
           tone={
             perf.on_time_pct == null
               ? 'neutral'
@@ -672,9 +675,9 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
           spark={perf.spark_week}
         />
         <KPICard
-          label="Capacity saturation"
+          label={t('zones.drawer.perf.saturation')}
           value={fmtPct(perf.capacity_saturation_pct, 0)}
-          delta="vs declared cap"
+          delta={t('zones.drawer.perf.vsCap')}
           tone={
             zonePerformanceThresholds?.saturation_danger_min != null &&
             zonePerformanceThresholds?.saturation_warn_min != null
@@ -688,17 +691,17 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
         />
       </div>
 
-      <div className="section-eyebrow">Today · hourly</div>
+      <div className="section-eyebrow">{t('zones.drawer.perf.todayHourly')}</div>
       <div style={{ padding: '6px 6px 12px' }}>
         <Sparkline values={perf.spark_today} width={300} height={48} />
       </div>
-      <div className="section-eyebrow">Last 7 days</div>
+      <div className="section-eyebrow">{t('zones.drawer.perf.last7')}</div>
       <div style={{ padding: '6px 6px 12px' }}>
         <Sparkline values={perf.spark_week} width={300} height={48} />
       </div>
     </div>
   ) : (
-    <StateView kind="empty" hint="No performance metrics found for this zone yet." />
+    <StateView kind="empty" hint={t('zones.drawer.perf.empty')} />
   );
 
   const tabBtn = (
@@ -733,22 +736,22 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
         <CanonicalChip
           category="zone_status"
           value={zoneStatusOf(zone)}
-          labelOverride={`status: ${zoneStatusOf(zone)}`}
+          labelOverride={<>{t('zones.drawer.statusChip')} {t(`zones.status.${zoneStatusOf(zone)}`, zoneStatusOf(zone))}</>}
           className="mono"
         />
         {zone.color_token ? (
           <CanonicalChip
             category="zone_color_token"
             value={String(zone.color_token)}
-            labelOverride={`color: ${zone.color_token}`}
+            labelOverride={<>{t('zones.drawer.color')} <bdi>{String(zone.color_token)}</bdi></>}
             className="mono"
           />
         ) : (
-          <Chip label="color: —" kind="neutral" size="xs" className="mono" />
+          <Chip label={`${t('zones.drawer.color')} —`} kind="neutral" size="xs" className="mono" />
         )}
         {pendingCount > 0 ? (
           <Chip
-            label={`${pendingCount} pending override${pendingCount > 1 ? 's' : ''}`}
+            label={fill(t(pendingCount > 1 ? 'zones.drawer.pendingOther' : 'zones.drawer.pendingOne'), { n: pendingCount })}
             kind="danger"
             size="xs"
           />
@@ -756,11 +759,11 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
       </div>
 
       <div className="rail-tabs" role="tablist" style={{ padding: '0 14px' }}>
-        {tabBtn('profile', 'Profile')}
-        {tabBtn('districts', 'Districts', linkedDistricts.length)}
-        {tabBtn('branches', 'Branches', linkedBranches.length)}
-        {tabBtn('overrides', 'Overrides', zoneOverrides.length)}
-        {tabBtn('performance', 'Performance')}
+        {tabBtn('profile', t('zones.drawer.tabs.profile'))}
+        {tabBtn('districts', t('zones.drawer.tabs.districts'), linkedDistricts.length)}
+        {tabBtn('branches', t('zones.drawer.tabs.branches'), linkedBranches.length)}
+        {tabBtn('overrides', t('zones.drawer.tabs.overrides'), zoneOverrides.length)}
+        {tabBtn('performance', t('zones.drawer.tabs.performance'))}
       </div>
 
       <div className="rail-body">
@@ -777,7 +780,7 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
             <KvGrid rows={kvRows} onEdit={handleProfileEdit} />
             <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 14px 0' }}>
               <Button
-                label="Retire zone"
+                label={t('zones.drawer.retire')}
                 iconName="trash"
                 kind="danger"
                 size="sm"
@@ -791,7 +794,7 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
 
         {tab === 'districts' ? (
           linkedDistricts.length === 0 ? (
-            <StateView kind="empty" hint="No districts linked. Triage in operations." />
+            <StateView kind="empty" hint={t('zones.drawer.noDistricts')} />
           ) : (
             <div>
               <div
@@ -803,7 +806,7 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
                 }}
               >
                 <Button
-                  label="Add district"
+                  label={t('zones.drawer.addDistrict')}
                   iconName="plus"
                   kind="primary"
                   size="sm"
@@ -818,7 +821,7 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
                     );
                     const candidate = [...districtIndex.values()].find((d) => !linkedIds.has(d.id));
                     if (!candidate) {
-                      pushToast('All canonical districts are already linked.', 'info');
+                      pushToast(t('zones.drawer.allLinked'), 'info');
                       return;
                     }
                     addDistrictMut
@@ -827,14 +830,14 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
                         canonical_district_id: candidate.id,
                       })
                       .then(() => {
-                        pushToast(`Linked ${candidate.name} to ${zone.name}.`, 'good');
+                        pushToast(fill(t('zones.drawer.linkedTo'), { district: candidate.name, zone: zone.name }), 'good');
                         onTimelineMutate();
                       })
-                      .catch(() => pushToast('Add district failed — see audit log.', 'danger'));
+                      .catch(() => pushToast(t('zones.drawer.addFailed'), 'danger'));
                   }}
                 />
                 <Button
-                  label="Remove selected"
+                  label={t('zones.drawer.removeSelected')}
                   iconName="trash"
                   kind="ghost"
                   size="sm"
@@ -845,12 +848,12 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
                       (d) => zoneDistrictSelectionKeyOf(d) === selectedDistrictKey,
                     );
                     if (!target) {
-                      pushToast('Select a linked district to remove.', 'info');
+                      pushToast(t('zones.drawer.selectToRemove'), 'info');
                       return;
                     }
                     const districtId = zoneDistrictIdOf(target);
                     if (!districtId) {
-                      pushToast('Linked district missing canonical district id - cannot remove.', 'warn');
+                      pushToast(t('zones.drawer.missingDistrictId'), 'warn');
                       return;
                     }
                     removeDistrictMut
@@ -861,10 +864,10 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
                       })
                       .then(() => {
                         setSelectedDistrictKey(null);
-                        pushToast(`Unlinked district ${districtId}.`, 'warn');
+                        pushToast(fill(t('zones.drawer.unlinked'), { id: districtId }), 'warn');
                         onTimelineMutate();
                       })
-                      .catch(() => pushToast('Remove district failed — see audit log.', 'danger'));
+                      .catch(() => pushToast(t('zones.drawer.removeFailed'), 'danger'));
                   }}
                 />
               </div>
@@ -888,7 +891,7 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
 
         {tab === 'branches' ? (
           linkedBranches.length === 0 ? (
-            <StateView kind="empty" hint="No branches reference this zone yet." />
+            <StateView kind="empty" hint={t('zones.drawer.noBranches')} />
           ) : (
             <DataTable<BranchZoneRow>
               columns={branchColumns}
@@ -902,7 +905,7 @@ export function ZoneDrawerBody(props: ZoneDrawerBodyProps) {
 
         {tab === 'overrides' ? (
           overrideEvents.length === 0 ? (
-            <StateView kind="empty" hint="No override requests filed against this zone." />
+            <StateView kind="empty" hint={t('zones.drawer.noOverrides')} />
           ) : (
             <div data-testid="zone-override-timeline">
               <TimelineLog

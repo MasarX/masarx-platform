@@ -191,6 +191,8 @@ function readBaseline(dir = baselineDir) {
         return;
       }
       const [, rel, count] = match;
+      const expectedFile = path.join(path.dirname(rel), `literal-${path.basename(rel)}.txt`);
+      if (name !== expectedFile) problems.push(`${name}:${index + 1}: expected ${expectedFile} for ${rel}`);
       if (entries.has(rel)) problems.push(`baseline lists ${rel} twice (also in ${name})`);
       if (previous && rel < previous) problems.push(`${name}: baseline is not sorted at ${rel}`);
       previous = rel;
@@ -212,7 +214,7 @@ function check(current, baseline) {
     }
   }
   for (const rel of baseline.entries.keys()) {
-    if (!current.has(rel)) failures.push(`${rel}: no literals left; delete its baseline line`);
+    if (!current.has(rel)) failures.push(`${rel}: no literals left; delete its allowance file or row`);
   }
   return failures;
 }

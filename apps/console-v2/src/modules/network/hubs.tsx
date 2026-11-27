@@ -26,9 +26,11 @@ import { Button } from '@/components/Button';
 import { Chip } from '@/components/Chip';
 import { useCapability } from '@/lib/identity';
 import { CAP } from '@/lib/capabilities';
+import { useT } from '@/lib/i18n';
 
 export function HubsModule() {
   const navigate = useNavigate();
+  const t = useT();
   const canRead = useCapability(CAP.BRANCHES_READ);
 
   // Belt-and-braces: if `beforeLoad` redirect was disabled (replay / smoke
@@ -42,14 +44,14 @@ export function HubsModule() {
     return (
       <div className="page">
         <PageHeader
-          eyebrow="Network"
-          titleAccent="Hubs"
-          titlePlain="(deprecated)"
+          eyebrow={t('nav.network')}
+          titleAccent={t('modules.hubs.accent')}
+          titlePlain={t('hubs.deprecatedTitle')}
         />
         <StateView
           kind="denied"
           capability={CAP.BRANCHES_READ}
-          hint="You do not have permission to view hubs."
+          hint={t('hubs.denied')}
         />
       </div>
     );
@@ -58,20 +60,20 @@ export function HubsModule() {
   return (
     <div className="page">
       <PageHeader
-        eyebrow="Network"
-        titleAccent="Hubs"
-        titlePlain="(deprecated)"
+        eyebrow={t('nav.network')}
+        titleAccent={t('modules.hubs.accent')}
+        titlePlain={t('hubs.deprecatedTitle')}
         pills={[
           <Chip
             key="status"
-            label="deprecated"
+            label={t('hubs.deprecated')}
             kind="warn"
             size="xs"
             className="mono"
           />,
           <Chip
             key="canonical"
-            label="branches.type='hub'"
+            label={"branches.type='hub'" /* i18n-literal-ok: data model token */}
             kind="neutral"
             size="xs"
             className="mono"
@@ -81,19 +83,17 @@ export function HubsModule() {
       />
       <StateView
         kind="empty"
-        title="This surface moved"
+        title={t('hubs.moved.title')}
         hint={
           <>
-            The hub topology is canonical to{' '}
-            <code className="mono">public.branches</code> (
-            <code className="mono">branch_type = 'hub'</code>). Use the
-            Branches surface to manage hubs, depots, branches and drop-off
-            points from a single roster.
+            {t('hubs.moved.lead')}{' '}
+            <code className="mono">public.branches</code> ({/* i18n-literal-ok: table name */}
+            <code className="mono">branch_type = 'hub'</code>). {t('hubs.moved.body')}{/* i18n-literal-ok: column value */}
           </>
         }
         action={
           <Button
-            label="Open Branches"
+            label={t('hubs.moved.open')}
             iconName="right"
             kind="primary"
             onClick={() => {
