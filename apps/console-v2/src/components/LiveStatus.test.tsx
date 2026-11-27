@@ -12,17 +12,25 @@ const syncedAt = Date.UTC(2026, 10, 24, 9, 5);
 const make = (state: LiveState): LiveConnection => ({ state, syncedAt, pollMs: 30_000, retry: vi.fn() });
 
 const LABELS: Record<'en' | 'ar', Record<LiveState, string>> = {
-  en: { syncing: 'Syncing', live: 'Live', reconnecting: 'Reconnecting', offline: 'Offline', polling: 'Auto-refresh' },
+  en: {
+    syncing: 'Syncing',
+    live: 'Live',
+    reconnecting: 'Reconnecting',
+    offline: 'Offline',
+    polling: 'Auto-refresh',
+    'not-configured': 'Live refresh not configured',
+  },
   ar: {
     syncing: 'جارٍ المزامنة',
     live: 'مباشر',
     reconnecting: 'جارٍ إعادة الاتصال',
     offline: 'غير متصل',
     polling: 'تحديث تلقائي',
+    'not-configured': 'التحديث المباشر غير مهيأ',
   },
 };
 const RETRY = { en: 'Retry', ar: 'إعادة المحاولة' };
-const STATES: LiveState[] = ['syncing', 'live', 'reconnecting', 'offline', 'polling'];
+const STATES: LiveState[] = ['syncing', 'live', 'reconnecting', 'offline', 'polling', 'not-configured'];
 
 describe.each(['en', 'ar'] as const)('LiveChip (%s)', (locale) => {
   it.each(STATES)('%s: one status region with the state label', (state) => {
@@ -41,6 +49,12 @@ describe.each(['en', 'ar'] as const)('LiveChip (%s)', (locale) => {
       expect(label?.getAttribute('title')).not.toContain('{age}');
       expect(label?.querySelector('bdi')).toBeInTheDocument();
     }
+    if (state === 'not-configured') {
+      expect(chip.querySelector('.chip--danger')).toHaveAttribute(
+        'title', expect.stringContaining('ui_presentation_policy.live_refresh'),
+      );
+      expect(within(chip).getByRole('button', { name: locale === 'ar' ? 'تحديث' : 'Refresh' })).toBeInTheDocument();
+    }
   });
 
   it('offline shows the data time in an isolated bdi and retries on click', async () => {
@@ -54,7 +68,7 @@ describe.each(['en', 'ar'] as const)('LiveChip (%s)', (locale) => {
 });
 
 describe('StaleBanner and StaleLabel', () => {
-  it.each(['syncing', 'live', 'polling'] as const)('render nothing while %s', (state) => {
+  it.each(['syncing', 'live', 'polling', 'not-configured'] as const)('render nothing while %s', (state) => {
     renderWithProviders(
       <>
         <StaleBanner live={make(state)} />

@@ -14,6 +14,7 @@ const CHIP_KIND: Record<LiveState, string> = {
   reconnecting: 'warn',
   offline: 'danger',
   polling: 'neutral',
+  'not-configured': 'danger',
 };
 const DOT_CLASS: Record<LiveState, string> = {
   syncing: 'live-spinner',
@@ -21,6 +22,7 @@ const DOT_CLASS: Record<LiveState, string> = {
   reconnecting: 'dot dot--warn dot--hollow',
   offline: 'dot dot--danger',
   polling: 'dot',
+  'not-configured': 'dot dot--danger',
 };
 
 function isStale(state: LiveState) {
@@ -65,6 +67,12 @@ export function LiveChip({ live }: { live: LiveConnection }) {
   const { state, syncedAt } = live;
   const now = useNow(state === 'live' || state === 'reconnecting');
   const age = fmtAge(now - syncedAt);
+  const missingConfig = state === 'not-configured';
+  const title = state === 'live'
+    ? fill(liveT('connectedTitle'), { age })
+    : missingConfig
+      ? fill(liveT('missingPolicyTitle'), { key: 'ui_presentation_policy.live_refresh' })
+      : undefined;
   const detail =
     state === 'live'
       ? <bdi>{age}</bdi>
@@ -79,13 +87,15 @@ export function LiveChip({ live }: { live: LiveConnection }) {
     <span className="live-chip" data-testid="live-chip" data-state={state}>
       <span
         className={`chip chip--${CHIP_KIND[state]}`}
-        title={state === 'live' ? fill(liveT('connectedTitle'), { age }) : undefined}
+        title={title}
       >
         <span className={DOT_CLASS[state]} aria-hidden="true" />
         <span role="status">{liveT(`state.${state}`)}</span>
         {detail ? <span>{liveT('detailSeparator')} {detail}</span> : null}
       </span>
-      {isStale(state) ? <Button kind="ghost" label={t('common.retry')} onClick={live.retry} /> : null}
+      {missingConfig || isStale(state) ? (
+        <Button kind="ghost" label={t(missingConfig ? 'common.refresh' : 'common.retry')} onClick={live.retry} />
+      ) : null}
     </span>
   );
 }

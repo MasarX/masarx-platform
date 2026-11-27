@@ -9,6 +9,7 @@ const messages: CatalogShape<typeof English> = {
       reconnecting: 'جارٍ إعادة الاتصال',
       offline: 'غير متصل',
       polling: 'تحديث تلقائي',
+      'not-configured': 'التحديث المباشر غير مهيأ',
     },
     statusbar: {
       syncing: 'جارٍ مزامنة التحديثات المباشرة',
@@ -18,7 +19,8 @@ const messages: CatalogShape<typeof English> = {
       polling: 'تحديث تلقائي',
     },
     connectedTitle: 'متصل. آخر تغيير قبل {age}.',
-    detailSeparator: '·',
+    missingPolicyTitle: 'الإعداد {key} غير موجود أو غير صالح',
+    detailSeparator: '،',
     lastUpdate: 'آخر تحديث قبل {age}',
     dataFrom: 'البيانات من {time}',
     dataFromLabel: 'البيانات من {time}',

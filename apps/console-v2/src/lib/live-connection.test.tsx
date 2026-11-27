@@ -19,15 +19,17 @@ const config = { pollMs: 4_000, offlineAfterMs: 6_000, maxReconnects: 2, refetch
 const settingsKey = qk.resolveSettings('ui_presentation_policy');
 const routeKey = qk.completeList('route_runs');
 
-function configuredClient(liveRefresh: unknown = {
-  poll_interval_ms: config.pollMs,
-  offline_after_ms: config.offlineAfterMs,
-  max_reconnects: config.maxReconnects,
-  refetch_interval_ms: config.refetchMs,
+function configuredClient(policy: unknown = {
+  live_refresh: {
+    poll_interval_ms: config.pollMs,
+    offline_after_ms: config.offlineAfterMs,
+    max_reconnects: config.maxReconnects,
+    refetch_interval_ms: config.refetchMs,
+  },
 }) {
   const client = makeQueryClient();
   client.setQueryDefaults(settingsKey, { staleTime: Infinity });
-  client.setQueryData(settingsKey, { value: { live_refresh: liveRefresh } });
+  client.setQueryData(settingsKey, { value: policy });
   return client;
 }
 
@@ -251,10 +253,14 @@ describe('private live refresh', () => {
     read.mockRejectedValueOnce(new Error('read failed'));
     await act(async () => socket.status(1, 'SUBSCRIBED'));
     expect(chip).toHaveAttribute('data-state', 'reconnecting');
+    read.mockResolvedValue('retry data');
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })); });
     expect(chip).toHaveAttribute('data-state', 'syncing');
-    await act(async () => socket.status(2, 'SUBSCRIBED'));
     expect(read).toHaveBeenCalledTimes(3);
+    expect(queryClient.getQueryData(routeKey)).toBe('retry data');
+    await act(async () => socket.status(2, 'SUBSCRIBED'));
+    await act(async () => vi.advanceTimersByTimeAsync(config.refetchMs));
+    expect(read).toHaveBeenCalledTimes(4);
     expect(chip).toHaveAttribute('data-state', 'live');
     stop();
   });
@@ -267,14 +273,30 @@ describe('private live refresh', () => {
     const chip = screen.getByTestId('live-chip');
     act(() => socket.status(0, 'CHANNEL_ERROR'));
     expect(chip).toHaveAttribute('data-state', 'reconnecting');
-    act(() => socket.status(0, 'CHANNEL_ERROR'));
+    await act(async () => socket.status(0, 'CHANNEL_ERROR'));
     expect(chip).toHaveAttribute('data-state', 'polling');
     expect(socket.client.removeChannel).toHaveBeenCalledWith(socket.channel(0));
     await act(async () => vi.advanceTimersByTimeAsync(config.pollMs));
-    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledTimes(2);
     unmount();
     await act(async () => vi.advanceTimersByTimeAsync(config.pollMs));
-    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledTimes(2);
+  });
+
+  it('refetches missed changes on fallback before the first polling interval', async () => {
+    const socket = mockSocket();
+    const queryClient = configuredClient();
+    const read = vi.fn().mockResolvedValue('latest');
+    const observer = new QueryObserver(queryClient, { queryKey: routeKey, queryFn: read, staleTime: Infinity, initialData: 'old' });
+    const stop = observer.subscribe(() => undefined);
+    renderWithProviders(<Harness />, { queryClient, identity: tenant });
+
+    act(() => socket.status(0, 'CHANNEL_ERROR'));
+    expect(read).not.toHaveBeenCalled();
+    await act(async () => socket.status(0, 'CHANNEL_ERROR'));
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(queryClient.getQueryData(routeKey)).toBe('latest');
+    stop();
   });
 
   it('delivers heartbeats to two hooks and removes only the departing hook callback', async () => {
@@ -302,14 +324,39 @@ describe('private live refresh', () => {
     expect(screen.getByTestId('live-chip')).toHaveAttribute('data-state', 'offline');
   });
 
-  it('does not join or poll with an invalid policy', async () => {
+  it.each([
+    ['missing', {}],
+    ['invalid', { live_refresh: { poll_interval_ms: 0 } }],
+  ])('shows not configured and starts no automatic refresh with a %s policy', async (_name, policy) => {
     const socket = mockSocket();
-    const queryClient = configuredClient({ poll_interval_ms: 0 });
+    const queryClient = configuredClient(policy);
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
     renderWithProviders(<Harness />, { queryClient, identity: tenant, locale: 'en' });
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.getByTestId('live-chip')).toHaveAttribute('data-state', 'not-configured');
+    expect(screen.getByRole('status')).toHaveTextContent('Live refresh not configured');
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     await act(async () => vi.advanceTimersByTimeAsync(config.pollMs));
     expect(socket.client.channel).not.toHaveBeenCalled();
     expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the active topic data once by hand without a live policy', async () => {
+    const socket = mockSocket();
+    const queryClient = configuredClient({});
+    const read = vi.fn().mockResolvedValue('latest');
+    const otherKey = qk.list('organizations');
+    const observer = new QueryObserver(queryClient, { queryKey: routeKey, queryFn: read, staleTime: Infinity, initialData: 'old' });
+    const stop = observer.subscribe(() => undefined);
+    queryClient.setQueryData(otherKey, []);
+    renderWithProviders(<Harness />, { queryClient, identity: tenant, locale: 'en' });
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Refresh' })); });
+    expect(queryClient.getQueryData(routeKey)).toBe('latest');
+    expect(queryClient.getQueryState(otherKey)?.isInvalidated).toBe(false);
+    expect(screen.getByTestId('live-chip')).toHaveAttribute('data-state', 'not-configured');
+    await act(async () => vi.advanceTimersByTimeAsync(config.pollMs));
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(socket.client.channel).not.toHaveBeenCalled();
+    stop();
   });
 });
