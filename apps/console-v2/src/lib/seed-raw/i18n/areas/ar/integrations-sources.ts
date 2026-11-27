@@ -87,7 +87,6 @@ const messages: CatalogShape<typeof English> = {
       tokenStatusPending: 'تأكيد حالة الرمز قيد الانتظار',
       available: 'متاح',
       ruleCounts: '{active} نشطة · {total} إجمالًا',
-      drawerTitle: '{name} · {reference}',
       archivedCannotEdit: 'تُحفظ المصادر المؤرشفة للتدقيق ولا يمكن تعديلها.',
       archivedCannotRotate: 'تُحفظ المصادر المؤرشفة للتدقيق ولا يمكن تدوير رموزها.',
       archivedAlreadyDisabled: 'المصادر المؤرشفة معطّلة بالفعل للاستقبال.',

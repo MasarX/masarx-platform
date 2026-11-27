@@ -1244,7 +1244,7 @@ export function SourcesModule() {
       },
     ];
     drawer.open({
-      title: fill(t('integrationsSources.sourcesModule.drawerTitle'), { name: String(row.name), reference: operatorReference(t, 'source', row.source_identifier) }),
+      title: `${row.name} · ${operatorReference(t, 'source', row.source_identifier)}`,
       size: 'lg',
       deepLink: `/integrations/sources?focus=${row.id}`,
       body: (

@@ -85,7 +85,6 @@ const messages = {
       tokenStatusPending: 'Token status confirmation pending',
       available: 'Available',
       ruleCounts: '{active} active · {total} total',
-      drawerTitle: '{name} · {reference}',
       archivedCannotEdit: 'Archived sources are retained for audit and cannot be edited.',
       archivedCannotRotate: 'Archived sources are retained for audit and cannot rotate tokens.',
       archivedAlreadyDisabled: 'Archived sources are already disabled for intake.',

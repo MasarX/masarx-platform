@@ -149,7 +149,7 @@ describe('SourcesModule in Arabic', () => {
     expect(findUntranslated(readback)).toEqual([]);
 
     const title = document.querySelector('.drawer__title') as HTMLElement;
-    expect(title).toHaveTextContent(fill(AR.drawerTitle, { name: SOURCE_NAME, reference: sourceRef }));
+    expect(title).toHaveTextContent(`${SOURCE_NAME} · ${sourceRef}`);
     expect(findUntranslated(title, DATA)).toEqual([]);
 
     for (const text of [AR.tokenHmac, AR.available, fill(AR.ruleCounts, { active: '2', total: '3' })]) {
