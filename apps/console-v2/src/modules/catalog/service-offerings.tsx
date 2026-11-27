@@ -250,17 +250,18 @@ function effectiveStatus(row: ServiceOfferingRow): string {
   return archived ?? def ?? '';
 }
 
-function formatSla(minutes: number | undefined): string {
+function formatSla(
+  minutes: number | undefined,
+  fmtNumber: ReturnType<typeof useI18n>['fmtNumber'],
+): string {
   if (minutes == null) return '—';
   if (minutes >= 1440 && minutes % 1440 === 0) {
-    const days = Math.round(minutes / 1440);
-    return `${days} day${days === 1 ? '' : 's'}`;
+    return fmtNumber(minutes / 1440, { style: 'unit', unit: 'day', unitDisplay: 'long' });
   }
   if (minutes >= 60) {
-    const hrs = Math.round((minutes / 60) * 10) / 10;
-    return `${hrs}h`;
+    return fmtNumber(minutes / 60, { style: 'unit', unit: 'hour', unitDisplay: 'narrow', maximumFractionDigits: 1 });
   }
-  return `${minutes}m`;
+  return fmtNumber(minutes, { style: 'unit', unit: 'minute', unitDisplay: 'narrow' });
 }
 
 function serviceLevelOptionLabel(level: ServiceLevelRow, t: Translate): string {
@@ -736,8 +737,10 @@ export function ServiceOfferingsModule() {
                   <div style={{ display: 'grid', gap: 2, minWidth: 0 }}>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>{lv.name}</span>
                     <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-                      Rank {lv.metadata?.priority_rank ?? '?'} · SLA{' '}
-                      {formatSla(lv.metadata?.sla_minutes)}
+                      {fill(t('catalogServiceOfferings.serviceOfferingsModule.rankAndSla'), {
+                        rank: lv.metadata?.priority_rank == null ? '?' : fmtNumber(lv.metadata.priority_rank),
+                        duration: formatSla(lv.metadata?.sla_minutes, fmtNumber),
+                      })}
                     </span>
                   </div>
                   <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
@@ -758,7 +761,9 @@ export function ServiceOfferingsModule() {
                       if (!row) {
                         return (
                           <Chip
-                            label={`service_level_status/${statusValue ?? 'missing-lifecycle'} (missing)`}
+                            label={fill(t('catalogServiceOfferings.serviceOfferingsModule.serviceLevelStatusMissing'), {
+                              status: statusValue ?? 'missing-lifecycle',
+                            })}
                             kind="danger"
                             size="xs"
                           />
@@ -864,7 +869,7 @@ export function ServiceOfferingsModule() {
               id="new-lv-rank"
               type="number"
               className="dt-inline-input"
-              placeholder="e.g. 30"
+              placeholder={fill(t('catalogServiceOfferings.serviceOfferingsModule.exampleNumber'), { value: fmtNumber(30) })}
               value={draft.priority_rank}
               onChange={(e) => setDraft((s) => ({ ...s, priority_rank: e.target.value }))}
             />
@@ -873,7 +878,7 @@ export function ServiceOfferingsModule() {
               id="new-lv-sla-min"
               type="number"
               className="dt-inline-input"
-              placeholder="e.g. 1440"
+              placeholder={fill(t('catalogServiceOfferings.serviceOfferingsModule.exampleNumber'), { value: fmtNumber(1440, { useGrouping: false }) })}
               value={draft.sla_minutes}
               onChange={(e) => setDraft((s) => ({ ...s, sla_minutes: e.target.value }))}
             />
@@ -881,7 +886,9 @@ export function ServiceOfferingsModule() {
             <input
               id="new-lv-sla-label"
               className="dt-inline-input"
-              placeholder="e.g. 24h"
+              placeholder={fill(t('catalogServiceOfferings.serviceOfferingsModule.exampleSlaLabel'), {
+                duration: fmtNumber(24, { style: 'unit', unit: 'hour', unitDisplay: 'narrow' }),
+              })}
               value={draft.sla_label}
               onChange={(e) => setDraft((s) => ({ ...s, sla_label: e.target.value }))}
             />
@@ -1181,7 +1188,7 @@ export function ServiceOfferingsModule() {
               id="new-of-price"
               type="number"
               className="dt-inline-input"
-              placeholder="e.g. 35"
+              placeholder={fill(t('catalogServiceOfferings.serviceOfferingsModule.exampleNumber'), { value: fmtNumber(35) })}
               value={draft.base_price}
               onChange={(e) => setDraft((s) => ({ ...s, base_price: e.target.value }))}
             />
@@ -1197,7 +1204,7 @@ export function ServiceOfferingsModule() {
               id="new-of-weight"
               type="number"
               className="dt-inline-input"
-              placeholder="e.g. 30"
+              placeholder={fill(t('catalogServiceOfferings.serviceOfferingsModule.exampleNumber'), { value: fmtNumber(30) })}
               value={draft.max_weight_kg}
               onChange={(e) => setDraft((s) => ({ ...s, max_weight_kg: e.target.value }))}
             />
@@ -1633,7 +1640,9 @@ export function ServiceOfferingsModule() {
             <KPICard
               label={t('catalogServiceOfferings.serviceOfferingsModule.active')}
               value={fmtNumber(activeOfferings)}
-              delta={`${fmtNumber(totalOfferings - activeOfferings)} non-active`}
+              delta={fill(t('catalogServiceOfferings.serviceOfferingsModule.nonActiveOfferingCount'), {
+                count: fmtNumber(totalOfferings - activeOfferings),
+              })}
               tone={
                 catalogKpiThresholds?.active_offerings_min != null
                   ? activeOfferings >= catalogKpiThresholds.active_offerings_min
@@ -1806,7 +1815,9 @@ export function ServiceOfferingsModule() {
                       {m.base_price != null ? fmtCurrency(m.base_price, m.currency ?? tenantCurrencyIso ?? '') : '—'}
                     </span>
                     <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-3)' }}>
-                      base · up to {m.max_weight_kg ?? '?'} kg
+                      {fill(t('catalogServiceOfferings.serviceOfferingsModule.baseWeightLimit'), {
+                        weight: m.max_weight_kg == null ? '?' : fmtNumber(m.max_weight_kg),
+                      })}
                     </span>
                   </div>
 
@@ -1821,8 +1832,11 @@ export function ServiceOfferingsModule() {
                     <Chip
                       label={
                         <span className="mono">
-                          SLA · {formatSla(lv?.metadata?.sla_minutes)}
-                          {!lv ? ' (missing)' : ''}
+                          {lv
+                            ? fill(t('catalogServiceOfferings.serviceOfferingsModule.slaDuration'), {
+                                duration: formatSla(lv.metadata?.sla_minutes, fmtNumber),
+                              })
+                            : t('catalogServiceOfferings.serviceOfferingsModule.slaLevelMissing')}
                         </span>
                       }
                       kind={serviceLevelChipTone(lv)}
@@ -1949,7 +1963,7 @@ interface ProfileTabProps {
 }
 
 function ProfileTab({ offering, level, branch, zone, fmtDateTime, tenantCurrencyIso }: ProfileTabProps) {
-  const { t } = useI18n();
+  const { t, fmtNumber } = useI18n();
   const m = offering.metadata ?? {};
   const display = serviceOfferingDisplay(offering, level, branch, t);
   const displayStatus = lookupDisplayLabel('service_offering_status', effectiveStatus(offering));
@@ -1977,9 +1991,12 @@ function ProfileTab({ offering, level, branch, zone, fmtDateTime, tenantCurrency
     { key: 'currency', label: t('catalogServiceOfferings.profileTab.currency'), value: m.currency ?? '—', mono: true },
     {
       key: 'sla_minutes',
-      label: 'SLA',
+      label: t('catalogServiceOfferings.profileTab.sla'),
       value: level?.metadata?.sla_minutes != null
-        ? `${formatSla(level.metadata.sla_minutes)} (${level.metadata.sla_minutes} min)`
+        ? fill(t('catalogServiceOfferings.profileTab.slaDuration'), {
+            duration: formatSla(level.metadata.sla_minutes, fmtNumber),
+            minutes: fmtNumber(level.metadata.sla_minutes),
+          })
         : '—',
       mono: true,
     },
@@ -2024,14 +2041,20 @@ function PricingTab({ offering, fmtCurrency, canWrite, onEditPrice, tenantCurren
         <Chip
           label={
             <span className="mono">
-              base · {m.base_price != null ? fmtCurrency(m.base_price, m.currency ?? tenantCurrencyIso ?? '') : '—'}
+              {fill(t('catalogServiceOfferings.pricingTab.basePriceValue'), {
+                price: m.base_price != null ? fmtCurrency(m.base_price, m.currency ?? tenantCurrencyIso ?? '') : '—',
+              })}
             </span>
           }
           kind="info"
           size="xs"
         />
         <Chip
-          label={<span className="mono">currency · {m.currency ?? tenantCurrencyIso ?? '—'}</span>}
+          label={
+            <span className="mono">
+              {fill(t('catalogServiceOfferings.pricingTab.currencyValue'), { currency: m.currency ?? tenantCurrencyIso ?? '—' })}
+            </span>
+          }
           kind="neutral"
           size="xs"
         />
@@ -2086,7 +2109,7 @@ interface SlaTabProps {
 }
 
 function SlaTab({ offering, level, fmtDateTime }: SlaTabProps) {
-  const { t } = useI18n();
+  const { t, fmtNumber } = useI18n();
   if (!level) {
     return <StateView kind="empty" hint={t('catalogServiceOfferings.slaTab.serviceTierDetailsAre')} />;
   }
@@ -2097,7 +2120,10 @@ function SlaTab({ offering, level, fmtDateTime }: SlaTabProps) {
       key: 'sla_minutes',
       label: t('catalogServiceOfferings.slaTab.slaPromise'),
       value: lm.sla_minutes != null
-        ? `${formatSla(lm.sla_minutes)} (${lm.sla_minutes} minutes)`
+        ? fill(t('catalogServiceOfferings.slaTab.slaDuration'), {
+            duration: formatSla(lm.sla_minutes, fmtNumber),
+            minutes: fmtNumber(lm.sla_minutes),
+          })
         : '—',
       mono: true,
     },

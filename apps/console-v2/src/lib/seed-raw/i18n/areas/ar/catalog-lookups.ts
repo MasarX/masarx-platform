@@ -5,6 +5,12 @@ import type English from '../en/catalog-lookups';
 const messages: CatalogShape<typeof English> = {
   catalogLookups: {
     lookupsModule: {
+      addValueToCategory: 'أضف قيمة إلى فئة {category}.',
+      valueCount: 'عدد القيم: {count}',
+      ownerRoleMissing: 'دور المالك غير موجود: owner_role/{role}',
+      ownerRoleValue: 'المالك · {role}',
+      approvalPolicyMissing: 'سياسة الموافقة غير موجودة: approval_policy/{policy}',
+      approvalPolicyValue: 'الموافقة · {policy}',
       updatedLookupValueCategory: 'قيمة البحث المحدّثة {category}.{value} غير متاحة بعد.',
       requiredCatalogOptionsAre: 'خيارات الكتالوج المطلوبة غير موجودة',
       seedTheMissingOptions: 'أضف خيارات {missing} قبل إنشاء تعريف بحث جديد.',

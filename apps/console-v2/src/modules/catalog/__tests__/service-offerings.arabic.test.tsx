@@ -29,6 +29,7 @@ describe('ServiceOfferingsModule in Arabic', () => {
     expect(findUntranslated(title)).toEqual([]);
     const [kpi] = await screen.findAllByText(copy.totalOfferings);
     expect(findUntranslated(kpi)).toEqual([]);
+    expect(await screen.findByText(/^العروض غير النشطة: \p{Number}+$/u)).toBeInTheDocument();
     expect((await screen.findAllByText(copy.catalogAccessCatalogUpdate)).length).toBeGreaterThan(0);
   });
 

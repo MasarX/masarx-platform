@@ -3,6 +3,12 @@
 const messages = {
   catalogLookups: {
     lookupsModule: {
+      addValueToCategory: 'Add a value to {category}.',
+      valueCount: '{count} values',
+      ownerRoleMissing: 'owner_role/{role} (missing)',
+      ownerRoleValue: 'owner · {role}',
+      approvalPolicyMissing: 'approval_policy/{policy} (missing)',
+      approvalPolicyValue: 'approval · {policy}',
       updatedLookupValueCategory: 'Updated lookup value {category}.{value} was not available yet.',
       requiredCatalogOptionsAre: 'Required catalog options are missing',
       seedTheMissingOptions: 'Seed the {missing} options before creating a new lookup definition.',

@@ -218,7 +218,7 @@ function defaultLookupValueStatus(): string | undefined {
 }
 
 export function LookupsModule() {
-  const { t } = useI18n();
+  const { t, fmtNumber } = useI18n();
   const modal = useModal();
   const canRead = useCapability(CAP.LOOKUPS_READ);
   const createDefMut = useCreateLookupDefinition();
@@ -589,7 +589,7 @@ export function LookupsModule() {
       }
       return (
         <div>
-          <p className="state__hint">{`Add a value to ${category}.`}</p>
+          <p className="state__hint">{fill(t('catalogLookups.lookupsModule.addValueToCategory'), { category })}</p>
           <div
             style={{
               display: 'grid',
@@ -878,18 +878,18 @@ export function LookupsModule() {
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '0 4px 6px' }}>
                   <h2 style={{ margin: 0, fontSize: 16 }} className="mono">{active.category}</h2>
-                  <Chip label={`${active.values.length} values`} kind="neutral" size="xs" />
+                  <Chip label={fill(t('catalogLookups.lookupsModule.valueCount'), { count: fmtNumber(active.values.length) })} kind="neutral" size="xs" />
                   {active.owner_role ? (() => {
                     const tone = ownerTone(active.owner_role);
                     return tone == null
-                      ? <Chip label={`owner_role/${active.owner_role} (missing)`} kind="danger" size="xs" />
-                      : <Chip label={`owner · ${active.owner_role}`} kind={tone} size="xs" />;
+                      ? <Chip label={fill(t('catalogLookups.lookupsModule.ownerRoleMissing'), { role: active.owner_role })} kind="danger" size="xs" />
+                      : <Chip label={fill(t('catalogLookups.lookupsModule.ownerRoleValue'), { role: active.owner_role })} kind={tone} size="xs" />;
                   })() : null}
                   {active.approval_policy ? (() => {
                     const tone = approvalTone(active.approval_policy);
                     return tone == null
-                      ? <Chip label={`approval_policy/${active.approval_policy} (missing)`} kind="danger" size="xs" />
-                      : <Chip label={`approval · ${active.approval_policy}`} kind={tone} size="xs" />;
+                      ? <Chip label={fill(t('catalogLookups.lookupsModule.approvalPolicyMissing'), { policy: active.approval_policy })} kind="danger" size="xs" />
+                      : <Chip label={fill(t('catalogLookups.lookupsModule.approvalPolicyValue'), { policy: active.approval_policy })} kind={tone} size="xs" />;
                   })() : null}
                   {active.is_mutable === false ? (
                     <Chip label={t('catalogLookups.lookupsModule.systemManaged2')} kind="warn" size="xs" />
