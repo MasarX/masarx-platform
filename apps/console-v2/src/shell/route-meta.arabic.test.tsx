@@ -9,7 +9,8 @@ vi.mock('@tanstack/react-router', async () => {
 import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { ROUTE_TITLES, buildRouteBreadcrumbs, buildRouteHead } from '@/lib/route-meta';
-import { en, ar } from '@/lib/seed-raw/i18n/areas/routes';
+import en from '@/lib/seed-raw/i18n/areas/en/routes';
+import ar from '@/lib/seed-raw/i18n/areas/ar/routes';
 import { Topbar } from './Topbar';
 
 const IDENTITY = {

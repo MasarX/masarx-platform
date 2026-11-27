@@ -281,7 +281,7 @@ test('fails closed on invalid JSON without publishing the response body or query
 });
 
 test.each([
-  ['HTTP error', new Response(null, { status: 503 }), 'GitHub API returned HTTP 503 for /git/ref/heads/main'],
+  ['HTTP error', new Response(null, { status: 500 }), 'GitHub API returned HTTP 500 for /git/ref/heads/main'],
   ['missing main ref', new Response(null, { status: 404 }), 'GitHub API returned HTTP 404 for /git/ref/heads/main'],
   ['malformed main SHA', Response.json({ object: { sha: [tip] } }), 'Invalid main tip'],
   ['network error', null, 'Connection failed for [redacted]'],

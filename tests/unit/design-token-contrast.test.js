@@ -4,6 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { readSharedUiTokenCss } = require('../../scripts/frontend/landing-shared-tokens');
 
 const ROOT = path.join(__dirname, '..', '..');
 const TEXT = 4.5;
@@ -23,9 +24,9 @@ function readBlock(css, selector) {
   return vars;
 }
 
-// Each theme is the cascade of its selectors, later blocks winning.
-function loadTheme(file, selectors) {
-  const css = fs.readFileSync(path.join(ROOT, file), 'utf8');
+// Each theme is the cascade of its selectors, later blocks winning. `file` may list several files in import order.
+function loadTheme(file, selectors, prefix = '') {
+  const css = prefix + [].concat(file).map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
   return Object.assign({}, ...selectors.map((s) => readBlock(css, s)));
 }
 
@@ -47,11 +48,24 @@ function oklchToRgb(l, c, h) {
   return lin.map((v) => clamp01(linearToSrgb(v)) * 255);
 }
 
+// A token every reference needs; a missing one fails with its name, never a fallback.
+function lookup(name, vars) {
+  if (vars[name] === undefined) throw new Error(`unknown token: ${name}`);
+  return vars[name];
+}
+
 // Returns [r, g, b, alpha] in 0-255 / 0-1.
 function parseColor(raw, vars) {
   const value = raw.replace(/\/\*.*?\*\//g, '').trim();
   const ref = value.match(/^var\((--[\w-]+)\)$/);
-  if (ref) return parseColor(vars[ref[1]], vars);
+  if (ref) return parseColor(lookup(ref[1], vars), vars);
+  // rgb(var(--ui-*)): an alias of a shared UI RGB channel triplet (#162).
+  const alias = value.match(/^rgb\(\s*var\((--[\w-]+)\)\s*\)$/);
+  if (alias) {
+    const triplet = lookup(alias[1], vars).trim();
+    if (!/^[\d.]+\s+[\d.]+\s+[\d.]+$/.test(triplet)) throw new Error(`not an RGB channel triplet: ${alias[1]}`);
+    return parseColor(triplet, vars);
+  }
   let m = value.match(/^#([0-9a-f]{6})$/i);
   if (m) return [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16)).concat(1);
   m = value.match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+))?\s*\)$/);
@@ -76,7 +90,7 @@ function contrast(a, b) {
 // A color spec is a token name, optionally with `@alpha` for a tint, painted over `base` tokens.
 function resolve(spec, vars, base) {
   const [name, alpha] = spec.split('@');
-  const color = parseColor(vars[name] ?? name, vars);
+  const color = parseColor(name.startsWith('--') ? lookup(name, vars) : name, vars);
   const rgba = alpha === undefined ? color : [...color.slice(0, 3), +alpha];
   if (rgba[3] >= 1) return rgba.slice(0, 3);
   return over(rgba, base.length ? resolve(base[0], vars, base.slice(1)) : [255, 255, 255]);
@@ -84,11 +98,20 @@ function resolve(spec, vars, base) {
 
 const TAG_COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
 
+// #443: inside Console V2 the studio's ui-accent* utilities resolve to the Console V2 tokens its Tailwind config names.
+const STUDIO_CONFIG = 'apps/console-v2/tailwind.config.cjs';
+const STUDIO_ACCENT = Object.fromEntries(
+  [...fs.readFileSync(path.join(ROOT, STUDIO_CONFIG), 'utf8').matchAll(/"(ui-accent[\w-]*)":\s*v2\("(--[\w-]+)"\)/g)].map(
+    (m) => [m[1], m[2]]
+  )
+);
+const studio = (name) => STUDIO_ACCENT[name] ?? `missing ${name} in ${STUDIO_CONFIG}`;
+
 // [foreground, background stack (top first), minimum, where it is used]
 const SURFACES = [
   {
     name: 'shared UI',
-    file: 'packages/ui/src/styles.css',
+    file: ['packages/ui/src/tokens.css', 'packages/ui/src/styles.css'],
     themes: { light: [':root'], dark: [':root', ':root[data-theme="dark"]'] },
     pairs: [
       ['--ui-ink', ['--ui-surface'], TEXT, 'body text'],
@@ -125,11 +148,26 @@ const SURFACES = [
     ],
   },
   {
+    // The studio paints Console V2 accents over the shared --ui-* surfaces it imports. Accent text at 4.5:1 also covers its 3:1 focus ring and borders.
+    name: 'Console V2 label designer studio',
+    file: ['apps/console-v2/src/styles/tokens.css', 'packages/ui/src/tokens.css'],
+    themes: { light: [':root', ':root[data-theme="light"]'], dark: [':root', ':root[data-theme="dark"]'] },
+    pairs: [
+      ...['--ui-surface', '--ui-paper', '--paper'].map((bg) => [studio('ui-accent'), [bg], TEXT, `accent text and tabs on ${bg}`]),
+      [studio('ui-accent-ink'), [studio('ui-accent')], TEXT, 'solid button'],
+      [studio('ui-accent-ink'), [studio('ui-accent-hover')], TEXT, 'solid button hover'],
+      ...['0.5', '0.8'].map((a) => [studio('ui-accent'), [`${studio('ui-accent-soft')}@${a}`, '--ui-surface'], TEXT, `ghost button at ${a}`]),
+      ['--ui-ink', [studio('ui-accent-soft')], TEXT, 'accent badge and selected option'],
+    ],
+  },
+  {
     name: 'landing and public tracking',
     file: 'docs/marketing/landing-v2/app.css',
+    // The landing build prepends the shared --ui-* blocks to app.css; read the same text.
+    prefix: readSharedUiTokenCss(ROOT),
     themes: {
-      light: [':root', 'html[data-variant="ai"]', 'html[data-theme="light"]'],
-      dark: [':root', 'html[data-variant="ai"]', 'html[data-theme="dark"]'],
+      light: ['html', ':root', 'html[data-variant="ai"]', 'html[data-theme="light"]'],
+      dark: ['html', ':root', ':root[data-theme="dark"]', 'html[data-variant="ai"]', 'html[data-theme="dark"]'],
     },
     pairs: [
       ['--text', ['--bg'], TEXT, 'body text'],
@@ -138,13 +176,16 @@ const SURFACES = [
       ['--muted', ['--surface', '--bg'], TEXT, 'secondary card text'],
       ['--muted', ['--surface-strong'], TEXT, 'secondary text on solid surface'],
       ['--btn-primary-text', ['--brand'], TEXT, 'primary button'],
+      ['--brand-text', ['--surface', '--bg'], TEXT, 'brand text on card (#423)'],
+      ['--brand-text', ['--brand@0.03', '--surface', '--bg'], TEXT, 'brand heading on highlighted card (#423)'],
+      ['--brand-text', ['--surface-strong'], TEXT, 'brand text on solid surface'],
     ],
   },
 ];
 
 const cases = SURFACES.flatMap((s) =>
   Object.entries(s.themes).flatMap(([theme, selectors]) => {
-    const vars = loadTheme(s.file, selectors);
+    const vars = loadTheme(s.file, selectors, s.prefix);
     return s.pairs.map(([fg, bg, min, use]) => {
       const bgRgb = resolve(bg[0], vars, bg.slice(1));
       const ratio = contrast(resolve(fg, vars, bg), bgRgb);
@@ -160,7 +201,33 @@ describe('design token contrast (WCAG 2.2 AA)', () => {
     expect(oklchToRgb(0.6279554, 0.2576833, 29.2338851).map(Math.round)).toEqual([255, 0, 0]);
   });
 
+  test('an rgb(var()) alias resolves and a missing one fails with its name', () => {
+    const vars = { '--ui-paper': '250 251 254', '--bg': 'rgb(var(--ui-paper))', '--lost': 'rgb(var(--ui-missing))' };
+    expect(resolve('--bg', vars, [])).toEqual([250, 251, 254]);
+    expect(() => resolve('--lost', vars, [])).toThrow('unknown token: --ui-missing');
+    expect(() => resolve('--absent', vars, [])).toThrow('unknown token: --absent');
+  });
+
   test.each(cases.map((c) => [c.label, c]))('%s', (_label, { ratio, min }) => {
     expect(ratio).toBeGreaterThanOrEqual(min);
+  });
+
+  // #443: the Console V2 label designer must read the shared --ui-* tokens checked above, not a stale copy.
+  test('the label designer studio imports the shared tokens and redeclares none', () => {
+    const file = 'apps/console-v2/src/styles/label-designer-shared.css';
+    const css = fs.readFileSync(path.join(ROOT, file), 'utf8');
+    const imports = [...css.matchAll(/@import\s+['"]([^'"]+)['"]/g)].map((m) =>
+      path.relative(ROOT, path.resolve(path.dirname(path.join(ROOT, file)), m[1])).split(path.sep).join('/')
+    );
+    expect(imports).toContain('packages/ui/src/tokens.css');
+    expect(css.match(/--ui-[\w-]+\s*:/g)).toBeNull();
+    // Inside Console V2 its accent comes from Console V2's accent family, never the shared indigo.
+    expect(css.match(/var\(--ui-accent/g)).toBeNull();
+    expect(STUDIO_ACCENT).toEqual({
+      'ui-accent': '--accent',
+      'ui-accent-hover': '--accent-ink',
+      'ui-accent-ink': '--ink-inv',
+      'ui-accent-soft': '--accent-soft',
+    });
   });
 });

@@ -1,3 +1,5 @@
+const os = require('node:os');
+const path = require('node:path');
 const {
   buildInstallArgs,
   shouldUseWithDeps,
@@ -143,8 +145,9 @@ describe('install-playwright-chromium', () => {
   });
 
   test('resolves the supplied browser cache without leaking process state', () => {
+    const cachePath = path.join(os.tmpdir(), `ms-playwright-${process.pid}`);
     const processEnv = {
-      PLAYWRIGHT_BROWSERS_PATH: '/home/masarx/.cache/ms-playwright',
+      PLAYWRIGHT_BROWSERS_PATH: cachePath,
     };
     const status = detectChromiumAvailability({
       sourceEnv: { PLAYWRIGHT_BROWSERS_PATH: '/ms-playwright' },
@@ -162,7 +165,7 @@ describe('install-playwright-chromium', () => {
 
     expect(status.executablePath).toBe('/ms-playwright/chromium-1234/chrome-linux64/chrome');
     expect(processEnv.PLAYWRIGHT_BROWSERS_PATH)
-      .toBe('/home/masarx/.cache/ms-playwright');
+      .toBe(cachePath);
     expect(() => detectChromiumAvailability({
       sourceEnv: { PLAYWRIGHT_BROWSERS_PATH: '/ms-playwright' },
       processEnv,
@@ -171,7 +174,7 @@ describe('install-playwright-chromium', () => {
       },
     })).toThrow('lookup failed');
     expect(processEnv.PLAYWRIGHT_BROWSERS_PATH)
-      .toBe('/home/masarx/.cache/ms-playwright');
+      .toBe(cachePath);
   });
 
   test('classifies missing self-hosted Chromium as browser image drift', () => {

@@ -1,14 +1,9 @@
 const { Pool } = require('pg');
 const { randomUUID } = require('crypto');
+const { assertEnv } = require('../utils/test-env');
 
-const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL || (['postgresql',":","/","/",'postgres',":",'postgres',"@",'localhost',":",'54322',"/",'postgres'].join("")),
-});
-
-const rlsIntegrationEnabled = process.env.RUN_RLS_INTEGRATION_TESTS === 'true';
-const describeIfDb =
-  process.env.DATABASE_URL && rlsIntegrationEnabled ? describe : describe.skip;
+assertEnv(['DATABASE_URL'], 'sensitive configuration RLS');
+const pool = new Pool({ connectionString: process.env.DATABASE_URL.trim() });
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -177,7 +172,7 @@ async function createAddress(client, organizationId, clientId) {
   return addressId;
 }
 
-describeIfDb('RLS sensitive configuration coverage', () => {
+describe('RLS sensitive configuration coverage', () => {
   let client;
 
   beforeAll(async () => {

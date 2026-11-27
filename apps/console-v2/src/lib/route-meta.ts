@@ -4,12 +4,14 @@
 // Titles come from the routes catalog. `head()` runs during route resolution,
 // before context providers render, so callers pass `t` and English is the default.
 
-import { englishT, fill, type Translate } from './i18n';
-import { en as routeCatalog } from './seed-raw/i18n/areas/routes';
+import { fill, translateCatalog, type Translate } from './i18n-catalog';
+import routeCatalog from './seed-raw/i18n/areas/en/routes';
 import { trimTrailingSlashes } from './trim-trailing-slashes';
 
 /** English route titles; the Arabic ones live beside them in the routes catalog. */
 export const ROUTE_TITLES = routeCatalog.routes.titles;
+
+const translateRoute: Translate = (path, fallback) => translateCatalog(routeCatalog, path, fallback);
 
 export type RoutePath = keyof typeof ROUTE_TITLES;
 
@@ -40,7 +42,7 @@ function titleizeSegment(segment: string): string {
   return segment.replace(/[-_]/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
-export function buildRouteBreadcrumbs(pathname: string, t: Translate = englishT): RouteBreadcrumb[] {
+export function buildRouteBreadcrumbs(pathname: string, t: Translate = translateRoute): RouteBreadcrumb[] {
   const title = (route: RoutePath) => t(`routes.titles.${route}`, ROUTE_TITLES[route]);
   const [path = ''] = pathname.split(/[?#]/, 1);
   const normalized = trimTrailingSlashes(path) || '/';
@@ -79,7 +81,7 @@ export interface RouteHead {
  * Build the per-route head shape consumed by TanStack Router's `head` option.
  * Sets `<title>` + a description meta tag derived from the route's leaf title.
  */
-export function buildRouteHead(path: RoutePath, t: Translate = englishT): RouteHead {
+export function buildRouteHead(path: RoutePath, t: Translate = translateRoute): RouteHead {
   const page = t(`routes.titles.${path}`, ROUTE_TITLES[path]);
   return {
     meta: [
@@ -88,4 +90,3 @@ export function buildRouteHead(path: RoutePath, t: Translate = englishT): RouteH
     ],
   };
 }
-
