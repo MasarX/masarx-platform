@@ -33,6 +33,19 @@ const previewErrorCodes = new Set([
   'org_required', 'draft_not_found', 'template_missing', 'payload_missing',
 ]);
 
+// Supabase reports platform codes in sb-error-code. Some responses also carry a top-level code.
+// https://supabase.com/docs/guides/functions/error-codes
+const platformErrorCodes = new Set([
+  'EDGE_FUNCTION_ERROR', 'IDLE_TIMEOUT', 'WORKER_RESOURCE_LIMIT', 'WORKER_LIMIT',
+  'WORKER_ERROR', 'INVALID_RESPONSE_STATUS_CODE',
+  'UNAUTHORIZED_NO_AUTH_HEADER', 'UNAUTHORIZED_ASYMMETRIC_JWT', 'UNAUTHORIZED_LEGACY_JWT',
+  'UNAUTHORIZED_UNSUPPORTED_TOKEN_ALGORITHM', 'UNAUTHORIZED_INVALID_JWT_FORMAT',
+  'RATE_LIMIT_EXCEEDED', 'INVALID_URL', 'NOT_FOUND', 'NOT_FOUND_FUNCTION_BLOB',
+  'BOOT_ERROR', 'LOAD_FUNCTION_ERROR', 'LOAD_FUNCTION_METADATA_ERROR',
+  'LOAD_FUNCTION_INVALID_ENTRYPOINT_PATH_ERROR', 'LOAD_FUNCTION_UNBUNDLING_ERROR',
+]);
+const errorMediaTypes = new Set(['application/json', 'application/problem+json', 'text/plain', 'text/html']);
+
 class ProbeError extends Error {
   constructor(code) {
     super('DEV label probe failed');
@@ -83,6 +96,39 @@ async function jsonRequest(url, headers, code, method = 'GET', body) {
   throw new ProbeError(code);
 }
 
+async function describeRenderError(response) {
+  const body = await response.json().catch(() => null);
+  const { isRendererErrorClass, rendererInternalCode } =
+    await import('../../supabase/functions/label-renderer/error-response.mjs');
+  const errorCode = body?.error?.code;
+  const errorClass = body?.error?.class;
+  const rendererCode = previewErrorCodes.has(errorCode) || errorCode === rendererInternalCode
+    ? errorCode : 'unavailable';
+  const rendererClass = errorCode === rendererInternalCode && isRendererErrorClass(errorClass)
+    ? errorClass : 'unavailable';
+
+  const keys = body && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body) : [];
+  const rendererShape = keys.length && keys.every(key => /^[A-Za-z_]{1,32}$/.test(key))
+    ? keys.sort().join(',') : 'unavailable';
+  const platformCode = body?.code;
+  const platformHeaderCode = response.headers.get('sb-error-code');
+  const mediaType = response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
+  const handlerMarked = response.headers.get('x-masarx-edge-function') === 'label-renderer'
+    && response.headers.get('x-masarx-renderer-transport') === '1';
+
+  return [
+    'LABEL_PROBE_RENDER_ERROR',
+    `status=${response.status}`,
+    `renderer_code=${rendererCode}`,
+    `renderer_class=${rendererClass}`,
+    `renderer_shape=${rendererShape}`,
+    `renderer_platform_code=${platformErrorCodes.has(platformCode) ? platformCode : 'unavailable'}`,
+    `renderer_platform_header_code=${platformErrorCodes.has(platformHeaderCode) ? platformHeaderCode : 'unavailable'}`,
+    `renderer_content_type=${errorMediaTypes.has(mediaType) ? mediaType : 'unavailable'}`,
+    `renderer_handler=${handlerMarked ? 'present' : 'unavailable'}`,
+  ].join(' ');
+}
+
 async function renderPreview(send, wait = delay) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     let response;
@@ -106,19 +152,7 @@ async function renderPreview(send, wait = delay) {
     }
     if (status !== undefined) {
       if (status < 500 || status >= 600 || attempt === 2) {
-        const body = await response.json().catch(() => null);
-        const { isRendererErrorClass, rendererInternalCode } =
-          await import('../../supabase/functions/label-renderer/error-response.mjs');
-        const errorCode = body?.error?.code;
-        const errorClass = body?.error?.class;
-        const rendererCode = previewErrorCodes.has(errorCode) || errorCode === rendererInternalCode
-          ? errorCode : 'unavailable';
-        const rendererClass = errorCode === rendererInternalCode && isRendererErrorClass(errorClass)
-          ? errorClass : 'unavailable';
-        return {
-          code: EXIT.renderStatus,
-          diagnostic: `LABEL_PROBE_RENDER_ERROR status=${status} renderer_code=${rendererCode} renderer_class=${rendererClass}`,
-        };
+        return { code: EXIT.renderStatus, diagnostic: await describeRenderError(response) };
       }
       await response.body?.cancel().catch(() => {});
     }

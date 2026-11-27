@@ -5,6 +5,10 @@ const { join, resolve } = require('node:path');
 const { parse } = require('yaml');
 const { checkPreview, renderPreview, EXIT } = require('../../../scripts/deploy/dev-label-render-probe.cjs');
 
+const unavailableShape = ' renderer_shape=unavailable';
+const unavailablePlatform = ' renderer_platform_code=unavailable renderer_platform_header_code=unavailable';
+const unavailableMediaAndHandler = ' renderer_content_type=unavailable renderer_handler=unavailable';
+
 test('DEV label renderer verification runs after Edge deploy independently of the app deploys', () => {
   const { jobs } = parse(readFileSync(resolve(__dirname, '../../../.github/workflows/deploy.yml'), 'utf8'));
   const probe = jobs['label-render-probe'];
@@ -58,9 +62,13 @@ test('the DEV label probe requires HTTP 200, ok true and canonical base64 PDF by
 
 test.each([
   [[null, 503, 200], 0, [1000, 2000], null],
-  [[503, 502, 500], EXIT.renderStatus, [1000, 2000], 'LABEL_PROBE_RENDER_ERROR status=500 renderer_code=unavailable renderer_class=unavailable'],
+  [[503, 502, 500], EXIT.renderStatus, [1000, 2000],
+    'LABEL_PROBE_RENDER_ERROR status=500 renderer_code=unavailable renderer_class=unavailable'
+      + unavailableShape + unavailablePlatform + unavailableMediaAndHandler],
   [[null, null, null], EXIT.renderNetwork, [1000, 2000], null],
-  [[403], EXIT.renderStatus, [], 'LABEL_PROBE_RENDER_ERROR status=403 renderer_code=auth_required renderer_class=unavailable'],
+  [[403], EXIT.renderStatus, [],
+    'LABEL_PROBE_RENDER_ERROR status=403 renderer_code=auth_required renderer_class=unavailable'
+      + ' renderer_shape=error' + unavailablePlatform + unavailableMediaAndHandler],
 ])('DEV label probe handles renderer results %j with code %i and waits %j', async (statuses, code, waits, diagnostic) => {
   const pdf = Buffer.from('%PDF-1.7\n\n');
   const send = jest.fn();
@@ -69,6 +77,7 @@ test.each([
     if (status === null) send.mockRejectedValueOnce(new Error('fixture network failure'));
     else send.mockResolvedValueOnce({
       status,
+      headers: new Headers(),
       json: status === 500 ? async () => { throw new SyntaxError('fixture response is not JSON'); } : readError,
       text: async () => JSON.stringify({ ok: true, pdf_base64: pdf.toString('base64') }),
     });
@@ -85,11 +94,13 @@ test.each([
 test('DEV label probe reports only allowlisted renderer errors', async () => {
   const result = await renderPreview(async () => ({
     status: 400,
-    json: async () => ({ error: { code: 'unknown_code', class: '42501', message: 'fixture detail' } }),
+    headers: new Headers(),
+    json: async () => ({ code: 'unknown_platform_code', error: { code: 'unknown_code', class: '42501', message: 'fixture detail' } }),
   }));
   expect(result).toEqual({
     code: EXIT.renderStatus,
-    diagnostic: 'LABEL_PROBE_RENDER_ERROR status=400 renderer_code=unavailable renderer_class=unavailable',
+    diagnostic: 'LABEL_PROBE_RENDER_ERROR status=400 renderer_code=unavailable renderer_class=unavailable'
+      + ' renderer_shape=code,error' + unavailablePlatform + unavailableMediaAndHandler,
   });
 });
 
@@ -102,12 +113,80 @@ test.each([
   [42501, 'unavailable'],
   [undefined, 'unavailable'],
 ])('DEV label probe reports the safe class for %j', async (received, reported) => {
-  const result = await renderPreview(async () => ({
+  const result = await renderPreview(async () => Response.json({
+    error: { code: 'renderer_internal', class: received, message: 'fixture detail' },
+  }, {
     status: 500,
-    json: async () => ({ error: { code: 'renderer_internal', class: received, message: 'fixture detail' } }),
+    headers: {
+      'sb-error-code': 'EDGE_FUNCTION_ERROR',
+      'x-masarx-edge-function': 'label-renderer',
+      'x-masarx-renderer-transport': '1',
+    },
   }), async () => {});
   expect(result).toEqual({
     code: EXIT.renderStatus,
-    diagnostic: `LABEL_PROBE_RENDER_ERROR status=500 renderer_code=renderer_internal renderer_class=${reported}`,
+    diagnostic: `LABEL_PROBE_RENDER_ERROR status=500 renderer_code=renderer_internal renderer_class=${reported}`
+      + ' renderer_shape=error renderer_platform_code=unavailable'
+      + ' renderer_platform_header_code=EDGE_FUNCTION_ERROR renderer_content_type=application/json'
+      + ' renderer_handler=present',
+  });
+});
+
+test('DEV label probe distinguishes a platform JSON error from an application error', async () => {
+  const result = await renderPreview(async () => new Response(JSON.stringify({
+    message: 'fixture private detail', code: 'BOOT_ERROR',
+  }), {
+    status: 500,
+    headers: {
+      'content-type': 'Application/JSON; charset=utf-8',
+      'sb-error-code': 'LOAD_FUNCTION_ERROR',
+    },
+  }), async () => {});
+  expect(result).toEqual({
+    code: EXIT.renderStatus,
+    diagnostic: 'LABEL_PROBE_RENDER_ERROR status=500 renderer_code=unavailable renderer_class=unavailable'
+      + ' renderer_shape=code,message renderer_platform_code=BOOT_ERROR'
+      + ' renderer_platform_header_code=LOAD_FUNCTION_ERROR renderer_content_type=application/json'
+      + ' renderer_handler=unavailable',
+  });
+});
+
+test('DEV label probe retains platform header evidence when the body is not JSON', async () => {
+  const result = await renderPreview(async () => new Response('<p>fixture private detail</p>', {
+    status: 500,
+    headers: { 'content-type': 'text/html; charset=utf-8', 'sb-error-code': 'LOAD_FUNCTION_ERROR' },
+  }), async () => {});
+  expect(result).toEqual({
+    code: EXIT.renderStatus,
+    diagnostic: 'LABEL_PROBE_RENDER_ERROR status=500 renderer_code=unavailable renderer_class=unavailable'
+      + ' renderer_shape=unavailable renderer_platform_code=unavailable'
+      + ' renderer_platform_header_code=LOAD_FUNCTION_ERROR renderer_content_type=text/html'
+      + ' renderer_handler=unavailable',
+  });
+});
+
+test.each([
+  [null],
+  ['fixture private detail'],
+  [['fixture private detail']],
+  [{}],
+  [{ '': 'fixture private detail' }],
+  [{ 'bad-key': 'fixture private detail' }],
+  [{ ['a'.repeat(33)]: 'fixture private detail' }],
+  [{ 'message\n': 'fixture private detail' }],
+])('DEV label probe omits unsafe or absent JSON shape for %j', async (body) => {
+  const result = await renderPreview(async () => new Response(JSON.stringify(body), {
+    status: 400,
+    headers: {
+      'content-type': 'application/x-fixture; fixture=private',
+      'sb-error-code': 'fixture private detail',
+      'x-masarx-edge-function': 'label-renderer',
+      'x-masarx-renderer-transport': 'fixture private detail',
+    },
+  }));
+  expect(result).toEqual({
+    code: EXIT.renderStatus,
+    diagnostic: 'LABEL_PROBE_RENDER_ERROR status=400 renderer_code=unavailable renderer_class=unavailable'
+      + unavailableShape + unavailablePlatform + unavailableMediaAndHandler,
   });
 });
