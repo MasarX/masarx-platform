@@ -78,3 +78,31 @@ test.each([
     error.mockRestore();
   }
 });
+
+test('sweep reports the status and SQLSTATE of a read query under its own label', async () => {
+  const { randomUUID } = require('node:crypto');
+  const { provisionSweep } = await import('../../../scripts/deploy/dev-sweep-users.mjs');
+  const claims = Buffer.from(JSON.stringify({ role: 'service_role', ref: projectRef })).toString('base64url');
+  const serviceKey = `e30.${claims}.${randomBytes(16).toString('base64url')}`;
+  const json = value => new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } });
+  let queries = 0;
+  const request = jest.spyOn(global, 'fetch').mockImplementation(async url => {
+    if (url.endsWith('/config/auth')) return json({ external_email_enabled: true });
+    if (url.endsWith('/api-keys?reveal=true')) return json([{ name: 'service_role', api_key: serviceKey }]);
+    // The fixture write succeeds; the first role's identity read is refused.
+    if (++queries === 1) return json([{ organization_id: randomUUID(), sender_id: randomUUID() }]);
+    return new Response(JSON.stringify({ message: `ERROR:  42501: permission denied ${rowValue}` }), { status: 400 });
+  });
+  const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+  const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    await expect(provisionSweep(sweepEnv())).rejects.toBeDefined();
+    expect(request).toHaveBeenCalledTimes(4);
+    expect(error.mock.calls).toEqual([['identity_read_http_status=400'], ['identity_read_sqlstate=42501']]);
+    expect(JSON.stringify([...log.mock.calls, ...error.mock.calls])).not.toContain(rowValue);
+  } finally {
+    request.mockRestore();
+    log.mockRestore();
+    error.mockRestore();
+  }
+});
