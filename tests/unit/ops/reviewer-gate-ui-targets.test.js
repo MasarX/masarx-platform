@@ -1,3 +1,8 @@
+const { fixtureHost } = require('../../fixtures/builders/hosts');
+
+const consoleHost = fixtureHost('console', 'vercel.app');
+const portalHost = fixtureHost('portal', 'vercel.app');
+
 const {
   formatOutputs,
   parseCsv,
@@ -12,8 +17,8 @@ describe('reviewer-gate-ui-targets', () => {
   test('returns both impacted UI projects when URLs are present', () => {
     const result = resolveReviewerGateUiTargets({
       surfaceIds: 'db,console,portal',
-      consoleUrl: 'https://console-preview.vercel.app',
-      portalUrl: 'https://portal-preview.vercel.app',
+      consoleUrl: `https://${consoleHost}`,
+      portalUrl: `https://${portalHost}`,
     });
 
     expect(formatOutputs(result)).toEqual({

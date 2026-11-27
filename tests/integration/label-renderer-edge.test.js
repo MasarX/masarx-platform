@@ -6,6 +6,8 @@ const { removeStoragePaths } = require('../../scripts/utils/supabase-storage');
 const { skipIfMissing } = require('../utils/test-env');
 const { createWorkflowContext, clearWorkflowEngineContext } = require('./helpers/tenant-utils');
 const { fetchJsonWithRetry, truncateText } = require('./helpers/http');
+const { signedRendererHeaders } = require('./helpers/renderer-request');
+const { ensureStorageBucket } = require('./helpers/storage-admin');
 
 loadEnv();
 
@@ -34,26 +36,11 @@ if (isLocalEnv && !localEdgeEnabled) {
   test.skip('Skipping label-renderer edge e2e in local env (RUN_LOCAL_EDGE_TESTS!=true)', () => {});
 }
 
-// Token requirement (any-of)
-const SERVICE_TOKEN =
-  process.env.LABEL_RENDERER_DB_JWT ||
-  process.env.LABEL_RENDERER_TOKEN ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SERVICE_ROLE_KEY ||
-  process.env.EDGE_SUPABASE_SERVICE_ROLE_KEY ||
-  '';
 const STORAGE_ADMIN_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   process.env.SERVICE_ROLE_KEY ||
   process.env.EDGE_SUPABASE_SERVICE_ROLE_KEY ||
-  SERVICE_TOKEN ||
   '';
-if (!SERVICE_TOKEN) {
-  // eslint-disable-next-line no-console
-  console.warn('[test-skip] Skipping label-renderer edge e2e - missing service token');
-  // eslint-disable-next-line jest/no-disabled-tests
-  test.skip('Skipping label-renderer edge e2e due to missing token', () => {});
-}
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const { DATABASE_URL } = process.env;
@@ -62,7 +49,7 @@ const LABEL_BUCKET = process.env.LABEL_RENDER_BUCKET || process.env.LABEL_RENDER
 const pool = new Pool({ connectionString: DATABASE_URL });
 
 const shouldRunLabelEdge =
-  !coreMissing && labelsEdgeEnabled && (!isLocalEnv || localEdgeEnabled) && SERVICE_TOKEN;
+  !coreMissing && labelsEdgeEnabled && (!isLocalEnv || localEdgeEnabled) && STORAGE_ADMIN_KEY;
 
 if (!shouldRunLabelEdge) {
   // eslint-disable-next-line jest/no-disabled-tests
@@ -99,6 +86,7 @@ describe('Label renderer edge function', () => {
     const addressId = randomUUID();
     const shipmentId = randomUUID();
     const boxId = randomUUID();
+    const trackingNumber = `EDGE-${shipmentId.slice(0, 8)}`;
     const jobPurpose = 'primary';
     let workflowContext = null;
 
@@ -233,7 +221,7 @@ describe('Label renderer edge function', () => {
            now(),
            now()
          )`,
-        [shipmentId, orgId, clientId, `EDGE-${shipmentId.slice(0, 8)}`, addressId]
+        [shipmentId, orgId, clientId, trackingNumber, addressId]
       );
 
       await adminClient.query(
@@ -249,30 +237,14 @@ describe('Label renderer edge function', () => {
            $5,
            now()
          )`,
-        [boxId, shipmentId, orgId, clientId, `EDGEBOX:${Date.now()}`]
+        [boxId, shipmentId, orgId, clientId, `${trackingNumber}:1`]
       );
 
-      const providerSettings = {
-        version: 2,
-        providers: [
-          {
-            name: 'edge_integration',
-            mode: 'internal',
-            invoke_url: `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/label-renderer`,
-            invoke_secret: SERVICE_TOKEN,
-            timeout_ms: 20000,
-          },
-        ],
-      };
-
-      await upsertSettings(
-        'label_provider',
-        'global',
-        null,
-        providerSettings,
-        'edge integration label provider',
-        adminClient
-      );
+      await ensureStorageBucket({
+        supabaseUrl: SUPABASE_URL,
+        bucket: LABEL_BUCKET,
+        storageAdminKey: STORAGE_ADMIN_KEY,
+      });
 
       workflowContext = await createWorkflowContext(adminClient, {
         templateName: 'sys_label_generation_v1',
@@ -300,27 +272,16 @@ describe('Label renderer edge function', () => {
         snapshotRows[0].template_snapshot.renderer_config.blocks.filter((block) => block.type === 'barcode')
       ).toHaveLength(1);
 
+      const renderUrl = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/label-renderer`;
       const { resp, bodyText, json, jsonError } = await fetchJsonWithRetry(
-        `${SUPABASE_URL}/functions/v1/label-renderer`,
+        renderUrl,
         {
           method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${SERVICE_TOKEN}`,
-            ...(process.env.SUPABASE_ANON_KEY ? { apikey: process.env.SUPABASE_ANON_KEY } : {}),
-          },
+          headers: await signedRendererHeaders(renderUrl),
           body: JSON.stringify({ organization_id: orgId, job_id: jobId, lease_seconds: 60 }),
         },
-        { purpose: `label renderer edge ${jobId}` },
+        { attempts: 1, purpose: `label renderer edge ${jobId}` },
       );
-
-      if (resp.status === 503 || resp.status === 500) {
-        console.warn(
-          '[label-renderer] Edge runtime unavailable',
-          { status: resp.status, text: truncateText(bodyText) }
-        );
-        return;
-      }
 
       expect(resp.status).toBe(200);
       if (jsonError || !json) {

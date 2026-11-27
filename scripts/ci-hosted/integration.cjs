@@ -9,7 +9,7 @@ const inventoryRoot = 'tests/integration';
 const exceptionFile = 'config/ci/hosted-integration-exceptions.json';
 
 function integrationEdgeEnvironment(apiPort) {
-  const { buildEdgeDbJwtBundle } = require('../ops/workspace/edge-db-jwt.js');
+  const { buildEdgeDbJwtBundle, createEdgeDbJwt } = require('../ops/workspace/edge-db-jwt.js');
   if (!Number.isInteger(apiPort) || apiPort < 1024 || apiPort > 65535) throw new Error('Invalid local API port');
   const jwtSecret = randomBytes(32).toString('hex');
   const salt = randomBytes(32).toString('hex');
@@ -31,6 +31,10 @@ function integrationEdgeEnvironment(apiPort) {
     MARKETING_TURNSTILE_SECRET_KEY: require('../../supabase/functions/_shared/turnstile-local-test.mjs').LOCAL_MARKETING_TURNSTILE_TEST_SECRET,
     EDGE_REQUIRE_DB_JWT: '1',
     EDGE_INTERNAL_CALLER_ROLES: 'edge_api_gateway_role,edge_webhook_role,edge_api_caller_role,service_role',
+    LABEL_RENDERER_SIGNING_KEY: randomBytes(32).toString('hex'),
+    LABEL_RENDERER_GATEWAY_JWT: createEdgeDbJwt({
+      secret: jwtSecret, role: 'edge_renderer_gateway_role', ttlSec: 3600,
+    }),
     ...dbJwts,
   } };
 }
