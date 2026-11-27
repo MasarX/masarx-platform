@@ -1,0 +1,1 @@
+apps/console/app/integrations/plugins/[plugin_id]/versions/[version]/page.tsx 2

@@ -7,7 +7,7 @@ const path = require('path');
 const ts = require('typescript');
 
 const repoRoot = path.join(__dirname, '..', '..');
-const baselinePath = path.join(__dirname, 'i18n-literal-baseline.txt');
+const baselineDir = path.join(__dirname, 'i18n-literal-baseline');
 
 const SCAN_ROOTS = [
   'apps/console-v2/src',
@@ -171,24 +171,32 @@ function scanRepo(root = repoRoot) {
   return counts;
 }
 
-function readBaseline(file = baselinePath) {
+function readBaseline(dir = baselineDir) {
   const entries = new Map();
   const problems = [];
-  const raw = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-  let previous = '';
-  raw.split(/\r?\n/).forEach((line, index) => {
-    if (!line.trim() || line.startsWith('#')) return;
-    const match = /^(\S+) (\d+)$/.exec(line);
-    if (!match) {
-      problems.push(`baseline line ${index + 1} is not "<path> <count>"`);
-      return;
-    }
-    const [, rel, count] = match;
-    if (entries.has(rel)) problems.push(`baseline lists ${rel} twice`);
-    if (previous && rel < previous) problems.push(`baseline is not sorted at ${rel}`);
-    previous = rel;
-    entries.set(rel, Number(count));
-  });
+  const files = fs.existsSync(dir)
+    ? fs.readdirSync(dir, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.txt'))
+      .map((entry) => path.join(entry.parentPath, entry.name))
+      .sort()
+    : [];
+  for (const file of files) {
+    const name = path.relative(dir, file);
+    let previous = '';
+    fs.readFileSync(file, 'utf8').split(/\r?\n/).forEach((line, index) => {
+      if (!line.trim() || line.startsWith('#')) return;
+      const match = /^(\S+) (\d+)$/.exec(line);
+      if (!match) {
+        problems.push(`${name}:${index + 1}: expected "<path> <count>"`);
+        return;
+      }
+      const [, rel, count] = match;
+      if (entries.has(rel)) problems.push(`baseline lists ${rel} twice (also in ${name})`);
+      if (previous && rel < previous) problems.push(`${name}: baseline is not sorted at ${rel}`);
+      previous = rel;
+      entries.set(rel, Number(count));
+    });
+  }
   return { entries, problems };
 }
 
@@ -225,4 +233,4 @@ if (require.main === module) {
   process.exit(failures.length ? 1 : 0);
 }
 
-module.exports = { scanSource, listFiles, scanRepo, readBaseline, check, baselinePath, SCAN_ROOTS };
+module.exports = { scanSource, listFiles, scanRepo, readBaseline, check, SCAN_ROOTS };

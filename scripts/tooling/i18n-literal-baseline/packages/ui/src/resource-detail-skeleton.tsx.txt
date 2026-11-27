@@ -1,0 +1,1 @@
+packages/ui/src/resource-detail-skeleton.tsx 1
