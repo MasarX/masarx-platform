@@ -11,8 +11,8 @@ describe('verify-cloud-core deterministic toggle defaults', () => {
     expect(body).toContain("RUN_LIVE_WEBHOOK_TESTS: 'false'");
     expect(body).toContain("RUN_LABELS_WEBHOOK_TESTS: 'false'");
     expect(body).toContain("RUN_EDGE_E2E: 'false'");
-    expect(body).toContain("RUN_RLS_INTEGRATION_TESTS: 'false'");
-    expect(body).toContain("RUN_MATRIX_E2E: 'false'");
+    expect(body).not.toContain('RUN_RLS_INTEGRATION_TESTS');
+    expect(body).not.toContain('RUN_MATRIX_E2E');
     expect(body).toContain("RUN_LIVE_COMMS_TESTS: 'false'");
     expect(body).toContain("RUN_LIVE_3PL_TESTS: 'false'");
   });

@@ -33,6 +33,7 @@ const {
   loadSeedShipmentStatuses,
 } = require('./seed-lookup-values');
 const { companyId: VENDOR_COMPANY_ID, baseUrl: VENDOR_BASE_URL } = require('../../tests/fixtures/carrier/vendor-account.synthetic.json');
+const { DIALOG360_FIXTURE_BASE_URL } = require('../../tests/fixtures/builders/hosts');
 
 // Ensure ENV_FILE and other .env files are honoured so DATABASE_URL
 // is available when running from local-verify.
@@ -1127,7 +1128,7 @@ const providers = [
     type: 'comms',
     metadata: {
       channel: 'whatsapp',
-      base_url: 'https://waba-sandbox.360dialog.io'
+      base_url: DIALOG360_FIXTURE_BASE_URL
     }
   },
   {
@@ -1737,7 +1738,7 @@ async function seedWorkflowOrchestration(client) {
     dialog_provider AS (
         SELECT
             id,
-            COALESCE(metadata->>'base_url', 'https://waba-sandbox.360dialog.io') AS base_url
+            COALESCE(metadata->>'base_url', '${DIALOG360_FIXTURE_BASE_URL}') AS base_url
         FROM providers
         WHERE name = 'dialog360_whatsapp'
         LIMIT 1

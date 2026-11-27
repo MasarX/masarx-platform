@@ -1,7 +1,7 @@
 const { randomUUID } = require('crypto');
 const { Pool } = require('pg');
 const {
-  DATABASE_URL,
+  assertDatabaseUrl,
   grantSelectRecursive,
   createOrganization,
   createClient,
@@ -10,10 +10,9 @@ const {
   setAuthContext
 } = require('./helpers/tenant-utils');
 
-const pool = new Pool({ connectionString: DATABASE_URL });
-const rlsIntegrationEnabled = process.env.RUN_RLS_INTEGRATION_TESTS === 'true';
+const pool = new Pool({ connectionString: assertDatabaseUrl('Row-Level Security (RLS) Policies') });
 
-(rlsIntegrationEnabled ? describe : describe.skip)('Row-Level Security (RLS) Policies', () => {
+describe('Row-Level Security (RLS) Policies', () => {
   let client;
 
   beforeAll(async () => {

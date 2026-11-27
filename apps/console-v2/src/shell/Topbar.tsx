@@ -20,6 +20,10 @@ export interface TopbarProps {
   onToggleNotifs?: () => void;
   /** Open the user menu drawer. */
   onOpenUserMenu?: () => void;
+  /** Whether the sidenav drawer is open; the toggle shows only at phone width. */
+  navOpen?: boolean;
+  /** Toggle the sidenav (same state as the sidenav pin). */
+  onToggleNav?: () => void;
   /** Whether the bell should show an unread dot. */
   hasUnreadNotifs?: boolean;
   /** Optional override for breadcrumb segments. Falls back to deriving from path. */
@@ -41,13 +45,16 @@ export function Topbar({
   onOpenScopePalette,
   onToggleNotifs,
   onOpenUserMenu,
+  navOpen = false,
+  onToggleNav,
   hasUnreadNotifs = false,
   crumbs,
 }: TopbarProps) {
   const { user, scope } = useIdentity();
   const { locale, toggleLocale, t } = useI18n();
-  const { theme, density, setTheme, cycleDensity } = useTheme();
+  const { theme, density, cycleTheme, cycleDensity } = useTheme();
   const location = useLocation();
+  const themeLabel = t(`app.themeCycle.${theme}`);
 
   const initials = useMemo(() => initialsOf(user?.name ?? ''), [user?.name]);
   const role = user?.role ?? 'user';
@@ -67,6 +74,18 @@ export function Topbar({
 
   return (
     <header className="topbar" role="banner">
+      {onToggleNav ? (
+        <button
+          className="icon-btn topbar__nav-toggle"
+          type="button"
+          aria-label={t('shell.topbar.navigation')}
+          aria-expanded={navOpen}
+          aria-controls="primary-nav"
+          onClick={onToggleNav}
+        >
+          <Icon name="list" size={16} />
+        </button>
+      ) : null}
       <div className="topbar__brand" aria-label={t('shell.topbar.brandLabel')}>
         <span className="brand-mark" aria-hidden="true">
           <svg viewBox="0 0 20 20" width={18} height={18}>
@@ -172,9 +191,9 @@ export function Topbar({
         <button
           className="icon-btn"
           type="button"
-          aria-label={t('shell.topbar.toggleTheme')}
-          aria-pressed={theme === 'dark'}
-          onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+          aria-label={themeLabel}
+          title={themeLabel}
+          onClick={cycleTheme}
         >
           <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />

@@ -1,4 +1,5 @@
 {
+  "use_api_bundle_limit_bytes": 5000000,
   "functions": [
     {
       "name": "api-caller",
@@ -109,6 +110,11 @@
     {
       "name": "tenant-user-invite",
       "auth_mode": "public_no_jwt",
+      "enabled": true
+    },
+    {
+      "name": "integration-plugin-studio",
+      "auth_mode": "supabase_jwt",
       "enabled": true
     }
   ]

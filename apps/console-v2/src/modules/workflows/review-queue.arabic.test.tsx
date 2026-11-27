@@ -5,7 +5,7 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { ReviewQueueModule } from '@/modules/workflows/review-queue';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/workflow-review-queue';
+import ar from '@/lib/seed-raw/i18n/areas/ar/workflow-review-queue';
 
 vi.mock('@/lib/supabase', () => ({
   getSupabaseClient: () => null,

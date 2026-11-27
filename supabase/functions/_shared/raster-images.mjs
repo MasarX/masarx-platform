@@ -21,13 +21,14 @@ export const isPngContainer = (bytes) => {
   return false;
 };
 
-export const isJpegContainer = (bytes) => {
+const scanJpeg = (bytes, onMetadata) => {
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return false;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let offset = 2;
   let hasFrame = false;
   let hasScan = false;
   while (offset < bytes.length) {
+    const segmentStart = offset;
     if (bytes[offset++] !== 0xff) return false;
     while (bytes[offset] === 0xff) offset += 1;
     if (offset >= bytes.length) return false;
@@ -38,6 +39,7 @@ export const isJpegContainer = (bytes) => {
     const length = view.getUint16(offset);
     if (length < 2 || length > bytes.length - offset) return false;
     const end = offset + length;
+    if ((marker >= 0xe0 && marker <= 0xef) || marker === 0xfe) onMetadata?.(segmentStart, end, marker, offset + 2);
     if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
       if (length < 8 || !bytes[offset + 7] || length !== 8 + 3 * bytes[offset + 7]) return false;
       hasFrame = true;
@@ -72,6 +74,8 @@ export const isJpegContainer = (bytes) => {
   }
   return false;
 };
+
+export const isJpegContainer = (bytes) => scanJpeg(bytes);
 
 export const MAX_LOGO_BYTES = 5 * 1024 * 1024;
 const boundedDimensions = ([width, height]) => width > 0 && height > 0 && width <= 4096 && height <= 4096;
@@ -164,4 +168,44 @@ export const validatedLogoContentType = (bytes, declared) => {
   }
   if (mime === 'image/webp' && webpDimensions(bytes)) return mime;
   return null;
+};
+
+// Rebuild from the validated image container, retaining only data needed to display the image.
+export const stripProofImageMetadata = (bytes, mime) => {
+  if (validatedLogoContentType(bytes, mime) !== mime) return null;
+  const parts = [];
+  if (mime === "image/png") {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    parts.push(bytes.subarray(0, 8));
+    for (let offset = 8; offset < bytes.length;) {
+      const end = offset + view.getUint32(offset) + 12;
+      const type = fourCC(bytes, offset + 4);
+      if (["IHDR", "PLTE", "tRNS", "IDAT", "IEND"].includes(type)) parts.push(bytes.subarray(offset, end));
+      offset = end;
+    }
+  } else if (mime === "image/jpeg") {
+    let start = 0;
+    if (!scanJpeg(bytes, (offset, end, marker, payload) => {
+      // A fixed-size Adobe APP14 segment supplies the JPEG color transform.
+      if (marker === 0xee && end - payload === 12 &&
+          String.fromCharCode(...bytes.subarray(payload, payload + 5)) === "Adobe") return;
+      // ICC APP2 color profiles may span several numbered segments.
+      if (marker === 0xe2 && end - payload > 14 &&
+          String.fromCharCode(...bytes.subarray(payload, payload + 12)) === "ICC_PROFILE\0" &&
+          bytes[payload + 12] > 0 && bytes[payload + 12] <= bytes[payload + 13]) return;
+      parts.push(bytes.subarray(start, offset));
+      start = end;
+    })) return null;
+    parts.push(bytes.subarray(start));
+  } else {
+    return null;
+  }
+
+  const result = new Uint8Array(parts.reduce((length, part) => length + part.length, 0));
+  let offset = 0;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.length;
+  }
+  return result;
 };

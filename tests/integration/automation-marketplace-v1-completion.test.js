@@ -1214,7 +1214,11 @@ describeIfDb('automation marketplace completion proof', () => {
     expect((await client.query('SELECT status FROM public.integration_plugin_versions WHERE id=$1 AND plugin_id=$2',[version,pluginCopy.installed_resource_id])).rows[0].status).toBe('approved');
     await client.query('SELECT public.integration_connection_rotate_v1($1,$2::jsonb)',[a.connection_id,JSON.stringify({custom_key:'sg13-new-synthetic'})]);
     await expectPgError(client,()=>client.query("SELECT public.integration_plugin_activate_v1($1,'tenant',$2)",[version,org.id]),/current-generation credential-presence check/);
-    const stale=await expectPgError(client,()=>client.query("SELECT public.integration_plugin_activate_core_v1($1,'tenant',$2)",[version,org.id]),/current-generation credential-presence check/);
+    const stale=await expectPgError(client,async()=>{
+      // Match the owner-only table guard proof while retaining the actor claims.
+      await client.query('RESET ROLE');
+      await client.query("SELECT public.integration_plugin_activate_core_v1($1,'tenant',$2)",[version,org.id]);
+    },/current-generation credential-presence check/);
     expect(stale.code).toBe('23514');
     await client.query('SELECT public.integration_connection_test_v1($1)',[a.connection_id]);
     await client.query("SELECT public.integration_plugin_activate_v1($1,'tenant',$2)",[version,org.id]);
