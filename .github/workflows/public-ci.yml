@@ -427,7 +427,45 @@ jobs:
             exit 1
           fi
           rm -- "$EDGE_FROZEN_WORKDIR/supabase/unexpected.ts"
-          node scripts/edge/verify-label-renderer-preview.cjs
+          if ! node scripts/edge/verify-label-renderer-preview.cjs; then
+            export DENO_DIR="$RUNNER_TEMP/label-renderer-map-cache"
+            readonly renderer_entry=supabase/functions/label-renderer/index.ts
+            deno bundle --frozen --lock=deno.lock --no-config --node-modules-dir=none \
+              --import-map supabase/functions/label-renderer/deno.json \
+              --platform=deno --packages=bundle --minify --keep-names --sourcemap=external \
+              --output "$RUNNER_TEMP/label-renderer-map.ts" "$renderer_entry"
+            cmp "$EDGE_FROZEN_WORKDIR/$renderer_entry" "$RUNNER_TEMP/label-renderer-map.ts"
+            node - "$RUNNER_TEMP/label-renderer-map.ts" <<'NODE'
+          const fs = require('node:fs');
+          const { SourceMap } = require('node:module');
+          const ts = require('typescript');
+          const file = process.argv[2];
+          const payload = JSON.parse(fs.readFileSync(file + '.map', 'utf8'));
+          const map = new SourceMap(payload);
+          const bundle = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+          const line = 123693;
+          const column = 9;
+          const entry = map.findEntry(line, column);
+          const token = ts.getTokenAtPosition(bundle, bundle.getPositionOfLineAndCharacter(line, column));
+          const source = entry.originalSource?.replaceAll('\\', '/').match(/(?:^|\/)((?:supabase\/functions|npm\/registry.npmjs.org)\/.+)$/)?.[1];
+          if (!source || !/^[-/@.\w]+$/.test(source)) throw new Error('Unmapped renderer frame');
+          const identifier = value => /^[$A-Za-z_][$\w]*$/.test(value ?? '') ? value : 'unavailable';
+          const compiled = ts.isIdentifier(token) ? identifier(token.getText(bundle)) : 'unavailable';
+          const originalIndex = payload.sources.indexOf(entry.originalSource);
+          const originalText = payload.sourcesContent?.[originalIndex];
+          const original = originalText
+            ? ts.createSourceFile(source, originalText, ts.ScriptTarget.Latest, true)
+            : null;
+          const originalToken = original && ts.getTokenAtPosition(original,
+            original.getPositionOfLineAndCharacter(entry.originalLine, entry.originalColumn));
+          const originalIdentifier = originalToken && ts.isIdentifier(originalToken)
+            ? identifier(originalToken.getText(original))
+            : 'unavailable';
+          console.error('LABEL_RENDERER_EDGE_MAP source=%s:%d:%d bundle_identifier=%s source_identifier=%s',
+            source, entry.originalLine + 1, entry.originalColumn + 1, compiled, originalIdentifier);
+          NODE
+            exit 1
+          fi
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs lint
