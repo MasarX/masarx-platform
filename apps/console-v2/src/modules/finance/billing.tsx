@@ -54,7 +54,7 @@ import { useDrawer, useModal, type OpenDrawerOptions } from '@/hooks/useOverlay'
 import { pushToast } from '@/components/toastStore';
 import { useIdentity, useCapability } from '@/lib/identity';
 import { CAP } from '@/lib/capabilities';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, useT, fill, englishT, type Translate } from '@/lib/i18n';
 import { agingBucket } from './_matcher';
 import { SeamLine } from './_shared';
 import { getLookups } from '@/lib/api';
@@ -438,12 +438,12 @@ function resolveEventTone(eventType: string): TimelineTone {
 
 // Drawer tabs — order matches the UX brief.
 type TabId = 'lines' | 'usage' | 'timeline' | 'subscription' | 'agreement';
-const TABS: ReadonlyArray<{ id: TabId; label: string }> = [
-  { id: 'lines', label: 'Lines' },
-  { id: 'usage', label: 'Backing usage events' },
-  { id: 'timeline', label: 'Payment timeline' },
-  { id: 'subscription', label: 'Subscription source' },
-  { id: 'agreement', label: 'Agreement terms' },
+const TABS: ReadonlyArray<{ id: TabId; labelKey: string }> = [
+  { id: 'lines', labelKey: 'billing.tabs.lines' },
+  { id: 'usage', labelKey: 'billing.tabs.usage' },
+  { id: 'timeline', labelKey: 'billing.tabs.timeline' },
+  { id: 'subscription', labelKey: 'billing.tabs.subscription' },
+  { id: 'agreement', labelKey: 'billing.tabs.agreement' },
 ];
 
 // Helper: canonical "is the invoice past its due date" check.
@@ -490,7 +490,7 @@ export function BillingModule() {
   // AGENTS.md §7 (CAPABILITY-GATED UI for reads): page-level fail-closed gate.
   const canRead = useCapability(CAP.BILLING_READ);
   const { scope, currentTenantId } = useIdentity();
-  const { fmtCurrency, fmtDateTime } = useI18n();
+  const { t, fmtCurrency, fmtDateTime } = useI18n();
   const drawer = useDrawer();
   const modal = useModal();
   const [openInvoiceId, setOpenInvoiceId] = useState<string | null>(null);
@@ -654,7 +654,7 @@ export function BillingModule() {
       ? inv.organization_id.trim()
       : null;
     if (invoiceTenantId && activeTenantId && invoiceTenantId !== activeTenantId) {
-      return "Switch to this invoice's tenant before changing billing lifecycle.";
+      return t('billing.reasons.switchTenant');
     }
     return undefined;
   }
@@ -666,7 +666,7 @@ export function BillingModule() {
   function editDraftInvoiceDisabledReason(inv: BillingInvoiceRow): string | undefined {
     const tenantReason = invoiceTenantActionDisabledReason(inv);
     if (tenantReason) return tenantReason;
-    return invoiceIsDraft(inv.status) ? undefined : 'Only draft invoices can be edited.';
+    return invoiceIsDraft(inv.status) ? undefined : t('billing.reasons.onlyDraftEdit');
   }
 
   function canSendInvoice(inv: BillingInvoiceRow): boolean {
@@ -678,7 +678,7 @@ export function BillingModule() {
     if (tenantReason) return tenantReason;
     return invoiceAllows(inv.status, 'allows_send')
       ? undefined
-      : 'This invoice status does not allow send.';
+      : t('billing.reasons.sendNotAllowed');
   }
 
   function collectibleAmountForInvoice(inv: BillingInvoiceRow): number {
@@ -693,10 +693,10 @@ export function BillingModule() {
     const tenantReason = invoiceTenantActionDisabledReason(inv);
     if (tenantReason) return tenantReason;
     if (!invoiceAllows(inv.status, 'allows_mark_paid')) {
-      return 'This invoice status does not allow payment recording.';
+      return t('billing.reasons.paymentNotAllowed');
     }
     if (collectibleAmountForInvoice(inv) <= 0) {
-      return 'This invoice has no outstanding amount to collect.';
+      return t('billing.reasons.nothingToCollect');
     }
     return undefined;
   }
@@ -713,10 +713,10 @@ export function BillingModule() {
     const tenantReason = invoiceTenantActionDisabledReason(inv);
     if (tenantReason) return tenantReason;
     if (!invoiceAllows(inv.status, 'allows_refund')) {
-      return 'This invoice status does not allow refund.';
+      return t('billing.reasons.refundNotAllowed');
     }
     if (refundableAmountForInvoice(inv) <= 0) {
-      return 'This invoice has no paid amount available to refund.';
+      return t('billing.reasons.nothingToRefund');
     }
     return undefined;
   }
@@ -730,15 +730,15 @@ export function BillingModule() {
     if (tenantReason) return tenantReason;
     return invoiceAllows(inv.status, 'allows_void')
       ? undefined
-      : 'Only draft invoices can be voided.';
+      : t('billing.reasons.onlyDraftVoid');
   }
 
   function bulkSendInvoicesDisabledReason(invoicesToSend: BillingInvoiceRow[]): string | undefined {
     if (invoicesToSend.some((inv) => Boolean(invoiceTenantActionDisabledReason(inv)))) {
-      return "Switch to each selected invoice's tenant before sending.";
+      return t('billing.reasons.bulkSwitchTenant');
     }
     return invoicesToSend.some((inv) => !canSendInvoice(inv))
-      ? 'Selected invoices include a status that cannot be sent.'
+      ? t('billing.reasons.bulkNotSendable')
       : undefined;
   }
 
@@ -767,7 +767,7 @@ export function BillingModule() {
                 : '';
         if (createdInvoiceId) setPendingCreatedInvoiceId(createdInvoiceId);
         modal.close();
-        pushToast(`Invoice draft created · ${res.invoice_number ?? createdInvoiceId}`, 'good');
+        pushToast(fill(t('billing.toast.draftCreated'), { id: res.invoice_number ?? createdInvoiceId }), 'good');
       },
       onError: (err: Error) => pushToast(err.message, 'danger'),
     });
@@ -775,14 +775,14 @@ export function BillingModule() {
 
   function sendInvoice(inv: BillingInvoiceRow) {
     if (!canSendInvoice(inv)) {
-      pushToast('This invoice status does not allow send', 'warn');
+      pushToast(t('billing.toast.sendNotAllowed'), 'warn');
       return;
     }
     sendInvoiceMutation.mutate(
       { billing_invoice_id: inv.id },
       {
         onSuccess: (res) =>
-          pushToast(`Invoice sent · ${res.invoice_number}`, 'good'),
+          pushToast(fill(t('billing.toast.sent'), { number: res.invoice_number }), 'good'),
         onError: (err: Error) => pushToast(err.message, 'danger'),
       },
     );
@@ -790,13 +790,13 @@ export function BillingModule() {
 
   function editDraftInvoice(inv: BillingInvoiceRow) {
     if (!canEditDraftInvoice(inv)) {
-      pushToast('Only draft invoices can be edited', 'warn');
+      pushToast(t('billing.toast.editNotAllowed'), 'warn');
       return;
     }
     const invoiceLines = allLines.filter((line) => line.invoice_id === inv.id);
     const lineBackedTotal = invoiceLines.reduce((sum, line) => sum + Number(line.line_total ?? 0), 0);
     modal.open({
-      title: `Edit draft · ${inv.invoice_number}`,
+      title: fill(t('billing.modal.editDraft'), { number: inv.invoice_number }),
       body: (
         <EditDraftForm
           invoice={inv}
@@ -806,7 +806,7 @@ export function BillingModule() {
             updateInvoiceMutation.mutate(args, {
               onSuccess: (res) => {
                 modal.close();
-                pushToast(`Invoice draft updated · ${res.billing_invoice_id}`, 'good');
+                pushToast(fill(t('billing.toast.draftUpdated'), { id: res.billing_invoice_id }), 'good');
               },
               onError: (err: Error) => pushToast(err.message, 'danger'),
             });
@@ -841,9 +841,9 @@ export function BillingModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="billing-payment-invoice">Invoice</label>
+            <label className="mono" htmlFor="billing-payment-invoice">{t('billing.form.invoice')}</label>
             <input id="billing-payment-invoice" className="dt-inline-input" value={inv.invoice_number} readOnly />
-            <label className="mono" htmlFor="billing-payment-amount">Payment amount</label>
+            <label className="mono" htmlFor="billing-payment-amount">{t('billing.form.paymentAmount')}</label>
             <input
               id="billing-payment-amount"
               data-testid="billing-payment-amount"
@@ -851,20 +851,20 @@ export function BillingModule() {
               value={fmtCurrency(outstandingAmount, inv.currency)}
               readOnly
             />
-            <label className="mono" htmlFor="billing-payment-reference">Payment reference</label>
+            <label className="mono" htmlFor="billing-payment-reference">{t('billing.form.paymentReference')}</label>
             <input
               id="billing-payment-reference"
               data-testid="billing-payment-reference"
               className="dt-inline-input"
               value={reference}
               onChange={(e) => setReference(e.target.value)}
-              placeholder="Bank receipt or cashier reference"
+              placeholder={t('billing.form.paymentReferencePlaceholder')}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Record payment"
+              label={t('billing.actions.recordPayment')}
               kind="primary"
               capability={CAP.BILLING_WRITE}
               disabled={!canSubmitPayment || markPaidMutation.isPending}
@@ -880,7 +880,7 @@ export function BillingModule() {
                       modal.close();
                       setOpenInvoiceTab('timeline');
                       pushToast(
-                        `Invoice paid · ${res.billing_invoice_id} · ${fmtCurrency(res.paid_amount, inv.currency)}`,
+                        fill(t('billing.toast.paid'), { id: res.billing_invoice_id, amount: fmtCurrency(res.paid_amount, inv.currency) }),
                         'good',
                       );
                     },
@@ -894,7 +894,7 @@ export function BillingModule() {
       );
     }
 
-    modal.open({ title: `Record payment · ${inv.invoice_number}`, body: <RecordPaymentForm /> });
+    modal.open({ title: fill(t('billing.modal.recordPayment'), { number: inv.invoice_number }), body: <RecordPaymentForm /> });
   }
 
   function recordRefund(inv: BillingInvoiceRow) {
@@ -924,11 +924,11 @@ export function BillingModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="billing-refund-invoice">Invoice</label>
+            <label className="mono" htmlFor="billing-refund-invoice">{t('billing.form.invoice')}</label>
             <input id="billing-refund-invoice" className="dt-inline-input" value={inv.invoice_number} readOnly />
-            <label className="mono" htmlFor="billing-refund-paid">Refundable amount</label>
+            <label className="mono" htmlFor="billing-refund-paid">{t('billing.form.refundableAmount')}</label>
             <input id="billing-refund-paid" className="dt-inline-input" value={fmtCurrency(refundableAmount, inv.currency)} readOnly />
-            <label className="mono" htmlFor="billing-refund-amount">Refund amount</label>
+            <label className="mono" htmlFor="billing-refund-amount">{t('billing.form.refundAmount')}</label>
             <input
               id="billing-refund-amount"
               data-testid="billing-refund-amount"
@@ -937,7 +937,7 @@ export function BillingModule() {
               value={amountText}
               onChange={(e) => setAmountText(e.target.value)}
             />
-            <label className="mono" htmlFor="billing-refund-reason">Refund reason</label>
+            <label className="mono" htmlFor="billing-refund-reason">{t('billing.form.refundReason')}</label>
             <textarea
               id="billing-refund-reason"
               data-testid="billing-refund-reason"
@@ -945,13 +945,13 @@ export function BillingModule() {
               rows={3}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="Required audit reason"
+              placeholder={t('billing.form.auditReasonPlaceholder')}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Record refund"
+              label={t('billing.actions.recordRefund')}
               kind="danger"
               capability={CAP.INVOICES_REFUND}
               disabled={!canSubmitRefund || refundInvoiceMutation.isPending}
@@ -967,7 +967,7 @@ export function BillingModule() {
                       modal.close();
                       setOpenInvoiceTab('timeline');
                       pushToast(
-                        `Invoice refunded · ${res.billing_invoice_id} · ${fmtCurrency(res.refunded_amount)}`,
+                        fill(t('billing.toast.refunded'), { id: res.billing_invoice_id, amount: fmtCurrency(res.refunded_amount) }),
                         'warn',
                       );
                     },
@@ -981,12 +981,12 @@ export function BillingModule() {
       );
     }
 
-    modal.open({ title: `Record refund · ${inv.invoice_number}`, body: <RefundInvoiceForm /> });
+    modal.open({ title: fill(t('billing.modal.recordRefund'), { number: inv.invoice_number }), body: <RefundInvoiceForm /> });
   }
 
   function voidInvoice(inv: BillingInvoiceRow) {
     if (!canVoidInvoice(inv)) {
-      pushToast('This invoice status does not allow void', 'warn');
+      pushToast(t('billing.toast.voidNotAllowed'), 'warn');
       return;
     }
     function VoidInvoiceForm() {
@@ -996,7 +996,7 @@ export function BillingModule() {
       return (
         <div>
           <p className="state__hint">
-            Void this draft invoice. The invoice and event ledger remain available for audit.
+            {t('billing.form.voidHint')}
           </p>
           <div
             style={{
@@ -1008,11 +1008,11 @@ export function BillingModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="billing-void-invoice">Invoice</label>
+            <label className="mono" htmlFor="billing-void-invoice">{t('billing.form.invoice')}</label>
             <input id="billing-void-invoice" className="dt-inline-input" value={inv.invoice_number} readOnly />
-            <label className="mono" htmlFor="billing-void-total">Total</label>
+            <label className="mono" htmlFor="billing-void-total">{t('billing.form.total')}</label>
             <input id="billing-void-total" className="dt-inline-input" value={fmtCurrency(inv.total_amount, inv.currency)} readOnly />
-            <label className="mono" htmlFor="billing-void-reason">Void reason</label>
+            <label className="mono" htmlFor="billing-void-reason">{t('billing.form.voidReason')}</label>
             <textarea
               id="billing-void-reason"
               data-testid="billing-void-reason"
@@ -1020,13 +1020,13 @@ export function BillingModule() {
               rows={3}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="Required audit reason"
+              placeholder={t('billing.form.auditReasonPlaceholder')}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Void invoice"
+              label={t('billing.actions.voidInvoice')}
               kind="danger"
               capability={CAP.BILLING_WRITE}
               disabled={!trimmedReason || voidInvoiceMutation.isPending}
@@ -1037,7 +1037,7 @@ export function BillingModule() {
                     onSuccess: (res) => {
                       modal.close();
                       setOpenInvoiceTab('timeline');
-                      pushToast(`Invoice voided · ${res.billing_invoice_id}`, 'warn');
+                      pushToast(fill(t('billing.toast.voided'), { id: res.billing_invoice_id }), 'warn');
                     },
                     onError: (err: Error) => pushToast(err.message, 'danger'),
                   },
@@ -1049,7 +1049,7 @@ export function BillingModule() {
       );
     }
 
-    modal.open({ title: `Void invoice · ${inv.invoice_number}`, body: <VoidInvoiceForm /> });
+    modal.open({ title: fill(t('billing.modal.voidInvoice'), { number: inv.invoice_number }), body: <VoidInvoiceForm /> });
   }
 
   function cancelSubscription(subscription: SubscriptionRow) {
@@ -1060,7 +1060,7 @@ export function BillingModule() {
       return (
         <div>
           <p className="state__hint">
-            Cancel this subscription. Existing invoices, events, and agreement context remain available for audit.
+            {t('billing.form.cancelHint')}
           </p>
           <div
             style={{
@@ -1072,28 +1072,28 @@ export function BillingModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="billing-cancel-subscription">Subscription</label>
+            <label className="mono" htmlFor="billing-cancel-subscription">{t('billing.form.subscription')}</label>
             <input
               id="billing-cancel-subscription"
               className="dt-inline-input"
               value={subscription.id}
               readOnly
             />
-            <label className="mono" htmlFor="billing-cancel-plan">Plan</label>
+            <label className="mono" htmlFor="billing-cancel-plan">{t('billing.form.plan')}</label>
             <input
               id="billing-cancel-plan"
               className="dt-inline-input"
               value={planLabelOf(subscription)}
               readOnly
             />
-            <label className="mono" htmlFor="billing-cancel-current-status">Current status</label>
+            <label className="mono" htmlFor="billing-cancel-current-status">{t('billing.form.currentStatus')}</label>
             <input
               id="billing-cancel-current-status"
               className="dt-inline-input"
               value={subscription.status}
               readOnly
             />
-            <label className="mono" htmlFor="billing-cancel-reason">Cancellation reason</label>
+            <label className="mono" htmlFor="billing-cancel-reason">{t('billing.form.cancellationReason')}</label>
             <textarea
               id="billing-cancel-reason"
               data-testid="billing-cancel-reason"
@@ -1101,13 +1101,13 @@ export function BillingModule() {
               rows={3}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="Required audit context"
+              placeholder={t('billing.form.auditContextPlaceholder')}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Cancel subscription"
+              label={t('billing.actions.cancelSubscription')}
               kind="danger"
               capability={CAP.BILLING_WRITE}
               disabled={!trimmedReason || cancelSubscriptionMutation.isPending}
@@ -1118,7 +1118,7 @@ export function BillingModule() {
                     onSuccess: (res) => {
                       modal.close();
                       setOpenInvoiceTab('subscription');
-                      pushToast(`Subscription canceled · ${res.subscription_id}`, 'warn');
+                      pushToast(fill(t('billing.toast.subscriptionCanceled'), { id: res.subscription_id }), 'warn');
                     },
                     onError: (err: Error) => pushToast(err.message, 'danger'),
                   },
@@ -1131,7 +1131,7 @@ export function BillingModule() {
     }
 
     modal.open({
-      title: `Cancel subscription · ${subscription.id}`,
+      title: fill(t('billing.modal.cancelSubscription'), { id: subscription.id }),
       body: <CancelSubscriptionForm />,
     });
   }
@@ -1172,14 +1172,14 @@ export function BillingModule() {
       <div className="page">
         <PageHeader
           moduleKey="billing"
-          eyebrow="Finance"
-          titleAccent="Billing"
-          titlePlain="— invoices & subscriptions"
+          eyebrow={t('billing.header.eyebrow')}
+          titleAccent={t('billing.header.accent')}
+          titlePlain={t('billing.header.plain')}
         />
         <StateView
           kind="denied"
           capability={CAP.BILLING_READ}
-          hint="You do not have permission to view billing (billing.read)."
+          hint={t('billing.states.denied')}
         />
       </div>
     );
@@ -1189,9 +1189,9 @@ export function BillingModule() {
       <div className="page">
         <PageHeader
           moduleKey="billing"
-          eyebrow="Finance"
-          titleAccent="Billing"
-          titlePlain="— invoices & subscriptions"
+          eyebrow={t('billing.header.eyebrow')}
+          titleAccent={t('billing.header.accent')}
+          titlePlain={t('billing.header.plain')}
         />
         <StateView kind="loading" />
       </div>
@@ -1202,14 +1202,14 @@ export function BillingModule() {
       <div className="page">
         <PageHeader
           moduleKey="billing"
-          eyebrow="Finance"
-          titleAccent="Billing"
-          titlePlain="— invoices & subscriptions"
+          eyebrow={t('billing.header.eyebrow')}
+          titleAccent={t('billing.header.accent')}
+          titlePlain={t('billing.header.plain')}
         />
         <StateView
           kind="error"
-          title="Billing policy is not configured"
-          hint="The overdue-aging setting is missing. Ask an administrator to finish billing policy setup before using this surface."
+          title={t('billing.states.policyMissingTitle')}
+          hint={t('billing.states.policyMissingHint')}
         />
       </div>
     );
@@ -1221,21 +1221,21 @@ export function BillingModule() {
   > = [
     {
       key: 'invoice_number',
-      label: 'Invoice #',
+      label: t('billing.columns.invoiceNumber'),
       mono: true,
       sortable: true,
       filterable: true,
     },
     {
       key: 'period',
-      label: 'Period',
+      label: t('billing.columns.period'),
       sortable: false,
       render: (_raw, row) =>
         `${String(row.period_start)} → ${String(row.period_end)}`,
     },
     {
       key: 'client_label',
-      label: 'Customer',
+      label: t('billing.columns.customer'),
       sortable: true,
       filterable: true,
       render: (_raw, row) => (
@@ -1249,7 +1249,7 @@ export function BillingModule() {
     },
     {
       key: 'total_amount',
-      label: 'Total',
+      label: t('billing.columns.total'),
       mono: true,
       align: 'right',
       format: 'currency',
@@ -1257,7 +1257,7 @@ export function BillingModule() {
     },
     {
       key: 'status',
-      label: 'Status',
+      label: t('billing.columns.status'),
       sortable: true,
       filterable: true,
       lookup: 'invoice_status',
@@ -1269,7 +1269,7 @@ export function BillingModule() {
         if (!statusRow) {
           return (
             <Chip
-              label={`invoice_status/${row.effective_status} (missing)`}
+              label={fill(t('billing.missing'), { ref: `invoice_status/${row.effective_status}` })}
               kind="danger"
               size="xs"
             />
@@ -1280,7 +1280,7 @@ export function BillingModule() {
     },
     {
       key: 'due_date',
-      label: 'Due',
+      label: t('billing.columns.due'),
       sortable: true,
       format: 'date',
       render: (_raw, row) => {
@@ -1289,10 +1289,10 @@ export function BillingModule() {
         const diffDays = Math.round((dueMs - now.getTime()) / 86_400_000);
         const rel =
           diffDays === 0
-            ? 'today'
+            ? t('billing.due.today')
             : diffDays > 0
-              ? `in ${diffDays}d`
-              : `${Math.abs(diffDays)}d ago`;
+              ? fill(t('billing.due.inDays'), { n: diffDays })
+              : fill(t('billing.due.daysAgo'), { n: Math.abs(diffDays) });
         return (
           <span title={String(row.due_date)}>
             <span className="mono">{String(row.due_date)}</span>
@@ -1303,19 +1303,17 @@ export function BillingModule() {
     },
     {
       key: 'aging',
-      label: 'Aging',
+      label: t('billing.columns.aging'),
       sortable: false,
       render: (_raw, row) => {
         if (!isOverdueDisplayRow(row, now)) return null;
         const a = agingBucket(String(row.due_date), now, agingSlaHours);
         return (
           <Chip
-            label={`overdue ${a.label}`}
+            label={fill(t('billing.aging.chip'), { age: a.label })}
             kind={a.tone === 'info' ? 'warn' : a.tone}
             size="xs"
-            title={`Past due by ${a.label}; overdue-aging policy is ${
-              agingSlaHours / 24
-            }d`}
+            title={fill(t('billing.aging.title'), { age: a.label, days: agingSlaHours / 24 })}
           />
         );
       },
@@ -1339,7 +1337,7 @@ export function BillingModule() {
       : [];
 
     return {
-      title: `Invoice · ${inv.invoice_number}`,
+      title: fill(t('billing.drawer.title'), { number: inv.invoice_number }),
       size: 'lg',
       onClose: () => setOpenInvoiceId(null),
       body: (
@@ -1362,7 +1360,7 @@ export function BillingModule() {
       footer: (
         <div style={{ display: 'flex', gap: '8px', width: '100%', flexWrap: 'wrap' }}>
           <Button
-            label="Edit draft"
+            label={t('billing.actions.editDraft')}
             iconName="edit"
             kind="ghost"
             capability={CAP.BILLING_WRITE}
@@ -1371,7 +1369,7 @@ export function BillingModule() {
             onClick={() => editDraftInvoice(inv)}
           />
           <Button
-            label="Send invoice"
+            label={t('billing.actions.sendInvoice')}
             iconName="upload"
             kind="ghost"
             capability={CAP.INVOICES_SEND}
@@ -1380,7 +1378,7 @@ export function BillingModule() {
             onClick={() => sendInvoice(inv)}
           />
           <Button
-            label="Record payment"
+            label={t('billing.actions.recordPayment')}
             iconName="wallet"
             kind="ghost"
             capability={CAP.BILLING_WRITE}
@@ -1389,7 +1387,7 @@ export function BillingModule() {
             onClick={() => recordPayment(inv)}
           />
           <Button
-            label="Record refund"
+            label={t('billing.actions.recordRefund')}
             iconName="refresh"
             kind="ghost"
             capability={CAP.INVOICES_REFUND}
@@ -1399,7 +1397,7 @@ export function BillingModule() {
           />
           <div style={{ flex: 1 }} />
           <Button
-            label="Void"
+            label={t('billing.actions.voidAction')}
             iconName="close"
             kind="danger"
             capability={CAP.BILLING_WRITE}
@@ -1421,14 +1419,14 @@ export function BillingModule() {
   const pills: ReactNode[] = [
     <ScopePill key="scope" scopeType="tenant" scopeId={activeTenantId ?? ''} />,
     <span key="seam" className="chip chip--xs">
-      Invoice closeout workflow
+      {t('billing.pills.workflow')}
     </span>,
     <Chip
       key="aging"
-      label={`aging SLA ${agingSlaHours / 24}d`}
+      label={fill(t('billing.aging.pill'), { days: agingSlaHours / 24 })}
       kind="neutral"
       size="xs"
-      title="Resolved overdue-aging policy from tenant settings"
+      title={t('billing.aging.pillTitle')}
     />,
   ];
 
@@ -1436,20 +1434,20 @@ export function BillingModule() {
     <div className="page">
       <PageHeader
         moduleKey="billing"
-        eyebrow="Finance"
-        titleAccent="Billing"
-        titlePlain="— invoices & subscriptions"
+        eyebrow={t('billing.header.eyebrow')}
+        titleAccent={t('billing.header.accent')}
+        titlePlain={t('billing.header.plain')}
         pills={pills}
         actions={[
           <Button
             key="new"
-            label="New invoice (draft)"
+            label={t('billing.actions.newInvoice')}
             iconName="plus"
             kind="primary"
             capability={CAP.BILLING_WRITE}
             onClick={() => {
               modal.open({
-                title: 'New invoice (draft)',
+                title: t('billing.actions.newInvoice'),
                 body: (
                   <NewDraftForm
                     activeTenantId={activeTenantId}
@@ -1468,28 +1466,28 @@ export function BillingModule() {
 
       <div className="kpi-strip" data-testid="billing-kpi-strip">
         <KPICard
-          label="Total outstanding"
+          label={t('billing.kpi.totalOutstanding')}
           value={fmtCurrency(totalOutstanding)}
           tone={overdueCount > 0 ? 'warn' : 'neutral'}
-          delta={`${overdueCount} overdue · ${decoratedInvoices.filter((r) => lookupRow('invoice_status', r.effective_status)?.metadata?.is_issued === true).length} issued`}
+          delta={fill(t('billing.kpi.outstandingDelta'), { overdue: overdueCount, issued: decoratedInvoices.filter((r) => lookupRow('invoice_status', r.effective_status)?.metadata?.is_issued === true).length })}
         />
         <KPICard
-          label="Overdue invoices"
+          label={t('billing.kpi.overdueInvoices')}
           value={String(overdueCount)}
           tone={overdueCount > 0 ? 'danger' : 'good'}
-          delta={overdueCount > 0 ? 'aging beyond due_date' : 'none past due'}
+          delta={overdueCount > 0 ? t('billing.kpi.overdueDelta') : t('billing.kpi.overdueNone')}
         />
         <KPICard
-          label="Paid this month"
+          label={t('billing.kpi.paidThisMonth')}
           value={fmtCurrency(paidThisMonth)}
           tone="good"
-          delta={`${paidInvoiceCount} paid · all-time`}
+          delta={fill(t('billing.kpi.paidDelta'), { n: paidInvoiceCount })}
         />
         <KPICard
-          label="Drafts"
+          label={t('billing.kpi.drafts')}
           value={String(draftCount)}
           tone="info"
-          delta="awaiting review"
+          delta={t('billing.kpi.draftsDelta')}
         />
       </div>
 
@@ -1505,13 +1503,13 @@ export function BillingModule() {
           onRowClick={openInvoiceDrawer}
           rowActions={[
             {
-              label: 'Open invoice',
+              label: t('billing.actions.openInvoice'),
               icon: 'eye',
               kind: 'primary',
               onClick: openInvoiceDrawer,
             },
             {
-              label: 'Edit draft',
+              label: t('billing.actions.editDraft'),
               icon: 'edit',
               capability: CAP.BILLING_WRITE,
               disabled: (inv) => Boolean(editDraftInvoiceDisabledReason(inv)),
@@ -1519,7 +1517,7 @@ export function BillingModule() {
               onClick: editDraftInvoice,
             },
             {
-              label: 'Send invoice',
+              label: t('billing.actions.sendInvoice'),
               icon: 'upload',
               capability: CAP.INVOICES_SEND,
               disabled: (inv) => Boolean(sendInvoiceDisabledReason(inv)),
@@ -1527,7 +1525,7 @@ export function BillingModule() {
               onClick: sendInvoice,
             },
             {
-              label: 'Record payment',
+              label: t('billing.actions.recordPayment'),
               icon: 'wallet',
               capability: CAP.BILLING_WRITE,
               disabled: (inv) => Boolean(recordPaymentDisabledReason(inv)),
@@ -1535,7 +1533,7 @@ export function BillingModule() {
               onClick: recordPayment,
             },
             {
-              label: 'Record refund',
+              label: t('billing.actions.recordRefund'),
               icon: 'refresh',
               capability: CAP.INVOICES_REFUND,
               disabled: (inv) => Boolean(refundInvoiceDisabledReason(inv)),
@@ -1543,7 +1541,7 @@ export function BillingModule() {
               onClick: recordRefund,
             },
             {
-              label: 'Void',
+              label: t('billing.actions.voidAction'),
               icon: 'close',
               kind: 'danger',
               capability: CAP.BILLING_WRITE,
@@ -1554,7 +1552,7 @@ export function BillingModule() {
           ]}
           bulkActions={[
             {
-              label: 'Send',
+              label: t('billing.actions.send'),
               icon: 'upload',
               kind: 'primary',
               capability: CAP.INVOICES_SEND,
@@ -1567,7 +1565,7 @@ export function BillingModule() {
                   {
                     onSuccess: (res) => {
                       pushToast(
-                        `Sent ${res.succeeded_count} invoice(s)${res.failed_count ? ` · ${res.failed_count} failed` : ''}`,
+                        fill(t('billing.toast.bulkSent'), { n: res.succeeded_count }) + (res.failed_count ? fill(t('billing.toast.bulkFailed'), { n: res.failed_count }) : ''),
                         res.failed_count ? 'warn' : 'good',
                       );
                     },
@@ -1619,6 +1617,7 @@ function BillingDrawerBody({
   initialTab = 'lines',
   onTabChange,
 }: BillingDrawerBodyProps) {
+  const t = useT();
   const [tab, setTab] = useState<TabId>(initialTab);
   useEffect(() => {
     setTab(initialTab);
@@ -1645,20 +1644,20 @@ function BillingDrawerBody({
         }}
       >
         <div style={{ flex: 1, minWidth: 160 }}>
-          <div className="eyebrow">Customer</div>
+          <div className="eyebrow">{t('billing.drawer.customer')}</div>
           <div className="serif" style={{ fontSize: '18px' }}>{invoice.client_label}</div>
           <div className="mono" style={{ color: 'var(--ink-3)', fontSize: '10.5px' }}>
             {invoice.client_id}
           </div>
         </div>
         <div style={{ minWidth: 120 }}>
-          <div className="eyebrow">Period</div>
+          <div className="eyebrow">{t('billing.drawer.period')}</div>
           <div className="mono" style={{ fontSize: '12px' }}>
             {invoice.period_start} → {invoice.period_end}
           </div>
         </div>
         <div style={{ minWidth: 120 }}>
-          <div className="eyebrow">Total</div>
+          <div className="eyebrow">{t('billing.drawer.total')}</div>
           <div className="mono" style={{ fontSize: '18px', fontWeight: 600 }}>
             {fmtCurrency(invoice.total_amount, invoice.currency)}
           </div>
@@ -1677,7 +1676,7 @@ function BillingDrawerBody({
             if (!statusRow) {
               return (
                 <Chip
-                  label={`invoice_status/${effectiveStatus} (missing)`}
+                  label={fill(t('billing.missing'), { ref: `invoice_status/${effectiveStatus}` })}
                   kind="danger"
                   size="xs"
                 />
@@ -1692,24 +1691,24 @@ function BillingDrawerBody({
             );
           })()}
           <span className="mono" style={{ color: 'var(--ink-3)', fontSize: '10.5px' }}>
-            due {invoice.due_date}
+            {t('billing.drawer.due')} <bdi>{invoice.due_date}</bdi>
           </span>
         </div>
       </div>
 
       {/* Tab strip */}
-      <div className="tabs" role="tablist" aria-label="Invoice drawer tabs">
-        {TABS.map((t) => (
+      <div className="tabs" role="tablist" aria-label={t('billing.tabs.ariaLabel')}>
+        {TABS.map((tabDef) => (
           <button
-            key={t.id}
+            key={tabDef.id}
             role="tab"
-            aria-selected={tab === t.id}
+            aria-selected={tab === tabDef.id}
             type="button"
-            className={`tabs__tab ${tab === t.id ? 'is-active' : ''}`}
-            onClick={() => selectTab(t.id)}
-            data-key={t.id}
+            className={`tabs__tab ${tab === tabDef.id ? 'is-active' : ''}`}
+            onClick={() => selectTab(tabDef.id)}
+            data-key={tabDef.id}
           >
-            {t.label}
+            {t(tabDef.labelKey)}
           </button>
         ))}
       </div>
@@ -1747,13 +1746,14 @@ function LinesTab({
   fmtCurrency: (n: number, ccy?: string) => string;
   currency: string;
 }) {
+  const t = useT();
   const columns: Array<DataTableColumn<BillingInvoiceLineRow>> = useMemo(
     () => [
-      { key: 'description', label: 'Description', sortable: true, filterable: true },
-      { key: 'qty', label: 'Qty', mono: true, align: 'right', sortable: true, type: 'number' },
+      { key: 'description', label: t('billing.lines.description'), sortable: true, filterable: true },
+      { key: 'qty', label: t('billing.qty'), mono: true, align: 'right', sortable: true, type: 'number' },
       {
         key: 'unit_price',
-        label: 'Unit price',
+        label: t('billing.lines.unitPrice'),
         mono: true,
         align: 'right',
         sortable: true,
@@ -1761,7 +1761,7 @@ function LinesTab({
       },
       {
         key: 'line_total',
-        label: 'Line total',
+        label: t('billing.lines.lineTotal'),
         mono: true,
         align: 'right',
         sortable: true,
@@ -1772,7 +1772,7 @@ function LinesTab({
       // key keeps React key uniqueness across columns.
       {
         key: 'metadata.source_event_ids',
-        label: 'Source events',
+        label: t('billing.lines.sourceEvents'),
         sortable: false,
         filterable: false,
         render: (_raw, row) => {
@@ -1790,24 +1790,23 @@ function LinesTab({
               title={ids.join(', ')}
               style={{ fontSize: '10.5px', color: 'var(--ink-3)' }}
             >
-              {ids.length} event{ids.length === 1 ? '' : 's'}
+              {fill(ids.length === 1 ? t('billing.lines.eventOne') : t('billing.lines.eventOther'), { n: ids.length })}
             </span>
           );
         },
       },
     ],
-    [fmtCurrency, currency],
+    [fmtCurrency, currency, t],
   );
 
   if (lines.length === 0) {
-    return <StateView kind="empty" hint="No lines on this invoice yet." />;
+    return <StateView kind="empty" hint={t('billing.lines.empty')} />;
   }
 
   return (
     <div data-testid="billing-drawer-lines-tab">
       <p className="state__hint" style={{ marginBottom: 8 }}>
-        Each line aggregates quantity and unit price, with lineage back to the
-        source usage activity.
+        {t('billing.lines.hint')}
       </p>
       <DataTable<BillingInvoiceLineRow>
         columns={columns}
@@ -1827,19 +1826,20 @@ function UsageTab({
   usage: UsageEventRow[];
   fmtDateTime: (iso: string | number | Date) => string;
 }) {
+  const t = useT();
   const columns: Array<DataTableColumn<UsageEventRow>> = useMemo(
     () => [
       {
         key: 'kind',
-        label: 'Kind',
+        label: t('billing.usage.kind'),
         sortable: true,
         filterable: true,
         lookup: 'usage_event_kind',
       },
-      { key: 'qty', label: 'Qty', mono: true, align: 'right', sortable: true, type: 'number' },
+      { key: 'qty', label: t('billing.qty'), mono: true, align: 'right', sortable: true, type: 'number' },
       {
         key: 'occurred_at',
-        label: 'Occurred',
+        label: t('billing.usage.occurred'),
         sortable: true,
         render: (raw) => fmtDateTime(String(raw)),
       },
@@ -1848,7 +1848,7 @@ function UsageTab({
       // per-projection key keeps React key uniqueness across columns.
       {
         key: 'metadata.subscription_id',
-        label: 'Subscription',
+        label: t('billing.usage.subscription'),
         mono: true,
         sortable: false,
         filterable: false,
@@ -1858,17 +1858,17 @@ function UsageTab({
         },
       },
     ],
-    [fmtDateTime],
+    [fmtDateTime, t],
   );
 
   if (usage.length === 0) {
-    return <StateView kind="empty" hint="No backing usage events resolved for this invoice." />;
+    return <StateView kind="empty" hint={t('billing.usage.empty')} />;
   }
 
   return (
     <div data-testid="billing-drawer-usage-tab">
       <p className="state__hint" style={{ marginBottom: 8 }}>
-        Filtered to the usage activity referenced by this invoice.
+        {t('billing.usage.hint')}
       </p>
       <DataTable<UsageEventRow>
         columns={columns}
@@ -1882,6 +1882,7 @@ function UsageTab({
 
 // ─── Tab: Payment timeline ───────────────────────────────────────────────
 function PaymentTimelineTab({ events }: { events: BillingInvoiceEventRow[] }) {
+  const t = useT();
   const timelineEvents: TimelineEvent[] = useMemo(
     () =>
       events.map((e) => {
@@ -1904,35 +1905,35 @@ function PaymentTimelineTab({ events }: { events: BillingInvoiceEventRow[] }) {
           at: occurredAt,
           type: `invoice.${e.event_type}`,
           actor: e.actor_user_id,
-          summary: humanizeEvent(e.event_type),
+          summary: humanizeEvent(e.event_type, t),
           tone,
           ...(detail !== undefined ? { detail } : {}),
         };
       }),
-    [events],
+    [events, t],
   );
 
   if (timelineEvents.length === 0) {
-    return <StateView kind="empty" hint="No payment-lifecycle events recorded yet." />;
+    return <StateView kind="empty" hint={t('billing.timeline.empty')} />;
   }
 
   return (
     <div data-testid="billing-drawer-timeline-tab">
       <p className="state__hint" style={{ marginBottom: 8 }}>
-        Invoice lifecycle history with tone mapping from the configured event types.
+        {t('billing.timeline.hint')}
       </p>
       <TimelineLog events={timelineEvents} />
     </div>
   );
 }
 
-function humanizeEvent(t: BillingInvoiceEventRow['event_type']): string {
+function humanizeEvent(eventType: BillingInvoiceEventRow['event_type'], t: Translate = englishT): string {
   // W34c — humanizeEvent now resolves canonically from
   // `billing_invoice_event_type` lookup_values metadata.label. Replaces the
   // inline switch literal which mirrored a category that already exists in
   // the canonical lookup SSOT.
-  const row = lookupRow('billing_invoice_event_type', t);
-  return row?.label ?? `billing_invoice_event_type/${t} (missing)`;
+  const row = lookupRow('billing_invoice_event_type', eventType);
+  return row?.label ?? fill(t('billing.missing'), { ref: `billing_invoice_event_type/${eventType}` });
 }
 
 // ─── Tab: Subscription source ────────────────────────────────────────────
@@ -1945,11 +1946,12 @@ function SubscriptionTab({
   fmtCurrency: (n: number, ccy?: string) => string;
   onCancelSubscription?: (subscription: SubscriptionRow) => void;
 }) {
+  const t = useT();
   if (!subscription) {
     return (
       <StateView
         kind="empty"
-        hint="No matching subscription resolved for this invoice (one-off or migrated invoice)."
+        hint={t('billing.subscription.empty')}
       />
     );
   }
@@ -1959,34 +1961,34 @@ function SubscriptionTab({
   const serviceOfferingId = serviceOfferingIdOf(subscription);
   const billingPeriod = billingPeriodOf(subscription);
   const rows: KvRow[] = [
-    { key: 'id', label: 'Subscription ID', value: subscription.id, mono: true },
-    { key: 'plan', label: 'Plan', value: planLabel },
+    { key: 'id', label: t('billing.subscription.id'), value: subscription.id, mono: true },
+    { key: 'plan', label: t('billing.subscription.plan'), value: planLabel },
     {
       key: 'service_offering_id',
-      label: 'Service offering',
+      label: t('billing.subscription.serviceOffering'),
       value: serviceOfferingId ?? '—',
       mono: true,
     },
-    { key: 'client_id', label: 'Client', value: subscription.client_id, mono: true },
-    { key: 'billing_period', label: 'Period', value: billingPeriod ?? '—' },
-    { key: 'started_at', label: 'Started', value: subscription.started_at, mono: true },
+    { key: 'client_id', label: t('billing.subscription.client'), value: subscription.client_id, mono: true },
+    { key: 'billing_period', label: t('billing.subscription.period'), value: billingPeriod ?? '—' },
+    { key: 'started_at', label: t('billing.subscription.started'), value: subscription.started_at, mono: true },
     {
       key: 'ended_at',
-      label: 'Ended',
+      label: t('billing.subscription.ended'),
       value: subscription.ended_at ?? '—',
       mono: true,
     },
     {
       key: 'base_fee',
-      label: 'Base fee',
+      label: t('billing.subscription.baseFee'),
       value: fmtCurrency(subscription.base_fee_sar),
       mono: true,
     },
-    { key: 'status', label: 'Status', value: subscription.status, lookup: 'subscription_status' },
+    { key: 'status', label: t('billing.subscription.status'), value: subscription.status, lookup: 'subscription_status' },
     ...(subscription.status_reason
       ? [{
           key: 'status_reason',
-          label: 'Status reason',
+          label: t('billing.subscription.statusReason'),
           value: subscription.status_reason,
         } satisfies KvRow]
       : []),
@@ -2013,19 +2015,19 @@ function SubscriptionTab({
   return (
     <div data-testid="billing-drawer-subscription-tab">
       <p className="state__hint" style={{ marginBottom: 8 }}>
-        Linked subscription record for this invoice.
+        {t('billing.subscription.hint')}
       </p>
       <KvGrid rows={rows} />
-      <h4 className="eyebrow" style={{ marginTop: 14 }}>Connected records</h4>
+      <h4 className="eyebrow" style={{ marginTop: 14 }}>{t('billing.subscription.connected')}</h4>
       <div className="card" style={{ fontSize: '11px', lineHeight: 1.6 }}>
-        <SeamLine k="Subscription" v="Source subscription record" />
-        <SeamLine k="Service" v="Service catalog offering" />
-        <SeamLine k="History" v="Subscription event ledger" />
+        <SeamLine k={t('billing.subscription.seamSubscription')} v={t('billing.subscription.seamSubscriptionValue')} />
+        <SeamLine k={t('billing.subscription.seamService')} v={t('billing.subscription.seamServiceValue')} />
+        <SeamLine k={t('billing.subscription.seamHistory')} v={t('billing.subscription.seamHistoryValue')} />
       </div>
       {isCancelable ? (
         <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
           <Button
-            label="Cancel subscription"
+            label={t('billing.actions.cancelSubscription')}
             iconName="close"
             kind="danger"
             capability={CAP.BILLING_WRITE}
@@ -2047,46 +2049,47 @@ function AgreementTab({
   terms: CommercialAgreementTermRow[];
   fmtDateTime: (iso: string | number | Date) => string;
 }) {
+  const t = useT();
   if (!agreement) {
     return (
       <StateView
         kind="empty"
-        hint="No commercial agreement resolved for this client (informal billing)."
+        hint={t('billing.agreement.empty')}
       />
     );
   }
   // W17-1 — `terms` (display label) resolves via canonical metadata/title/code
   // helpers; `value` (per-term display) resolves via metadata jsonb.
   const headerRows: KvRow[] = [
-    { key: 'id', label: 'Agreement ID', value: agreement.id, mono: true },
-    { key: 'terms', label: 'Terms', value: agreementLabelOf(agreement) },
-    { key: 'signed_at', label: 'Signed', value: agreement.signed_at, mono: true },
-    { key: 'expires_at', label: 'Expires', value: agreement.expires_at, mono: true },
-    { key: 'status', label: 'Status', value: agreement.status, lookup: 'agreement_status' },
+    { key: 'id', label: t('billing.agreement.id'), value: agreement.id, mono: true },
+    { key: 'terms', label: t('billing.agreement.terms'), value: agreementLabelOf(agreement) },
+    { key: 'signed_at', label: t('billing.agreement.signed'), value: agreement.signed_at, mono: true },
+    { key: 'expires_at', label: t('billing.agreement.expires'), value: agreement.expires_at, mono: true },
+    { key: 'status', label: t('billing.agreement.status'), value: agreement.status, lookup: 'agreement_status' },
   ];
-  const termRows: KvRow[] = terms.map((t) => ({
-    key: t.id,
-    label: t.category,
-    value: termValueOf(t),
+  const termRows: KvRow[] = terms.map((term) => ({
+    key: term.id,
+    label: term.category,
+    value: termValueOf(term),
     lookup: undefined,
   }));
   return (
     <div data-testid="billing-drawer-agreement-tab">
       <p className="state__hint" style={{ marginBottom: 8 }}>
-        Master commercial agreement with the active per-term sheet for this client.
+        {t('billing.agreement.hint')}
       </p>
       <KvGrid rows={headerRows} />
-      <h4 className="eyebrow" style={{ marginTop: 14 }}>Term sheet</h4>
+      <h4 className="eyebrow" style={{ marginTop: 14 }}>{t('billing.agreement.termSheet')}</h4>
       {termRows.length === 0 ? (
-        <p className="state__hint">No terms recorded for this agreement.</p>
+        <p className="state__hint">{t('billing.agreement.noTerms')}</p>
       ) : (
         <KvGrid rows={termRows} />
       )}
-      <h4 className="eyebrow" style={{ marginTop: 14 }}>Agreement coverage</h4>
+      <h4 className="eyebrow" style={{ marginTop: 14 }}>{t('billing.agreement.coverage')}</h4>
       <div className="card" style={{ fontSize: '11px', lineHeight: 1.6 }}>
-        <SeamLine k="Agreement" v="Commercial agreement" />
-        <SeamLine k="Term sheet" v="Agreement terms" />
-        <SeamLine k="Last reviewed" v={fmtDateTime(agreement.signed_at)} />
+        <SeamLine k={t('billing.agreement.seamAgreement')} v={t('billing.agreement.seamAgreementValue')} />
+        <SeamLine k={t('billing.agreement.seamTermSheet')} v={t('billing.agreement.seamTermSheetValue')} />
+        <SeamLine k={t('billing.agreement.seamLastReviewed')} v={fmtDateTime(agreement.signed_at)} />
       </div>
     </div>
   );
@@ -2139,6 +2142,7 @@ function NewDraftForm({
   }) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   // Empty default — operator must select a tenant client from the canonical
   // `clients` resource. No hardcoded tenant/client identifier and no free-text
   // invoice ownership.
@@ -2186,8 +2190,7 @@ function NewDraftForm({
   return (
     <div>
       <p className="state__hint">
-        Opens a new invoice in <strong>draft</strong> status. Lines are added
-        automatically when the configured billing period closes.
+        {t('billing.form.newDraftHintBefore')} <strong>{t('billing.form.newDraftHintStatus')}</strong> {t('billing.form.newDraftHintAfter')}
       </p>
       <div
         style={{
@@ -2198,7 +2201,7 @@ function NewDraftForm({
           padding: '8px 4px 0',
         }}
       >
-        <label className="mono" htmlFor="billing-new-client">Client</label>
+        <label className="mono" htmlFor="billing-new-client">{t('billing.form.client')}</label>
         <select
           id="billing-new-client"
           className="dt-inline-input"
@@ -2208,7 +2211,7 @@ function NewDraftForm({
         >
           {clientOptions.length === 0 ? (
             <option value="">
-              {clientsQuery.isLoading ? 'Loading clients...' : 'No clients available'}
+              {clientsQuery.isLoading ? t('billing.form.loadingClients') : t('billing.form.noClients')}
             </option>
           ) : null}
           {clientOptions.map((client) => (
@@ -2217,7 +2220,7 @@ function NewDraftForm({
             </option>
           ))}
         </select>
-        <label className="mono" htmlFor="billing-new-currency">Currency</label>
+        <label className="mono" htmlFor="billing-new-currency">{t('billing.form.currency')}</label>
         <input
           id="billing-new-currency"
           className="dt-inline-input"
@@ -2228,7 +2231,7 @@ function NewDraftForm({
           onChange={(e) => setDraft((d) => ({ ...d, currency: e.target.value.toUpperCase() }))}
           placeholder={tenantCurrencyIso || ''}
         />
-        <label className="mono" htmlFor="billing-new-due">Due date</label>
+        <label className="mono" htmlFor="billing-new-due">{t('billing.form.dueDate')}</label>
         <input
           id="billing-new-due"
           className="dt-inline-input"
@@ -2238,9 +2241,9 @@ function NewDraftForm({
         />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onCancel} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onCancel} />
         <Button
-          label="Create draft"
+          label={t('billing.actions.createDraft')}
           kind="primary"
           capability={CAP.BILLING_WRITE}
           disabled={!valid}
@@ -2287,6 +2290,7 @@ function EditDraftForm({
   }) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const hasLineBackedTotal = lineCount > 0;
   const [draft, setDraft] = useState<EditDraftState>({
     currency: invoice.currency ?? '',
@@ -2309,8 +2313,7 @@ function EditDraftForm({
   return (
     <div>
       <p className="state__hint">
-        Updates the draft invoice. Closed invoices stay locked, and version and
-        audit history remain system-managed.
+        {t('billing.form.editDraftHint')}
       </p>
       <div
         style={{
@@ -2321,24 +2324,24 @@ function EditDraftForm({
           padding: '8px 4px 0',
         }}
       >
-        <label className="mono" htmlFor="billing-edit-currency">Currency</label>
+        <label className="mono" htmlFor="billing-edit-currency">{t('billing.form.currency')}</label>
         <input
           id="billing-edit-currency"
           className="dt-inline-input"
           value={draft.currency}
           onChange={(e) => setDraft((d) => ({ ...d, currency: e.target.value.toUpperCase() }))}
         />
-        <label className="mono" htmlFor="billing-edit-total">Total</label>
+        <label className="mono" htmlFor="billing-edit-total">{t('billing.form.total')}</label>
         <input
           id="billing-edit-total"
           className="dt-inline-input"
           inputMode="decimal"
           value={draft.total}
           readOnly={hasLineBackedTotal}
-          title={hasLineBackedTotal ? 'Line-backed total is controlled by invoice lines.' : undefined}
+          title={hasLineBackedTotal ? t('billing.form.lineBackedTotal') : undefined}
           onChange={(e) => setDraft((d) => ({ ...d, total: e.target.value }))}
         />
-        <label className="mono" htmlFor="billing-edit-period-start">Period start</label>
+        <label className="mono" htmlFor="billing-edit-period-start">{t('billing.form.periodStart')}</label>
         <input
           id="billing-edit-period-start"
           className="dt-inline-input"
@@ -2346,7 +2349,7 @@ function EditDraftForm({
           value={draft.period_start_at}
           onChange={(e) => setDraft((d) => ({ ...d, period_start_at: e.target.value }))}
         />
-        <label className="mono" htmlFor="billing-edit-period-end">Period end</label>
+        <label className="mono" htmlFor="billing-edit-period-end">{t('billing.form.periodEnd')}</label>
         <input
           id="billing-edit-period-end"
           className="dt-inline-input"
@@ -2354,7 +2357,7 @@ function EditDraftForm({
           value={draft.period_end_at}
           onChange={(e) => setDraft((d) => ({ ...d, period_end_at: e.target.value }))}
         />
-        <label className="mono" htmlFor="billing-edit-due">Due date</label>
+        <label className="mono" htmlFor="billing-edit-due">{t('billing.form.dueDate')}</label>
         <input
           id="billing-edit-due"
           className="dt-inline-input"
@@ -2364,9 +2367,9 @@ function EditDraftForm({
         />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onCancel} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onCancel} />
         <Button
-          label="Update draft"
+          label={t('billing.actions.updateDraft')}
           kind="primary"
           capability={CAP.BILLING_WRITE}
           disabled={!valid}

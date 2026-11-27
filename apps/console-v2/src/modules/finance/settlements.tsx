@@ -47,7 +47,7 @@ import { useDrawer, useModal, type OpenDrawerOptions } from '@/hooks/useOverlay'
 import { pushToast } from '@/components/toastStore';
 import { useIdentity, useCapability } from '@/lib/identity';
 import { CAP } from '@/lib/capabilities';
-import { useI18n } from '@/lib/i18n';
+import { fill, useI18n } from '@/lib/i18n';
 import { getLookups, lookupRow, type CreateSettlementBatchArgs } from '@/lib/api';
 import { getSupabaseClient } from '@/lib/supabase';
 import { DetailRow, SeamLine } from './_shared';
@@ -324,7 +324,7 @@ export function SettlementsModule() {
   // AGENTS.md §7 (CAPABILITY-GATED UI for reads): page-level fail-closed gate.
   const canRead = useCapability(CAP.SETTLEMENTS_READ);
   const { scope, currentTenantId } = useIdentity();
-  const { fmtCurrency } = useI18n();
+  const { t, fmtCurrency } = useI18n();
   const drawer = useDrawer();
   const modal = useModal();
   const [activeDrawer, setActiveDrawer] = useState<SettlementDrawerState>(null);
@@ -497,16 +497,11 @@ export function SettlementsModule() {
   if (!canRead) {
     return (
       <div className="page">
-        <PageHeader
-          moduleKey="settlements"
-          eyebrow="Finance"
-          titleAccent="Settlements"
-          titlePlain="— batch lifecycle"
-        />
+        <PageHeader moduleKey="settlements" />
         <StateView
           kind="denied"
           capability={CAP.SETTLEMENTS_READ}
-          hint="You do not have permission to view settlements (settlements.read)."
+          hint={t('settlements.denied')}
         />
       </div>
     );
@@ -514,12 +509,7 @@ export function SettlementsModule() {
   if (settlementPolicy.isLoading) {
     return (
       <div className="page">
-        <PageHeader
-          moduleKey="settlements"
-          eyebrow="Finance"
-          titleAccent="Settlements"
-          titlePlain="— batch lifecycle"
-        />
+        <PageHeader moduleKey="settlements" />
         <StateView kind="loading" />
       </div>
     );
@@ -527,15 +517,10 @@ export function SettlementsModule() {
   if (readError) {
     return (
       <div className="page">
-        <PageHeader
-          moduleKey="settlements"
-          eyebrow="Finance"
-          titleAccent="Settlements"
-          titlePlain="— batch lifecycle"
-        />
+        <PageHeader moduleKey="settlements" />
         <StateView
           kind="error"
-          title="Unable to load settlement batches"
+          title={t('settlements.loadError')}
           hint={(readError as Error).message}
         />
       </div>
@@ -544,16 +529,11 @@ export function SettlementsModule() {
   if (lockApprovalSlaHours == null || varianceThresholdSar == null) {
     return (
       <div className="page">
-        <PageHeader
-          moduleKey="settlements"
-          eyebrow="Finance"
-          titleAccent="Settlements"
-          titlePlain="— batch lifecycle"
-        />
+        <PageHeader moduleKey="settlements" />
         <StateView
           kind="error"
-          title="Settlement policy missing"
-          hint="Configure settlement approval SLA and variance thresholds before using this surface."
+          title={t('settlements.policyMissing.title')}
+          hint={t('settlements.policyMissing.hint')}
         />
       </div>
     );
@@ -568,7 +548,7 @@ export function SettlementsModule() {
     const rowTenantId = textOf(item.organization_id) || textOf(summaryFor(item.id).organization_id);
     const activeTenantId = textOf(tenantId);
     if (rowTenantId && (!activeTenantId || rowTenantId !== activeTenantId)) {
-      return "Switch to this settlement batch's tenant before changing settlement lifecycle.";
+      return t('settlements.reasons.otherTenant');
     }
     return undefined;
   }
@@ -576,25 +556,25 @@ export function SettlementsModule() {
   function transitionDisabledReason(item: SettlementBatchRow): string | undefined {
     const tenantReason = settlementTenantActionDisabledReason(item);
     if (tenantReason) return tenantReason;
-    return transitionMutation.isPending ? 'Settlement transition is already running.' : undefined;
+    return transitionMutation.isPending ? t('settlements.reasons.transitionRunning') : undefined;
   }
 
   function approveDisabledReason(item: SettlementBatchRow): string | undefined {
     const tenantReason = settlementTenantActionDisabledReason(item);
     if (tenantReason) return tenantReason;
-    if (applyMutation.isPending) return 'Settlement approval is already running.';
+    if (applyMutation.isPending) return t('settlements.reasons.approvalRunning');
     return settlementAllows(item.status, 'allows_approve')
       ? undefined
-      : 'This settlement status does not allow approval.';
+      : t('settlements.reasons.approveNotAllowed');
   }
 
   function rejectDisabledReason(item: SettlementBatchRow): string | undefined {
     const tenantReason = settlementTenantActionDisabledReason(item);
     if (tenantReason) return tenantReason;
-    if (rejectMutation.isPending) return 'Settlement rejection is already running.';
+    if (rejectMutation.isPending) return t('settlements.reasons.rejectionRunning');
     return settlementAllows(item.status, 'allows_reject')
       ? undefined
-      : 'This settlement status does not allow rejection.';
+      : t('settlements.reasons.rejectNotAllowed');
   }
 
   function variantBatches(): SettlementBatchRow[] {
@@ -606,16 +586,16 @@ export function SettlementsModule() {
   function openVarianceSummary() {
     const variant = variantBatches();
     drawer.open({
-      title: 'Variance summary',
+      title: t('settlements.variance.title'),
       size: 'md',
       body: (
         <div>
           <p className="state__hint">
-            {`${variant.length} batch${variant.length === 1 ? '' : 'es'} with variance escalated to manual review.`}
+            {fill(t(variant.length === 1 ? 'settlements.variance.countOne' : 'settlements.variance.countOther'), { n: variant.length })}
           </p>
           <div className="state__hint" style={{ marginTop: '6px', fontSize: '11px' }}>
-            Threshold:{' '}
-            <span className="mono">{fmtCurrency(varianceThreshold)}</span>
+            {t('settlements.variance.threshold')}{' '}
+            <bdi className="mono">{fmtCurrency(varianceThreshold)}</bdi>
           </div>
           <div className="card" style={{ marginTop: '12px' }}>
             {variant.map((b) => {
@@ -645,7 +625,7 @@ export function SettlementsModule() {
             })}
             {variant.length === 0 ? (
               <div className="state__hint" style={{ padding: '8px 0' }}>
-                No batches in variance.
+                {t('settlements.variance.empty')}
               </div>
             ) : null}
           </div>
@@ -666,11 +646,11 @@ export function SettlementsModule() {
       return (
         <div>
           <p className="state__hint">
-            Record a rejection reason before canceling this settlement batch.
+            {t('settlements.reject.hint')}
           </p>
           <div style={{ display: 'grid', gap: '8px', marginTop: '12px' }}>
             <label className="mono" htmlFor="settlement-reject-reason">
-              Rejection reason
+              {t('settlements.reject.reason')}
             </label>
             <textarea
               id="settlement-reject-reason"
@@ -681,9 +661,9 @@ export function SettlementsModule() {
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Reject batch"
+              label={t('settlements.reject.submit')}
               kind="danger"
               capability={CAP.SETTLEMENTS_WRITE}
               disabled={!trimmedReason || rejectMutation.isPending}
@@ -694,7 +674,7 @@ export function SettlementsModule() {
                     onSuccess: (res) => {
                       modal.close();
                       setActiveDrawer({ kind: 'batch', batchId: item.id });
-                      pushToast(`Settlement rejected - ${res.settlement_batch_id}`, 'warn');
+                      pushToast(fill(t('settlements.toast.rejected'), { id: res.settlement_batch_id }), 'warn');
                     },
                     onError: (err: Error) => pushToast(err.message, 'danger'),
                   },
@@ -705,7 +685,7 @@ export function SettlementsModule() {
         </div>
       );
     }
-    modal.open({ title: 'Reject settlement batch', body: <RejectBatchForm /> });
+    modal.open({ title: t('settlements.reject.title'), body: <RejectBatchForm /> });
   }
 
   function openNewBatchModal() {
@@ -807,7 +787,7 @@ export function SettlementsModule() {
       return (
         <div>
           <p className="state__hint">
-            Opens a settlement batch in open status after the required scope context is selected.
+            {t('settlements.create.hint')}
           </p>
           {!lookupsConfigured ? (
             <p
@@ -815,7 +795,7 @@ export function SettlementsModule() {
               className="state__hint"
               style={{ color: 'var(--danger)', marginTop: '8px' }}
             >
-              Settlement scope types, allowed policy scopes, or kinds are not configured. Contact a platform administrator.
+              {t('settlements.create.lookupsMissing')}
             </p>
           ) : null}
           {unsupportedMessage ? (
@@ -836,7 +816,7 @@ export function SettlementsModule() {
               padding: '0 4px',
             }}
           >
-            <label className="mono" htmlFor="settlement-new-kind">Kind</label>
+            <label className="mono" htmlFor="settlement-new-kind">{t('settlements.detail.kind')}</label>
             <select
               id="settlement-new-kind"
               className="dt-inline-input"
@@ -850,7 +830,7 @@ export function SettlementsModule() {
                 </option>
               ))}
             </select>
-            <label className="mono" htmlFor="settlement-new-scope">Scope</label>
+            <label className="mono" htmlFor="settlement-new-scope">{t('settlements.detail.scope')}</label>
             <select
               id="settlement-new-scope"
               className="dt-inline-input"
@@ -864,7 +844,7 @@ export function SettlementsModule() {
                 </option>
               ))}
             </select>
-            <label className="mono" htmlFor="settlement-new-date">Period date</label>
+            <label className="mono" htmlFor="settlement-new-date">{t('settlements.create.periodDate')}</label>
             <input
               id="settlement-new-date"
               className="dt-inline-input"
@@ -891,7 +871,7 @@ export function SettlementsModule() {
                       }))
                     }
                   >
-                    <option value="">{`Select ${req.label.toLowerCase()}`}</option>
+                    <option value="">{fill(t('settlements.create.selectOption'), { label: req.label.toLowerCase() })}</option>
                     {options.map((row) => {
                       const value = optionValueFor(req, row);
                       if (!value) return null;
@@ -913,9 +893,9 @@ export function SettlementsModule() {
             })}
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Open batch"
+              label={t('settlements.create.submit')}
               kind="primary"
               capability={CAP.SETTLEMENTS_WRITE}
               disabled={!canOpenBatch}
@@ -927,7 +907,7 @@ export function SettlementsModule() {
                       modal.close();
                       setActiveDrawer({ kind: 'batch', batchId: res.settlement_batch_id });
                       setPendingCreatedBatchId(res.settlement_batch_id);
-                      pushToast(`Batch opened - ${res.settlement_batch_id}`, 'good');
+                      pushToast(fill(t('settlements.toast.opened'), { id: res.settlement_batch_id }), 'good');
                     },
                     onError: (err: Error) => pushToast(err.message, 'danger'),
                   },
@@ -938,7 +918,7 @@ export function SettlementsModule() {
         </div>
       );
     }
-    modal.open({ title: 'New settlement batch', body: <NewBatchForm /> });
+    modal.open({ title: t('settlements.create.title'), body: <NewBatchForm /> });
   }
 
   function openCardDrawer(item: SettlementBatchRow) {
@@ -958,31 +938,39 @@ export function SettlementsModule() {
         <div>
           <Stepper stages={stepperStages} current={item.status} />
           <div className="card" style={{ marginTop: '14px' }}>
-            <DetailRow k="Status" v={settlementStatusLabel(item.status)} />
+            <DetailRow k={t('settlements.detail.status')} v={<bdi>{settlementStatusLabel(item.status)}</bdi>} />
             {typeof item.status_reason === 'string' && item.status_reason.trim() ? (
-              <DetailRow k="Status reason" v={item.status_reason.trim()} />
+              <DetailRow k={t('settlements.detail.statusReason')} v={<bdi>{item.status_reason.trim()}</bdi>} />
             ) : null}
-            <DetailRow k="Kind" v={item.kind} />
-            <DetailRow k="Scope" v={s.scope_type ?? item.scope_type ?? '—'} />
-            <DetailRow k="Expected" v={fmtCurrency(s.expected_amount)} />
-            <DetailRow k="Collected" v={fmtCurrency(s.collected_amount)} />
-            <DetailRow k="Remitted" v={fmtCurrency(s.remitted_amount)} />
+            <DetailRow k={t('settlements.detail.kind')} v={<bdi>{item.kind}</bdi>} />
+            <DetailRow k={t('settlements.detail.scope')} v={<bdi>{s.scope_type ?? item.scope_type ?? '—'}</bdi>} />
+            <DetailRow k={t('settlements.detail.expected')} v={<bdi>{fmtCurrency(s.expected_amount)}</bdi>} />
+            <DetailRow k={t('settlements.detail.collected')} v={<bdi>{fmtCurrency(s.collected_amount)}</bdi>} />
+            <DetailRow k={t('settlements.detail.remitted')} v={<bdi>{fmtCurrency(s.remitted_amount)}</bdi>} />
             {v.delta !== 0 ? (
               <DetailRow
-                k="Variance"
-                v={`${fmtCurrency(v.delta)} · threshold ${fmtCurrency(varianceThreshold)} · ${v.exceeds_threshold ? 'manual review required' : 'within tolerance'}`}
+                k={t('settlements.detail.variance')}
+                v={
+                  <>
+                    <bdi>{fmtCurrency(v.delta)}</bdi>
+                    {' · '}
+                    {t('settlements.detail.threshold')} <bdi>{fmtCurrency(varianceThreshold)}</bdi>
+                    {' · '}
+                    {v.exceeds_threshold ? t('settlements.detail.manualReview') : t('settlements.detail.withinTolerance')}
+                  </>
+                }
                 danger={v.tone === 'danger'}
               />
             ) : null}
-            <DetailRow k="Posted" v={s.posted_at ? String(s.posted_at) : '—'} />
+            <DetailRow k={t('settlements.detail.posted')} v={<bdi>{s.posted_at ? String(s.posted_at) : '—'}</bdi>} />
           </div>
-          <h4 className="eyebrow" style={{ marginTop: '14px' }}>Operational backing</h4>
+          <h4 className="eyebrow" style={{ marginTop: '14px' }}>{t('settlements.backing.title')}</h4>
           <div className="card mono" style={{ fontSize: '11px', lineHeight: 1.6 }}>
-            <SeamLine k="Summary" v="Settlement summary" />
-            <SeamLine k="Expected amount" v="COD collection summary" />
-            <SeamLine k="Lifecycle" v="Settlement workflow" />
-            <SeamLine k="Variance" v="Manual review gate" />
-            <SeamLine k="Threshold" v={fmtCurrency(varianceThreshold)} />
+            <SeamLine k={t('settlements.backing.summary')} v={t('settlements.backing.summaryValue')} />
+            <SeamLine k={t('settlements.backing.expectedAmount')} v={t('settlements.backing.expectedAmountValue')} />
+            <SeamLine k={t('settlements.backing.lifecycle')} v={t('settlements.backing.lifecycleValue')} />
+            <SeamLine k={t('settlements.detail.variance')} v={t('settlements.backing.varianceValue')} />
+            <SeamLine k={t('settlements.backing.threshold')} v={fmtCurrency(varianceThreshold)} />
           </div>
         </div>
       ),
@@ -1021,7 +1009,7 @@ export function SettlementsModule() {
                       onSuccess: (res) => {
                         setActiveDrawer({ kind: 'batch', batchId: item.id });
                         pushToast(
-                          `Settlement moved to ${res.status ?? toStatus} - ${res.settlement_batch_id}`,
+                          fill(t('settlements.toast.moved'), { status: res.status ?? toStatus, id: res.settlement_batch_id }),
                           'good',
                         );
                       },
@@ -1033,7 +1021,7 @@ export function SettlementsModule() {
             );
           })}
           <Button
-            label="Approve"
+            label={t('common.approve')}
             iconName="check"
             kind="ghost"
             capability={CAP.SETTLEMENTS_WRITE}
@@ -1050,7 +1038,7 @@ export function SettlementsModule() {
                 {
                   onSuccess: (res) => {
                     setActiveDrawer({ kind: 'batch', batchId: item.id });
-                    pushToast(`Settlement applied · ${res.settlement_batch_id}`, 'good');
+                    pushToast(fill(t('settlements.toast.applied'), { id: res.settlement_batch_id }), 'good');
                   },
                   onError: (err: Error) => pushToast(err.message, 'danger'),
                 },
@@ -1058,7 +1046,7 @@ export function SettlementsModule() {
             }}
           />
           <Button
-            label="Reject"
+            label={t('common.reject')}
             iconName="close"
             kind="danger"
             capability={CAP.SETTLEMENTS_WRITE}
@@ -1077,14 +1065,14 @@ export function SettlementsModule() {
       ? [
           <Chip
             key="url-scope"
-            label={financeUrlScopeLabel(urlScope, scopeLabelRows)}
+            label={financeUrlScopeLabel(urlScope, scopeLabelRows, t)}
             kind="info"
             size="xs"
           />,
         ]
       : []),
     <span key="seam" className="chip chip--xs mono">
-      settlement batches · summary
+      {t('settlements.seamChip')}
     </span>,
   ];
 
@@ -1092,13 +1080,10 @@ export function SettlementsModule() {
     <div className="page">
       <PageHeader
         moduleKey="settlements"
-        eyebrow="Finance"
-        titleAccent="Settlements"
-        titlePlain="— batch lifecycle"
         pills={pills}
         actions={[
-          <Button key="variance" label="Variance summary" iconName="alert" kind="ghost" onClick={openVarianceSummary} />,
-          <Button key="new" label="New batch" iconName="plus" kind="primary" capability={CAP.SETTLEMENTS_WRITE} onClick={openNewBatchModal} />,
+          <Button key="variance" label={t('settlements.variance.title')} iconName="alert" kind="ghost" onClick={openVarianceSummary} />,
+          <Button key="new" label={t('settlements.create.action')} iconName="plus" kind="primary" capability={CAP.SETTLEMENTS_WRITE} onClick={openNewBatchModal} />,
         ]}
       />
 
@@ -1119,7 +1104,7 @@ export function SettlementsModule() {
             return (
               <div key={stage.id} className="kanban__col">
                 <div className="kanban__col-head">
-                  <span className="kanban__col-title">{stage.label}</span>
+                  <span className="kanban__col-title"><bdi>{stage.label}</bdi></span>
                   <span className="kanban__col-count">{`· ${items.length}`}</span>
                 </div>
                 <div className="kanban__col-body">
@@ -1138,29 +1123,29 @@ export function SettlementsModule() {
                         onClick={() => openCardDrawer(item)}
                       >
                         <div className="kanban__card-head">
-                          <span className="kanban__card-id mono">{item.id}</span>
+                          <bdi className="kanban__card-id mono">{item.id}</bdi>
                         </div>
                         <div className="kanban__card-meta mono">
-                          {item.kind} · {s.scope_type ?? item.scope_type ?? '—'}
+                          <bdi>{item.kind} · {s.scope_type ?? item.scope_type ?? '—'}</bdi>
                         </div>
                         <div style={{ fontWeight: 600, marginTop: '4px' }}>
-                          {fmtCurrency(s.expected_amount)}
+                          <bdi>{fmtCurrency(s.expected_amount)}</bdi>
                         </div>
                         <div style={{ display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
                           {showVariance ? (
                             <Chip
-                              label={`variance ${fmtCurrency(v.delta)}`}
+                              label={fill(t('settlements.card.variance'), { amount: fmtCurrency(v.delta) })}
                               kind={v.tone}
                               size="xs"
-                              title="Variance against the allowed settlement threshold"
+                              title={t('settlements.card.varianceTitle')}
                             />
                           ) : null}
                           {aging ? (
                             <Chip
-                              label={`awaiting ${aging.label}`}
+                              label={fill(t('settlements.card.awaiting'), { age: aging.label })}
                               kind={aging.tone}
                               size="xs"
-                              title={`Locked for ${aging.label} · SLA ${lockApprovalSlaHours}h`}
+                              title={fill(t('settlements.card.lockedFor'), { age: aging.label, hours: lockApprovalSlaHours })}
                             />
                           ) : null}
                         </div>
@@ -1172,7 +1157,7 @@ export function SettlementsModule() {
                       className="state__hint"
                       style={{ fontSize: '11px', padding: '12px', textAlign: 'center' }}
                     >
-                      No batches
+                      {t('settlements.noBatches')}
                     </div>
                   ) : null}
                 </div>
