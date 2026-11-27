@@ -6,6 +6,9 @@ name: Disable Console V2 DEV provider subdomain
 permissions:
   contents: read
 
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
 jobs:
   disable-subdomain:
     if: github.ref == 'refs/heads/main'
