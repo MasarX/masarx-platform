@@ -75,7 +75,11 @@ function runPolicyReadout(input) {
 }
 
 test('deploy enables dispatch for DEV only and syncs between migrations and Edge deploy', () => {
-  expect(deploy.env.EDGE_DISPATCH_ENABLED).toBe("${{ env.DEPLOY_ENV == 'dev' && 'true' || 'false' }}");
+  const dispatchEnabled = deploy.env.EDGE_DISPATCH_ENABLED;
+  expect(dispatchEnabled).toBe("${{ (env.DEPLOY_ENV == 'dev' || env.DEPLOY_ENV == 'stg') && 'true' || 'false' }}");
+  const evaluateDispatch = new Function('env', `return ${dispatchEnabled.slice(3, -2)}`);
+  expect(['dev', 'stg', 'prod'].map(DEPLOY_ENV => evaluateDispatch({ DEPLOY_ENV })))
+    .toEqual(['true', 'true', 'false']);
   expect(deploy.run.indexOf(deployCommand)).toBeGreaterThan(deploy.run.indexOf('"$cli" db push --linked'));
   expect(deploy.run.indexOf(deployCommand)).toBeLessThan(deploy.run.indexOf('"$cli" functions deploy'));
 });
