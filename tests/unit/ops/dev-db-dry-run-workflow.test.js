@@ -22,6 +22,7 @@ test('runs one manual dry-run job in dev with only read access and pinned GitHub
   expect(Object.keys(workflow.jobs).sort()).toEqual([
     'api-schemas',
     'console',
+    'console-v2',
     'database',
     'database-dry-run',
     'e2e-report',

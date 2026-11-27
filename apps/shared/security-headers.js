@@ -87,7 +87,7 @@ function resolveWebsocketOrigin(origin) {
   return null;
 }
 
-function resolveMapTileOrigins(value) {
+function resolveHttpsOrigins(value) {
   return uniqueValues(String(value || '').split(',').flatMap(candidate => {
     const raw = candidate.trim();
     // Exact HTTPS origins only: never turn an image allowlist into fetch grants.
@@ -103,6 +103,9 @@ function buildCsp({
   nonce = "",
   trustedExternalDataOrigins = process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS,
   mapTileOrigins = process.env.NEXT_PUBLIC_UI_MAP_TILE_ORIGINS,
+  fontStylesheetOrigins = "",
+  fontAssetOrigins = "",
+  sameOriginWorkers = false,
 }) {
   const supabaseOrigin = normalizeOrigin(supabaseUrl);
   const websocketOrigin = resolveWebsocketOrigin(supabaseOrigin);
@@ -112,7 +115,7 @@ function buildCsp({
     configuredOrigins: trustedExternalDataOrigins,
   });
 
-  const connectSources = ["'self'", ...resolveMapTileOrigins(mapTileOrigins)];
+  const connectSources = ["'self'", ...resolveHttpsOrigins(mapTileOrigins)];
   if (supabaseOrigin) {
     connectSources.push(supabaseOrigin);
   }
@@ -137,12 +140,13 @@ function buildCsp({
     "object-src": ["'none'"],
     "frame-src": ["'none'"],
     "script-src": scriptSources,
-    "style-src": ["'self'", "'unsafe-inline'"],
+    "style-src": ["'self'", "'unsafe-inline'", ...resolveHttpsOrigins(fontStylesheetOrigins)],
     "img-src": imageSources,
-    "font-src": ["'self'", "data:"],
+    "font-src": ["'self'", "data:", ...resolveHttpsOrigins(fontAssetOrigins)],
     "connect-src": connectSources,
     "frame-ancestors": ["'none'"],
   };
+  if (sameOriginWorkers) directives["worker-src"] = ["'self'"];
   if (isProduction) {
     directives["upgrade-insecure-requests"] = [];
   }
@@ -199,6 +203,9 @@ function buildSecurityHeaders({
   nonce = "",
   trustedExternalDataOrigins = process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS,
   mapTileOrigins = process.env.NEXT_PUBLIC_UI_MAP_TILE_ORIGINS,
+  fontStylesheetOrigins = "",
+  fontAssetOrigins = "",
+  sameOriginWorkers = false,
 }) {
   return [
     {
@@ -209,6 +216,9 @@ function buildSecurityHeaders({
         nonce,
         trustedExternalDataOrigins,
         mapTileOrigins,
+        fontStylesheetOrigins,
+        fontAssetOrigins,
+        sameOriginWorkers,
       }),
     },
     ...buildBaseSecurityHeaders(),

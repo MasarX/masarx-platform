@@ -42,6 +42,7 @@ export default defineConfig(({ command, mode }) => {
   const analyze = env.ANALYZE === '1' || process.env.ANALYZE === '1';
   const seedMode = process.env.VITE_USE_SEED ?? env.VITE_USE_SEED;
   const seedEnabled = seedMode !== 'false';
+  const cspNonce = process.env.CONSOLE_V2_CSP_NONCE_PLACEHOLDER;
   // Console V2 uses the shared UI for label design. All other screens use its own catalogs.
   const sharedUiMessages = Object.fromEntries(['en', 'ar'].map((locale) => {
     const catalogPath = path.resolve(__dirname, '../../packages/config/messages', `${locale}.json`);
@@ -53,6 +54,7 @@ export default defineConfig(({ command, mode }) => {
   return {
     root: __dirname,
     cacheDir: path.join(cacheRoot, 'node_modules/.vite'),
+    html: { cspNonce },
     plugins: [
       seedEnabled && {
         name: 'console-v2-seed-fonts',
@@ -114,7 +116,7 @@ export default defineConfig(({ command, mode }) => {
     },
     build: {
       target: 'es2022',
-      sourcemap: true,
+      sourcemap: !cspNonce,
       rollupOptions: {
         // @sentry/react is an opt-in runtime dep: it's only dynamically imported when
         // VITE_SENTRY_DSN is set, and is intentionally NOT in package.json. Externalise so

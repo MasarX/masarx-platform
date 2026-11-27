@@ -38,6 +38,7 @@
         "^\\.github/",
         "^config/ci/",
         "^scripts/ops/ci/",
+        "^tooling/apps/console-v2-worker/",
         "^scripts/ops/security-(?:audit-inventory|scan-gate)\\.js$",
         "^security-(?:audit|scan-summary|vulnerability-inventory)\\.json$",
         "^scripts/ops/remote-workflow\\.js$",
