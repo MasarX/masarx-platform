@@ -1,3 +1,4 @@
+import { englishT, fill, type Translate } from '@/lib/i18n';
 import { readUrlParam, type UrlParamSource } from '@/lib/url-params';
 
 export type FinanceUrlScope = { kind: 'client' | 'partner'; id: string };
@@ -61,6 +62,7 @@ function titleLabel(value: string): string {
 export function financeUrlScopeLabel(
   scope: FinanceUrlScope,
   rows: FinanceScopeLabelRow[] = [],
+  t: Translate = englishT,
 ): string {
   const kind = scope.kind === 'client' ? 'client' : 'partner';
   const row = rows.find((candidate) => rowMatchesScope(candidate, scope));
@@ -77,7 +79,7 @@ export function financeUrlScopeLabel(
       rowLabel.key === 'slug'
         ? titleLabel(rowLabel.value.replace(/[_-]+/g, ' '))
         : rowLabel.value;
-    return `Scoped ${kind} ${label}`;
+    return fill(t(`finance.scope.${kind}`), { label });
   }
 
   const normalized = scope.id
@@ -85,8 +87,8 @@ export function financeUrlScopeLabel(
     .replace(/^(cl|mpp|client|partner)[_-]+/i, '')
     .replace(/[_-]+/g, ' ')
     .trim();
-  if (!normalized || UUID_RE.test(scope.id)) return `Scoped ${kind} selected ${kind}`;
-  return `Scoped ${kind} ${titleLabel(normalized)}`;
+  if (!normalized || UUID_RE.test(scope.id)) return t(`finance.scope.${kind}Selected`);
+  return fill(t(`finance.scope.${kind}`), { label: titleLabel(normalized) });
 }
 
 export function rowMetadata(row: Record<string, unknown>): Record<string, unknown> {
