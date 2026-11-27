@@ -56,12 +56,16 @@ export function getSupabaseClient(): ConsoleSupabaseClient | null {
         const target = input instanceof Request ? input.url : String(input);
         const bearer = new Headers(init?.headers).get('Authorization');
         // With no session supabase-js sends the anon key as the bearer (or no bearer for
-        // new-format keys), which every Console Edge function rejects. Stop here and sign out
-        // locally so the identity provider drops to unauthenticated and AppGuard shows its
-        // sign-in action, which returns the user to this page.
+        // new-format keys), which every Console Edge function rejects. Stop here. When there is
+        // really no session, sign out locally so the identity provider drops to unauthenticated
+        // and AppGuard shows its sign-in action, which returns the user to this page. When the
+        // lookup failed (a retryable refresh failure: offline, timeout, 5xx), auth-js keeps the
+        // stored session for a later refresh, and a local sign-out would delete it, so keep it.
         if (target.startsWith(functionsUrl) && (!bearer || bearer === `Bearer ${key}`)) {
-          void client.auth.signOut({ scope: 'local' }).catch(() => undefined);
-          return Promise.reject(new Error('Console session ended; sign in again'));
+          return client.auth.getSession().then(({ data, error }) => {
+            if (!error && !data.session) void client.auth.signOut({ scope: 'local' }).catch(() => undefined);
+            throw new Error('Console session ended; sign in again');
+          });
         }
         return fetch(input, init);
       },
