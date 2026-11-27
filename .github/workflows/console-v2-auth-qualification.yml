@@ -19,8 +19,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
-      CANDIDATE_SHA: 9bdb40233df50568fdc49e0b1efa2450d1f8e45b
-      CANDIDATE_TREE: 6542c872a5d57972e364f5b894aafac18029be6b
+      CANDIDATE_SHA: 60437e5836e11ed7aa039c7edf2817df18ca0fa2
+      CANDIDATE_TREE: a31ffa79cadcebc7e281da7d1df432eaeff27e17
     steps:
       - name: Bind the reviewed workflow
         shell: bash
