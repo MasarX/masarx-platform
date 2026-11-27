@@ -1,10 +1,8 @@
 const { Pool } = require('pg');
+const { assertEnv } = require('../utils/test-env');
 
-const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) throw new Error('DATABASE_URL must be defined for RLS tests');
-
-const pool = new Pool({ connectionString: DATABASE_URL });
-const rlsIntegrationEnabled = process.env.RUN_RLS_INTEGRATION_TESTS === 'true';
+assertEnv(['DATABASE_URL'], 'manual review task RLS');
+const pool = new Pool({ connectionString: process.env.DATABASE_URL.trim() });
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -64,7 +62,7 @@ async function setAuthContext(client, userId) {
   await client.query('SELECT set_config($1, $2, true)', ['request.jwt.claims', claims]);
 }
 
-(rlsIntegrationEnabled ? describe : describe.skip)('RLS: manual_review_tasks', () => {
+describe('RLS: manual_review_tasks', () => {
   let client;
 
   beforeAll(async () => {

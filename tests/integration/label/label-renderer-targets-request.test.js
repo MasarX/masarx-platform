@@ -6,10 +6,7 @@ const { fetchJsonWithRetry, truncateText } = require('../helpers/http');
 const { createWorkflowContext, clearWorkflowEngineContext } = require('../helpers/tenant-utils');
 const { removeStoragePaths } = require('../../../scripts/utils/supabase-storage');
 const { ensureStorageBucket, resolveStorageAdminKey } = require('../helpers/storage-admin');
-const {
-  isAuthSignatureModeError,
-  logAuthSignatureModeSkip,
-} = require('../helpers/auth-signature-mode');
+const { signedRendererHeaders } = require('../helpers/renderer-request');
 
 loadEnv();
 jest.setTimeout(180000);
@@ -22,34 +19,13 @@ const SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_KEY ||
   '';
 const STORAGE_ADMIN_KEY = resolveStorageAdminKey() || SERVICE_ROLE_KEY;
-const isTruthy = (value) => /^(1|true|yes)$/i.test(String(value || '').trim());
-const previewMode = isTruthy(process.env.PREVIEW_MODE) || isTruthy(process.env.CI_PREVIEW);
-const edgeRequireDbJwt = String(process.env.EDGE_REQUIRE_DB_JWT || '').trim() === '1';
-const skipInPreviewFallback = previewMode && !edgeRequireDbJwt;
-const labelRendererDbJwt =
-  String(process.env.LABEL_RENDERER_DB_JWT || process.env.EDGE_DB_JWT || '').trim();
-const skipForStrictDbJwtLocal = edgeRequireDbJwt && !labelRendererDbJwt;
-const LABEL_RENDERER_JWT = previewMode && !edgeRequireDbJwt
-  ? SERVICE_ROLE_KEY
-  : (process.env.LABEL_RENDERER_DB_JWT || SERVICE_ROLE_KEY || '');
 const LABEL_BUCKET = process.env.LABEL_RENDER_BUCKET || process.env.LABEL_RENDERER_BUCKET || 'labels';
-
-function skipForAuthSignatureMode(errorLike) {
-  if (!isAuthSignatureModeError(errorLike)) {
-    return false;
-  }
-  logAuthSignatureModeSkip('label-renderer-targets-request.test', errorLike);
-  return true;
-}
 
 if (
   !SUPABASE_URL ||
   !DATABASE_URL ||
   !SUPABASE_ANON_KEY ||
-  !LABEL_RENDERER_JWT ||
-  !STORAGE_ADMIN_KEY ||
-  skipInPreviewFallback ||
-  skipForStrictDbJwtLocal
+  !STORAGE_ADMIN_KEY
 ) {
   // eslint-disable-next-line jest/no-disabled-tests
   describe.skip('label renderer target requests', () => {
@@ -261,22 +237,13 @@ if (
           bucket: LABEL_BUCKET,
           storageAdminKey: STORAGE_ADMIN_KEY,
         });
-      } catch (error) {
-        if (skipForAuthSignatureMode(error)) return;
-        throw error;
-      }
 
-      const requestUrl = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/label-renderer`;
-      try {
+        const requestUrl = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/label-renderer`;
         const { resp, bodyText, json, jsonError } = await fetchJsonWithRetry(
           requestUrl,
           {
             method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              authorization: `Bearer ${LABEL_RENDERER_JWT}`,
-              apikey: SUPABASE_ANON_KEY,
-            },
+            headers: await signedRendererHeaders(requestUrl),
             body: JSON.stringify({
               mode: 'print',
               organization_id: orgId,
@@ -292,7 +259,7 @@ if (
               output_name: 'target-labels.pdf',
             }),
           },
-          { purpose: `target print request ${orgId}` },
+          { attempts: 1, purpose: `target print request ${orgId}` },
         );
 
         responseStatus = resp.status;
@@ -374,9 +341,6 @@ if (
             /request_label_generation_target_for_step_v1|request_label_generation_target_v1|label bucket unavailable|storage request failed|bucket/i,
           );
         }
-      } catch (error) {
-        if (skipForAuthSignatureMode(error)) return;
-        throw error;
       } finally {
         if (uploadedPath) {
           await removeStoragePaths(

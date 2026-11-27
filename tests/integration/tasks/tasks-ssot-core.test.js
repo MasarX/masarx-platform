@@ -259,7 +259,7 @@ describe('Tasks SSOT core', () => {
       [created.workflow_run_id]
     );
     expect(runRows).toHaveLength(1);
-    expect(runRows[0].entry_point).toBe('worker');
+    expect(runRows[0].entry_point).toBe('task');
     expect(runRows[0].context?.trigger_type).toBe('task');
     expect(runRows[0].context?.task_id).toBe(created.task_id);
     expect(runRows[0].context?.task_type_key).toBe('workflow_entry_point');

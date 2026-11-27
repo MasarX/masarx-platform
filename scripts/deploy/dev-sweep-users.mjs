@@ -22,6 +22,28 @@ function mask(value) {
   console.log(`::add-mask::${value.replaceAll('%', '%25')}`);
 }
 
+async function reportQueryError(response, reason) {
+  // The status alone separates a token or scope refusal from a database error.
+  console.error(`${reason}_http_status=${response.status}`);
+  const error = await response.json();
+  // Supabase can wrap the PostgreSQL error in a message with additional row details.
+  const message = typeof error?.message === 'string' ? error.message : '';
+  const header = /^(?:Failed to run sql query: )?ERROR: +([0-9A-Z]{5}): +([^\r\n]*)/.exec(message);
+  const sqlstate = typeof error?.code === 'string' && /^[0-9A-Z]{5}$/.test(error.code) ? error.code : header?.[1];
+  if (!sqlstate) return;
+
+  const primary = header?.[2] ?? message.split(/[\r\n]/, 1)[0];
+  const constraint = error?.constraint ??
+    /^(?:duplicate key value|new row for relation "[^"]+"|insert or update on table "[^"]+") violates (?:unique|check|foreign key) constraint "([a-z_][a-z0-9_]*)"$/.exec(primary)?.[1];
+  const column = error?.column ??
+    /^(?:null value in column|column) "([a-z_][a-z0-9_]*)"(?: of relation "[^"]+")? (?:violates not-null constraint|does not exist)$/.exec(primary)?.[1];
+  const identifier = /^[a-z_][a-z0-9_]{0,62}$/;
+  let detail = '';
+  if (typeof constraint === 'string' && identifier.test(constraint)) detail = ` constraint=${constraint}`;
+  else if (typeof column === 'string' && identifier.test(column)) detail = ` column=${column}`;
+  console.error(`${reason}_sqlstate=${sqlstate}${detail}`);
+}
+
 async function request(url, headers, reason, method = 'GET', body) {
   try {
     const response = await fetch(url, {
@@ -33,6 +55,7 @@ async function request(url, headers, reason, method = 'GET', body) {
     });
     if (response.ok) return method === 'DELETE' ? null : await response.json();
     if (reason === 'auth_config') console.error(`auth_config_http_status=${response.status}`);
+    else if (url.endsWith('/database/query')) await reportQueryError(response, reason);
   } catch {
     // Provider errors can contain configuration, identities or request data.
   }
@@ -98,13 +121,15 @@ function ensureTenantRole(query, organizationId, key, capabilities) {
 }
 
 async function checkRolePolicy(query, { id, organizationId, key, scope, scopeId, required, optional }) {
+  // Not read_only: the resolvers grant EXECUTE only to authenticated and service_role, so the read-only
+  // principal gets 42501 (#790). p_log = false keeps the policy resolver free of writes.
   const [policy] = await query(`
     SELECT roles, public.resolve_capabilities_v1(policy, roles) AS capabilities
       FROM public.resolve_access_control_policy_v1($1, $2::uuid, false)
       CROSS JOIN LATERAL public.resolve_role_keys_v1(policy, $3::uuid, $4) AS resolved(roles)
       WHERE NOT EXISTS (
         SELECT 1 FROM public.rbac_user_role_assignments WHERE user_id = $3::uuid AND revoked_at IS NULL
-      )`, [scope, scopeId ?? organizationId, id, key], 'role_read', true);
+      )`, [scope, scopeId ?? organizationId, id, key], 'role_read');
   requireSweep(policy?.roles?.length === 1 && policy.roles[0] === key &&
     Array.isArray(policy.capabilities) && required.every(cap => policy.capabilities.includes(cap)) &&
     policy.capabilities.every(cap => required.includes(cap) || optional.includes(cap)), 'role_policy');
@@ -169,7 +194,7 @@ export async function provisionSweep(env) {
   const authUsers = `${projectUrl}/auth/v1/admin/users`;
   const query = (sql, parameters, reason, readOnly = false) => request(
     `${management}/database/query`, managementHeaders, reason, 'POST',
-    { query: sql, parameters, read_only: readOnly, disable_statement_timeout: false },
+    { query: sql, parameters, read_only: readOnly },
   );
   const digest = createHash('sha256').update(`dev-design-sweep:${projectRef}`).digest('hex');
   const suffix = digest.slice(0, 16);

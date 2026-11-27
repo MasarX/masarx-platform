@@ -109,9 +109,10 @@ export function ToastHost({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <ToastProvider>
-      <ToastContext.Provider value={contextValue}>
-        {children}
+    <ToastContext.Provider value={contextValue}>
+      {children}
+      {/* Radix's viewport registration only needs to update the toast subtree. */}
+      <ToastProvider>
         {toasts.map((item) => (
           <Toast
             key={item.id}
@@ -124,7 +125,8 @@ export function ToastHost({ children }: { children: React.ReactNode }) {
           >
             <div className="space-y-1">
               {item.title ? <ToastTitle>{item.title}</ToastTitle> : null}
-              {item.description ? (
+              {/* Error fallbacks reuse the title as description; show that text once. */}
+              {item.description && item.description !== item.title ? (
                 <ToastDescription>{item.description}</ToastDescription>
               ) : null}
             </div>
@@ -144,7 +146,7 @@ export function ToastHost({ children }: { children: React.ReactNode }) {
             </div>
           </Toast>
         ))}
-      </ToastContext.Provider>
-    </ToastProvider>
+      </ToastProvider>
+    </ToastContext.Provider>
   );
 }

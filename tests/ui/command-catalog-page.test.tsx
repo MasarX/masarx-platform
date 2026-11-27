@@ -73,7 +73,8 @@ test("command catalog stays navigable when command registry readback is degraded
   expect(status).toHaveAttribute("data-testid", "console-commands-degraded");
   expect(status).toHaveAttribute("aria-live", "polite");
   expect(status).toHaveAttribute("aria-atomic", "true");
-  expect(screen.getByText(/registry offline/)).toBeInTheDocument();
+  expect(screen.getByText("Unable to load command catalog.")).toBeInTheDocument();
+  expect(screen.queryByText("registry offline", { exact: false })).not.toBeInTheDocument();
   expect(screen.getByLabelText("Search commands")).toBeInTheDocument();
   expect(
     screen.getByText("Command registry readback is unavailable.")
@@ -348,7 +349,8 @@ test("command catalog allowed filter reports unavailable read registry readback"
     "data-testid",
     "console-commands-read-registry-degraded"
   );
-  expect(screen.getByText(/read registry offline/)).toBeInTheDocument();
+  expect(status.textContent).toBe("Read registry readback is unavailable.");
+  expect(status).not.toHaveTextContent("read registry offline");
   expect(
     screen.getByText(
       "No commands can be confirmed runnable in Console because read registry readback is unavailable. Route-target blocked: 0; command permission blocked: 0; readback blocked: 1."
