@@ -32,7 +32,8 @@ SELECT columns_are(
     'hos_active_segment_id', 'hos_active_duty_status',
     'hos_active_segment_started_at',
     'is_active', 'is_suspended', 'is_inactive',
-    'has_expired_documents', 'has_expiring_documents', 'tenure_seconds'
+    'has_expired_documents', 'has_expiring_documents', 'tenure_seconds',
+    'deliveries_today', 'deliveries_week', 'on_time_pct', 'customer_rating'
   ],
   'v_driver_directory exposes FE-projection columns'
 );
