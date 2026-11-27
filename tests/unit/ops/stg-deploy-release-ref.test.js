@@ -99,7 +99,7 @@ test.each([
   ['a malformed name', { GITHUB_REF: 'refs/tags/v01.2.3-rc.4' }, {}, 'tag must be a numbered release candidate'],
   ['a plain version tag', { GITHUB_REF: 'refs/tags/v1.2.3' }, {}, 'tag must be a numbered release candidate'],
   ['an RC numbered zero', { GITHUB_REF: 'refs/tags/v1.2.3-rc.0' }, {}, 'tag must be a numbered release candidate'],
-  ['a tag for another commit', {}, { target: { type: 'commit', sha: tip } }, 'tag must resolve to github.sha'],
+  ['a tag for another commit', {}, { target: { type: 'commit', sha: tip } }, 'release candidate tag must resolve to github.sha'],
   ['a dispatch with a different expected SHA', { GITHUB_EVENT_NAME: 'workflow_dispatch', EXPECTED_SHA: tip },
     {}, 'expected_sha must equal github.sha'],
   ['a commit outside main', {}, { comparison: 'diverged' }, 'release commit is not on main'],
