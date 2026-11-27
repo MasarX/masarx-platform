@@ -173,7 +173,7 @@ test('sweep provisioner masks generated passwords before use and emits fixed lab
         tenantRoles.set(roleKey, role.capability_keys);
         return response([{ settings_id: orgId }]);
       }
-      if (query.includes('resolve_access_control_policy_v1') && readOnly) {
+      if (query.includes('resolve_access_control_policy_v1') && !readOnly) {
         const key = parameters[3];
         const configured = key === 'dispatcher' ? tenantRoles.get(key) : roles[key].required;
         const capabilities = [...configured, ...(key === driftRole ? ['system.write'] : [])];
