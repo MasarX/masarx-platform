@@ -91,12 +91,12 @@ describe('dependency security foundation', () => {
     const mobileCore = readJson('packages/mobile-core/package.json');
 
     expect(fieldops.dependencies).toMatchObject({
-      '@expo/app-integrity': '~55.0.15',
+      '@expo/app-integrity': '~55.0.17',
       expo: '~55.0.32',
-      'expo-dev-client': '~55.0.37',
+      'expo-dev-client': '~55.0.41',
       'expo-modules-core': '55.0.27',
-      react: '19.2.0',
-      'react-dom': '19.2.0',
+      react: '19.2.9',
+      'react-dom': '19.2.9',
       'react-native': '0.83.10',
     });
     expect(fieldops.dependencies).not.toHaveProperty('@react-native/virtualized-lists');
@@ -106,13 +106,13 @@ describe('dependency security foundation', () => {
     });
     expect(mobileCore.peerDependencies).toEqual({
       expo: '~55.0.32',
-      react: '19.2.0',
+      react: '19.2.9',
       'react-native': '0.83.10',
     });
     expect(mobileCore.devDependencies).toEqual({
       '@types/react': '~19.2.0',
       expo: '55.0.32',
-      react: '19.2.0',
+      react: '19.2.9',
       'react-native': '0.83.10',
     });
   });
@@ -158,29 +158,29 @@ describe('dependency security foundation', () => {
 
     expect(lock.packages['packages/mobile-core'].peerDependencies).toEqual({
       expo: '~55.0.32',
-      react: '19.2.0',
+      react: '19.2.9',
       'react-native': '0.83.10',
     });
     expect(lock.packages['packages/mobile-core'].devDependencies).toEqual({
       '@types/react': '~19.2.0',
       expo: '55.0.32',
-      react: '19.2.0',
+      react: '19.2.9',
       'react-native': '0.83.10',
     });
-    expect(lock.packages['apps/fieldops'].dependencies['react-dom']).toBe('19.2.0');
-    expect(lock.packages['apps/fieldops'].dependencies['expo-dev-client']).toBe('~55.0.37');
+    expect(lock.packages['apps/fieldops'].dependencies['react-dom']).toBe('19.2.9');
+    expect(lock.packages['apps/fieldops'].dependencies['expo-dev-client']).toBe('~55.0.41');
     expect(lock.packages['apps/fieldops'].dependencies['expo-modules-core']).toBe('55.0.27');
     expect(lock.packages['packages/ui'].dependencies['@hookform/resolvers']).toBe('5.2.2');
 
     expect(versionsForLockPackage(lock, 'expo')).toEqual(['55.0.32']);
-    expect(versionsForLockPackage(lock, 'expo-dev-client')).toEqual(['55.0.37']);
+    expect(versionsForLockPackage(lock, 'expo-dev-client')).toEqual(['55.0.41']);
     expect(versionsForLockPackage(lock, 'expo-modules-core')).toEqual(['55.0.27']);
     for (const name of ['react', 'react-dom']) {
       const consoleV2Path = `apps/console-v2/node_modules/${name}`;
       expect(lock.packages[consoleV2Path]).toBeUndefined();
       const remainingPackages = { ...lock.packages };
       delete remainingPackages[consoleV2Path];
-      expect(versionsForLockPackage({ packages: remainingPackages }, name)).toEqual(['19.2.0', '19.2.8']);
+      expect(versionsForLockPackage({ packages: remainingPackages }, name)).toEqual(['19.2.9']);
     }
     expect(versionsForLockPackage(lock, 'react-native')).toEqual(['0.83.10']);
   });
