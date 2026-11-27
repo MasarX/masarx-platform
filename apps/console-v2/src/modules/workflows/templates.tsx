@@ -1810,12 +1810,14 @@ function InputsTab({
                     key={it}
                     type="button"
                     className="wf-var-pill mono"
-                    title="Drag to an input field · click to copy expression"
+                    title="Click or drag to put this variable in the expression field"
                     draggable
                     onDragStart={(e) =>
                       e.dataTransfer.setData('text/plain', `{{ ${k}.${it} }}`)
                     }
+                    // WCAG 2.5.7: a click or Enter does what the drop does, and also copies.
                     onClick={() => {
+                      setFieldExpr(`{{ ${k}.${it} }}`);
                       navigator.clipboard
                         ?.writeText(`{{ ${k}.${it} }}`)
                         .catch(() => undefined);

@@ -3565,13 +3565,6 @@
       "calls": "Calls",
       "avgResponse": "Avg Response"
     },
-    "dispatchBoard": {
-      "unassigned": "Unassigned",
-      "allJobsAssigned": "All jobs assigned",
-      "drivers": "Drivers",
-      "eta": "ETA",
-      "noJobsDropHere": "No jobs — drop here to assign"
-    },
     "pickupStatus": {
       "unknown": "Unknown",
       "statuses": {
@@ -3606,7 +3599,9 @@
       "dismissAriaLabel": "Dismiss onboarding checklist"
     },
     "kanbanBoard": {
-      "noItems": "No items"
+      "noItems": "No items",
+      "moveTo": "Move to column…",
+      "moveCard": "Move to column: {card}"
     },
     "pickupOperations": {
       "form": {
