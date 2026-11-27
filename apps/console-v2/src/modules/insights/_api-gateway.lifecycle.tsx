@@ -1,6 +1,7 @@
 import { Chip, type ChipKind } from '@/components/Chip';
 import { KvGrid, type KvRow } from '@/components/KvGrid';
 import type { UseDrawerHandle } from '@/hooks/useOverlay';
+import { fill, useI18n, type Translate } from '@/lib/i18n';
 
 export interface ApiGatewayLifecycleRow {
   request_id: string;
@@ -30,27 +31,29 @@ function outboundTone(status?: string | null, code?: number | null): ChipKind {
 export function openApiGatewayOutboundLifecycleDrawer(
   drawer: UseDrawerHandle,
   row: ApiGatewayLifecycleRow,
+  t: Translate,
 ): void {
   drawer.open({
-    title: `Provider delivery - ${row.outbound_call_id ?? row.request_id}`,
+    title: fill(t('insightsApiGatewayLifecycle.openApiGatewayOutboundLifecycleDrawer.providerDeliveryValue'), { value: String(row.outbound_call_id ?? row.request_id) }),
     size: 'lg',
     body: <ApiGatewayOutboundLifecycleBody row={row} />,
   });
 }
 
 export function ApiGatewayOutboundLifecycleBody({ row }: { row: ApiGatewayLifecycleRow }) {
+  const { t } = useI18n();
   const rows: KvRow[] = [
-    { key: 'request_id', label: 'Gateway request', value: row.request_id, mono: true },
-    { key: 'correlation_id', label: 'Correlation', value: row.correlation_id ?? '-', mono: true },
-    { key: 'outbound_call_id', label: 'Provider reference', value: row.outbound_call_id ?? '-', mono: true },
-    { key: 'outbound_status', label: 'Provider delivery status', value: row.outbound_status ?? '-', mono: true },
-    { key: 'status_code', label: 'Provider status', value: row.status_code ?? '-', mono: true },
-    { key: 'error_code', label: 'Provider error', value: row.error_code ?? '-' },
-    { key: 'outbound_error_message', label: 'Provider error detail', value: row.outbound_error_message ?? '-' },
-    { key: 'workflow_run_id', label: 'Workflow run', value: row.workflow_run_id ?? '-', mono: true },
-    { key: 'shipment', label: 'Shipment', value: row.tracking_number ?? row.shipment_id ?? '-', mono: !row.tracking_number },
-    { key: 'settings_resolution_id', label: 'Policy check', value: row.settings_resolution_id ? 'Recorded' : '-', mono: false },
-    { key: 'occurred_at', label: 'Received', value: row.occurred_at, mono: true },
+    { key: 'request_id', label: t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.gatewayRequest'), value: row.request_id, mono: true },
+    { key: 'correlation_id', label: t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.correlation'), value: row.correlation_id ?? '-', mono: true },
+    { key: 'outbound_call_id', label: t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.providerReference'), value: row.outbound_call_id ?? '-', mono: true },
+    { key: 'outbound_status', label: t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.providerDeliveryStatus'), value: row.outbound_status ?? '-', mono: true },
+    { key: 'status_code', label: t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.providerStatus'), value: row.status_code ?? '-', mono: true },
+    { key: 'error_code', label: t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.providerError'), value: row.error_code ?? '-' },
+    { key: 'outbound_error_message', label: t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.providerErrorDetail'), value: row.outbound_error_message ?? '-' },
+    { key: 'workflow_run_id', label: t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.workflowRun'), value: row.workflow_run_id ?? '-', mono: true },
+    { key: 'shipment', label: t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.shipment'), value: row.tracking_number ?? row.shipment_id ?? '-', mono: !row.tracking_number },
+    { key: 'settings_resolution_id', label: t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.policyCheck'), value: row.settings_resolution_id ? t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.recorded') : '-', mono: false },
+    { key: 'occurred_at', label: t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.received'), value: row.occurred_at, mono: true },
   ];
 
   return (
@@ -68,13 +71,13 @@ export function ApiGatewayOutboundLifecycleBody({ row }: { row: ApiGatewayLifecy
         }}
       >
         <div>
-          <div className="eyebrow">Provider delivery status</div>
+          <div className="eyebrow">{t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.providerDeliveryStatus')}</div>
           <div className="serif" style={{ fontSize: 18 }}>
-            {row.outbound_call_id ?? 'No provider delivery update yet'}
+            {row.outbound_call_id ?? t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.noProviderDeliveryUpdate')}
           </div>
         </div>
         <Chip
-          label={row.outbound_status ?? row.intake_state ?? 'pending'}
+          label={row.outbound_status ?? row.intake_state ?? t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.pending')}
           kind={outboundTone(row.outbound_status, row.status_code)}
           size="xs"
           className="mono"
@@ -83,7 +86,7 @@ export function ApiGatewayOutboundLifecycleBody({ row }: { row: ApiGatewayLifecy
       <KvGrid rows={rows} />
       {!row.outbound_call_id ? (
         <div className="state__hint" style={{ marginTop: 12 }}>
-          No provider delivery update is available for this API request yet.
+          {t('insightsApiGatewayLifecycle.apiGatewayOutboundLifecycleBody.noProviderDeliveryUpdate2')}
         </div>
       ) : null}
     </div>

@@ -101,3 +101,8 @@ export const englishT: Translate = (path, fallback) => lookup(catalogs.en, path)
 export function fill(template: string, values: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in values ? String(values[name]) : match));
 }
+
+/** A translator for one catalog section, so a large module names the section once instead of in every lookup (the key paths are part of the bundle). */
+export function scopeT(t: Translate, section: string): Translate {
+  return (path, fallback) => t(`${section}.${path}`, fallback);
+}
