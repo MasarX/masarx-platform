@@ -40,7 +40,6 @@ describe('Dispatch stop reassignment without dragging', () => {
     await user.keyboard('{Enter}');
 
     await waitFor(() => expect(reassignSpy).toHaveBeenCalledTimes(1));
-    const [stopIds] = reassignSpy.mock.calls[0] as [string[]];
-    expect(stopIds).toHaveLength(1);
+    expect(reassignSpy.mock.calls[0]?.[0]).toHaveLength(1);
   });
 });
