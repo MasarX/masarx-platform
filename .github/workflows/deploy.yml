@@ -705,6 +705,8 @@ jobs:
               echo "::warning::Could not write database apply evidence"
           fi
           rm -f "$deploy_temp/db-push.log" "$deploy_temp/edge-secret-metadata.json"; rmdir "$deploy_temp"' EXIT
+          : > "$deploy_temp/db-push.log"
+          bash scripts/deploy/prepare-executor-plan.sh
           export NO_COLOR=1
           "$cli" db push --linked --yes 2>&1 | tee "$deploy_temp/db-push.log" ||
             bash scripts/deploy/supabase-db-push.sh "$cli" "$deploy_temp/db-push.log" "${PIPESTATUS[@]}" 2>&1 | tee -a "$deploy_temp/db-push.log"
