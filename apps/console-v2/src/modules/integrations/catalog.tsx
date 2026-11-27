@@ -37,6 +37,7 @@ import {
   displayRedactedIntegrationJson,
   isRedactedIntegrationSecret,
 } from './secret-redaction';
+import { fill, useI18n } from '@/lib/i18n';
 
 type LookupOption = ReturnType<typeof api.getLookups>[number];
 
@@ -200,6 +201,7 @@ function ManualIntegrationDraftModal({
   onCancel: () => void;
   onCreate: (values: ManualDraftFormValues) => Promise<boolean>;
 }) {
+  const { t } = useI18n();
   const [pluginName, setPluginName] = useState('');
   const [vendor, setVendor] = useState('');
   const [pluginKind, setPluginKind] = useState(defaultPluginKind);
@@ -215,7 +217,7 @@ function ManualIntegrationDraftModal({
 
   async function submitDraft() {
     if (!canCreate) {
-      pushToast('Display name or vendor is required', 'warn');
+      pushToast(t('integrationsCatalog.manualIntegrationDraftModal.displayNameOrVendor'), 'warn');
       return;
     }
     setBusy(true);
@@ -236,7 +238,7 @@ function ManualIntegrationDraftModal({
   return (
     <div>
       <p className="state__hint">
-        Registers a new provider integration. Author mappings in Intake mappings after creation.
+        {t('integrationsCatalog.manualIntegrationDraftModal.registersANewProvider')}
       </p>
       <div
         style={{
@@ -247,23 +249,23 @@ function ManualIntegrationDraftModal({
           padding: '0 4px',
         }}
       >
-        <label className="mono" htmlFor="manual-plugin-name">Display name</label>
+        <label className="mono" htmlFor="manual-plugin-name">{t('integrationsCatalog.manualIntegrationDraftModal.displayName')}</label>
         <input
           id="manual-plugin-name"
           className="dt-inline-input"
-          placeholder="e.g. Examplecourier KSA"
+          placeholder={t('integrationsCatalog.manualIntegrationDraftModal.eGExamplecourierKsa')}
           value={pluginName}
           onChange={(e) => setPluginName(e.target.value)}
         />
-        <label className="mono" htmlFor="manual-plugin-vendor">Vendor</label>
+        <label className="mono" htmlFor="manual-plugin-vendor">{t('integrationsCatalog.manualIntegrationDraftModal.vendor')}</label>
         <input
           id="manual-plugin-vendor"
           className="dt-inline-input"
-          placeholder="e.g. Examplecourier KSA"
+          placeholder={t('integrationsCatalog.manualIntegrationDraftModal.eGExamplecourierKsa')}
           value={vendor}
           onChange={(e) => setVendor(e.target.value)}
         />
-        <label className="mono" htmlFor="manual-plugin-kind">Kind</label>
+        <label className="mono" htmlFor="manual-plugin-kind">{t('integrationsCatalog.manualIntegrationDraftModal.kind')}</label>
         <select
           id="manual-plugin-kind"
           className="dt-inline-input"
@@ -276,14 +278,14 @@ function ManualIntegrationDraftModal({
             </option>
           ))}
         </select>
-        <label className="mono" htmlFor="manual-plugin-source">Draft source</label>
+        <label className="mono" htmlFor="manual-plugin-source">{t('integrationsCatalog.manualIntegrationDraftModal.draftSource')}</label>
         <input
           id="manual-plugin-source"
           className="dt-inline-input"
           readOnly
           value={lookupLabel(sourceTypeOptions, sourceType)}
         />
-        <label className="mono" htmlFor="manual-plugin-auth">Auth</label>
+        <label className="mono" htmlFor="manual-plugin-auth">{t('integrationsCatalog.manualIntegrationDraftModal.auth')}</label>
         <select
           id="manual-plugin-auth"
           className="dt-inline-input"
@@ -298,9 +300,9 @@ function ManualIntegrationDraftModal({
         </select>
       </div>
       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-        <Button label="Cancel" kind="ghost" disabled={busy} onClick={onCancel} />
+        <Button label={t('integrationsCatalog.manualIntegrationDraftModal.cancel')} kind="ghost" disabled={busy} onClick={onCancel} />
         <Button
-          label={busy ? 'Creating...' : 'Create'}
+          label={busy ? t('integrationsCatalog.manualIntegrationDraftModal.creating') : t('integrationsCatalog.manualIntegrationDraftModal.create')}
           kind="primary"
           capability={CAP.INTEGRATION_PLUGINS_WRITE}
           disabled={!canCreate}
@@ -589,6 +591,7 @@ function PluginAuditTrail({
   validationRuns: IntegrationPluginValidationRun[];
   approvalEvents: IntegrationPluginApprovalEvent[];
 }) {
+  const { t } = useI18n();
   if (!validationRuns.length && !approvalEvents.length) return null;
 
   return (
@@ -596,7 +599,7 @@ function PluginAuditTrail({
       {validationRuns.length ? (
         <>
           <h4 className="eyebrow" style={{ marginTop: '14px' }}>
-            Validation history
+            {t('integrationsCatalog.pluginAuditTrail.validationHistory')}
           </h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {validationRuns.map((run) => (
@@ -616,11 +619,11 @@ function PluginAuditTrail({
                   </span>
                 </div>
                 <div style={{ marginTop: '6px', display: 'grid', gap: '2px' }}>
-                  <AuditMetaRow label="Validation reference" value={run.id} />
-                  <AuditMetaRow label="Version reference" value={run.plugin_version_id} />
-                  <AuditMetaRow label="Request reference" value={run.correlation_id} />
-                  <AuditMetaRow label="Completed" value={formatAuditTimestamp(run.completed_at)} />
-                  <AuditMetaRow label="Review note" value={run.error_message} />
+                  <AuditMetaRow label={t('integrationsCatalog.pluginAuditTrail.validationReference')} value={run.id} />
+                  <AuditMetaRow label={t('integrationsCatalog.pluginAuditTrail.versionReference')} value={run.plugin_version_id} />
+                  <AuditMetaRow label={t('integrationsCatalog.pluginAuditTrail.requestReference')} value={run.correlation_id} />
+                  <AuditMetaRow label={t('integrationsCatalog.pluginAuditTrail.completed')} value={formatAuditTimestamp(run.completed_at)} />
+                  <AuditMetaRow label={t('integrationsCatalog.pluginAuditTrail.reviewNote')} value={run.error_message} />
                 </div>
               </div>
             ))}
@@ -631,7 +634,7 @@ function PluginAuditTrail({
       {approvalEvents.length ? (
         <>
           <h4 className="eyebrow" style={{ marginTop: '14px' }}>
-            Approval history
+            {t('integrationsCatalog.pluginAuditTrail.approvalHistory')}
           </h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {approvalEvents.map((event) => (
@@ -647,10 +650,10 @@ function PluginAuditTrail({
                   </span>
                 </div>
                 <div style={{ marginTop: '6px', display: 'grid', gap: '2px' }}>
-                  <AuditMetaRow label="Decision reference" value={event.id} />
-                  <AuditMetaRow label="Version reference" value={event.plugin_version_id} />
-                  <AuditMetaRow label="Handled by" value={event.actor_user_id} />
-                  <AuditMetaRow label="Reason" value={event.reason} />
+                  <AuditMetaRow label={t('integrationsCatalog.pluginAuditTrail.decisionReference')} value={event.id} />
+                  <AuditMetaRow label={t('integrationsCatalog.pluginAuditTrail.versionReference')} value={event.plugin_version_id} />
+                  <AuditMetaRow label={t('integrationsCatalog.pluginAuditTrail.handledBy')} value={event.actor_user_id} />
+                  <AuditMetaRow label={t('integrationsCatalog.pluginAuditTrail.reason')} value={event.reason} />
                 </div>
               </div>
             ))}
@@ -666,11 +669,12 @@ function PluginAuditTrail({
 // Missing canonical row renders a danger-toned `(missing)` chip so operators
 // see the seed gap rather than a silent neutral default.
 function PluginStatusChip({ value }: { value: string }) {
+  const { t } = useI18n();
   const row = lookupRow('plugin_status', value);
   return row ? (
     <Chip label={row.label} kind={row.tone as ChipKind} size="xs" />
   ) : (
-    <Chip label={`Unknown plugin status: ${value}`} kind="danger" size="xs" />
+    <Chip label={fill(t('integrationsCatalog.pluginStatusChip.unknownPluginStatus'), { value: String(value) })} kind="danger" size="xs" />
   );
 }
 
@@ -682,10 +686,11 @@ function PluginStatusChip({ value }: { value: string }) {
 // loud (parity with `PluginStatusChip`); rows without `is_chip_visible: true`
 // render nothing — this is row-driven by configuration, not a code branch.
 function PluginVersionRowChip({ value }: { value: string }) {
+  const { t } = useI18n();
   const row = lookupRow('plugin_status', value);
   if (!row) {
     return (
-      <Chip label={`Unknown plugin status: ${value}`} kind="danger" size="xs" />
+      <Chip label={fill(t('integrationsCatalog.pluginVersionRowChip.unknownPluginStatus'), { value: String(value) })} kind="danger" size="xs" />
     );
   }
   if (row.metadata?.is_chip_visible !== true) {
@@ -724,6 +729,7 @@ function PluginExportHandoffCard({
 }: {
   handoff: PluginExportHandoffReadback;
 }) {
+  const { t } = useI18n();
   const token = handoffText(handoff.token);
   const endpoint = redactHandoffText(handoff.endpoint, token) ?? '-';
   const sampleCurl = redactHandoffText(handoff.sample_curl, token);
@@ -739,28 +745,28 @@ function PluginExportHandoffCard({
       style={{ marginTop: '12px', padding: '10px 12px' }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        <Chip label="Export handoff ready" kind="good" size="xs" />
+        <Chip label={t('integrationsCatalog.pluginExportHandoffCard.exportHandoffReady')} kind="good" size="xs" />
         <span style={{ fontSize: '10.5px', color: 'var(--ink-3)' }}>
-          Instructions ready
+          {t('integrationsCatalog.pluginExportHandoffCard.instructionsReady')}
         </span>
         {handoff.method ? (
           <span style={{ fontSize: '10.5px', color: 'var(--ink-3)' }}>
-            Request method set
+            {t('integrationsCatalog.pluginExportHandoffCard.requestMethodSet')}
           </span>
         ) : null}
       </div>
       <div style={{ marginTop: '8px', display: 'grid', gap: '3px' }}>
-        <AuditMetaRow label="Export setup confirmed" value="Ready" />
-        <AuditMetaRow label="Integration reference" value={handoff.plugin_id} />
-        <AuditMetaRow label="Version reference" value={handoff.plugin_version_id} />
-        <AuditMetaRow label="Export request" value={endpoint ? 'Configured' : 'Pending setup'} />
-        <AuditMetaRow label="Token" value={token && token !== '{{TOKEN}}' ? 'Issued - redacted' : 'Not issued'} />
+        <AuditMetaRow label={t('integrationsCatalog.pluginExportHandoffCard.exportSetupConfirmed')} value="Ready" />
+        <AuditMetaRow label={t('integrationsCatalog.pluginExportHandoffCard.integrationReference')} value={handoff.plugin_id} />
+        <AuditMetaRow label={t('integrationsCatalog.pluginExportHandoffCard.versionReference')} value={handoff.plugin_version_id} />
+        <AuditMetaRow label={t('integrationsCatalog.pluginExportHandoffCard.exportRequest')} value={endpoint ? 'Configured' : 'Pending setup'} />
+        <AuditMetaRow label={t('integrationsCatalog.pluginExportHandoffCard.token')} value={token && token !== '{{TOKEN}}' ? 'Issued - redacted' : 'Not issued'} />
       </div>
       {sampleCurl ? (
         <StateView
           kind="empty"
-          title="Export request prepared"
-          hint="Use the generated integration instructions to send the export request with the issued token."
+          title={t('integrationsCatalog.pluginExportHandoffCard.exportRequestPrepared')}
+          hint={t('integrationsCatalog.pluginExportHandoffCard.useTheGeneratedIntegration')}
         />
       ) : null}
       {instructions.length ? (
@@ -800,6 +806,7 @@ function PluginBindingToggle({
   lifecycleScope,
   onAfterToggle,
 }: PluginBindingToggleProps) {
+  const { t } = useI18n();
   const setPluginBinding = useSetIntegrationPluginBinding();
   const inFlightRef = useRef(false);
   const [isToggling, setIsToggling] = useState(false);
@@ -833,7 +840,7 @@ function PluginBindingToggle({
     } catch (err) {
       const message = (err as Error)?.message ?? '';
       setStatusMessage(`Set binding failed${message ? `: ${message}` : ''}`);
-      pushToast(`Set binding failed · ${message}`, 'danger');
+      pushToast(fill(t('integrationsCatalog.pluginBindingToggle.setBindingFailed'), { message: String(message) }), 'danger');
     } finally {
       inFlightRef.current = false;
       setIsToggling(false);
@@ -843,7 +850,7 @@ function PluginBindingToggle({
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
       <Button
-        label={enabled ? 'Disable binding' : 'Enable binding'}
+        label={enabled ? t('integrationsCatalog.pluginBindingToggle.disableBinding') : t('integrationsCatalog.pluginBindingToggle.enableBinding')}
         iconName={enabled ? 'lock' : 'unlock'}
         kind={enabled ? 'danger' : 'primary'}
         capability={CAP.INTEGRATION_PLUGINS_ACTIVATE}
@@ -873,6 +880,7 @@ function PluginDrawerBody({
   onRunTest,
   onAfterBindingToggle,
 }: PluginDrawerProps) {
+  const { t } = useI18n();
   const latest = versions[0] ?? null;
   const activeVersion = versions.find((version) => version.id === plugin.active_version_id) ?? null;
   const latestBindings = latest
@@ -906,11 +914,11 @@ function PluginDrawerBody({
         ...(baseUrl ? { base_url: baseUrl } : {}),
       });
       setExportHandoff(result);
-      pushToast(`Export handoff ready · ${plugin.name} ${pluginVersionDisplay(activeVersion)}`, 'good');
+      pushToast(fill(t('integrationsCatalog.pluginDrawerBody.exportHandoffReady'), { name: String(plugin.name), value: String(pluginVersionDisplay(activeVersion)) }), 'good');
     } catch (err) {
       const message = (err as Error)?.message ?? 'export handoff failed';
       setExportError(message);
-      pushToast(`Export handoff failed · ${message}`, 'danger');
+      pushToast(fill(t('integrationsCatalog.pluginDrawerBody.exportHandoffFailed'), { message: String(message) }), 'danger');
     } finally {
       setIsExporting(false);
     }
@@ -925,7 +933,7 @@ function PluginDrawerBody({
     } catch (err) {
       const message = (err as Error)?.message ?? 'validation failed';
       setValidationError(message);
-      pushToast(`Validation failed · ${message}`, 'danger');
+      pushToast(fill(t('integrationsCatalog.pluginDrawerBody.validationFailed'), { message: String(message) }), 'danger');
     } finally {
       setIsRunningValidation(false);
     }
@@ -934,33 +942,33 @@ function PluginDrawerBody({
   return (
     <div>
       <p className="state__hint">
-        Plugin authoring lives in Intake mappings. Versioning and active release selection stay governed here.
+        {t('integrationsCatalog.pluginDrawerBody.pluginAuthoringLivesIn')}
       </p>
       <div className="card" style={{ marginTop: '10px' }}>
-        <KvRow label="Vendor" value={plugin.vendor} />
-        <KvRow label="Version" value={plugin.version} />
-        <KvRow label="Kind" value={pluginKindLabel(plugin.plugin_kind)} />
-        <KvRow label="Binding" value={bindingLabel} />
+        <KvRow label={t('integrationsCatalog.pluginDrawerBody.vendor')} value={plugin.vendor} />
+        <KvRow label={t('integrationsCatalog.pluginDrawerBody.version')} value={plugin.version} />
+        <KvRow label={t('integrationsCatalog.pluginDrawerBody.kind')} value={pluginKindLabel(plugin.plugin_kind)} />
+        <KvRow label={t('integrationsCatalog.pluginDrawerBody.binding')} value={bindingLabel} />
         <KvRow
-          label="Status"
+          label={t('integrationsCatalog.pluginDrawerBody.status')}
           value={<PluginStatusChip value={plugin.status} />}
         />
         <KvRow
-          label="Latest version"
+          label={t('integrationsCatalog.pluginDrawerBody.latestVersion')}
           value={latest ? pluginVersionDisplay(latest) : '—'}
         />
         <KvRow
-          label="Latest version status"
+          label={t('integrationsCatalog.pluginDrawerBody.latestVersionStatus')}
           value={latest ? <PluginStatusChip value={latest.status} /> : '—'}
         />
         <KvRow
-          label="Health (24h)"
+          label={t('integrationsCatalog.pluginDrawerBody.health24h')}
           value={plugin.health == null ? '—' : `${(plugin.health * 100).toFixed(1)}%`}
         />
-        <KvRow label="Active version" value={activeVersionLabel} />
+        <KvRow label={t('integrationsCatalog.pluginDrawerBody.activeVersion')} value={activeVersionLabel} />
       </div>
       <h4 className="eyebrow" style={{ marginTop: '14px' }}>
-        Version history
+        {t('integrationsCatalog.pluginDrawerBody.versionHistory')}
       </h4>
       {versions.length ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1009,20 +1017,20 @@ function PluginDrawerBody({
                 <div
                   style={{ fontSize: '10.5px', color: 'var(--ink-2)', marginTop: '2px' }}
                 >
-                  submitted by {v.submitted_by}
+                  {fill(t('integrationsCatalog.pluginDrawerBody.submittedBy'), { submitted_by: String(v.submitted_by) })}
                 </div>
               ) : null}
             </div>
           ))}
         </div>
       ) : (
-        <div className="state__hint">No version history is available for this plugin.</div>
+        <div className="state__hint">{t('integrationsCatalog.pluginDrawerBody.noVersionHistoryIs')}</div>
       )}
       <PluginAuditTrail validationRuns={validationRuns} approvalEvents={approvalEvents} />
       {bindings.length ? (
         <>
           <h4 className="eyebrow" style={{ marginTop: '14px' }}>
-            Runtime bindings
+            {t('integrationsCatalog.pluginDrawerBody.runtimeBindings')}
           </h4>
           {latest && canToggleBinding ? (
             <div style={{ display: 'flex', justifyContent: 'flex-start', margin: '8px 0' }}>
@@ -1043,12 +1051,12 @@ function PluginDrawerBody({
               <div key={binding.id} className="card" style={{ padding: '10px 12px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Chip
-                    label={binding.enabled === false ? 'Disabled' : 'Enabled'}
+                    label={binding.enabled === false ? t('integrationsCatalog.pluginDrawerBody.disabled') : t('integrationsCatalog.pluginDrawerBody.enabled')}
                     kind={binding.enabled === false ? 'neutral' : 'good'}
                     size="xs"
                   />
                   <span className="mono" style={{ fontSize: '10.5px', color: 'var(--ink-3)' }}>
-                    {binding.scope_type ?? 'scope'} / {binding.binding_type ?? 'binding'}
+                    {binding.scope_type ?? t('integrationsCatalog.pluginDrawerBody.scope')} / {binding.binding_type ?? t('integrationsCatalog.pluginDrawerBody.binding2')}
                   </span>
                   <div style={{ flex: 1 }} />
                   <span className="mono" style={{ fontSize: '10.5px', color: 'var(--ink-3)' }}>
@@ -1056,15 +1064,15 @@ function PluginDrawerBody({
                   </span>
                 </div>
                 <div style={{ marginTop: '6px', display: 'grid', gap: '2px' }}>
-                  <AuditMetaRow label="binding" value={binding.id} />
-                  <AuditMetaRow label="version" value={binding.plugin_version_id} />
-                  <AuditMetaRow label="scope" value={binding.scope_id} />
-                  <AuditMetaRow label="runtime" value={binding.runtime_resource_type} />
-                  <AuditMetaRow label="runtime id" value={binding.runtime_resource_id} />
+                  <AuditMetaRow label={t('integrationsCatalog.pluginDrawerBody.binding2')} value={binding.id} />
+                  <AuditMetaRow label={t('integrationsCatalog.pluginDrawerBody.version2')} value={binding.plugin_version_id} />
+                  <AuditMetaRow label={t('integrationsCatalog.pluginDrawerBody.scope')} value={binding.scope_id} />
+                  <AuditMetaRow label={t('integrationsCatalog.pluginDrawerBody.runtime')} value={binding.runtime_resource_type} />
+                  <AuditMetaRow label={t('integrationsCatalog.pluginDrawerBody.runtimeId')} value={binding.runtime_resource_id} />
                 </div>
                 <pre
                   className="wf-code-block"
-                  aria-label="Runtime binding config"
+                  aria-label={t('integrationsCatalog.pluginDrawerBody.runtimeBindingConfig')}
                   style={{ marginTop: '8px', whiteSpace: 'pre-wrap' }}
                 >
                   {runtimeBindingConfigPreview(binding)}
@@ -1075,9 +1083,9 @@ function PluginDrawerBody({
         </>
       ) : null}
       <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
-        <Button label="Open in Intake mappings" iconName="edit" kind="ghost" onClick={onOpenMapping} />
+        <Button label={t('integrationsCatalog.pluginDrawerBody.openInIntakeMappings')} iconName="edit" kind="ghost" onClick={onOpenMapping} />
         <Button
-          label={isExporting ? 'Exporting handoff...' : 'Export handoff'}
+          label={isExporting ? t('integrationsCatalog.pluginDrawerBody.exportingHandoff') : t('integrationsCatalog.pluginDrawerBody.exportHandoff')}
           iconName="download"
           kind="ghost"
           capability={CAP.INTEGRATION_PLUGINS_WRITE}
@@ -1086,7 +1094,7 @@ function PluginDrawerBody({
         />
         <div style={{ flex: 1 }} />
         <Button
-          label={isRunningValidation ? 'Running validation...' : 'Run validation'}
+          label={isRunningValidation ? t('integrationsCatalog.pluginDrawerBody.runningValidation') : t('integrationsCatalog.pluginDrawerBody.runValidation')}
           iconName="play"
           kind="primary"
           capability={CAP.INTEGRATION_PLUGINS_TEST}
@@ -1094,7 +1102,7 @@ function PluginDrawerBody({
           onClick={() => void runValidation()}
         />
         <Button
-          label="Run test event"
+          label={t('integrationsCatalog.pluginDrawerBody.runTestEvent')}
           iconName="play"
           kind="ghost"
           capability={CAP.INTEGRATION_PLUGINS_TEST}
@@ -1103,12 +1111,12 @@ function PluginDrawerBody({
       </div>
       {validationError ? (
         <div className="state__hint" role="status" style={{ color: 'var(--danger)', marginTop: '8px' }}>
-          Validation failed: {validationError}
+          {fill(t('integrationsCatalog.pluginDrawerBody.validationFailed2'), { validationError: String(validationError) })}
         </div>
       ) : null}
       {exportError ? (
         <div className="state__hint" role="status" style={{ color: 'var(--danger)', marginTop: '8px' }}>
-          Export handoff failed: {exportError}
+          {fill(t('integrationsCatalog.pluginDrawerBody.exportHandoffFailed2'), { exportError: String(exportError) })}
         </div>
       ) : null}
       {exportHandoff ? <PluginExportHandoffCard handoff={exportHandoff} /> : null}
@@ -1135,6 +1143,7 @@ function KvRow({ label, value }: { label: string; value: ReactNode }) {
 }
 
 export function CatalogModule() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const consoleNavigate = useConsoleNavigator();
   const drawer = useDrawer();
@@ -1253,12 +1262,12 @@ export function CatalogModule() {
 
   function openAddIntegration() {
     if (!defaultPluginKind || !defaultSourceType || !defaultAuthMode) {
-      pushToast('Integration lookup options are still loading', 'warn');
+      pushToast(t('integrationsCatalog.catalogModule.integrationLookupOptionsAre'), 'warn');
       return;
     }
     setManualDraftReadback(null);
     modal.open({
-      title: 'Add integration',
+      title: t('integrationsCatalog.catalogModule.addIntegration'),
       body: (
         <ManualIntegrationDraftModal
           pluginKindOptions={pluginKindOptions}
@@ -1303,10 +1312,10 @@ export function CatalogModule() {
                   ?? refreshedDirectoryRow?.active_version_status
                   ?? null,
               });
-              pushToast(`Plugin draft created - ${values.pluginName || values.vendor}`, 'good');
+              pushToast(fill(t('integrationsCatalog.catalogModule.pluginDraftCreated'), { value: String(values.pluginName || values.vendor) }), 'good');
               return true;
             } catch (err) {
-              pushToast(`Create failed - ${(err as Error)?.message ?? ''}`, 'danger');
+              pushToast(fill(t('integrationsCatalog.catalogModule.createFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
               return false;
             }
           }}
@@ -1446,7 +1455,7 @@ export function CatalogModule() {
               },
               latest.id,
             );
-            pushToast(`Validation run recorded · ${plugin.name} ${pluginVersionDisplay(latest)}`, 'good');
+            pushToast(fill(t('integrationsCatalog.catalogModule.validationRunRecorded'), { name: String(plugin.name), value: String(pluginVersionDisplay(latest)) }), 'good');
             await openPluginDrawer(plugin);
           }}
           onRunTest={() => {
@@ -1469,7 +1478,7 @@ export function CatalogModule() {
                   source_name: sourceName,
                 });
                 if (!stashed) {
-                  pushToast('Token handoff is unavailable in this browser session. Copy the token manually.', 'warn');
+                  pushToast(t('integrationsCatalog.catalogModule.tokenHandoffIsUnavailable'), 'warn');
                 }
               }
               const search = new URLSearchParams({
@@ -1502,7 +1511,7 @@ export function CatalogModule() {
                 source_name: sourceName,
               });
               if (!stashed) {
-                pushToast('Token handoff is unavailable in this browser session. Copy the token manually.', 'warn');
+                pushToast(t('integrationsCatalog.catalogModule.tokenHandoffIsUnavailable'), 'warn');
               }
             }
             consoleNavigate(`/integrations/webhook-tester?${search.toString()}`);
@@ -1550,17 +1559,17 @@ export function CatalogModule() {
               buttons.push(
                 <Button
                   key="submit"
-                  label="Submit for review"
+                  label={t('integrationsCatalog.catalogModule.submitForReview')}
                   iconName="upload"
                   kind="primary"
                   capability={CAP.INTEGRATION_PLUGINS_WRITE}
                   onClick={async () => {
                     try {
                       await submitPlugin.mutateAsync({ plugin_version_id: latest.id });
-                      pushToast(`Submitted · ${plugin.name} v${latest.version}`, 'good');
+                      pushToast(fill(t('integrationsCatalog.catalogModule.submittedV'), { name: String(plugin.name), version: String(latest.version) }), 'good');
                       await openPluginDrawer(plugin);
                     } catch (err) {
-                      pushToast(`Submit failed · ${(err as Error)?.message ?? ''}`, 'danger');
+                      pushToast(fill(t('integrationsCatalog.catalogModule.submitFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
                     }
                   }}
                 />,
@@ -1570,7 +1579,7 @@ export function CatalogModule() {
               buttons.push(
                 <Button
                   key="approve"
-                  label="Approve"
+                  label={t('integrationsCatalog.catalogModule.approve')}
                   iconName="check"
                   kind="primary"
                   capability={CAP.INTEGRATION_PLUGINS_APPROVE}
@@ -1580,10 +1589,10 @@ export function CatalogModule() {
                         plugin_version_id: latest.id,
                         decision: 'approved',
                       });
-                      pushToast(`Approved · ${plugin.name} v${latest.version}`, 'good');
+                      pushToast(fill(t('integrationsCatalog.catalogModule.approvedV'), { name: String(plugin.name), version: String(latest.version) }), 'good');
                       await openPluginDrawer(plugin);
                     } catch (err) {
-                      pushToast(`Approve failed · ${(err as Error)?.message ?? ''}`, 'danger');
+                      pushToast(fill(t('integrationsCatalog.catalogModule.approveFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
                     }
                   }}
                 />,
@@ -1593,7 +1602,7 @@ export function CatalogModule() {
               buttons.push(
                 <Button
                   key="reject"
-                  label="Reject"
+                  label={t('integrationsCatalog.catalogModule.reject')}
                   iconName="x"
                   kind="ghost"
                   capability={CAP.INTEGRATION_PLUGINS_APPROVE}
@@ -1603,10 +1612,10 @@ export function CatalogModule() {
                         plugin_version_id: latest.id,
                         decision: 'rejected',
                       });
-                      pushToast(`Rejected · ${plugin.name} v${latest.version}`, 'warn');
+                      pushToast(fill(t('integrationsCatalog.catalogModule.rejectedV'), { name: String(plugin.name), version: String(latest.version) }), 'warn');
                       await openPluginDrawer(plugin);
                     } catch (err) {
-                      pushToast(`Reject failed · ${(err as Error)?.message ?? ''}`, 'danger');
+                      pushToast(fill(t('integrationsCatalog.catalogModule.rejectFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
                     }
                   }}
                 />,
@@ -1616,7 +1625,7 @@ export function CatalogModule() {
               buttons.push(
                 <Button
                   key="activate"
-                  label="Activate"
+                  label={t('integrationsCatalog.catalogModule.activate')}
                   iconName="bolt"
                   kind="primary"
                   capability={CAP.INTEGRATION_PLUGINS_ACTIVATE}
@@ -1627,10 +1636,10 @@ export function CatalogModule() {
                         scope_type: lifecycleScope.scope_type,
                         scope_id: lifecycleScope.scope_id,
                       });
-                      pushToast(`Activated · ${plugin.name} v${latest.version}`, 'good');
+                      pushToast(fill(t('integrationsCatalog.catalogModule.activatedV'), { name: String(plugin.name), version: String(latest.version) }), 'good');
                       await openPluginDrawer(plugin);
                     } catch (err) {
-                      pushToast(`Activate failed · ${(err as Error)?.message ?? ''}`, 'danger');
+                      pushToast(fill(t('integrationsCatalog.catalogModule.activateFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
                     }
                   }}
                 />,
@@ -1640,7 +1649,7 @@ export function CatalogModule() {
               buttons.push(
                 <Button
                   key="deactivate"
-                  label="Deactivate plugin"
+                  label={t('integrationsCatalog.catalogModule.deactivatePlugin')}
                   iconName="pause"
                   kind="danger"
                   capability={CAP.INTEGRATION_PLUGINS_ACTIVATE}
@@ -1652,10 +1661,10 @@ export function CatalogModule() {
                         plugin_version_id: activeVersion.id,
                         reason: `Console deactivate ${plugin.name} ${pluginVersionDisplay(activeVersion)}`,
                       });
-                      pushToast(`Deactivated · ${plugin.name} ${pluginVersionDisplay(activeVersion)}`, 'warn');
+                      pushToast(fill(t('integrationsCatalog.catalogModule.deactivated'), { name: String(plugin.name), value: String(pluginVersionDisplay(activeVersion)) }), 'warn');
                       await openPluginDrawer(plugin);
                     } catch (err) {
-                      pushToast(`Deactivate failed · ${(err as Error)?.message ?? ''}`, 'danger');
+                      pushToast(fill(t('integrationsCatalog.catalogModule.deactivateFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
                     }
                   }}
                 />,
@@ -1670,12 +1679,12 @@ export function CatalogModule() {
             </span>
           ) : null}
           <Button
-            label={rollbackTarget ? `Rollback to ${rollbackTargetLabel}` : 'Rollback unavailable'}
+            label={rollbackTarget ? fill(t('integrationsCatalog.catalogModule.rollbackTo'), { rollbackTargetLabel: String(rollbackTargetLabel) }) : t('integrationsCatalog.catalogModule.rollbackUnavailable')}
             iconName="history"
             kind="danger"
             capability={CAP.INTEGRATION_PLUGINS_ACTIVATE}
             disabled={!rollbackTarget}
-            title={rollbackDisabledReason ?? `Rollback ${plugin.name} to ${rollbackTargetLabel}`}
+            title={rollbackDisabledReason ?? fill(t('integrationsCatalog.catalogModule.rollbackTo2'), { name: String(plugin.name), rollbackTargetLabel: String(rollbackTargetLabel) })}
             onClick={async () => {
               if (!rollbackTarget) return;
               try {
@@ -1684,10 +1693,10 @@ export function CatalogModule() {
                   target_plugin_version_id: rollbackTarget.id,
                   reason: `Console rollback to ${rollbackTargetLabel}`,
                 });
-                pushToast(`Rollback applied - ${plugin.name} -> ${rollbackTargetLabel}`, 'warn');
+                pushToast(fill(t('integrationsCatalog.catalogModule.rollbackApplied'), { name: String(plugin.name), rollbackTargetLabel: String(rollbackTargetLabel) }), 'warn');
                 await openPluginDrawer(plugin);
               } catch (err) {
-                pushToast(`Rollback failed - ${(err as Error)?.message ?? ''}`, 'danger');
+                pushToast(fill(t('integrationsCatalog.catalogModule.rollbackFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
               }
             }}
           />
@@ -1715,7 +1724,7 @@ export function CatalogModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-catalog"
-          eyebrow="Integrations"
+          eyebrow={t('integrationsCatalog.catalogModule.integrations')}
           titleAccent="Plugin"
           titlePlain="catalog"
           pills={[]}
@@ -1723,7 +1732,7 @@ export function CatalogModule() {
         <StateView
           kind="denied"
           capability={CAP.INTEGRATION_PLUGINS_READ}
-          hint="You do not have permission to view the plugin catalog."
+          hint={t('integrationsCatalog.catalogModule.youDoNotHave')}
         />
       </div>
     );
@@ -1734,7 +1743,7 @@ export function CatalogModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-catalog"
-          eyebrow="Integrations"
+          eyebrow={t('integrationsCatalog.catalogModule.integrations')}
           titleAccent="Plugin"
           titlePlain="catalog"
           pills={[]}
@@ -1749,7 +1758,7 @@ export function CatalogModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-catalog"
-          eyebrow="Integrations"
+          eyebrow={t('integrationsCatalog.catalogModule.integrations')}
           titleAccent="Plugin"
           titlePlain="catalog"
           pills={[]}
@@ -1763,18 +1772,18 @@ export function CatalogModule() {
     <div className="page">
       <PageHeader
         moduleKey="int-catalog"
-        eyebrow="Integrations"
+        eyebrow={t('integrationsCatalog.catalogModule.integrations')}
         titleAccent="Plugin"
         titlePlain="catalog"
         pills={[
           <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
-          <span key="src" className="chip chip--xs mono">Plugin lifecycle · versions</span>,
-          <span key="dir" className="chip chip--xs mono">Catalog directory</span>,
+          <span key="src" className="chip chip--xs mono">{t('integrationsCatalog.catalogModule.pluginLifecycleVersions')}</span>,
+          <span key="dir" className="chip chip--xs mono">{t('integrationsCatalog.catalogModule.catalogDirectory')}</span>,
         ]}
         actions={[
           <Button
             key="add"
-            label="Add integration"
+            label={t('integrationsCatalog.catalogModule.addIntegration')}
             iconName="plus"
             kind="primary"
             capability={CAP.INTEGRATION_PLUGINS_WRITE}
@@ -1793,8 +1802,8 @@ export function CatalogModule() {
             <Chip
               label={
                 manualDraftReadback.visibleInCatalog && manualDraftReadback.visibleInDirectory
-                  ? 'Integration confirmed'
-                  : 'Finishing integration confirmation'
+                  ? t('integrationsCatalog.catalogModule.integrationConfirmed')
+                  : t('integrationsCatalog.catalogModule.finishingIntegrationConfirmation')
               }
               kind={
                 manualDraftReadback.visibleInCatalog && manualDraftReadback.visibleInDirectory
@@ -1803,12 +1812,12 @@ export function CatalogModule() {
               }
             />
             <Chip
-              label={manualDraftReadback.visibleInCatalog ? 'Catalog available' : 'Catalog updating'}
+              label={manualDraftReadback.visibleInCatalog ? t('integrationsCatalog.catalogModule.catalogAvailable') : t('integrationsCatalog.catalogModule.catalogUpdating')}
               kind={manualDraftReadback.visibleInCatalog ? 'good' : 'warn'}
               size="xs"
             />
             <Chip
-              label={manualDraftReadback.visibleInDirectory ? 'Directory available' : 'Directory updating'}
+              label={manualDraftReadback.visibleInDirectory ? t('integrationsCatalog.catalogModule.directoryAvailable') : t('integrationsCatalog.catalogModule.directoryUpdating')}
               kind={manualDraftReadback.visibleInDirectory ? 'good' : 'warn'}
               size="xs"
             />
@@ -1837,8 +1846,8 @@ export function CatalogModule() {
       {displayedPlugins.length === 0 ? (
         <StateView
           kind="empty"
-          title="No plugins registered"
-          hint="Add an integration to start receiving webhooks."
+          title={t('integrationsCatalog.catalogModule.noPluginsRegistered')}
+          hint={t('integrationsCatalog.catalogModule.addAnIntegrationTo')}
         />
       ) : (
         <div
@@ -1931,7 +1940,7 @@ export function CatalogModule() {
                   )}
                 </div>
                 <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--ink-2)' }}>
-                  Binding: {bindingLabel}
+                  {fill(t('integrationsCatalog.catalogModule.binding'), { bindingLabel: String(bindingLabel) })}
                 </div>
               </div>
             );
