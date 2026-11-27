@@ -6982,14 +6982,12 @@ export function streamEvidence(callback: EvidenceCallback): () => void {
 
   if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('streamEvidence');
   state.evidence_subscribers.add(callback);
-  // Emit the last few decisions immediately
-  ((seed.decision_log as Record<string, unknown>[]) ?? [])
+  const replayTimers = ((seed.decision_log as Record<string, unknown>[]) ?? [])
     .slice(0, 5)
     .reverse()
-    .forEach((d, i) => {
-      setTimeout(() => callback(d), 200 + i * 80);
-    });
+    .map((decision, index) => setTimeout(() => callback(decision), 200 + index * 80));
   return () => {
+    for (const timer of replayTimers) clearTimeout(timer);
     state.evidence_subscribers.delete(callback);
   };
 }
