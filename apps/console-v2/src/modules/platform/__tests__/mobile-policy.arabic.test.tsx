@@ -5,7 +5,7 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { MobilePolicyModule } from '@/modules/platform/mobile-policy';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/platform-mobile-policy';
+import ar from '@/lib/seed-raw/i18n/areas/ar/platform-mobile-policy';
 import * as api from '@/lib/api';
 
 const MOBILE_ATTESTATION_LOOKUPS = [

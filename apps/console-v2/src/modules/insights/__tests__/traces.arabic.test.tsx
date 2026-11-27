@@ -5,7 +5,7 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { TracesModule } from '@/modules/insights/traces';
 import { englishT, fill } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/insights-traces';
+import ar from '@/lib/seed-raw/i18n/areas/ar/insights-traces';
 
 function lookup(catalog: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], catalog);

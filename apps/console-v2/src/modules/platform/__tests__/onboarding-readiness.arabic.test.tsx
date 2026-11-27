@@ -5,7 +5,7 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { OnboardingReadinessModule } from '@/modules/platform/onboarding-readiness';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/platform-onboarding-readiness';
+import ar from '@/lib/seed-raw/i18n/areas/ar/platform-onboarding-readiness';
 import { CAP } from '@/lib/capabilities';
 
 function lookup(catalog: unknown, path: string): unknown {

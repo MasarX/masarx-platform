@@ -1,36 +1,6 @@
+/* The studio reads the shared --ui-* tokens; never redeclare them here. Its accent is Console V2's --accent family, mapped in tailwind.config.cjs (#443). */
+@import '../../../../packages/ui/src/tokens.css';
 @tailwind utilities;
-
-.label-designer-studio {
-  --ui-paper: 250 251 254;
-  --ui-surface: 255 255 255;
-  --ui-highlight: 242 245 248;
-  --ui-ink: 30 38 50;
-  --ui-muted: 82 94 111;
-  --ui-border: 213 219 228;
-  --ui-accent: 20 120 90;
-  --ui-accent-hover: 16 96 72;
-  --ui-accent-ink: 255 255 255;
-  --ui-accent-soft: 224 244 237;
-  --ui-success: 34 139 89;
-  --ui-warning: 194 120 0;
-  --ui-danger: 204 43 43;
-}
-
-:root[data-theme="dark"] .label-designer-studio {
-  --ui-paper: 24 30 39;
-  --ui-surface: 30 37 48;
-  --ui-highlight: 42 51 65;
-  --ui-ink: 233 238 245;
-  --ui-muted: 164 174 188;
-  --ui-border: 68 78 94;
-  --ui-accent: 54 158 107;
-  --ui-accent-hover: 72 178 126;
-  --ui-accent-ink: 8 18 14;
-  --ui-accent-soft: 24 64 50;
-  --ui-success: 54 158 107;
-  --ui-warning: 221 139 76;
-  --ui-danger: 231 78 78;
-}
 
 .label-designer-studio [data-testid$="-canvas-viewport"] {
   min-height: 520px;
@@ -97,13 +67,13 @@
 .label-designer-studio .bg-ui-surface { background: rgb(var(--ui-surface)); }
 .label-designer-studio .bg-ui-paper\/80 { background: rgb(var(--ui-paper) / 0.8); }
 .label-designer-studio .bg-ui-highlight\/70 { background: rgb(var(--ui-highlight) / 0.7); }
-.label-designer-studio .bg-ui-accent { background: rgb(var(--ui-accent)); }
-.label-designer-studio .bg-ui-accent-soft\/50 { background: rgb(var(--ui-accent-soft) / 0.5); }
+.label-designer-studio .bg-ui-accent { background: var(--accent); }
+.label-designer-studio .bg-ui-accent-soft\/50 { background: color-mix(in oklab, var(--accent-soft) 50%, transparent); }
 .label-designer-studio .bg-ui-danger\/5 { background: rgb(var(--ui-danger) / 0.05); }
 .label-designer-studio .text-ui-ink { color: rgb(var(--ui-ink)); }
 .label-designer-studio .text-ui-muted { color: rgb(var(--ui-muted)); }
-.label-designer-studio .text-ui-accent { color: rgb(var(--ui-accent)); }
-.label-designer-studio .text-ui-accent-ink { color: rgb(var(--ui-accent-ink)); }
+.label-designer-studio .text-ui-accent { color: var(--accent); }
+.label-designer-studio .text-ui-accent-ink { color: var(--ink-inv); }
 .label-designer-studio .text-ui-danger { color: rgb(var(--ui-danger)); }
 .label-designer-studio .shadow-sm { box-shadow: 0 1px 2px rgb(15 23 42 / 0.08); }
 .label-designer-studio .overflow-auto { overflow: auto; }

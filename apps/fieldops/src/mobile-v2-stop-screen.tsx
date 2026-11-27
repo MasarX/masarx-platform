@@ -12,6 +12,7 @@ import * as React from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Defs, G, Path, Pattern, Rect, Text as SvgText } from "react-native-svg";
 
+import { EN_STRINGS, getStrings, resolveLocaleCode, type FieldOpsStrings } from "./i18n";
 import { FxIcon } from "./mobile-v2-icon";
 import type { MobileV2IconName } from "./mobile-v2-icon-specs";
 import {
@@ -123,6 +124,8 @@ export interface MobileV2StopDetail {
 export interface MobileV2StopScreenProps {
   readonly theme: MobileV2Theme;
   readonly stop: MobileV2StopDetail;
+  /** Display locale for stop text and accessibility labels; defaults to English. */
+  readonly locale?: string;
   readonly locationReadback?: MobileV2StopLocationReadback | null;
   readonly terminalState?: "done" | "failed" | "partial" | null;
   readonly intentReadback?: {
@@ -136,13 +139,13 @@ export interface MobileV2StopScreenProps {
   readonly onCopyAddress?: () => void;
   readonly onShareAddress?: () => void;
   readonly onScanParcel?: () => void;
-  /** Tap a parcel to open its detail / toggle scan state manually. */
+  /** Tap a parcel to open its detail. Parcel status renders only from the stop read-back. */
   readonly onParcelPress?: (parcelId: string) => void;
   /** Open the damaged-parcel hold sheet for this stop. */
   readonly onDamageHold?: () => void;
   /** Open the delivery reschedule sheet for this stop. */
   readonly onReschedule?: () => void;
-  /** Tap a proof checklist item to mark it done (e.g. photo captured). */
+  /** Tap a proof checklist item to open proof capture. Done state renders only from the stop read-back. */
   readonly onProofPress?: (key: string) => void;
   readonly onPodSubmit?: () => void;
   readonly onFail?: () => void;
@@ -197,8 +200,8 @@ function resolveProofIcon(key: string): MobileV2IconName {
   }
 }
 
-function formatPaymentMethod(value: string | null): string {
-  if (!value) return "Payment method pending";
+function formatPaymentMethod(value: string | null, strings: FieldOpsStrings = EN_STRINGS): string {
+  if (!value) return strings.stop.paymentMethodPending;
   return value
     .split(/[_\s-]+/)
     .filter(Boolean)
@@ -361,6 +364,7 @@ function StopStat({
 
 export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactElement {
   const { theme, stop } = props;
+  const strings = getStrings(resolveLocaleCode(props.locale));
   const locationReadback = props.locationReadback ?? null;
   const terminalState = props.terminalState ?? null;
   const isTerminal = terminalState !== null;
@@ -382,12 +386,19 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
   const paymentCollection = stop.paymentCollection ?? null;
   const terminalCopy =
     terminalState === "done"
-      ? { label: "Delivery completed", icon: "check" as const, tone: "success" as const }
+      ? { label: strings.stop.deliveryCompleted, icon: "check" as const, tone: "success" as const }
       : terminalState === "failed"
-        ? { label: "Delivery failed", icon: "alert" as const, tone: "danger" as const }
+        ? { label: strings.stop.deliveryFailed, icon: "alert" as const, tone: "danger" as const }
         : terminalState === "partial"
-          ? { label: "Partial delivery recorded", icon: "alert" as const, tone: "warning" as const }
+          ? { label: strings.stop.partialDeliveryRecorded, icon: "alert" as const, tone: "warning" as const }
           : null;
+  const intentReadback = props.intentReadback ?? null;
+  const actionLoggedText =
+    intentReadback === null
+      ? ""
+      : (intentReadback.eventCount === 1 ? strings.stop.actionLoggedOne : strings.stop.actionLoggedOther)
+          .replace("{status}", () => intentReadback.status.replace(/_/g, " "))
+          .replace("{count}", () => String(intentReadback.eventCount));
   const resolveParcelStatus = (parcel: MobileV2StopParcel): MobileV2StopParcel["status"] =>
     resolveMobileV2StopParcelStatus(parcel, stop.proofChecklist, stop.parcels);
 
@@ -425,7 +436,7 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                         fontFamily: MOBILE_V2_FONT_SANS,
                       }}
                     >
-                      Stop {stop.seq}
+                      {strings.stop.stopSeq.replace("{seq}", () => String(stop.seq))}
                     </Text>
                     <Text
                       style={{
@@ -478,7 +489,7 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                   <Pressable
                     onPress={props.onCall}
                     accessibilityRole="button"
-                    accessibilityLabel="Call"
+                    accessibilityLabel={strings.detail.call}
                     style={{
                       width: 38,
                       height: 38,
@@ -493,7 +504,7 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                   <Pressable
                     onPress={props.onWhatsApp}
                     accessibilityRole="button"
-                    accessibilityLabel="WhatsApp"
+                    accessibilityLabel={strings.stop.whatsapp}
                     style={{
                       width: 38,
                       height: 38,
@@ -557,9 +568,7 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                 fontSize: MOBILE_V2_TYPE_SIZES.body,
               }}
             >
-              Action logged: {props.intentReadback.status.replace(/_/g, " ")} -{" "}
-              {props.intentReadback.eventCount} update
-              {props.intentReadback.eventCount === 1 ? "" : "s"}
+              {actionLoggedText}
             </Text>
           </FxCard>
         ) : null}
@@ -579,19 +588,19 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
         <FxRow gap={MOBILE_V2_SPACING.lg}>
           <StopStat
             theme={theme}
-            label="ETA"
-            value={stop.etaMinutes > 0 ? `+${stop.etaMinutes}m` : "now"}
+            label={strings.stop.eta}
+            value={stop.etaMinutes > 0 ? strings.stop.etaMinutes.replace("{n}", () => String(stop.etaMinutes)) : strings.stop.etaNow}
             icon="clock"
             tone={stop.etaMinutes > 0 && stop.window < "12:00" ? "warning" : "accent"}
           />
           <StopStat
             theme={theme}
-            label="Distance"
-            value={`${stop.distanceKm.toFixed(1)} km`}
+            label={strings.stop.distance}
+            value={strings.stop.distanceKm.replace("{km}", () => stop.distanceKm.toFixed(1))}
             icon="route"
             tone="muted"
           />
-          <StopStat theme={theme} label="Window" value={stop.window} icon="calendar" tone="muted" />
+          <StopStat theme={theme} label={strings.stop.window} value={stop.window} icon="calendar" tone="muted" />
         </FxRow>
 
         {/* Address card — design canvas ScrStopDetail puts a 120px
@@ -694,7 +703,7 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                     borderRadius: 8,
                     rowGap: MOBILE_V2_SPACING.sm,
                   }}
-                  accessibilityLabel="Stop location details"
+                  accessibilityLabel={strings.stop.locationDetails}
                 >
                   <FxRow gap={MOBILE_V2_SPACING.md} align="center">
                     <FxIcon name="pin" size={12} color={theme.info} />
@@ -708,7 +717,7 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                         textTransform: "uppercase",
                       }}
                     >
-                      Verified location
+                      {strings.stop.verifiedLocation}
                     </Text>
                   </FxRow>
                   {locationReadback.shortAddress !== null ? (
@@ -755,13 +764,13 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                 primary CTA for the bottom "Start delivery" button. */}
             <FxRow gap={MOBILE_V2_SPACING.md}>
               <FxButton theme={theme} variant="ghost" icon="navigate" size="sm" onPress={props.onNavigate}>
-                Navigate
+                {strings.detail.navigate}
               </FxButton>
               <FxButton theme={theme} variant="ghost" icon="copy" size="sm" onPress={props.onCopyAddress}>
-                Copy
+                {strings.stop.copy}
               </FxButton>
               <FxButton theme={theme} variant="ghost" icon="share" size="sm" onPress={props.onShareAddress}>
-                Share
+                {strings.stop.share}
               </FxButton>
             </FxRow>
           </FxCol>
@@ -776,7 +785,7 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
         <FxCol gap={MOBILE_V2_SPACING.lg}>
           <FxSectionHead
             theme={theme}
-            label="Parcels"
+            label={strings.stop.parcels}
             right={
               <FxRow gap={MOBILE_V2_SPACING.lg} align="center">
                 <Text
@@ -810,7 +819,9 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                     : undefined
                 }
                 accessibilityRole="button"
-                accessibilityLabel={`Parcel ${p.code} ${resolveParcelStatus(p)}`}
+                accessibilityLabel={strings.stop.parcelA11y
+                  .replace("{code}", () => p.code)
+                  .replace("{status}", () => strings.stop.parcelStatus[resolveParcelStatus(p)])}
                 accessibilityState={{ disabled: isTerminal }}
                 disabled={isTerminal}
                 style={{
@@ -873,7 +884,7 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                   }
                   dense
                 >
-                  {resolveParcelStatus(p) === "pending" ? "scan to verify" : resolveParcelStatus(p)}
+                  {resolveParcelStatus(p) === "pending" ? strings.stop.scanToVerify : strings.stop.parcelStatus[resolveParcelStatus(p)]}
                 </FxChip>
               </Pressable>
             ))}
@@ -887,9 +898,9 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
               full
               disabled={isTerminal || stop.parcels.length === 0}
               onPress={isTerminal ? undefined : props.onDamageHold}
-              accessibilityLabel="Report damaged parcel"
+              accessibilityLabel={strings.stop.reportDamagedParcel}
             >
-              Report damaged parcel
+              {strings.stop.reportDamagedParcel}
             </FxButton>
           ) : null}
           {props.onReschedule !== undefined ? (
@@ -901,16 +912,16 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
               full
               disabled={isTerminal}
               onPress={isTerminal ? undefined : props.onReschedule}
-              accessibilityLabel="Reschedule delivery"
+              accessibilityLabel={strings.stop.rescheduleDelivery}
             >
-              Reschedule delivery
+              {strings.stop.rescheduleDelivery}
             </FxButton>
           ) : null}
         </FxCol>
 
         {paymentCollection !== null ? (
           <FxCol gap={MOBILE_V2_SPACING.lg}>
-            <FxSectionHead theme={theme} label="COD collection" />
+            <FxSectionHead theme={theme} label={strings.stop.codCollection} />
             <FxCard theme={theme} padding={14}>
               <FxCol gap={MOBILE_V2_SPACING.md}>
                 <FxRow justify="space-between" align="flex-start" gap={MOBILE_V2_SPACING.lg}>
@@ -923,8 +934,8 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                       }}
                     >
                       {paymentCollection.outcome === "collected"
-                        ? "Collection confirmed"
-                        : "Collection pending"}
+                        ? strings.stop.collectionConfirmed
+                        : strings.stop.collectionPending}
                     </Text>
                     <Text
                       style={{
@@ -933,7 +944,7 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                         fontFamily: MOBILE_V2_FONT_SANS,
                       }}
                     >
-                      {formatPaymentMethod(paymentCollection.method)} · {paymentCollection.source}
+                      {formatPaymentMethod(paymentCollection.method, strings)} · {paymentCollection.source}
                     </Text>
                   </View>
                   <FxChip
@@ -941,20 +952,20 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                     tone={paymentCollection.outcome === "collected" ? "success" : "warning"}
                     dense
                   >
-                    {paymentCollection.outcome === "collected" ? "collected" : "pending"}
+                    {paymentCollection.outcome === "collected" ? strings.stop.codStatus.collected : strings.stop.codStatus.pending}
                   </FxChip>
                 </FxRow>
                 <FxRow gap={MOBILE_V2_SPACING.md} align="stretch">
                   <StopStat
                     theme={theme}
-                    label="Expected"
+                    label={strings.stop.expected}
                     value={`${paymentCollection.expectedAmount.toLocaleString()} ${paymentCollection.currency}`}
                     icon="calendar"
                     tone="muted"
                   />
                   <StopStat
                     theme={theme}
-                    label="Collected"
+                    label={strings.stop.collected}
                     value={`${(paymentCollection.collectedAmount ?? 0).toLocaleString()} ${paymentCollection.currency}`}
                     icon="clock"
                     tone={paymentCollection.outcome === "collected" ? "success" : "warning"}
@@ -968,9 +979,13 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                       fontFamily: MOBILE_V2_FONT_SANS,
                     }}
                   >
-                    Tendered {(paymentCollection.tenderedAmount ?? paymentCollection.collectedAmount ?? 0).toLocaleString()} {paymentCollection.currency}
+                    {strings.stop.tendered
+                      .replace("{amount}", () => (paymentCollection.tenderedAmount ?? paymentCollection.collectedAmount ?? 0).toLocaleString())
+                      .replace("{currency}", () => paymentCollection.currency)}
                     {" · "}
-                    Change {(paymentCollection.changeDueAmount ?? 0).toLocaleString()} {paymentCollection.currency}
+                    {strings.stop.change
+                      .replace("{amount}", () => (paymentCollection.changeDueAmount ?? 0).toLocaleString())
+                      .replace("{currency}", () => paymentCollection.currency)}
                   </Text>
                 ) : null}
               </FxCol>
@@ -982,7 +997,7 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
         <FxCol gap={MOBILE_V2_SPACING.lg}>
           <FxSectionHead
             theme={theme}
-            label="Required proof"
+            label={strings.stop.requiredProof}
             right={
               <Text
                 style={{
@@ -1012,9 +1027,9 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                         ? () => props.onProofPress!(c.key)
                         : undefined
                     }
-                    accessibilityRole="checkbox"
-                    accessibilityLabel={c.label}
-                    accessibilityState={{ checked: done, disabled: isTerminal }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${c.label}, ${done ? strings.home.counter_done : strings.home.counter_pending}`}
+                    accessibilityState={{ disabled: isTerminal }}
                     disabled={isTerminal}
                     style={{
                       flexDirection: "row",
@@ -1056,7 +1071,7 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
                         then a `success`-toned `captured`. Design
                         flow-route.jsx:411. */}
                     <FxChip theme={theme} tone={done ? "success" : "neutral"} dense>
-                      {done ? "captured" : "required"}
+                      {done ? strings.stop.proofCaptured : strings.stop.proofRequired}
                     </FxChip>
                   </Pressable>
                 </FxCard>
@@ -1068,7 +1083,7 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
         {/* Timeline */}
         {stop.timeline.length > 0 ? (
           <FxCol gap={MOBILE_V2_SPACING.lg}>
-            <FxSectionHead theme={theme} label="Activity" />
+            <FxSectionHead theme={theme} label={strings.stop.activity} />
             <View
               style={{
                 backgroundColor: theme.surface,
@@ -1150,7 +1165,7 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
               as the *entry* into the POD flow, so the primary CTA is
               the forward-progress verb. */}
           <FxButton theme={theme} variant="ghost" icon="alert" size="md" onPress={props.onFail}>
-            Can't deliver
+            {strings.stop.cantDeliver}
           </FxButton>
           <FxButton
             theme={theme}
@@ -1161,8 +1176,10 @@ export function MobileV2StopScreen(props: MobileV2StopScreenProps): React.ReactE
             style={{ flexGrow: 1 } as never}
           >
             {podDoneCount > 0
-              ? `Resume delivery · ${podDoneCount}/${stop.proofChecklist.length}`
-              : "Start delivery"}
+              ? strings.stop.resumeDelivery
+                  .replace("{done}", () => String(podDoneCount))
+                  .replace("{total}", () => String(stop.proofChecklist.length))
+              : strings.stop.startDelivery}
           </FxButton>
           </FxRow>
         )}

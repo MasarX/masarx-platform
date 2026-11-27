@@ -10,6 +10,7 @@
 - Use ISO 8601 in data payloads; format only at the UI boundary.
 - Numeral shaping follows locale; avoid manual digit substitution in code.
 - RTL/LTR direction is set by locale and mirrored automatically; no per-page overrides.
+- Console V2 loads the saved language's catalog when it opens and keeps the current language visible until a selected language is ready.
 
 ## RTL requirements
 - Layout uses logical properties (inline-start/end) so mirroring is automatic.

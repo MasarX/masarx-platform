@@ -1,6 +1,8 @@
 // Mobile V2 pickup policy helpers. The production reason taxonomy comes from
 // pickup_policy.failure.*_reasons through resolve_settings_row_from_policy_context_v1.
 
+import { EN_STRINGS } from "./i18n";
+
 export interface MobileV2PickupFailureReason {
   readonly key: string;
   readonly label: string;
@@ -8,10 +10,10 @@ export interface MobileV2PickupFailureReason {
 }
 
 export const MOBILE_V2_PICKUP_DEFAULT_FAILURE_REASONS: ReadonlyArray<MobileV2PickupFailureReason> = Object.freeze([
-  Object.freeze({ key: "sender_unavailable", label: "Sender unavailable", className: "reschedule" as const }),
-  Object.freeze({ key: "pickup_not_ready", label: "Pickup not ready", className: "reschedule" as const }),
-  Object.freeze({ key: "access_restricted", label: "Access restricted", className: "escalation" as const }),
-  Object.freeze({ key: "quantity_mismatch", label: "Quantity mismatch", className: "escalation" as const }),
+  Object.freeze({ key: "sender_unavailable", label: EN_STRINGS.pickupDetail.failureReasons.sender_unavailable, className: "reschedule" as const }),
+  Object.freeze({ key: "pickup_not_ready", label: EN_STRINGS.pickupDetail.failureReasons.pickup_not_ready, className: "reschedule" as const }),
+  Object.freeze({ key: "access_restricted", label: EN_STRINGS.pickupDetail.failureReasons.access_restricted, className: "escalation" as const }),
+  Object.freeze({ key: "quantity_mismatch", label: EN_STRINGS.pickupDetail.failureReasons.quantity_mismatch, className: "escalation" as const }),
 ]);
 
 function asRecord(value: unknown): Record<string, unknown> | null {

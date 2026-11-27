@@ -3398,7 +3398,6 @@ const CHIP_BTN_STYLE: CSSProperties = {
 };
 
 function FilterBar({
-  const { t } = useI18n();
   range,
   onRangeChange,
   routePackId,
@@ -3416,6 +3415,7 @@ function FilterBar({
   liveTailAvailable,
   realtimeMode,
 }: FilterBarProps) {
+  const { t } = useI18n();
   // W27-cycle-D §7 — derive the FilterBar range options from the canonical
   // `RANGE_OPTIONS` SSOT in `_shared.ts` instead of duplicating the key list +
   // label record inline. Filter to the four windows surfaced by the api-gateway
@@ -3900,7 +3900,6 @@ function ResponseTab({ row }: { row: ApiCallRow }) {
 // ─── Tab: Latency ─────────────────────────────────────────────────────────
 
 function LatencyTab({
-  const { t } = useI18n();
   row,
   provider,
   downstreamDominancePct,
@@ -3916,6 +3915,7 @@ function LatencyTab({
   // to an inline `?? 30` literal.
   downstreamDominancePct: number | undefined;
 }) {
+  const { t } = useI18n();
   // Segmented bar — gateway own time vs downstream provider time. The
   // canonical gateway projection does not yet split these explicitly so we
   // attribute provider latency to the most-recent provider_health_logs entry
@@ -4098,7 +4098,6 @@ function ReplayTab({ row }: { row: ApiCallRow }) {
 // `202604280330_block_api_gateway_source_v1.sql`).
 
 function ApiGatewayRouteMappingForm({
-  const { t } = useI18n();
   route,
   mappings,
   currentMapping,
@@ -4117,6 +4116,7 @@ function ApiGatewayRouteMappingForm({
   onClose: () => void;
   onOpenMappingStudio: (route: ApiRouteRow) => void;
 }) {
+  const { t } = useI18n();
   const currentRef = routeRequestMappingRef(route);
   const routeIntent = routeCanonicalIntent(route);
   const compatibleMappings = useMemo(
@@ -4241,7 +4241,6 @@ function ApiGatewayRouteMappingForm({
 }
 
 function ApiGatewayShipmentTestForm({
-  const { t } = useI18n();
   routes,
   sourceRows = [],
   tenantId,
@@ -4280,6 +4279,7 @@ function ApiGatewayShipmentTestForm({
   initialRouteId?: string | null;
   routeMappingLabel?: (route: ApiRouteRow | null | undefined) => string;
 }) {
+  const { t } = useI18n();
   const go = useConsoleNavigator();
   const allowed = useCapability(CAP.API_GATEWAY_WRITE);
   const testRequest = useRunApiGatewayRequestTest();
@@ -5063,13 +5063,13 @@ function ApiGatewayShipmentTestForm({
 }
 
 function BlockSourceForm({
-  const { t } = useI18n();
   sources,
   onClose,
 }: {
   sources: Array<{ id: string; label: string }>;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const allowed = useCapability(CAP.API_GATEWAY_WRITE);
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? '');
   const [reason, setReason] = useState('');
@@ -5150,13 +5150,13 @@ function BlockSourceForm({
 // `202604280330_block_api_gateway_source_v1.sql`).
 
 function AdjustRateLimitForm({
-  const { t } = useI18n();
   rateLimits,
   onClose,
 }: {
   rateLimits: RateLimitRow[];
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const allowed = useCapability(CAP.API_GATEWAY_WRITE);
   // W77 (Insights Cycle F-R-17 P2) — initial-limit fallback resolves
   // canonically through `api_gateway_thresholds.default_rate_limit_per_min`.

@@ -264,7 +264,7 @@ function WorkflowRunCard({ wr }: { wr: UiTraceWorkflowRun }) {
 export function TracesModule() {
   // AGENTS.md §7 (CAPABILITY-GATED UI for reads): page-level fail-closed gate.
   const canRead = useCapability(CAP.OBSERVABILITY_READ);
-  const { fmtNumber } = useI18n();
+  const { t, fmtNumber } = useI18n();
   const drawer = useDrawer();
   const search = useInsightsSearch();
   const updateSearch = useUpdateSearch();

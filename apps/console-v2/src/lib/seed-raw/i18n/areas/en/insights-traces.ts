@@ -1,0 +1,63 @@
+// Insights activity traces: Console V2 copy in English and Arabic (issue #302).
+
+const messages = {
+  insightsTraces: {
+    observabilityRow: {
+      eventEventTypeDurms: 'Event {event_type}, {durMs} ms',
+    },
+    eventDrawerBody: {
+      activityEvent: 'Activity event',
+      notAvailable: 'Not available',
+      additionalDetails: 'Additional details',
+      activityHistory: 'Activity history',
+      thisLookupReturnsTimeline: 'This lookup returns timeline events, domain events, and workflow runs for the selected activity reference.',
+      event: 'Event: {value}',
+      source: 'Source: {value}',
+      resource: 'Resource: {value}',
+      status: 'Status: {value}',
+      eventTime: 'Event time: {value}',
+      duration: 'Duration: {value}',
+    },
+    domainEventCard: {
+      recorded: 'Recorded',
+      notAvailable: 'Not available',
+    },
+    workflowRunCard: {
+      recorded: 'Recorded',
+      workflowTemplate: 'Workflow: Recorded · Template: {value}',
+      notAvailable: 'Not available',
+    },
+    tracesModule: {
+      copiedActiveid: 'Copied · {activeId}',
+      clipboardBlocked: 'Clipboard blocked',
+      eventEventType: 'Event · {event_type}',
+      activityHistory: 'Activity history',
+      insights: 'Insights',
+      activity: 'Activity',
+      youNeedActivityHistory: 'You need activity history access to view this page.',
+      activityReference: 'Activity reference',
+      copyActivityReference: 'Copy activity reference',
+      copyReference: 'Copy reference',
+      openThisActivityIn: 'Open this activity in a new tab',
+      openInNewTab: 'Open in new tab',
+      findActivity: 'Find activity',
+      noActivityReferenceSelected: 'No activity reference selected',
+      pasteAnActivityReference: 'Paste an activity reference above to fetch its history.',
+      activityHistoryUnavailable: 'Activity history unavailable',
+      couldNotLoadActivity: 'Could not load activity history for "{activeId}".',
+      fetchingActivityForActiveid: 'Fetching activity for "{activeId}"...',
+      noEventsFound: 'No events found',
+      noActivityFoundFor: 'No activity found for reference "{activeId}".',
+      recorded: 'Recorded',
+      totalValueMs: ' · total {value}ms',
+      timelineEvents: 'Timeline events',
+      relatedEvents: 'Related events',
+      relatedWorkflows: 'Related workflows',
+      activityReferenceValue: 'Activity reference: {value}',
+      notAvailable: 'Not available',
+      titlePlain: 'history',
+    },
+  },
+};
+
+export default messages;

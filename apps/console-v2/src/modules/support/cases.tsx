@@ -1871,7 +1871,6 @@ interface QueuePaneProps {
 }
 
 function QueuePane({
-  const { t } = useI18n();
   filter,
   onFilterChange,
   rows,
@@ -1880,6 +1879,7 @@ function QueuePane({
   users,
   now,
 }: QueuePaneProps) {
+  const { t } = useI18n();
   return (
     <aside
       className="card support-queue"
@@ -2093,7 +2093,6 @@ interface PublicTrackingReviewPanelProps {
 }
 
 function PublicTrackingReviewPanel({
-  const { t } = useI18n();
   review,
   compact = false,
   canAct,
@@ -2101,6 +2100,7 @@ function PublicTrackingReviewPanel({
   onReasonChange,
   onReview,
 }: PublicTrackingReviewPanelProps) {
+  const { t } = useI18n();
   const rows: KvRow[] = [
     { key: 'tracking', label: t('supportCases.publicTrackingReviewPanel.tracking'), value: review.trackingNumber, mono: true },
     { key: 'type', label: t('supportCases.publicTrackingReviewPanel.request'), value: review.requestType ? humanizeKey(review.requestType) : null },
@@ -2555,13 +2555,13 @@ function SupportContextShipments({ rows }: { rows: ShipmentRow[] }) {
 }
 
 function SupportClientContextBody({
-  const { t } = useI18n();
   client,
   shipments,
 }: {
   client: ClientRow | null;
   shipments: ShipmentRow[];
 }) {
+  const { t } = useI18n();
   if (!client) {
     return <StateView kind="empty" title={t('supportCases.supportClientContextBody.clientNotFound')} hint={t('supportCases.supportClientContextBody.theLinkedClientIs')} />;
   }
@@ -2587,7 +2587,6 @@ function SupportClientContextBody({
 }
 
 function SupportSenderContextBody({
-  const { t } = useI18n();
   sender,
   client,
   shipments,
@@ -2596,6 +2595,7 @@ function SupportSenderContextBody({
   client: ClientRow | null;
   shipments: ShipmentRow[];
 }) {
+  const { t } = useI18n();
   if (!sender) {
     return <StateView kind="empty" title={t('supportCases.supportSenderContextBody.senderNotFound')} hint={t('supportCases.supportSenderContextBody.theLinkedSenderIs')} />;
   }
@@ -2615,7 +2615,6 @@ function SupportSenderContextBody({
 }
 
 function SupportRecipientContextBody({
-  const { t } = useI18n();
   recipient,
   client,
   shipments,
@@ -2624,6 +2623,7 @@ function SupportRecipientContextBody({
   client: ClientRow | null;
   shipments: ShipmentRow[];
 }) {
+  const { t } = useI18n();
   if (!recipient) {
     return <StateView kind="empty" title={t('supportCases.supportRecipientContextBody.recipientNotFound')} hint={t('supportCases.supportRecipientContextBody.theLinkedRecipientIs')} />;
   }
@@ -2652,7 +2652,6 @@ interface ProfilePaneProps {
 }
 
 function ProfilePane({
-  const { t } = useI18n();
   caseRow,
   client,
   sender,
@@ -2661,6 +2660,7 @@ function ProfilePane({
   decisions,
   onOpenContext,
 }: ProfilePaneProps) {
+  const { t } = useI18n();
   if (!caseRow) {
     return (
       <aside
@@ -2899,13 +2899,13 @@ interface DetailDrawerBodyProps {
 }
 
 function DetailDrawerBody({
-  const { t } = useI18n();
   caseRow,
   messages,
   messageDirectoryById,
   events,
   now,
 }: DetailDrawerBodyProps) {
+  const { t } = useI18n();
   const reviewInfo = publicTrackingReviewInfo(caseRow);
   // W26 — prefer the projection's author_label for the attachment "from"
   // breadcrumb so the drawer renders the canonical user name resolution
@@ -3273,7 +3273,6 @@ interface SupportCaseEditPatch {
 }
 
 function EditCaseForm({
-  const { t } = useI18n();
   caseRow,
   onCancel,
   onSave,
@@ -3282,6 +3281,7 @@ function EditCaseForm({
   onCancel: () => void;
   onSave: (patch: SupportCaseEditPatch) => Promise<boolean> | boolean;
 }) {
+  const { t } = useI18n();
   const [subject, setSubject] = useState(caseRow.subject);
   const [priority, setPriority] = useState(caseRow.priority);
   const [channel, setChannel] = useState(caseRow.channel);
@@ -3417,7 +3417,6 @@ function EditCaseForm({
 }
 
 function NewCaseForm({
-  const { t } = useI18n();
   onConfirm,
   onCancel,
   onCreated,
@@ -3426,6 +3425,7 @@ function NewCaseForm({
   onCancel: () => void;
   onCreated?: (res: unknown) => void;
 }) {
+  const { t } = useI18n();
   // CLAIM-SUPPORT-CASES / Phase C6 — canonical create_support_case_v1 RPC.
   // The form keeps the demo's slim shape; in production a wider form would
   // bind subject + priority + channel + client picker + sla_minutes.
