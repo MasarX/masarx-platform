@@ -2,6 +2,7 @@
 // current user lacks the capability for. Mirrors demo `capabilityLock()`.
 import { Icon } from './Icon';
 import { formatCapabilityRequirement, formatCapabilityTitle } from '../lib/capabilities';
+import { useT } from '../lib/i18n';
 
 export interface CapabilityLockProps {
   capability: string;
@@ -9,11 +10,12 @@ export interface CapabilityLockProps {
 }
 
 export function CapabilityLock({ capability, className }: CapabilityLockProps) {
+  const t = useT();
   const classes = ['cap-lock', className].filter(Boolean).join(' ');
   return (
-    <span className={classes} title={formatCapabilityTitle(capability)}>
+    <span className={classes} title={formatCapabilityTitle(capability, t)}>
       <Icon name="lock" size={9} />
-      <span>{formatCapabilityRequirement(capability)}</span>
+      <span>{formatCapabilityRequirement(capability, t)}</span>
     </span>
   );
 }

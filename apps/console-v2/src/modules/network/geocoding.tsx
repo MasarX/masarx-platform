@@ -47,7 +47,7 @@ import {
   useResolveSettings,
 } from '@/lib/queries';
 import { useIdentity, useCapability } from '@/lib/identity';
-import { useI18n } from '@/lib/i18n';
+import { englishT, fill, useI18n, useT, type Translate } from '@/lib/i18n';
 import { useDrawer, useModal } from '@/hooks/useOverlay';
 import { CAP } from '@/lib/capabilities';
 import type { ScopeType, SettingsResolution } from '@/types/domain';
@@ -371,12 +371,14 @@ function buildGeocodePoint(
   row: GeocodeRow,
   addressById: ReadonlyMap<string, AddressRow>,
   thresholds: GeocodingThresholds | null,
+  t: Translate = englishT,
 ): GeoPoint | null {
   const lat = Number(row.lat);
   const lng = Number(row.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   const parent = row.address_id ? addressById.get(row.address_id) : undefined;
-  const provider = policyDisplayLabel(row.provider_name ?? row.provider ?? 'provider pending');
+  const providerToken = row.provider_name ?? row.provider;
+  const provider = providerToken ? policyDisplayLabel(providerToken, t) : t('geocoding.value.providerPending');
   const confidence = confidenceOf(row);
   const addressLabel = parent
     ? [addressStreetOf(parent), parent.city].filter(Boolean).join(' · ')
@@ -391,8 +393,8 @@ function buildGeocodePoint(
   };
 }
 
-function titleCaseToken(value: string | undefined): string {
-  if (!value) return 'Map engine missing';
+function titleCaseToken(value: string | undefined, t: Translate = englishT): string {
+  if (!value) return t('geocoding.value.mapEngineMissing');
   const known: Record<string, string> = {
     maplibre: 'MapLibre',
     openstreetmap: 'OpenStreetMap',
@@ -429,28 +431,30 @@ function stringArrayValue(value: unknown): string[] {
     .filter((entry): entry is string => Boolean(entry));
 }
 
-function policyDisplayLabel(value: string | null | undefined): string {
+// Policy tokens with a catalog label under `geocoding.token.<token>`; others are title-cased data.
+const KNOWN_POLICY_TOKENS = new Set([
+  'address_policy',
+  'address_resolution_policy',
+  'geocode_cache',
+  'geocoding_policy',
+  'manual_review',
+  'map_policy',
+  'national_address_lookup',
+  'osm_nominatim',
+  'postgis_short_code',
+  'production_cached',
+  'provided_payload',
+  'provider_timeout',
+  'retry',
+  'sa_short_code',
+  'short_code',
+  'short_code_registry',
+]);
+
+function policyDisplayLabel(value: string | null | undefined, t: Translate = englishT): string {
   const normalized = value?.trim();
-  if (!normalized) return 'Not configured';
-  const known: Record<string, string> = {
-    address_policy: 'Address policy',
-    address_resolution_policy: 'Address resolution policy',
-    geocode_cache: 'Geocode cache',
-    geocoding_policy: 'Geocoding policy',
-    manual_review: 'Manual review',
-    map_policy: 'Map policy',
-    national_address_lookup: 'National address lookup',
-    osm_nominatim: 'OSM Nominatim',
-    postgis_short_code: 'PostGIS short-code',
-    production_cached: 'Production cache',
-    provided_payload: 'Submitted address',
-    provider_timeout: 'Provider timeout',
-    retry: 'Retry',
-    sa_short_code: 'Saudi short code',
-    short_code: 'Short code',
-    short_code_registry: 'Short-code registry',
-  };
-  return known[normalized] ?? titleCaseToken(normalized);
+  if (!normalized) return t('geocoding.value.notConfigured');
+  return KNOWN_POLICY_TOKENS.has(normalized) ? t(`geocoding.token.${normalized}`) : titleCaseToken(normalized);
 }
 
 function pluginByName(policy: GeocodingPolicyValue | null, name: string) {
@@ -461,53 +465,57 @@ function fieldResolutionByName(policy: AddressResolutionPolicyValue | null, name
   return policy?.fields?.find((field) => field?.name === name) ?? null;
 }
 
-function describePlugin(plugin: ReturnType<typeof pluginByName>, fallback: string): string {
+function describePlugin(plugin: ReturnType<typeof pluginByName>, fallback: string, t: Translate = englishT): string {
   const label = titleCaseToken(fallback);
-  if (!plugin) return `${label} needs setup`;
-  return `${label} ${plugin.enabled === false ? 'off' : 'on'}`;
+  if (!plugin) return fill(t('geocoding.plugin.needsSetup'), { label });
+  return fill(plugin.enabled === false ? t('geocoding.plugin.off') : t('geocoding.plugin.on'), { label });
 }
 
 const POLICY_CATEGORY_ORDER: Array<{
   key: PolicyCategoryKey;
-  label: string;
-  summary: string;
-  signals: string[];
+  labelKey: string;
+  summaryKey: string;
+  signalKeys: string[];
+  /** Product/brand names shown as-is. */
+  techSignals?: string[];
 }> = [
   {
     key: 'map_policy',
-    label: 'Map provider defaults',
-    summary: 'Tiles, viewport, routing, and optimization provider stack.',
-    signals: ['MapLibre / OSM', 'PostGIS / Valhalla / VROOM'],
+    labelKey: 'geocoding.policy.map.label',
+    summaryKey: 'geocoding.policy.map.summary',
+    signalKeys: [],
+    techSignals: ['MapLibre / OSM', 'PostGIS / Valhalla / VROOM'], // i18n-literal-ok: product names
   },
   {
     key: 'address_policy',
-    label: 'Address capture',
-    summary: 'Saudi address fields, coordinate capture, and required inputs.',
-    signals: ['Short national address', 'Coordinates'],
+    labelKey: 'geocoding.policy.address.label',
+    summaryKey: 'geocoding.policy.address.summary',
+    signalKeys: ['geocoding.signal.shortNationalAddress', 'geocoding.signal.coordinates'],
   },
   {
     key: 'address_resolution_policy',
-    label: 'Address resolution sources',
-    summary: 'Per-field source order and review fallback behavior.',
-    signals: ['Short-code registry', 'Manual review fallback'],
+    labelKey: 'geocoding.policy.addressResolution.label',
+    summaryKey: 'geocoding.policy.addressResolution.summary',
+    signalKeys: ['geocoding.signal.shortCodeRegistry', 'geocoding.signal.manualReviewFallback'],
   },
   {
     key: 'geocoding_policy',
-    label: 'Geocoding workflow',
-    summary: 'Provider order, fuzzy match, short-code plugin, and review gate.',
-    signals: ['Short-code plugin', 'Fuzzy plugin', 'Manual review'],
+    labelKey: 'geocoding.policy.geocoding.label',
+    summaryKey: 'geocoding.policy.geocoding.summary',
+    signalKeys: ['geocoding.signal.shortCodePlugin', 'geocoding.signal.fuzzyPlugin', 'geocoding.signal.manualReview'],
   },
 ];
 
-function policyCategoryLabel(category: PolicyCategoryKey): string {
-  return POLICY_CATEGORY_ORDER.find((policy) => policy.key === category)?.label ?? titleCaseToken(category);
+function policyCategoryLabel(category: PolicyCategoryKey, t: Translate = englishT): string {
+  const policy = POLICY_CATEGORY_ORDER.find((entry) => entry.key === category);
+  return policy ? t(policy.labelKey) : titleCaseToken(category);
 }
 
-const TABS: Array<{ key: TabKey; label: string }> = [
-  { key: 'addresses', label: 'Addresses' },
-  { key: 'geocodes', label: 'Geocodes' },
-  { key: 'canonical', label: 'Canonical refs' },
-  { key: 'policy', label: 'Policy & attempts' },
+const TABS: Array<{ key: TabKey; labelKey: string }> = [
+  { key: 'addresses', labelKey: 'geocoding.tabs.addresses' },
+  { key: 'geocodes', labelKey: 'geocoding.tabs.geocodes' },
+  { key: 'canonical', labelKey: 'geocoding.tabs.canonical' },
+  { key: 'policy', labelKey: 'geocoding.tabs.policy' },
 ];
 
 // ────────── Canonical-tone chip helper ──────────
@@ -529,11 +537,12 @@ function CanonicalChip({
   className?: string;
   labelOverride?: string;
 }) {
+  const t = useT();
   const row = lookupRow(category, value);
   if (!row) {
     return (
       <Chip
-        label={`${category}/${value} (missing)`}
+        label={fill(t('geocoding.chip.missing'), { category, value })}
         kind="danger"
         size="xs"
         className={className}
@@ -558,6 +567,7 @@ function AddressGeocodeAction({
   organizationId: string | null;
 }) {
   const go = useConsoleNavigator();
+  const t = useT();
   const requeueGeocode = useRequeueShipmentGeocode();
   const [readback, setReadback] = useState<GeocodeExecutionReadback | null>(null);
   const [executionError, setExecutionError] = useState<string | null>(null);
@@ -580,10 +590,10 @@ function AddressGeocodeAction({
   const isBusy = shipmentsQuery.isLoading || requeueGeocode.isPending;
   const isUnavailable = shipmentsQuery.isError || !targetShipment;
   const title = shipmentsQuery.isError
-    ? 'Linked shipment unavailable'
+    ? t('geocoding.action.linkedUnavailable')
     : targetShipment?.tracking_number
-      ? `Shipment ${targetShipment.tracking_number}`
-      : 'No linked shipment found for this address';
+      ? fill(t('geocoding.action.shipment'), { tracking: String(targetShipment.tracking_number) })
+      : t('geocoding.action.noLinkedFound');
 
   return (
     <div
@@ -596,7 +606,7 @@ function AddressGeocodeAction({
       }}
     >
       <Button
-        label={requeueGeocode.isPending ? 'Requeueing...' : 'Requeue geocode'}
+        label={requeueGeocode.isPending ? t('geocoding.action.requeueing') : t('geocoding.action.requeue')}
         iconName="refresh"
         kind="primary"
         capability={CAP.SHIPMENTS_WRITE}
@@ -606,7 +616,7 @@ function AddressGeocodeAction({
           setReadback(null);
           setExecutionError(null);
           if (!targetShipment) {
-            pushToast('No linked shipment found for this address', 'warn');
+            pushToast(t('geocoding.action.noLinkedFound'), 'warn');
             return;
           }
           requeueGeocode.mutate(
@@ -619,10 +629,10 @@ function AddressGeocodeAction({
               onSuccess: (res) => {
                 const executionReadback = buildGeocodeExecutionReadback(res);
                 setReadback(executionReadback);
-                pushToast('Geocode update requested', 'good');
+                pushToast(t('geocoding.toast.updateRequested'), 'good');
               },
               onError: (err) => {
-                const message = err instanceof Error ? err.message : 'Could not requeue geocode';
+                const message = err instanceof Error ? err.message : t('geocoding.toast.requeueFailed');
                 setExecutionError(message);
                 pushToast(message, 'danger');
               },
@@ -631,18 +641,18 @@ function AddressGeocodeAction({
         }}
       />
       {shipmentsQuery.isLoading ? (
-        <Chip label="Checking linked shipment" kind="neutral" size="xs" />
+        <Chip label={t('geocoding.readback.checking')} kind="neutral" size="xs" />
       ) : shipmentsQuery.isError ? (
-        <Chip label="Shipment link unavailable" kind="warn" size="xs" />
+        <Chip label={t('geocoding.readback.linkUnavailable')} kind="warn" size="xs" />
       ) : targetShipment?.tracking_number ? (
         <Chip label={targetShipment.tracking_number} kind="info" size="xs" className="mono" />
       ) : (
-        <Chip label="No linked shipment" kind="neutral" size="xs" />
+        <Chip label={t('geocoding.readback.noLinked')} kind="neutral" size="xs" />
       )}
       {readback ? (
         <div
           data-testid="geocode-execution-readback"
-          aria-label="Geocode status"
+          aria-label={t('geocoding.readback.aria')}
           style={{
             border: '1px solid var(--line)',
             borderRadius: '8px',
@@ -655,35 +665,35 @@ function AddressGeocodeAction({
           }}
         >
           <span className="mono" style={{ color: 'var(--ink-3)', fontSize: '11px' }}>
-            Location update
+            {t('geocoding.readback.title')}
           </span>
-          <Chip label="Update requested" kind="good" size="xs" />
-          <Chip label={`Status ${titleCaseToken(readback.status)}`} kind="info" size="xs" />
+          <Chip label={t('geocoding.readback.updateRequested')} kind="good" size="xs" />
+          <Chip label={fill(t('geocoding.readback.status'), { status: titleCaseToken(readback.status) })} kind="info" size="xs" />
           {readback.geocodeWorkflowStatus ? (
             <Chip
-              label={`Geocode ${titleCaseToken(readback.geocodeWorkflowStatus)}`}
+              label={fill(t('geocoding.readback.geocode'), { status: titleCaseToken(readback.geocodeWorkflowStatus) })}
               kind={isFailureExecution(readback.geocodeWorkflowStatus, readback.failureReason) ? 'danger' : 'info'}
               size="xs"
             />
           ) : null}
           {readback.geocodeWorkflowRunId ? (
-            <Chip label="Follow-up queued" kind="neutral" size="xs" />
+            <Chip label={t('geocoding.readback.followUp')} kind="neutral" size="xs" />
           ) : null}
           {readback.geocodingAttemptId ? (
-            <Chip label="Address check recorded" kind="info" size="xs" />
+            <Chip label={t('geocoding.readback.addressCheck')} kind="info" size="xs" />
           ) : null}
           {readback.geocodeId ? (
-            <Chip label="Coordinate saved" kind="good" size="xs" />
+            <Chip label={t('geocoding.readback.coordinateSaved')} kind="good" size="xs" />
           ) : null}
           {readback.manualReviewTaskId ? (
-            <Chip label="Review queued" kind="warn" size="xs" />
+            <Chip label={t('geocoding.readback.reviewQueued')} kind="warn" size="xs" />
           ) : null}
           {readback.failureReason ? (
-            <Chip label={`Reason ${titleCaseToken(readback.failureReason)}`} kind="danger" size="xs" />
+            <Chip label={fill(t('geocoding.readback.reason'), { reason: titleCaseToken(readback.failureReason) })} kind="danger" size="xs" />
           ) : null}
           {isManualReviewExecution(readback.geocodeWorkflowStatus ?? readback.status, readback.manualReviewTaskId) ? (
             <Button
-              label="Open review queue"
+              label={t('geocoding.action.openReviewQueue')}
               iconName="audit"
               kind="ghost"
               size="sm"
@@ -709,7 +719,7 @@ function AddressGeocodeAction({
           }}
         >
           <span className="mono" style={{ color: 'var(--danger)', fontSize: '11px' }}>
-            Execution failed
+            {t('geocoding.readback.failed')}
           </span>
           <div className="state__hint">{executionError}</div>
         </div>
@@ -721,7 +731,7 @@ function AddressGeocodeAction({
 export function GeocodingModule() {
   const { scope, currentTenantId } = useIdentity();
   const go = useConsoleNavigator();
-  const { fmtNumber, fmtDateTime } = useI18n();
+  const { t, fmtNumber, fmtDateTime } = useI18n();
   const drawer = useDrawer();
   const modal = useModal();
   const canRead = useCapability(CAP.NETWORK_READ);
@@ -762,8 +772,9 @@ export function GeocodingModule() {
   const mapPolicyValue = (mapPolicyQuery.data?.value as MapPolicyValue | undefined) ?? null;
   const mapTileProvider = mapPolicyValue?.tile_provider;
   const mapDefaultViewport = mapPolicyValue?.default_viewport ?? null;
-  const mapStackLabel = `${titleCaseToken(mapTileProvider?.engine)} · ${titleCaseToken(
+  const mapStackLabel = `${titleCaseToken(mapTileProvider?.engine, t)} · ${titleCaseToken(
     mapTileProvider?.data_provider ?? mapTileProvider?.provider,
+    t,
   )}`;
 
   // W27 Cycle D closure (P1 #4): KPI tone thresholds resolve strictly via
@@ -833,9 +844,9 @@ export function GeocodingModule() {
   const geocodePoints = useMemo<GeoPoint[]>(
     () =>
       geocodes
-        .map((row) => buildGeocodePoint(row, addressById, geocodingThresholds))
+        .map((row) => buildGeocodePoint(row, addressById, geocodingThresholds, t))
         .filter((point): point is GeoPoint => point != null),
-    [addressById, geocodes, geocodingThresholds],
+    [addressById, geocodes, geocodingThresholds, t],
   );
   const missingCoordinateCount = geocodes.length - geocodePoints.length;
 
@@ -887,8 +898,8 @@ export function GeocodingModule() {
     // identity-conversion form.
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     return attempts.filter((a) => {
-      const t = a.created_at ? new Date(a.created_at as string).getTime() : NaN;
-      return Number.isFinite(t) && t >= cutoff;
+      const time = a.created_at ? new Date(a.created_at as string).getTime() : NaN;
+      return Number.isFinite(time) && time >= cutoff;
     }).length;
   }, [attempts, attemptsQuery.isError]);
 
@@ -980,12 +991,12 @@ export function GeocodingModule() {
     const defaultScopeType =
       allowedScopes.includes('tenant') ? 'tenant' : allowedScopes[0];
     if (!defaultScopeType) {
-      pushToast(`${policyCategoryLabel(category)} cannot be edited yet`, 'warn');
+      pushToast(fill(t('geocoding.toast.cannotEdit'), { label: policyCategoryLabel(category, t) }), 'warn');
       return;
     }
 
     modal.open({
-      title: `Configure ${policy?.label ?? category}`,
+      title: fill(t('geocoding.policy.configure'), { label: policy ? t(policy.labelKey) : category }),
       body: (
         <SettingsChangeForm
           category={category}
@@ -999,7 +1010,7 @@ export function GeocodingModule() {
               const parsed = JSON.parse(value);
               const policyScope = policyScopePayload(scopeType);
               if (!policyScope) {
-                pushToast(`${titleCaseToken(scopeType)} scope is not available in this session`, 'warn');
+                pushToast(fill(t('geocoding.toast.scopeUnavailable'), { scope: titleCaseToken(scopeType) }), 'warn');
                 return undefined;
               }
               const result = (await proposeSettings.mutateAsync({
@@ -1009,12 +1020,12 @@ export function GeocodingModule() {
                 dryRun,
                 justification,
               })) as SettingsChangePreviewResult;
-              pushToast(dryRun ? 'Policy change preview ready' : 'Policy change submitted', 'good');
+              pushToast(dryRun ? t('geocoding.toast.previewReady') : t('geocoding.toast.submitted'), 'good');
               if (!dryRun) modal.close();
               return result;
             } catch {
               pushToast(
-                'Policy change could not be prepared. Check the entered settings and try again.',
+                t('geocoding.toast.prepareFailed'),
                 'danger',
               );
               return undefined;
@@ -1025,7 +1036,7 @@ export function GeocodingModule() {
               const parsed = JSON.parse(value);
               const policyScope = policyScopePayload(scopeType);
               if (!policyScope) {
-                pushToast(`${titleCaseToken(scopeType)} scope is not available in this session`, 'warn');
+                pushToast(fill(t('geocoding.toast.scopeUnavailable'), { scope: titleCaseToken(scopeType) }), 'warn');
                 return undefined;
               }
               const result = await applySettings.mutateAsync({
@@ -1045,14 +1056,14 @@ export function GeocodingModule() {
               });
               await refetchPolicyCategory(category);
               pushToast(
-                `${policyCategoryLabel(category)} saved`,
+                fill(t('geocoding.toast.saved'), { label: policyCategoryLabel(category, t) }),
                 'good',
               );
               modal.close();
               return result;
             } catch {
               pushToast(
-                'Policy change could not be saved. Check the entered settings and try again.',
+                t('geocoding.toast.saveFailed'),
                 'danger',
               );
               return undefined;
@@ -1070,24 +1081,24 @@ export function GeocodingModule() {
       // Column key stays stable so view-saved sorts/filters keep working.
       {
         key: 'street',
-        label: 'Street',
+        label: t('geocoding.field.street'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => addressStreetOf(row) ?? '—',
       },
-      { key: 'district', label: 'District', sortable: true, filterable: true },
-      { key: 'city', label: 'City', sortable: true, filterable: true },
-      { key: 'country', label: 'Country', sortable: true, filterable: true },
-      { key: 'postal_code', label: 'Postal', mono: true, sortable: true },
+      { key: 'district', label: t('geocoding.field.district'), sortable: true, filterable: true },
+      { key: 'city', label: t('geocoding.field.city'), sortable: true, filterable: true },
+      { key: 'country', label: t('geocoding.field.country'), sortable: true, filterable: true },
+      { key: 'postal_code', label: t('geocoding.field.postal'), mono: true, sortable: true },
       {
         key: 'validation_status',
-        label: 'Status',
+        label: t('geocoding.field.status'),
         sortable: true,
         filterable: true,
         render: (raw) => {
           const v = raw == null ? null : String(raw);
           return v ? (
-            <CanonicalChip category="address_validation_status" value={v} labelOverride={policyDisplayLabel(v)} />
+            <CanonicalChip category="address_validation_status" value={v} labelOverride={policyDisplayLabel(v, t)} />
           ) : (
             <span>—</span>
           );
@@ -1095,7 +1106,7 @@ export function GeocodingModule() {
       },
       {
         key: '__geocodes__',
-        label: 'Geocodes',
+        label: t('geocoding.field.geocodes'),
         align: 'right',
         sortable: false,
         filterable: false,
@@ -1105,35 +1116,35 @@ export function GeocodingModule() {
         },
       },
     ],
-    [geocodesByAddress, fmtNumber]
+    [geocodesByAddress, fmtNumber, t]
   );
 
   const geocodeColumns = useMemo<Array<DataTableColumn<GeocodeRow>>>(
     () => [
       {
         key: 'address_id',
-        label: 'Address',
+        label: t('geocoding.field.address'),
         sortable: true,
         filterable: true,
         render: (raw) => {
           const address = raw ? addressById.get(String(raw)) : null;
-          return address ? [addressStreetOf(address), address.city].filter(Boolean).join(' · ') : 'Linked address';
+          return address ? [addressStreetOf(address), address.city].filter(Boolean).join(' · ') : t('geocoding.value.linkedAddress');
         },
       },
       // Canonical column is `provider_name`; seed alias `provider` is also
       // accepted via the row's render closure so legacy seeds keep rendering.
       {
         key: 'provider_name',
-        label: 'Provider',
+        label: t('geocoding.field.provider'),
         sortable: true,
         filterable: true,
-        render: (raw, row) => policyDisplayLabel(String(raw ?? row.provider ?? '')),
+        render: (raw, row) => policyDisplayLabel(String(raw ?? row.provider ?? ''), t),
       },
-      { key: 'lat', label: 'Lat', mono: true, align: 'right', sortable: true, type: 'number' },
-      { key: 'lng', label: 'Lng', mono: true, align: 'right', sortable: true, type: 'number' },
+      { key: 'lat', label: t('geocoding.field.lat'), mono: true, align: 'right', sortable: true, type: 'number' },
+      { key: 'lng', label: t('geocoding.field.lng'), mono: true, align: 'right', sortable: true, type: 'number' },
       {
         key: 'confidence_score',
-        label: 'Confidence',
+        label: t('geocoding.field.confidence'),
         align: 'right',
         sortable: true,
         format: 'percent',
@@ -1145,7 +1156,7 @@ export function GeocodingModule() {
       },
       {
         key: 'geocoded_at',
-        label: 'Cached',
+        label: t('geocoding.field.cached'),
         format: 'datetime',
         sortable: true,
         render: (raw, row) => {
@@ -1154,7 +1165,7 @@ export function GeocodingModule() {
         },
       },
     ],
-    [addressById, fmtDateTime]
+    [addressById, fmtDateTime, t]
   );
 
   const cityColumns = useMemo<Array<DataTableColumn<CanonicalCityRow>>>(
@@ -1163,7 +1174,7 @@ export function GeocodingModule() {
       // legacy seed compatibility (falls through to `id` when absent).
       {
         key: 'id',
-        label: 'Code',
+        label: t('geocoding.field.code'),
         mono: true,
         sortable: true,
         filterable: true,
@@ -1171,27 +1182,27 @@ export function GeocodingModule() {
       },
       {
         key: 'name_canonical',
-        label: 'Name',
+        label: t('geocoding.field.name'),
         sortable: true,
         filterable: true,
         render: (raw, row) => String(raw ?? row.name ?? '—'),
       },
       {
         key: 'country_code',
-        label: 'Country',
+        label: t('geocoding.field.country'),
         sortable: true,
         filterable: true,
         render: (raw, row) => String(raw ?? row.country ?? '—'),
       },
     ],
-    []
+    [t]
   );
 
   const districtColumns = useMemo<Array<DataTableColumn<CanonicalDistrictRow>>>(
     () => [
       {
         key: 'id',
-        label: 'Code',
+        label: t('geocoding.field.code'),
         mono: true,
         sortable: true,
         filterable: true,
@@ -1199,14 +1210,14 @@ export function GeocodingModule() {
       },
       {
         key: 'name_canonical',
-        label: 'Name',
+        label: t('geocoding.field.name'),
         sortable: true,
         filterable: true,
         render: (raw, row) => String(raw ?? row.name ?? '—'),
       },
       {
         key: 'city_id',
-        label: 'City',
+        label: t('geocoding.field.city'),
         mono: true,
         sortable: true,
         filterable: true,
@@ -1222,41 +1233,41 @@ export function GeocodingModule() {
         },
       },
     ],
-    [cities]
+    [cities, t]
   );
 
   const attemptColumns = useMemo<Array<DataTableColumn<GeocodingAttemptRow>>>(
     () => [
-      { key: 'created_at', label: 'When', format: 'datetime', sortable: true },
+      { key: 'created_at', label: t('geocoding.field.when'), format: 'datetime', sortable: true },
       {
         key: 'provider_name',
-        label: 'Provider',
+        label: t('geocoding.field.provider'),
         sortable: true,
         filterable: true,
-        render: (raw) => policyDisplayLabel(String(raw ?? '')),
+        render: (raw) => policyDisplayLabel(String(raw ?? ''), t),
       },
       // W13-1 — `attempt_type` resolves through metadata.attempt_type (no column). Sort/filter
       // operate on the projected key via the cell render below; per-projection key
       // keeps React key uniqueness across columns.
       {
         key: 'metadata.attempt_type',
-        label: 'Type',
+        label: t('geocoding.field.type'),
         sortable: false,
         filterable: false,
         render: (_raw, row) => {
-          const t = attemptTypeOf(row);
-          return t ? <span>{policyDisplayLabel(t)}</span> : <span>—</span>;
+          const type = attemptTypeOf(row);
+          return type ? <span>{policyDisplayLabel(type, t)}</span> : <span>—</span>;
         },
       },
       {
         key: 'status',
-        label: 'Status',
+        label: t('geocoding.field.status'),
         sortable: true,
         filterable: true,
         render: (raw) => {
           const v = raw == null ? null : String(raw);
           return v ? (
-            <CanonicalChip category="geocoding_attempt_status" value={v} labelOverride={policyDisplayLabel(v)} />
+            <CanonicalChip category="geocoding_attempt_status" value={v} labelOverride={policyDisplayLabel(v, t)} />
           ) : (
             <span>—</span>
           );
@@ -1264,7 +1275,7 @@ export function GeocodingModule() {
       },
       {
         key: 'duration_ms',
-        label: 'Duration',
+        label: t('geocoding.field.duration'),
         align: 'right',
         sortable: true,
         format: 'ms',
@@ -1272,50 +1283,50 @@ export function GeocodingModule() {
       },
       {
         key: 'address_id',
-        label: 'Address',
+        label: t('geocoding.field.address'),
         sortable: true,
         render: (raw) => {
           const address = raw ? addressById.get(String(raw)) : null;
-          return address ? [addressStreetOf(address), address.city].filter(Boolean).join(' · ') : 'Linked address';
+          return address ? [addressStreetOf(address), address.city].filter(Boolean).join(' · ') : t('geocoding.value.linkedAddress');
         },
       },
     ],
-    [addressById]
+    [addressById, t]
   );
 
   function openAddress(addr: AddressRow) {
     const linkedGeocodes = geocodesByAddress.get(addr.id) ?? [];
     const linkedGeocodePoints = linkedGeocodes
-      .map((row) => buildGeocodePoint(row, addressById, geocodingThresholds))
+      .map((row) => buildGeocodePoint(row, addressById, geocodingThresholds, t))
       .filter((point): point is GeoPoint => point != null);
     const rows: KvRow[] = [
       // W20 — Street row resolves canonical `normalized_line1` first via
       // `addressStreetOf()`; FE alias `street` remains a back-compat fallback.
-      { key: 'street', label: 'Street', value: addressStreetOf(addr) ?? '—' },
-      { key: 'district', label: 'District', value: addr.district ?? '—' },
-      { key: 'city', label: 'City', value: addr.city ?? '—' },
-      { key: 'country', label: 'Country', value: addr.country ?? '—' },
+      { key: 'street', label: t('geocoding.field.street'), value: addressStreetOf(addr) ?? '—' },
+      { key: 'district', label: t('geocoding.field.district'), value: addr.district ?? '—' },
+      { key: 'city', label: t('geocoding.field.city'), value: addr.city ?? '—' },
+      { key: 'country', label: t('geocoding.field.country'), value: addr.country ?? '—' },
       {
         key: 'postal_code',
-        label: 'Postal',
+        label: t('geocoding.field.postal'),
         value: addr.postal_code ?? '—',
         mono: true,
       },
       {
         key: 'validation_status',
-        label: 'Status',
-        value: addr.validation_status ? policyDisplayLabel(addr.validation_status) : '—',
+        label: t('geocoding.field.status'),
+        value: addr.validation_status ? policyDisplayLabel(addr.validation_status, t) : '—',
       },
       {
         key: 'geocodes_count',
-        label: 'Geocodes cached',
+        label: t('geocoding.field.geocodesCached'),
         value: linkedGeocodes.length === 0 ? '—' : fmtNumber(linkedGeocodes.length),
         mono: true,
       },
     ];
 
     drawer.open({
-      title: `Address · ${addressStreetOf(addr) ?? addr.id}`,
+      title: fill(t('geocoding.drawer.address'), { address: addressStreetOf(addr) ?? addr.id }),
       size: 'md',
       deepLink: `/network/geocoding?focus=${encodeURIComponent(addr.id)}`,
       body: (
@@ -1334,20 +1345,20 @@ export function GeocodingModule() {
               <CanonicalChip
                 category="address_validation_status"
                 value={addr.validation_status}
-                labelOverride={policyDisplayLabel(addr.validation_status)}
+                labelOverride={policyDisplayLabel(addr.validation_status, t)}
               />
             ) : null}
           </div>
           <KvGrid rows={rows} />
 
-          <div className="section-eyebrow">Location map</div>
+          <div className="section-eyebrow">{t('geocoding.section.locationMap')}</div>
           <div style={{ padding: '0 14px 12px' }}>
             <GeoPointMap
               points={linkedGeocodePoints}
               bounds={mapDefaultViewport}
               height={220}
-              title="Address geocode map"
-              emptyLabel="No coordinate is available for this address yet."
+              title={t('geocoding.map.addressTitle')}
+              emptyLabel={t('geocoding.map.addressEmpty')}
               tileUrlTemplate={mapTileProvider?.url_template}
               allowedTileHosts={mapTileProvider?.allowed_hosts}
               tileUsageTier={mapTileProvider?.usage_tier}
@@ -1358,11 +1369,11 @@ export function GeocodingModule() {
             />
           </div>
 
-          <div className="section-eyebrow">Geocodes for this address</div>
+          <div className="section-eyebrow">{t('geocoding.section.addressGeocodes')}</div>
           {linkedGeocodes.length === 0 ? (
             <StateView
               kind="empty"
-              hint="No geocode cached yet. Workflow runtime resolves addresses asynchronously."
+              hint={t('geocoding.state.noGeocodeCached')}
             />
           ) : (
             <DataTable<GeocodeRow>
@@ -1374,10 +1385,10 @@ export function GeocodingModule() {
             />
           )}
 
-          <div className="section-eyebrow">Workflow action</div>
+          <div className="section-eyebrow">{t('geocoding.section.workflowAction')}</div>
           <AddressGeocodeAction address={addr} organizationId={tenantId} />
 
-          <div className="section-eyebrow">Review settings</div>
+          <div className="section-eyebrow">{t('geocoding.section.reviewSettings')}</div>
           <div
             style={{
               display: 'flex',
@@ -1387,7 +1398,7 @@ export function GeocodingModule() {
             }}
           >
             <Button
-              label="Address settings"
+              label={t('geocoding.action.addressSettings')}
               iconName="settings"
               kind="ghost"
               onClick={() => {
@@ -1396,7 +1407,7 @@ export function GeocodingModule() {
               }}
             />
             <Button
-              label="Activity history"
+              label={t('geocoding.action.activityHistory')}
               iconName="audit"
               kind="ghost"
               onClick={() => {
@@ -1412,17 +1423,17 @@ export function GeocodingModule() {
   function openGeocode(g: GeocodeRow) {
     const parent = g.address_id ? addressById.get(g.address_id) : undefined;
     const provider = g.provider_name ?? g.provider ?? '—';
-    const providerLabel = provider === '—' ? provider : policyDisplayLabel(provider);
+    const providerLabel = provider === '—' ? provider : policyDisplayLabel(provider, t);
     const confidence = g.confidence_score ?? g.confidence;
     const cachedAt = g.geocoded_at ?? g.cached_at;
-    const point = buildGeocodePoint(g, addressById, geocodingThresholds);
+    const point = buildGeocodePoint(g, addressById, geocodingThresholds, t);
     const rows: KvRow[] = [
-      { key: 'provider_name', label: 'Provider', value: providerLabel },
-      { key: 'lat', label: 'Lat', value: g.lat != null ? String(g.lat) : '—', mono: true },
-      { key: 'lng', label: 'Lng', value: g.lng != null ? String(g.lng) : '—', mono: true },
+      { key: 'provider_name', label: t('geocoding.field.provider'), value: providerLabel },
+      { key: 'lat', label: t('geocoding.field.lat'), value: g.lat != null ? String(g.lat) : '—', mono: true },
+      { key: 'lng', label: t('geocoding.field.lng'), value: g.lng != null ? String(g.lng) : '—', mono: true },
       {
         key: 'confidence_score',
-        label: 'Confidence',
+        label: t('geocoding.field.confidence'),
         value:
           confidence != null
             ? `${(Number(confidence) * 100).toFixed(1)}%`
@@ -1431,14 +1442,16 @@ export function GeocodingModule() {
       },
       {
         key: 'geocoded_at',
-        label: 'Cached',
+        label: t('geocoding.field.cached'),
         value: cachedAt ? fmtDateTime(cachedAt as string) : '—',
         mono: true,
       },
     ];
 
     drawer.open({
-      title: `Geocode · ${providerLabel !== '—' ? providerLabel : 'Selected coordinate'}`,
+      title: fill(t('geocoding.drawer.geocode'), {
+        provider: providerLabel !== '—' ? providerLabel : t('geocoding.drawer.selectedCoordinate'),
+      }),
       size: 'md',
       body: (
         <div>
@@ -1457,15 +1470,15 @@ export function GeocodingModule() {
             ) : null}
           </div>
           <KvGrid rows={rows} />
-          <div className="section-eyebrow">Location map</div>
+          <div className="section-eyebrow">{t('geocoding.section.locationMap')}</div>
           <div style={{ padding: '0 14px 12px' }}>
             <GeoPointMap
               points={point ? [point] : []}
               selectedId={point?.id}
               bounds={mapDefaultViewport}
               height={220}
-              title="Geocode coordinate map"
-              emptyLabel="This geocode row does not include a coordinate."
+              title={t('geocoding.map.geocodeTitle')}
+              emptyLabel={t('geocoding.map.geocodeEmpty')}
               tileUrlTemplate={mapTileProvider?.url_template}
               allowedTileHosts={mapTileProvider?.allowed_hosts}
               tileUsageTier={mapTileProvider?.usage_tier}
@@ -1475,33 +1488,33 @@ export function GeocodingModule() {
               tileAttributionUrl={mapTileProvider?.attribution_url}
             />
           </div>
-          <div className="section-eyebrow">Linked address</div>
+          <div className="section-eyebrow">{t('geocoding.section.linkedAddress')}</div>
           {parent ? (
             <KvGrid
               rows={[
                 {
                   key: 'street',
-                  label: 'Street',
+                  label: t('geocoding.field.street'),
                   // W20 — resolves canonical normalized_line1 first.
                   value: addressStreetOf(parent) ?? '—',
                 },
-                { key: 'city', label: 'City', value: parent.city ?? '—' },
+                { key: 'city', label: t('geocoding.field.city'), value: parent.city ?? '—' },
                 {
                   key: 'country',
-                  label: 'Country',
+                  label: t('geocoding.field.country'),
                   value: parent.country ?? '—',
                 },
                 {
                   key: 'status',
-                  label: 'Status',
-                  value: parent.validation_status ? policyDisplayLabel(parent.validation_status) : '—',
+                  label: t('geocoding.field.status'),
+                  value: parent.validation_status ? policyDisplayLabel(parent.validation_status, t) : '—',
                 },
               ]}
             />
           ) : (
             <StateView
               kind="empty"
-              hint="Address row not in current page — open Addresses tab to inspect."
+              hint={t('geocoding.state.addressNotInPage')}
             />
           )}
         </div>
@@ -1525,20 +1538,20 @@ export function GeocodingModule() {
     );
     const failureReason = metadataString(attempt, 'geocode_failure_reason', 'failure_reason', 'failure_code', 'error', 'message');
     const rows: KvRow[] = [
-      { key: 'created_at', label: 'When', value: attempt.created_at ? fmtDateTime(attempt.created_at) : '—', mono: true },
-      { key: 'provider_name', label: 'Provider', value: policyDisplayLabel(attempt.provider_name) },
-      { key: 'status', label: 'Status', value: policyDisplayLabel(attempt.status) },
-      { key: 'attempt_type', label: 'Type', value: policyDisplayLabel(type) },
-      { key: 'duration_ms', label: 'Duration', value: attempt.duration_ms != null ? `${attempt.duration_ms} ms` : '—', mono: true },
-      { key: 'address_id', label: 'Address', value: attempt.address_id ? 'Linked address' : '—' },
-      { key: 'workflow_run_id', label: 'Workflow', value: workflowRunId ? 'Workflow recorded' : '—' },
-      { key: 'manual_review_task_id', label: 'Review task', value: manualReviewTaskId ? 'Review task ready' : '—' },
-      { key: 'failure_reason', label: 'Failure', value: failureReason ? policyDisplayLabel(failureReason) : '—' },
+      { key: 'created_at', label: t('geocoding.field.when'), value: attempt.created_at ? fmtDateTime(attempt.created_at) : '—', mono: true },
+      { key: 'provider_name', label: t('geocoding.field.provider'), value: policyDisplayLabel(attempt.provider_name, t) },
+      { key: 'status', label: t('geocoding.field.status'), value: policyDisplayLabel(attempt.status, t) },
+      { key: 'attempt_type', label: t('geocoding.field.type'), value: policyDisplayLabel(type, t) },
+      { key: 'duration_ms', label: t('geocoding.field.duration'), value: attempt.duration_ms != null ? fill(t('geocoding.value.ms'), { n: attempt.duration_ms }) : '—', mono: true },
+      { key: 'address_id', label: t('geocoding.field.address'), value: attempt.address_id ? t('geocoding.value.linkedAddress') : '—' },
+      { key: 'workflow_run_id', label: t('geocoding.field.workflow'), value: workflowRunId ? t('geocoding.value.workflowRecorded') : '—' },
+      { key: 'manual_review_task_id', label: t('geocoding.field.reviewTask'), value: manualReviewTaskId ? t('geocoding.value.reviewTaskReady') : '—' },
+      { key: 'failure_reason', label: t('geocoding.field.failure'), value: failureReason ? policyDisplayLabel(failureReason, t) : '—' },
     ];
     const showReviewQueue = isManualReviewExecution(type ?? attempt.status, manualReviewTaskId);
 
     drawer.open({
-      title: `Geocoding attempt - ${policyDisplayLabel(attempt.provider_name)}`,
+      title: fill(t('geocoding.drawer.attempt'), { provider: policyDisplayLabel(attempt.provider_name, t) }),
       size: 'md',
       body: (
         <div>
@@ -1568,11 +1581,11 @@ export function GeocodingModule() {
             ) : null}
           </div>
           <KvGrid rows={rows} />
-          <div className="section-eyebrow">Execution routing</div>
+          <div className="section-eyebrow">{t('geocoding.section.executionRouting')}</div>
           <div style={{ display: 'flex', gap: '6px', padding: '0 14px', flexWrap: 'wrap' }}>
             {attempt.address_id && addressById.has(attempt.address_id) ? (
               <Button
-                label="Open address"
+                label={t('geocoding.action.openAddress')}
                 iconName="pin"
                 kind="ghost"
                 onClick={() => openAddress(addressById.get(attempt.address_id!)!)}
@@ -1580,7 +1593,7 @@ export function GeocodingModule() {
             ) : null}
             {showReviewQueue ? (
               <Button
-                label="Open review queue"
+                label={t('geocoding.action.openReviewQueue')}
                 iconName="audit"
                 kind="ghost"
                 onClick={() => {
@@ -1592,7 +1605,7 @@ export function GeocodingModule() {
               />
             ) : null}
             {failureReason ? (
-              <Chip label={`Failure reason: ${policyDisplayLabel(failureReason)}`} kind="danger" size="xs" />
+              <Chip label={fill(t('geocoding.value.failureReason'), { reason: policyDisplayLabel(failureReason, t) })} kind="danger" size="xs" />
             ) : null}
           </div>
         </div>
@@ -1602,15 +1615,15 @@ export function GeocodingModule() {
 
   function renderAddressesTab(): ReactNode {
     if (addressesQuery.isError)
-      return <StateView kind="error" hint="Could not load addresses." />;
+      return <StateView kind="error" hint={t('geocoding.state.addressesError')} />;
     if (addressesQuery.isLoading || !addressesQuery.data)
-      return <StateView kind="loading" hint="Loading addresses…" />;
+      return <StateView kind="loading" hint={t('geocoding.state.addressesLoading')} />;
     if (!addresses.length)
       return (
         <StateView
           kind="empty"
-          title="No addresses indexed"
-          hint="Addresses arrive via shipment intake. Once webhooks fire they appear here."
+          title={t('geocoding.state.addressesEmpty')}
+          hint={t('geocoding.state.addressesEmptyHint')}
         />
       );
     return (
@@ -1629,15 +1642,15 @@ export function GeocodingModule() {
 
   function renderGeocodesTab(): ReactNode {
     if (geocodesQuery.isError)
-      return <StateView kind="error" hint="Could not load geocodes." />;
+      return <StateView kind="error" hint={t('geocoding.state.geocodesError')} />;
     if (geocodesQuery.isLoading || !geocodesQuery.data)
-      return <StateView kind="loading" hint="Loading geocodes…" />;
+      return <StateView kind="loading" hint={t('geocoding.state.geocodesLoading')} />;
     if (!geocodes.length)
       return (
         <StateView
           kind="empty"
-          title="No geocodes cached"
-          hint="Once addresses resolve through the geocoding pipeline they appear here."
+          title={t('geocoding.state.geocodesEmpty')}
+          hint={t('geocoding.state.geocodesEmptyHint')}
         />
       );
     return (
@@ -1656,24 +1669,24 @@ export function GeocodingModule() {
       return (
         <StateView
           kind="error"
-          hint="Could not load canonical references."
+          hint={t('geocoding.state.canonicalError')}
         />
       );
     if (citiesQuery.isLoading || districtsQuery.isLoading)
       return (
-        <StateView kind="loading" hint="Loading canonical references…" />
+        <StateView kind="loading" hint={t('geocoding.state.canonicalLoading')} />
       );
     if (!cities.length && !districts.length)
       return (
         <StateView
           kind="empty"
-          title="Canonical references unavailable"
-          hint="canonical_cities and canonical_districts feed the address resolver. Add canonical rows to populate this surface."
+          title={t('geocoding.state.canonicalEmpty')}
+          hint={t('geocoding.state.canonicalEmptyHint')}
         />
       );
     return (
       <>
-        <div className="section-eyebrow">Canonical cities</div>
+        <div className="section-eyebrow">{t('geocoding.section.cities')}</div>
         {cities.length ? (
           <DataTable<CanonicalCityRow>
             columns={cityColumns}
@@ -1682,9 +1695,9 @@ export function GeocodingModule() {
             entityKind="canonical_city"
           />
         ) : (
-          <StateView kind="empty" hint="No canonical cities found." />
+          <StateView kind="empty" hint={t('geocoding.state.noCities')} />
         )}
-        <div className="section-eyebrow">Canonical districts</div>
+        <div className="section-eyebrow">{t('geocoding.section.districts')}</div>
         {districts.length ? (
           <DataTable<CanonicalDistrictRow>
             columns={districtColumns}
@@ -1693,7 +1706,7 @@ export function GeocodingModule() {
             entityKind="canonical_district"
           />
         ) : (
-          <StateView kind="empty" hint="No canonical districts found." />
+          <StateView kind="empty" hint={t('geocoding.state.noDistricts')} />
         )}
       </>
     );
@@ -1702,10 +1715,25 @@ export function GeocodingModule() {
   function renderPolicyTab(): ReactNode {
     return (
       <div>
-        <PolicyWorkflowControls
-          readback={policyMutationReadback}
-          onConfigure={openPolicyEditor}
-        />
+        {canonicalScopeOrder.length > 0 ? (
+          <PolicyWorkflowControls
+            readback={policyMutationReadback}
+            onConfigure={openPolicyEditor}
+          />
+        ) : scopeRegistryQuery.isPending ? (
+          <StateView kind="loading" hint={t('modules.geocoding.scopeTypes.loading', 'Loading scope types…')} />
+        ) : scopeRegistryQuery.isError ? (
+          <StateView kind="error" hint={t('modules.geocoding.scopeTypes.error', 'Could not load scope types.')} />
+        ) : (
+          <StateView
+            kind="empty"
+            title={t('modules.geocoding.scopeTypes.emptyTitle', 'No scope types registered')}
+            hint={t(
+              'modules.geocoding.scopeTypes.emptyHint',
+              'The scope type registry has no rows, so geocoding policies cannot be configured at any scope. Ask a platform administrator to register scope types.',
+            )}
+          />
+        )}
         <PolicyCapabilitySummary
           mapPolicy={mapPolicyValue}
           addressResolutionPolicy={addressResolutionPolicy}
@@ -1724,36 +1752,36 @@ export function GeocodingModule() {
           }}
         >
           <PolicySnapshot
-            label="Map settings"
+            label={t('geocoding.snapshot.map')}
             query={mapPolicyQuery}
           />
           <PolicySnapshot
-            label="Address settings"
+            label={t('geocoding.snapshot.address')}
             query={addressPolicyQuery}
           />
           <PolicySnapshot
-            label="Address resolution settings"
+            label={t('geocoding.snapshot.addressResolution')}
             query={addressResolutionPolicyQuery}
           />
           <PolicySnapshot
-            label="Geocoding settings"
+            label={t('geocoding.snapshot.geocoding')}
             query={geocodingPolicyQuery}
           />
         </div>
 
-        <div className="section-eyebrow">Recent geocoding attempts</div>
+        <div className="section-eyebrow">{t('geocoding.section.recentAttempts')}</div>
         {attemptsQuery.isError ? (
           <StateView
             kind="empty"
-            hint="Attempts ledger unavailable — registry may not surface geocoding_attempts in this environment."
+            hint={t('geocoding.state.attemptsUnavailable')}
           />
         ) : attemptsQuery.isLoading ? (
-          <StateView kind="loading" hint="Loading attempts…" />
+          <StateView kind="loading" hint={t('geocoding.state.attemptsLoading')} />
         ) : attempts.length === 0 ? (
           <StateView
             kind="empty"
-            title="No attempts logged"
-            hint="The geocoding_attempts ledger is empty. Workflow runs append rows here as they execute."
+            title={t('geocoding.state.attemptsEmpty')}
+            hint={t('geocoding.state.attemptsEmptyHint')}
           />
         ) : (
           <DataTable<GeocodingAttemptRow>
@@ -1784,14 +1812,11 @@ export function GeocodingModule() {
       <div className="page">
         <PageHeader
           moduleKey="geocoding"
-          eyebrow="Network"
-          titleAccent="Geocoding"
-          titlePlain="& addresses"
         />
         <StateView
           kind="denied"
           capability={CAP.NETWORK_READ}
-          hint="You do not have permission to view geocoding & addresses."
+          hint={t('geocoding.state.denied')}
         />
       </div>
     );
@@ -1801,14 +1826,11 @@ export function GeocodingModule() {
     <div className="page">
       <PageHeader
         moduleKey="geocoding"
-        eyebrow="Network"
-        titleAccent="Geocoding"
-        titlePlain="& addresses"
         pills={[
           <ScopePill key="scope" scopeType="tenant" scopeId={tenantId} />,
           <Chip
             key="src"
-            label="addresses · geocodes · attempts"
+            label="addresses · geocodes · attempts" // i18n-literal-ok: resource keys
             kind="neutral"
             size="xs"
             className="mono"
@@ -1823,15 +1845,15 @@ export function GeocodingModule() {
           neutral tone (no silent FE-literal masking). */}
       <div className="kpi-strip">
         <KPICard
-          label="Addresses"
+          label={t('geocoding.kpi.addresses')}
           value={fmtNumber(addresses.length)}
-          delta="across senders"
+          delta={t('geocoding.kpi.acrossSenders')}
           tone="neutral"
         />
         <KPICard
-          label="Valid %"
+          label={t('geocoding.kpi.validPct')}
           value={`${validPct}%`}
-          delta="validation status"
+          delta={t('geocoding.kpi.validationStatus')}
           tone={
             geocodingThresholds?.verified_pct_good_min != null &&
             geocodingThresholds?.verified_pct_warn_min != null
@@ -1844,19 +1866,19 @@ export function GeocodingModule() {
           }
         />
         <KPICard
-          label="Geocodes cached"
+          label={t('geocoding.kpi.geocodesCached')}
           value={fmtNumber(geocodes.length)}
-          delta="multi-provider"
+          delta={t('geocoding.kpi.multiProvider')}
           tone="info"
         />
         <KPICard
-          label="Avg confidence"
+          label={t('geocoding.kpi.avgConfidence')}
           value={
             avgConfidence == null
               ? '—'
               : `${(avgConfidence * 100).toFixed(1)}%`
           }
-          delta={avgConfidence == null ? 'no geocodes' : 'rolling mean'}
+          delta={avgConfidence == null ? t('geocoding.kpi.noGeocodes') : t('geocoding.kpi.rollingMean')}
           tone={
             avgConfidence == null
               ? 'neutral'
@@ -1871,14 +1893,14 @@ export function GeocodingModule() {
           }
         />
         <KPICard
-          label="Attempts (24h)"
+          label={t('geocoding.kpi.attempts24h')}
           value={attempts24h == null ? '—' : fmtNumber(attempts24h)}
           delta={
             attempts24h == null
-              ? 'feed unavailable'
+              ? t('geocoding.kpi.feedUnavailable')
               : districtCoverage != null
-              ? `district coverage ${districtCoverage}%`
-              : 'rolling 24h'
+              ? fill(t('geocoding.kpi.districtCoverage'), { pct: districtCoverage })
+              : t('geocoding.kpi.rolling24h')
           }
           tone={attempts24h == null ? 'neutral' : 'info'}
         />
@@ -1896,11 +1918,11 @@ export function GeocodingModule() {
           }}
         >
           <div>
-            <div className="section-eyebrow" style={{ padding: 0 }}>Geocoding coverage map</div>
+            <div className="section-eyebrow" style={{ padding: 0 }}>{t('geocoding.map.coverage')}</div>
             <div className="state__hint">
-              {fmtNumber(geocodePoints.length)} plotted coordinates
+              {fill(t('geocoding.map.plotted'), { n: fmtNumber(geocodePoints.length) })}
               {missingCoordinateCount > 0
-                ? ` · ${fmtNumber(missingCoordinateCount)} missing coordinates`
+                ? fill(t('geocoding.map.missing'), { n: fmtNumber(missingCoordinateCount) })
                 : ''}
             </div>
           </div>
@@ -1915,7 +1937,7 @@ export function GeocodingModule() {
           points={geocodePoints}
           bounds={mapDefaultViewport}
           height={300}
-          title="Geocoding coverage map"
+          title={t('geocoding.map.coverage')}
           tileUrlTemplate={mapTileProvider?.url_template}
           allowedTileHosts={mapTileProvider?.allowed_hosts}
           tileUsageTier={mapTileProvider?.usage_tier}
@@ -1926,17 +1948,17 @@ export function GeocodingModule() {
         />
       </div>
 
-      <div className="tabs" role="tablist" aria-label="Geocoding tabs">
-        {TABS.map((t) => (
+      <div className="tabs" role="tablist" aria-label={t('geocoding.tabs.aria')}>
+        {TABS.map((tab) => (
           <button
-            key={t.key}
+            key={tab.key}
             type="button"
             role="tab"
-            aria-selected={active === t.key}
-            className={`tabs__tab ${active === t.key ? 'is-active' : ''}`}
-            onClick={() => setActive(t.key)}
+            aria-selected={active === tab.key}
+            className={`tabs__tab ${active === tab.key ? 'is-active' : ''}`}
+            onClick={() => setActive(tab.key)}
           >
-            {t.label}
+            {t(tab.labelKey)}
           </button>
         ))}
       </div>
@@ -1999,6 +2021,7 @@ function GeocodeAttemptVariantSummary({
   attempts: GeocodingAttemptRow[];
   onOpenAttempt: (attempt: GeocodingAttemptRow) => void;
 }) {
+  const t = useT();
   const latest = attempts[0];
   const manualReview = attempts.find((attempt) =>
     isManualReviewExecution(
@@ -2043,10 +2066,15 @@ function GeocodeAttemptVariantSummary({
         }}
       >
         <div>
-          <div className="section-eyebrow" style={{ padding: 0 }}>Execution variants</div>
-          <div className="state__hint">Recent ledger coverage for provider, review, and failure paths.</div>
+          <div className="section-eyebrow" style={{ padding: 0 }}>{t('geocoding.variants.title')}</div>
+          <div className="state__hint">{t('geocoding.variants.hint')}</div>
         </div>
-        <Chip label="geocoding_attempts" kind="info" size="xs" className="mono" />
+        <Chip
+          label="geocoding_attempts" // i18n-literal-ok: resource key
+          kind="info"
+          size="xs"
+          className="mono"
+        />
       </div>
       <div
         style={{
@@ -2056,30 +2084,30 @@ function GeocodeAttemptVariantSummary({
         }}
       >
         <PolicySignal
-          label="Latest attempt"
-          value={latest ? `${policyDisplayLabel(latest.status)} / ${policyDisplayLabel(attemptTypeOf(latest))}` : 'None yet'}
+          label={t('geocoding.variants.latest')}
+          value={latest ? `${policyDisplayLabel(latest.status, t)} / ${policyDisplayLabel(attemptTypeOf(latest), t)}` : t('geocoding.value.noneYet')}
           kind={latestKind}
         />
         <PolicySignal
-          label="Provider mix"
-          value={providerCount ? `${providerCount} providers` : 'None yet'}
+          label={t('geocoding.variants.providerMix')}
+          value={providerCount ? fill(t('geocoding.variants.providers'), { n: providerCount }) : t('geocoding.value.noneYet')}
           kind={providerCount > 1 ? 'good' : providerCount === 1 ? 'info' : 'neutral'}
         />
         <PolicySignal
-          label="Manual review"
+          label={t('geocoding.variants.manualReview')}
           value={
             manualReview
-              ? 'Review task ready'
-              : 'No review needed'
+              ? t('geocoding.value.reviewTaskReady')
+              : t('geocoding.variants.noReview')
           }
           kind={manualReview ? 'warn' : 'neutral'}
         />
         <PolicySignal
-          label="Failure"
+          label={t('geocoding.variants.failure')}
           value={
             failure
-              ? policyDisplayLabel(metadataString(failure, 'failure_reason', 'failure_code', 'error', 'message') ?? failure.status)
-              : 'No failures'
+              ? policyDisplayLabel(metadataString(failure, 'failure_reason', 'failure_code', 'error', 'message') ?? failure.status, t)
+              : t('geocoding.variants.noFailures')
           }
           kind={failure ? 'danger' : 'neutral'}
         />
@@ -2098,7 +2126,7 @@ function GeocodeAttemptVariantSummary({
         >
           {manualReview ? (
             <Button
-              label="Inspect manual review"
+              label={t('geocoding.variants.inspectReview')}
               iconName="audit"
               kind="ghost"
               size="sm"
@@ -2108,7 +2136,7 @@ function GeocodeAttemptVariantSummary({
           ) : null}
           {failure ? (
             <Button
-              label="Inspect failure"
+              label={t('geocoding.variants.inspectFailure')}
               iconName="alert"
               kind="ghost"
               size="sm"
@@ -2129,6 +2157,7 @@ function PolicyWorkflowControls({
   readback: PolicyMutationReadback | null;
   onConfigure: (category: PolicyCategoryKey) => void;
 }) {
+  const t = useT();
   return (
     <div className="card" style={{ padding: '12px', marginBottom: '12px' }}>
       <div
@@ -2142,10 +2171,10 @@ function PolicyWorkflowControls({
         }}
       >
         <div>
-          <div className="section-eyebrow" style={{ padding: 0 }}>Policy updates</div>
-          <div className="state__hint">Tenant-editable map and address controls are saved through the approved policy workflow.</div>
+          <div className="section-eyebrow" style={{ padding: 0 }}>{t('geocoding.updates.title')}</div>
+          <div className="state__hint">{t('geocoding.updates.hint')}</div>
         </div>
-        <Chip label="Approved save path" kind="info" size="xs" />
+        <Chip label={t('geocoding.updates.savePath')} kind="info" size="xs" />
       </div>
       <div
         style={{
@@ -2170,19 +2199,22 @@ function PolicyWorkflowControls({
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
               <span className="mono" style={{ fontWeight: 700, fontSize: '12px' }}>
-                {policy.label}
+                {t(policy.labelKey)}
               </span>
-              <Chip label="Tenant editable" kind="neutral" size="xs" />
+              <Chip label={t('geocoding.updates.tenantEditable')} kind="neutral" size="xs" />
             </div>
-            <div className="state__hint" style={{ flex: 1 }}>{policy.summary}</div>
+            <div className="state__hint" style={{ flex: 1 }}>{t(policy.summaryKey)}</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-              {policy.signals.map((signal) => (
+              {(policy.techSignals ?? []).map((signal) => (
                 <Chip key={signal} label={signal} kind="info" size="xs" />
+              ))}
+              {policy.signalKeys.map((signalKey) => (
+                <Chip key={signalKey} label={t(signalKey)} kind="info" size="xs" />
               ))}
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <Button
-                label={`Configure ${policy.label}`}
+                label={fill(t('geocoding.policy.configure'), { label: t(policy.labelKey) })}
                 iconName="settings"
                 kind="ghost"
                 anyCapabilities={[CAP.SETTINGS_WRITE, CAP.SYSTEM_WRITE]}
@@ -2205,17 +2237,17 @@ function PolicyWorkflowControls({
           }}
         >
           <span className="mono" style={{ color: 'var(--ink-3)', fontSize: '11px' }}>
-            Policy update
+            {t('geocoding.updates.readback')}
           </span>
-          <Chip label={policyCategoryLabel(readback.category)} kind="good" size="xs" />
-          <Chip label={readback.scopeType === 'tenant' ? 'Tenant scope' : titleCaseToken(readback.scopeType)} kind="info" size="xs" />
-          <Chip label="Settings saved" kind="info" size="xs" />
-          <Chip label="Policy refreshed" kind="info" size="xs" />
+          <Chip label={policyCategoryLabel(readback.category, t)} kind="good" size="xs" />
+          <Chip label={readback.scopeType === 'tenant' ? t('geocoding.updates.tenantScope') : titleCaseToken(readback.scopeType)} kind="info" size="xs" />
+          <Chip label={t('geocoding.updates.settingsSaved')} kind="info" size="xs" />
+          <Chip label={t('geocoding.updates.refreshed')} kind="info" size="xs" />
           {readback.version ? (
             <Chip label={`v${readback.version}`} kind="good" size="xs" className="mono" />
           ) : null}
           {readback.justification ? (
-            <Chip label={`Reason ${readback.justification.slice(0, 48)}`} kind="neutral" size="xs" />
+            <Chip label={fill(t('geocoding.readback.reason'), { reason: readback.justification.slice(0, 48) })} kind="neutral" size="xs" />
           ) : null}
         </div>
       ) : null}
@@ -2232,6 +2264,7 @@ function PolicyCapabilitySummary({
   addressResolutionPolicy: AddressResolutionPolicyValue | null;
   geocodingPolicy: GeocodingPolicyValue | null;
 }) {
+  const t = useT();
   const tile = mapPolicy?.tile_provider;
   const stack = mapPolicy?.logistics_stack ?? geocodingPolicy?.metadata?.open_geocoding_stack;
   const stackRecord = recordValue(stack);
@@ -2245,13 +2278,22 @@ function PolicyCapabilitySummary({
   const manualReviewRule = stringValue(geocodingPolicy?.provider_agreement_rules?.if_disagree) ?? 'manual_review';
   const sourceSummary = (field: PolicyFieldResolution | null) => {
     const sources = stringArrayValue(field?.sources);
-    return sources.length ? sources.slice(0, 3).map(policyDisplayLabel).join(' > ') : 'Sources missing';
+    return sources.length
+      ? sources.slice(0, 3).map((source) => policyDisplayLabel(source, t)).join(' > ')
+      : t('geocoding.capability.sourcesMissing');
   };
+  const tierLabel = tile?.usage_tier != null ? policyDisplayLabel(tile.usage_tier, t) : t('geocoding.capability.tierMissing');
+  const boundary = stringValue(coordinateHandling?.country_boundary);
+  const boundaryLabel = boundary === 'SA'
+    ? t('geocoding.capability.saudiArabia')
+    : boundary
+      ? policyDisplayLabel(boundary, t)
+      : t('geocoding.capability.country');
 
   return (
     <div className="card" style={{ padding: '12px', marginBottom: '12px' }}>
       <div className="section-eyebrow" style={{ padding: 0, marginBottom: '8px' }}>
-        Policy breadth
+        {t('geocoding.capability.title')}
       </div>
       <div
         style={{
@@ -2261,57 +2303,57 @@ function PolicyCapabilitySummary({
         }}
       >
         <PolicySignal
-          label="Map provider"
-          value={`${titleCaseToken(tile?.engine)} / ${titleCaseToken(tile?.data_provider ?? tile?.provider)}`}
+          label={t('geocoding.capability.mapProvider')}
+          value={`${titleCaseToken(tile?.engine, t)} / ${titleCaseToken(tile?.data_provider ?? tile?.provider, t)}`}
           kind={tile?.engine === 'maplibre' && (tile?.data_provider ?? tile?.provider) === 'openstreetmap' ? 'good' : 'warn'}
         />
         <PolicySignal
-          label="Tile delivery"
-          value={`${policyDisplayLabel(tile?.usage_tier ?? 'tier missing')}${boolValue(tile?.cache_required) === true ? ' enabled' : ''}`}
+          label={t('geocoding.capability.tileDelivery')}
+          value={boolValue(tile?.cache_required) === true ? fill(t('geocoding.capability.enabled'), { label: tierLabel }) : tierLabel}
           kind={boolValue(tile?.cache_required) === true ? 'good' : 'warn'}
         />
         <PolicySignal
-          label="Geo stack"
+          label={t('geocoding.capability.geoStack')}
           value={[
             stringValue(stackRecord?.spatial_source_of_truth) ?? stringValue(stackRecord?.geospatial_source_of_truth),
             stringValue(stackRecord?.routing_engine),
             stringValue(stackRecord?.optimization_engine),
-          ].filter(Boolean).map((value) => titleCaseToken(String(value))).join(' / ') || 'stack missing'}
+          ].filter(Boolean).map((value) => titleCaseToken(String(value))).join(' / ') || t('geocoding.capability.stackMissing')}
           kind={stackRecord ? 'good' : 'warn'}
         />
         <PolicySignal
-          label="Saudi short address"
-          value={`${describePlugin(shortCode, 'short_code')} ${policyDisplayLabel(stringValue(shortCodeParams?.code_type) ?? 'Saudi short code')}`}
+          label={t('geocoding.capability.shortAddress')}
+          value={`${describePlugin(shortCode, 'short_code', t)} ${policyDisplayLabel(stringValue(shortCodeParams?.code_type) ?? 'sa_short_code', t)}`}
           kind={shortCode?.enabled === false || !shortCode ? 'warn' : 'good'}
         />
         <PolicySignal
-          label="Short-code sources"
+          label={t('geocoding.capability.shortCodeSources')}
           value={sourceSummary(shortCodeResolution)}
           kind={shortCodeResolution ? 'good' : 'warn'}
         />
         <PolicySignal
-          label="Coordinates"
-          value={`${stringValue(coordinateHandling?.country_boundary) === 'SA' ? 'Saudi Arabia' : policyDisplayLabel(stringValue(coordinateHandling?.country_boundary) ?? 'country')} ${coordinateHandling?.validate_bounds === false ? 'unbounded' : 'bounds checked'}`}
+          label={t('geocoding.capability.coordinates')}
+          value={`${boundaryLabel} ${coordinateHandling?.validate_bounds === false ? t('geocoding.capability.unbounded') : t('geocoding.capability.boundsChecked')}`}
           kind={coordinateHandling?.use_provided_coordinates === false ? 'warn' : 'good'}
         />
         <PolicySignal
-          label="Coordinate sources"
+          label={t('geocoding.capability.coordinateSources')}
           value={sourceSummary(coordinateResolution)}
           kind={coordinateResolution ? 'good' : 'warn'}
         />
         <PolicySignal
-          label="Fuzzy matching"
-          value={describePlugin(fuzzy, 'fuzzy')}
+          label={t('geocoding.capability.fuzzy')}
+          value={describePlugin(fuzzy, 'fuzzy', t)}
           kind={fuzzy?.enabled === false || !fuzzy ? 'warn' : 'good'}
         />
         <PolicySignal
-          label="Review fallback"
-          value={policyDisplayLabel(manualReviewRule)}
+          label={t('geocoding.capability.reviewFallback')}
+          value={policyDisplayLabel(manualReviewRule, t)}
           kind={manualReviewRule === 'manual_review' ? 'good' : 'warn'}
         />
         <PolicySignal
-          label="External providers"
-          value={providerPriority.length ? providerPriority.map(policyDisplayLabel).join(', ') : 'Explicit only'}
+          label={t('geocoding.capability.externalProviders')}
+          value={providerPriority.length ? providerPriority.map((provider) => policyDisplayLabel(provider, t)).join(', ') : t('geocoding.capability.explicitOnly')}
           kind={providerPriority.length ? 'info' : 'good'}
         />
       </div>
@@ -2320,6 +2362,7 @@ function PolicyCapabilitySummary({
 }
 
 function PolicySnapshot({ label, query }: PolicySnapshotProps) {
+  const t = useT();
   return (
     <div className="card" style={{ padding: '12px', minHeight: '180px' }}>
       <div
@@ -2339,15 +2382,15 @@ function PolicySnapshot({ label, query }: PolicySnapshotProps) {
             scopeId={undefined}
           />
         ) : null}
-        <Chip label="resolved snapshot" kind="info" size="xs" />
+        <Chip label={t('geocoding.snapshot.resolved')} kind="info" size="xs" />
       </div>
       {query.isError ? (
         <StateView
           kind="empty"
-          hint={`Resolver returned no row for ${label}. Add a settings_versions entry to populate.`}
+          hint={fill(t('geocoding.snapshot.noRow'), { label })}
         />
       ) : query.isLoading || !query.data ? (
-        <StateView kind="loading" hint="Resolving ladder…" />
+        <StateView kind="loading" hint={t('geocoding.state.resolving')} />
       ) : (
         <PolicyValueBlock value={query.data.value} />
       )}
@@ -2363,7 +2406,7 @@ function PolicySnapshot({ label, query }: PolicySnapshotProps) {
             className="mono"
             style={{ color: 'var(--ink-3)', fontSize: '10.5px', marginBottom: '4px' }}
           >
-            ladder
+            {t('geocoding.snapshot.ladder')}
           </div>
           <div
             style={{
@@ -2390,18 +2433,20 @@ function PolicySnapshot({ label, query }: PolicySnapshotProps) {
 }
 
 function PolicyValueBlock({ value }: { value: unknown }) {
+  const t = useT();
   if (value == null) {
-    return <StateView kind="empty" hint="Resolved value is null." />;
+    return <StateView kind="empty" hint={t('geocoding.state.nullValue')} />;
   }
   if (typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>);
     const summary = entries.slice(0, 6).map(([key, entry]) => {
-      if (Array.isArray(entry)) return `${policyDisplayLabel(key)}: ${entry.length} items`;
-      if (entry && typeof entry === 'object') return `${policyDisplayLabel(key)}: ${Object.keys(entry).length} settings`;
-      if (typeof entry === 'boolean') return `${policyDisplayLabel(key)}: ${entry ? 'Enabled' : 'Off'}`;
-      if (typeof entry === 'string') return `${policyDisplayLabel(key)}: ${policyDisplayLabel(entry)}`;
-      if (entry == null) return `${policyDisplayLabel(key)}: Not configured`;
-      return `${policyDisplayLabel(key)}: ${String(entry)}`;
+      const label = policyDisplayLabel(key, t);
+      if (Array.isArray(entry)) return fill(t('geocoding.valueBlock.items'), { label, n: entry.length });
+      if (entry && typeof entry === 'object') return fill(t('geocoding.valueBlock.settings'), { label, n: Object.keys(entry).length });
+      if (typeof entry === 'boolean') return `${label}: ${entry ? t('geocoding.valueBlock.enabled') : t('geocoding.valueBlock.off')}`;
+      if (typeof entry === 'string') return `${label}: ${policyDisplayLabel(entry, t)}`;
+      if (entry == null) return `${label}: ${t('geocoding.value.notConfigured')}`;
+      return `${policyDisplayLabel(key, t)}: ${String(entry)}`;
     });
     return (
       <div
@@ -2412,7 +2457,7 @@ function PolicyValueBlock({ value }: { value: unknown }) {
         }}
       >
         <div className="state__hint" style={{ marginBottom: '6px' }}>
-          {entries.length} saved policy settings
+          {fill(t('geocoding.valueBlock.saved'), { n: entries.length })}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
           {summary.map((entry) => (
@@ -2421,7 +2466,7 @@ function PolicyValueBlock({ value }: { value: unknown }) {
         </div>
         <details style={{ marginTop: '8px' }}>
           <summary className="state__hint" style={{ cursor: 'pointer' }}>
-            Show configured policy details
+            {t('geocoding.valueBlock.showDetails')}
           </summary>
           <pre
             className="mono"

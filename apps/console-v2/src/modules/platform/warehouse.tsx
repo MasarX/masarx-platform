@@ -30,6 +30,7 @@ import {
 import { useCapability, useIdentity } from '@/lib/identity';
 import { CAP } from '@/lib/capabilities';
 import { readUrlParam } from '@/lib/url-params';
+import { fill, useI18n, type Translate } from '@/lib/i18n';
 
 // W11-3 schema-drift remediation (PLATFORM §10) — TransferRow is now backed
 // by the paired projection view `public.v_warehouse_transfer_summary`
@@ -194,8 +195,9 @@ function taskActionNextStatus(kind: string): string {
   return row?.next_status ?? row?.metadata?.next_status ?? '';
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err || 'unknown error');
+function errorMessage(err: unknown, t: Translate): string {
+  if (err instanceof Error) return err.message;
+  return err ? String(err) : t('platformWarehouse.helpers.unknownError');
 }
 
 function branchLabel(row: BranchOptionRow): string {
@@ -244,6 +246,7 @@ interface CheckpointScanFormProps {
 }
 
 function CheckpointScanForm({ label, onCancel, onSubmit }: CheckpointScanFormProps) {
+  const { t } = useI18n();
   const [barcode, setBarcode] = useState('');
   const [handlingUnit, setHandlingUnit] = useState('');
   const [notes, setNotes] = useState('');
@@ -254,8 +257,8 @@ function CheckpointScanForm({ label, onCancel, onSubmit }: CheckpointScanFormPro
     event.preventDefault();
     const trimmedBarcode = barcode.trim();
     if (!trimmedBarcode) {
-      setFormError('Scan barcode is required');
-      pushToast('Scan barcode is required', 'warn');
+      setFormError(t('platformWarehouse.checkpointScanForm.scanBarcodeIsRequired'));
+      pushToast(t('platformWarehouse.checkpointScanForm.scanBarcodeIsRequired'), 'warn');
       return;
     }
 
@@ -268,9 +271,9 @@ function CheckpointScanForm({ label, onCancel, onSubmit }: CheckpointScanFormPro
         notes: notes.trim() || null,
       });
     } catch (err) {
-      const message = errorMessage(err);
+      const message = errorMessage(err, t);
       setFormError(message);
-      pushToast(`Checkpoint scan failed - ${message}`, 'danger');
+      pushToast(fill(t('platformWarehouse.checkpointScanForm.checkpointScanFailed'), { message: String(message) }), 'danger');
     } finally {
       setSubmitting(false);
     }
@@ -279,7 +282,7 @@ function CheckpointScanForm({ label, onCancel, onSubmit }: CheckpointScanFormPro
   return (
     <form data-testid="warehouse-checkpoint-modal" onSubmit={submit}>
       <p className="state__hint" style={{ margin: '0 0 10px' }}>
-        Runs the checkpoint scan workflow for this transfer.
+        {t('platformWarehouse.checkpointScanForm.runsTheCheckpointScan')}
       </p>
       {formError ? (
         <div className="state state--error" role="alert" style={{ marginBottom: '10px' }}>
@@ -288,31 +291,31 @@ function CheckpointScanForm({ label, onCancel, onSubmit }: CheckpointScanFormPro
       ) : null}
       <div className="field">
         <label className="field__label" htmlFor="warehouse-checkpoint-barcode">
-          Scan barcode
+          {t('platformWarehouse.checkpointScanForm.scanBarcode')}
         </label>
         <input
           id="warehouse-checkpoint-barcode"
           data-testid="warehouse-checkpoint-barcode"
-          placeholder="BAG-001 / MAN-001"
+          placeholder={t('platformWarehouse.checkpointScanForm.bag001Man001')}
           value={barcode}
           onChange={(event) => setBarcode(event.target.value)}
         />
       </div>
       <div className="field">
         <label className="field__label" htmlFor="warehouse-checkpoint-handling-unit">
-          Handling unit code
+          {t('platformWarehouse.checkpointScanForm.handlingUnitCode')}
         </label>
         <input
           id="warehouse-checkpoint-handling-unit"
           data-testid="warehouse-checkpoint-handling-unit"
-          placeholder="Optional bag/container code"
+          placeholder={t('platformWarehouse.checkpointScanForm.optionalBagContainerCode')}
           value={handlingUnit}
           onChange={(event) => setHandlingUnit(event.target.value)}
         />
       </div>
       <div className="field">
         <label className="field__label" htmlFor="warehouse-checkpoint-notes">
-          Notes
+          {t('platformWarehouse.checkpointScanForm.notes')}
         </label>
         <textarea
           id="warehouse-checkpoint-notes"
@@ -323,9 +326,9 @@ function CheckpointScanForm({ label, onCancel, onSubmit }: CheckpointScanFormPro
         />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-        <Button label="Cancel" kind="ghost" onClick={onCancel} disabled={submitting} />
+        <Button label={t('platformWarehouse.checkpointScanForm.cancel')} kind="ghost" onClick={onCancel} disabled={submitting} />
         <Button
-          label={submitting ? 'Recording scan...' : label}
+          label={submitting ? t('platformWarehouse.checkpointScanForm.recordingScan') : label}
           iconName="scan"
           kind="primary"
           capability={CAP.WAREHOUSE_WRITE}
@@ -354,6 +357,7 @@ function ScanCorrectionForm({
   onCancel,
   onSubmit,
 }: ScanCorrectionFormProps) {
+  const { t } = useI18n();
   const [barcode, setBarcode] = useState(defaultBarcode ?? scan.barcode ?? '');
   const [reason, setReason] = useState(defaultReason ?? '');
   const [formError, setFormError] = useState<string | null>(null);
@@ -364,13 +368,13 @@ function ScanCorrectionForm({
     const correctedBarcode = barcode.trim();
     const correctionReason = reason.trim();
     if (!correctedBarcode) {
-      setFormError('Corrected barcode is required');
-      pushToast('Corrected barcode is required', 'warn');
+      setFormError(t('platformWarehouse.scanCorrectionForm.correctedBarcodeIsRequired'));
+      pushToast(t('platformWarehouse.scanCorrectionForm.correctedBarcodeIsRequired'), 'warn');
       return;
     }
     if (!correctionReason) {
-      setFormError('Correction reason is required');
-      pushToast('Correction reason is required', 'warn');
+      setFormError(t('platformWarehouse.scanCorrectionForm.correctionReasonIsRequired'));
+      pushToast(t('platformWarehouse.scanCorrectionForm.correctionReasonIsRequired'), 'warn');
       return;
     }
 
@@ -379,9 +383,9 @@ function ScanCorrectionForm({
     try {
       await onSubmit({ corrected_barcode: correctedBarcode, correction_reason: correctionReason });
     } catch (err) {
-      const message = errorMessage(err);
+      const message = errorMessage(err, t);
       setFormError(message);
-      pushToast(`Scan correction failed - ${message}`, 'danger');
+      pushToast(fill(t('platformWarehouse.scanCorrectionForm.scanCorrectionFailed'), { message: String(message) }), 'danger');
     } finally {
       setSubmitting(false);
     }
@@ -391,8 +395,8 @@ function ScanCorrectionForm({
     <form data-testid={`warehouse-scan-correction-${mode}-modal`} onSubmit={submit}>
       <p className="state__hint" style={{ margin: '0 0 10px' }}>
         {mode === 'request'
-          ? 'Creates a supervisor approval task for an append-only scan correction.'
-          : 'Completes the approval task and records an append-only correction scan.'}
+          ? t('platformWarehouse.scanCorrectionForm.createsASupervisorApproval')
+          : t('platformWarehouse.scanCorrectionForm.completesTheApprovalTask')}
       </p>
       {formError ? (
         <div className="state state--error" role="alert" style={{ marginBottom: '10px' }}>
@@ -401,7 +405,7 @@ function ScanCorrectionForm({
       ) : null}
       <div className="field">
         <label className="field__label" htmlFor={`warehouse-scan-correction-barcode-${mode}`}>
-          Corrected barcode
+          {t('platformWarehouse.scanCorrectionForm.correctedBarcode')}
         </label>
         <input
           id={`warehouse-scan-correction-barcode-${mode}`}
@@ -412,7 +416,7 @@ function ScanCorrectionForm({
       </div>
       <div className="field">
         <label className="field__label" htmlFor={`warehouse-scan-correction-reason-${mode}`}>
-          Correction reason
+          {t('platformWarehouse.scanCorrectionForm.correctionReason')}
         </label>
         <textarea
           id={`warehouse-scan-correction-reason-${mode}`}
@@ -423,9 +427,9 @@ function ScanCorrectionForm({
         />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-        <Button label="Cancel" kind="ghost" onClick={onCancel} disabled={submitting} />
+        <Button label={t('platformWarehouse.scanCorrectionForm.cancel')} kind="ghost" onClick={onCancel} disabled={submitting} />
         <Button
-          label={submitting ? 'Saving correction...' : mode === 'request' ? 'Request correction' : 'Record correction'}
+          label={submitting ? t('platformWarehouse.scanCorrectionForm.savingCorrection') : mode === 'request' ? t('platformWarehouse.scanCorrectionForm.requestCorrection') : t('platformWarehouse.scanCorrectionForm.recordCorrection')}
           iconName="edit"
           kind="primary"
           capability={mode === 'request' ? CAP.WAREHOUSE_WRITE : CAP.TASKS_COMPLETE}
@@ -437,44 +441,50 @@ function ScanCorrectionForm({
   );
 }
 
-const TRANSFER_COLUMNS: DataTableColumn<TransferRow>[] = [
-  // W11-3: bind to canonical view columns. Legacy aliases (transfer_id /
-  // origin_hub / destination_hub) remain on the seed-mode projection so
-  // existing saved-view selectors keep resolving until the rename pass lands.
-  { key: 'transfer_code', label: 'Transfer', mono: true, sortable: true, filterable: true },
-  { key: 'from_branch_id', label: 'Origin', sortable: true, filterable: true },
-  { key: 'to_branch_id', label: 'Destination', sortable: true, filterable: true },
-  { key: 'item_count', label: 'Items', align: 'right', sortable: true, type: 'number' },
-  { key: 'received_count', label: 'Received', align: 'right', sortable: true, type: 'number' },
-  { key: 'variance_count', label: 'Variance', align: 'right', sortable: true, type: 'number' },
-  {
-    key: 'status',
-    label: 'Status',
-    lookup: 'warehouse_transfer_status',
-    sortable: true,
-    filterable: true,
-    editable: false,
-  },
-  { key: 'posted_at', label: 'Posted', format: 'datetime', sortable: true },
-  { key: 'updated_at', label: 'Updated', format: 'datetime', sortable: true },
-];
+function transferColumns(t: Translate): DataTableColumn<TransferRow>[] {
+  return [
+    // W11-3: bind to canonical view columns. Legacy aliases (transfer_id /
+    // origin_hub / destination_hub) remain on the seed-mode projection so
+    // existing saved-view selectors keep resolving until the rename pass lands.
+    { key: 'transfer_code', label: t('platformWarehouse.warehouseModule.colTransfer'), mono: true, sortable: true, filterable: true },
+    { key: 'from_branch_id', label: t('platformWarehouse.warehouseModule.colOrigin'), sortable: true, filterable: true },
+    { key: 'to_branch_id', label: t('platformWarehouse.warehouseModule.colDestination'), sortable: true, filterable: true },
+    { key: 'item_count', label: t('platformWarehouse.warehouseModule.colItems'), align: 'right', sortable: true, type: 'number' },
+    { key: 'received_count', label: t('platformWarehouse.warehouseModule.colReceived'), align: 'right', sortable: true, type: 'number' },
+    { key: 'variance_count', label: t('platformWarehouse.warehouseModule.colVariance'), align: 'right', sortable: true, type: 'number' },
+    {
+      key: 'status',
+      label: t('platformWarehouse.warehouseModule.colStatus'),
+      lookup: 'warehouse_transfer_status',
+      sortable: true,
+      filterable: true,
+      editable: false,
+    },
+    { key: 'posted_at', label: t('platformWarehouse.warehouseModule.colPosted'), format: 'datetime', sortable: true },
+    { key: 'updated_at', label: t('platformWarehouse.warehouseModule.colUpdated'), format: 'datetime', sortable: true },
+  ];
+}
 
-const ITEM_COLUMNS: DataTableColumn<TransferItem & Record<string, unknown>>[] = [
-  { key: 'shipment_id', label: 'Shipment', mono: true },
-  { key: 'expected', label: 'Expected', align: 'right' },
-  { key: 'received', label: 'Received', align: 'right' },
-  { key: 'status', label: 'Status' },
-];
+function itemColumns(t: Translate): DataTableColumn<TransferItem & Record<string, unknown>>[] {
+  return [
+    { key: 'shipment_id', label: t('platformWarehouse.warehouseModule.itemColShipment'), mono: true },
+    { key: 'expected', label: t('platformWarehouse.warehouseModule.itemColExpected'), align: 'right' },
+    { key: 'received', label: t('platformWarehouse.warehouseModule.itemColReceived'), align: 'right' },
+    { key: 'status', label: t('platformWarehouse.warehouseModule.itemColStatus') },
+  ];
+}
 
-const SCAN_COLUMNS: DataTableColumn<CheckpointScan & Record<string, unknown>>[] = [
-  { key: 'scan_type', label: 'Type' },
-  { key: 'sequence', label: '#', align: 'right' },
-  { key: 'checkpoint', label: 'Checkpoint' },
-  { key: 'barcode', label: 'Barcode', mono: true },
-  { key: 'shipment_id', label: 'Shipment', mono: true },
-  { key: 'correction_reason', label: 'Correction reason' },
-  { key: 'occurred_at', label: 'When', format: 'datetime' },
-];
+function scanColumns(t: Translate): DataTableColumn<CheckpointScan & Record<string, unknown>>[] {
+  return [
+    { key: 'scan_type', label: t('platformWarehouse.warehouseModule.scanColType') },
+    { key: 'sequence', label: '#', align: 'right' },
+    { key: 'checkpoint', label: t('platformWarehouse.warehouseModule.scanColCheckpoint') },
+    { key: 'barcode', label: t('platformWarehouse.warehouseModule.scanColBarcode'), mono: true },
+    { key: 'shipment_id', label: t('platformWarehouse.warehouseModule.scanColShipment'), mono: true },
+    { key: 'correction_reason', label: t('platformWarehouse.warehouseModule.scanColCorrectionReason') },
+    { key: 'occurred_at', label: t('platformWarehouse.warehouseModule.scanColWhen'), format: 'datetime' },
+  ];
+}
 
 function Kv({ k, v }: { k: string; v: ReactNode }) {
   return (
@@ -609,18 +619,19 @@ function warehouseActionReadbackFrom(
 }
 
 function WarehouseActionReadbackPanel({ readback }: { readback: WarehouseActionReadback | null }) {
+  const { t } = useI18n();
   if (!readback) return null;
   return (
     <div className="card" data-testid="warehouse-action-readback" style={{ marginBottom: '10px' }}>
       <div className="dt-toolbar">
-        <span className="eyebrow">Action confirmation</span>
+        <span className="eyebrow">{t('platformWarehouse.warehouseActionReadbackPanel.actionConfirmation')}</span>
         <Chip label={readback.action} size="xs" kind="good" />
         {readback.status ? <Chip label={readback.status} size="xs" /> : null}
       </div>
       <div className="form-grid form-grid--3" style={{ marginTop: '8px' }}>
-        <Kv k="Transfer" v={<span className="mono">{readback.transfer_code ?? readback.warehouse_transfer_id ?? 'pending'}</span>} />
-        <Kv k="Transfer status" v={<span className="mono">{readback.transfer_status ?? 'pending'}</span>} />
-        <Kv k="Workflow" v={<span className="mono">{readback.workflow_run_id ?? 'not started'}</span>} />
+        <Kv k="Transfer" v={<span className="mono">{readback.transfer_code ?? readback.warehouse_transfer_id ?? t('platformWarehouse.warehouseActionReadbackPanel.pending')}</span>} />
+        <Kv k="Transfer status" v={<span className="mono">{readback.transfer_status ?? t('platformWarehouse.warehouseActionReadbackPanel.pending')}</span>} />
+        <Kv k="Workflow" v={<span className="mono">{readback.workflow_run_id ?? t('platformWarehouse.warehouseActionReadbackPanel.notStarted')}</span>} />
         {readback.workflow_status ? <Kv k="Workflow status" v={<span className="mono">{readback.workflow_status}</span>} /> : null}
         {readback.item_count != null ? <Kv k="Items" v={<span className="mono">{readback.item_count}</span>} /> : null}
         {readback.scan_event_id ? <Kv k="Scan event" v={<span className="mono">{readback.scan_event_id}</span>} /> : null}
@@ -632,6 +643,10 @@ function WarehouseActionReadbackPanel({ readback }: { readback: WarehouseActionR
 }
 
 export function WarehouseModule() {
+  const { t } = useI18n();
+  const transferTableColumns = useMemo(() => transferColumns(t), [t]);
+  const itemTableColumns = useMemo(() => itemColumns(t), [t]);
+  const scanTableColumns = useMemo(() => scanColumns(t), [t]);
   const canRead = useCapability(CAP.WAREHOUSE_READ);
   const canWriteWarehouse = useCapability(CAP.WAREHOUSE_WRITE);
   const canCompleteTasks = useCapability(CAP.TASKS_COMPLETE);
@@ -757,8 +772,8 @@ export function WarehouseModule() {
   const grouped = useMemo<Record<string, TransferRow[]>>(() => {
     const m: Record<string, TransferRow[]> = {};
     kanbanColumns.forEach((s) => (m[s] = []));
-    for (const t of transfers) {
-      (m[t.status] = m[t.status] || []).push(t);
+    for (const entry of transfers) {
+      (m[entry.status] = m[entry.status] || []).push(entry);
     }
     return m;
   }, [transfers, kanbanColumns]);
@@ -792,12 +807,12 @@ export function WarehouseModule() {
 
   const completeWarehouseTask = async (transferId: string, task: WarehouseTask) => {
     if (!canCompleteTasks) {
-      pushToast('Task completion permission required', 'warn');
+      pushToast(t('platformWarehouse.warehouseModule.taskCompletionPermissionRequired'), 'warn');
       return;
     }
     const nextStatus = taskActionNextStatus('resolve');
     if (!nextStatus) {
-      pushToast('Resolve status is not configured for task actions', 'danger');
+      pushToast(t('platformWarehouse.warehouseModule.resolveStatusIsNot'), 'danger');
       return;
     }
     const workflowRunId = warehouseTaskWorkflowRunId(task);
@@ -843,31 +858,32 @@ export function WarehouseModule() {
       }));
       pushToast(`${warehouseTaskLabel(task)} completed`, 'good');
     } catch (err) {
-      pushToast(`Task completion failed - ${errorMessage(err)}`, 'danger');
+      pushToast(fill(t('platformWarehouse.warehouseModule.taskCompletionFailed'), { value: String(errorMessage(err, t)) }), 'danger');
     }
   };
 
-  const dispatchTransfer = async (t: TransferRow) => {
+  const dispatchTransfer = async (entry: TransferRow) => {
     if (!canWriteWarehouse) {
-      pushToast('Warehouse update permission required', 'warn');
+      pushToast(t('platformWarehouse.warehouseModule.warehouseUpdatePermissionRequired'), 'warn');
       return;
     }
     try {
-      const result = await dispatchTransferMutation.mutateAsync({ warehouse_transfer_id: t.id });
+      const result = await dispatchTransferMutation.mutateAsync({ warehouse_transfer_id: entry.id });
       await refetchWarehouseLists();
       setLastActionReadback(warehouseActionReadbackFrom('dispatch', result, {
-        warehouse_transfer_id: t.id,
-        transfer_code: t.transfer_code ?? t.transfer_id ?? t.id,
-        transfer_status: t.status,
+        warehouse_transfer_id: entry.id,
+        transfer_code: entry.transfer_code ?? entry.transfer_id ?? entry.id,
+        transfer_status: entry.status,
       }));
-      pushToast(`Dispatch started for ${t.transfer_code ?? t.id}`, 'good');
+      pushToast(fill(t('platformWarehouse.warehouseModule.dispatchStartedFor'), { value: String(entry.transfer_code ?? entry.id) }), 'good');
     } catch (err) {
-      pushToast(`Dispatch workflow failed - ${errorMessage(err)}`, 'danger');
+      pushToast(fill(t('platformWarehouse.warehouseModule.dispatchWorkflowFailed'), { value: String(errorMessage(err, t)) }), 'danger');
     }
   };
 
   const openCreateManifestModal = () => {
     function ManifestCreateForm() {
+      const { t } = useI18n();
       const manifestListOpts = useMemo(
         () => ({
           page_size: 100,
@@ -930,7 +946,7 @@ export function WarehouseModule() {
       return (
         <div data-testid="warehouse-manifest-create-modal">
           <p className="state__hint" style={{ margin: '0 0 12px' }}>
-            Build a draft transfer manifest from existing branch and shipment records.
+            {t('platformWarehouse.manifestCreateForm.buildADraftTransfer')}
           </p>
           <div
             style={{
@@ -940,7 +956,7 @@ export function WarehouseModule() {
               alignItems: 'center',
             }}
           >
-            <label className="mono" htmlFor="warehouse-manifest-code">Transfer code</label>
+            <label className="mono" htmlFor="warehouse-manifest-code">{t('platformWarehouse.manifestCreateForm.transferCode')}</label>
             <input
               id="warehouse-manifest-code"
               data-testid="warehouse-manifest-transfer-code"
@@ -953,7 +969,7 @@ export function WarehouseModule() {
                 }))
               }
             />
-            <label className="mono" htmlFor="warehouse-manifest-origin">Origin branch</label>
+            <label className="mono" htmlFor="warehouse-manifest-origin">{t('platformWarehouse.manifestCreateForm.originBranch')}</label>
             <select
               id="warehouse-manifest-origin"
               data-testid="warehouse-manifest-from-branch"
@@ -963,14 +979,14 @@ export function WarehouseModule() {
                 setDraft((current) => ({ ...current, from_branch_id: e.target.value }))
               }
             >
-              <option value="">Choose origin</option>
+              <option value="">{t('platformWarehouse.manifestCreateForm.chooseOrigin')}</option>
               {branchOptions.map((branch) => (
                 <option key={branch.id} value={branch.id}>
                   {branchLabel(branch)}
                 </option>
               ))}
             </select>
-            <label className="mono" htmlFor="warehouse-manifest-destination">Destination branch</label>
+            <label className="mono" htmlFor="warehouse-manifest-destination">{t('platformWarehouse.manifestCreateForm.destinationBranch')}</label>
             <select
               id="warehouse-manifest-destination"
               data-testid="warehouse-manifest-to-branch"
@@ -980,7 +996,7 @@ export function WarehouseModule() {
                 setDraft((current) => ({ ...current, to_branch_id: e.target.value }))
               }
             >
-              <option value="">Choose destination</option>
+              <option value="">{t('platformWarehouse.manifestCreateForm.chooseDestination')}</option>
               {branchOptions.map((branch) => (
                 <option key={branch.id} value={branch.id}>
                   {branchLabel(branch)}
@@ -990,11 +1006,11 @@ export function WarehouseModule() {
           </div>
 
           <div style={{ marginTop: 14 }}>
-            <div className="section-eyebrow">Shipment manifest</div>
+            <div className="section-eyebrow">{t('platformWarehouse.manifestCreateForm.shipmentManifest')}</div>
             {manifestShipmentsQuery.isLoading ? (
               <StateView kind="loading" />
             ) : shipmentOptions.length === 0 ? (
-              <StateView kind="empty" title="No shipments available" hint="Create or import shipments before building a warehouse transfer." />
+              <StateView kind="empty" title={t('platformWarehouse.manifestCreateForm.noShipmentsAvailable')} hint={t('platformWarehouse.manifestCreateForm.createOrImportShipments')} />
             ) : (
               <div
                 className="dt"
@@ -1004,8 +1020,8 @@ export function WarehouseModule() {
                 <table className="dt__table">
                   <thead>
                     <tr>
-                      <th>Select</th>
-                      <th>Shipment</th>
+                      <th>{t('platformWarehouse.manifestCreateForm.select')}</th>
+                      <th>{t('platformWarehouse.manifestCreateForm.shipment')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1014,7 +1030,7 @@ export function WarehouseModule() {
                         <td>
                           <input
                             type="checkbox"
-                            aria-label={`Select shipment ${shipmentManifestLabel(shipment)}`}
+                            aria-label={fill(t('platformWarehouse.manifestCreateForm.selectShipment'), { value: String(shipmentManifestLabel(shipment)) })}
                             data-testid={`warehouse-manifest-shipment-${shipment.id}`}
                             checked={draft.shipment_ids.includes(shipment.id)}
                             onChange={(e) => toggleShipment(shipment.id, e.target.checked)}
@@ -1030,7 +1046,7 @@ export function WarehouseModule() {
           </div>
 
           <div className="field" style={{ marginTop: 12 }}>
-            <label className="field__label" htmlFor="warehouse-manifest-notes">Notes</label>
+            <label className="field__label" htmlFor="warehouse-manifest-notes">{t('platformWarehouse.manifestCreateForm.notes')}</label>
             <textarea
               id="warehouse-manifest-notes"
               data-testid="warehouse-manifest-notes"
@@ -1042,18 +1058,18 @@ export function WarehouseModule() {
 
           {draft.from_branch_id && draft.to_branch_id && draft.from_branch_id === draft.to_branch_id ? (
             <p className="state__hint" role="alert">
-              Origin and destination must be different branches.
+              {t('platformWarehouse.manifestCreateForm.originAndDestinationMust')}
             </p>
           ) : null}
 
           {formError ? (
-            <StateView kind="error" title="Create manifest failed" hint={formError} />
+            <StateView kind="error" title={t('platformWarehouse.manifestCreateForm.createManifestFailed')} hint={formError} />
           ) : null}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('platformWarehouse.manifestCreateForm.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Create manifest"
+              label={t('platformWarehouse.manifestCreateForm.createManifest')}
               iconName="plus"
               kind="primary"
               capability={CAP.WAREHOUSE_WRITE}
@@ -1079,12 +1095,12 @@ export function WarehouseModule() {
                     transfer_status: readbackString((result as Record<string, unknown>).transfer_status) ?? 'draft',
                     item_count: result.item_count,
                   }));
-                  pushToast(`Transfer manifest ${result.transfer_code} created`, 'good');
+                  pushToast(fill(t('platformWarehouse.manifestCreateForm.transferManifestCreated'), { transfer_code: String(result.transfer_code) }), 'good');
                   modal.close();
                 } catch (err) {
-                  const message = errorMessage(err);
+                  const message = errorMessage(err, t);
                   setFormError(message);
-                  pushToast(`Create manifest failed - ${message}`, 'danger');
+                  pushToast(fill(t('platformWarehouse.manifestCreateForm.createManifestFailed2'), { message: String(message) }), 'danger');
                 }
               }}
             />
@@ -1094,18 +1110,18 @@ export function WarehouseModule() {
     }
 
     modal.open({
-      title: 'Create transfer manifest',
+      title: t('platformWarehouse.warehouseModule.createTransferManifest'),
       body: <ManifestCreateForm />,
     });
   };
 
-  const openCheckpointModal = (t: TransferRow, actionKey: WarehouseTransferCheckpointActionKey) => {
+  const openCheckpointModal = (entry: TransferRow, actionKey: WarehouseTransferCheckpointActionKey) => {
     const label = commandLabel(
       actionKey,
       actionKey === 'warehouse_transfers.scan_departure' ? 'Scan departure' : 'Scan arrival',
     );
     modal.open({
-      title: `${label} - ${t.transfer_code ?? t.transfer_id ?? t.id}`,
+      title: `${label} - ${entry.transfer_code ?? entry.transfer_id ?? entry.id}`,
       body: (
         <CheckpointScanForm
           label={label}
@@ -1113,19 +1129,19 @@ export function WarehouseModule() {
           onSubmit={async (payload) => {
             const result = await checkpointMutation.mutateAsync({
               action_key: actionKey,
-              warehouse_transfer_id: t.id,
+              warehouse_transfer_id: entry.id,
               barcode: payload.barcode,
               handling_unit_code: payload.handling_unit_code,
               notes: payload.notes,
             });
             await refetchWarehouseLists();
             setLastActionReadback(warehouseActionReadbackFrom(actionKey, result, {
-              warehouse_transfer_id: t.id,
-              transfer_code: t.transfer_code ?? t.transfer_id ?? t.id,
-              transfer_status: readbackString((result as Record<string, unknown>).transfer_status) ?? t.status,
+              warehouse_transfer_id: entry.id,
+              transfer_code: entry.transfer_code ?? entry.transfer_id ?? entry.id,
+              transfer_status: readbackString((result as Record<string, unknown>).transfer_status) ?? entry.status,
               scan_event_id: readbackString(result.scan_event_id),
             }));
-            pushToast(`Checkpoint scan recorded - ${label}`, 'good');
+            pushToast(fill(t('platformWarehouse.warehouseModule.checkpointScanRecorded'), { label: String(label) }), 'good');
             modal.close();
           }}
         />
@@ -1135,7 +1151,7 @@ export function WarehouseModule() {
 
   const openScanCorrectionRequestModal = (transfer: TransferRow, scan: CheckpointScan) => {
     modal.open({
-      title: `Request scan correction - ${scan.barcode ?? scan.id}`,
+      title: fill(t('platformWarehouse.warehouseModule.requestScanCorrection'), { value: String(scan.barcode ?? scan.id) }),
       body: (
         <ScanCorrectionForm
           mode="request"
@@ -1168,7 +1184,7 @@ export function WarehouseModule() {
               correction_approval_task_id: readbackString((result as Record<string, unknown>).task_id),
               status: readbackString((result as Record<string, unknown>).status) ?? 'requested',
             }));
-            pushToast('Scan correction approval requested', 'good');
+            pushToast(t('platformWarehouse.warehouseModule.scanCorrectionApprovalRequested'), 'good');
             modal.close();
           }}
         />
@@ -1183,7 +1199,7 @@ export function WarehouseModule() {
   ) => {
     const correction = scanCorrectionTaskMetadata(task);
     modal.open({
-      title: `Record scan correction - ${scan.barcode ?? scan.id}`,
+      title: fill(t('platformWarehouse.warehouseModule.recordScanCorrection'), { value: String(scan.barcode ?? scan.id) }),
       body: (
         <ScanCorrectionForm
           mode="record"
@@ -1242,7 +1258,7 @@ export function WarehouseModule() {
               correction_approval_task_id: task.id,
               status: readbackString(objectRecord(transitionResult).status) ?? 'correction_recorded',
             }));
-            pushToast('Scan correction recorded', 'good');
+            pushToast(t('platformWarehouse.warehouseModule.scanCorrectionRecorded'), 'good');
             modal.close();
           }}
         />
@@ -1250,22 +1266,22 @@ export function WarehouseModule() {
     });
   };
 
-  const openReconcileModal = (t: TransferRow) => {
-    let received = String(t.received_count ?? 0);
+  const openReconcileModal = (entry: TransferRow) => {
+    let received = String(entry.received_count ?? 0);
     let damaged = '0';
-    let missing = String(t.variance_count ?? 0);
+    let missing = String(entry.variance_count ?? 0);
     let unmanifested = '0';
     let notes = '';
     const label = commandLabel('warehouse_transfers.reconcile_destination', 'Reconcile transfer');
     modal.open({
-      title: `${label} - ${t.transfer_code ?? t.transfer_id ?? t.id}`,
+      title: `${label} - ${entry.transfer_code ?? entry.transfer_id ?? entry.id}`,
       body: (
         <div data-testid="warehouse-reconcile-modal">
           <p className="state__hint" style={{ margin: '0 0 10px' }}>
-            Runs the destination reconciliation workflow for this transfer.
+            {t('platformWarehouse.warehouseModule.runsTheDestinationReconciliation')}
           </p>
           <div className="field">
-            <label className="field__label">Received shipment count</label>
+            <label className="field__label">{t('platformWarehouse.warehouseModule.receivedShipmentCount')}</label>
             <input
               data-testid="warehouse-reconcile-received"
               type="number"
@@ -1277,7 +1293,7 @@ export function WarehouseModule() {
             />
           </div>
           <div className="field">
-            <label className="field__label">Damaged shipment count</label>
+            <label className="field__label">{t('platformWarehouse.warehouseModule.damagedShipmentCount')}</label>
             <input
               data-testid="warehouse-reconcile-damaged"
               type="number"
@@ -1289,7 +1305,7 @@ export function WarehouseModule() {
             />
           </div>
           <div className="field">
-            <label className="field__label">Missing shipment count</label>
+            <label className="field__label">{t('platformWarehouse.warehouseModule.missingShipmentCount')}</label>
             <input
               data-testid="warehouse-reconcile-missing"
               type="number"
@@ -1301,7 +1317,7 @@ export function WarehouseModule() {
             />
           </div>
           <div className="field">
-            <label className="field__label">Unmanifested shipment count</label>
+            <label className="field__label">{t('platformWarehouse.warehouseModule.unmanifestedShipmentCount')}</label>
             <input
               data-testid="warehouse-reconcile-unmanifested"
               type="number"
@@ -1313,7 +1329,7 @@ export function WarehouseModule() {
             />
           </div>
           <div className="field">
-            <label className="field__label">Reconcile notes</label>
+            <label className="field__label">{t('platformWarehouse.warehouseModule.reconcileNotes')}</label>
             <textarea
               rows={3}
               data-testid="warehouse-reconcile-notes"
@@ -1326,7 +1342,7 @@ export function WarehouseModule() {
       ),
       footer: (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('platformWarehouse.warehouseModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
             label={label}
             iconName="check"
@@ -1335,7 +1351,7 @@ export function WarehouseModule() {
             onClick={async () => {
               try {
                 const result = await reconcileDestinationMutation.mutateAsync({
-                  warehouse_transfer_id: t.id,
+                  warehouse_transfer_id: entry.id,
                   received_shipment_count: parseNonNegativeInt(received, 'Received shipment count'),
                   damaged_shipment_count: parseNonNegativeInt(damaged, 'Damaged shipment count'),
                   missing_shipment_count: parseNonNegativeInt(missing, 'Missing shipment count'),
@@ -1343,28 +1359,28 @@ export function WarehouseModule() {
                   reconcile_notes: notes.trim() || null,
                 });
                 const refreshed = await refetchWarehouseListsUntil((snapshot) => {
-                  const nextTransfer = snapshot.transfers.find((row) => row.id === t.id);
+                  const nextTransfer = snapshot.transfers.find((row) => row.id === entry.id);
                   return Boolean(
                     nextTransfer &&
-                      (nextTransfer.status !== t.status || nextTransfer.updated_at !== t.updated_at),
+                      (nextTransfer.status !== entry.status || nextTransfer.updated_at !== entry.updated_at),
                   );
                 });
-                const refreshedTransfer = refreshed.transfers.find((row) => row.id === t.id);
+                const refreshedTransfer = refreshed.transfers.find((row) => row.id === entry.id);
                 if (refreshedTransfer && drawer.isOpen) {
                   openTransferDrawer(refreshedTransfer, refreshed);
                 }
                 setLastActionReadback(warehouseActionReadbackFrom('reconcile_destination', result, {
-                  warehouse_transfer_id: t.id,
-                  transfer_code: refreshedTransfer?.transfer_code ?? t.transfer_code ?? t.transfer_id ?? t.id,
+                  warehouse_transfer_id: entry.id,
+                  transfer_code: refreshedTransfer?.transfer_code ?? entry.transfer_code ?? entry.transfer_id ?? entry.id,
                   transfer_status:
                     refreshedTransfer?.status ??
                     readbackString((result as Record<string, unknown>).transfer_status) ??
-                    t.status,
+                    entry.status,
                 }));
-                pushToast('Transfer reconciliation recorded', 'good');
+                pushToast(t('platformWarehouse.warehouseModule.transferReconciliationRecorded'), 'good');
                 modal.close();
               } catch (err) {
-                pushToast(`Reconcile workflow failed - ${errorMessage(err)}`, 'danger');
+                pushToast(fill(t('platformWarehouse.warehouseModule.reconcileWorkflowFailed'), { value: String(errorMessage(err, t)) }), 'danger');
               }
             }}
           />
@@ -1387,15 +1403,15 @@ export function WarehouseModule() {
       body: (
         <div data-testid="warehouse-bulk-reconcile-modal">
           <div className="state__hint" style={{ margin: '0 0 10px' }}>
-            {`${rows.length} destination reconcile workflows will run from canonical transfer counts.`}
+            {fill(t('platformWarehouse.warehouseModule.destinationReconcileWorkflowsWill'), { length: String(rows.length) })}
           </div>
           <div className="dt" style={{ maxHeight: 220, overflow: 'auto' }}>
             <table className="dt__table">
               <thead>
                 <tr>
-                  <th>Transfer</th>
-                  <th>Received</th>
-                  <th>Missing</th>
+                  <th>{t('platformWarehouse.warehouseModule.transfer')}</th>
+                  <th>{t('platformWarehouse.warehouseModule.received')}</th>
+                  <th>{t('platformWarehouse.warehouseModule.missing')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1410,7 +1426,7 @@ export function WarehouseModule() {
             </table>
           </div>
           <div className="field" style={{ marginTop: 10 }}>
-            <label className="field__label">Reconcile notes</label>
+            <label className="field__label">{t('platformWarehouse.warehouseModule.reconcileNotes')}</label>
             <textarea
               rows={3}
               data-testid="warehouse-bulk-reconcile-notes"
@@ -1423,7 +1439,7 @@ export function WarehouseModule() {
       ),
       footer: (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('platformWarehouse.warehouseModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
             label={label}
             iconName="check"
@@ -1453,12 +1469,12 @@ export function WarehouseModule() {
               const okCount = results.length - failures.length;
               if (failures.length > 0) {
                 pushToast(
-                  `Reconciled ${okCount}/${rows.length} transfers - ${failures.length} failed - ${errorMessage(failures[0]?.reason)}`,
+                  fill(t('platformWarehouse.warehouseModule.reconciledTransfersFailed'), { okCount: String(okCount), length: String(rows.length), length2: String(failures.length), value: String(errorMessage(failures[0]?.reason, t)) }),
                   okCount > 0 ? 'warn' : 'danger',
                 );
                 return;
               }
-              pushToast(`Transfer reconciliation recorded - ${okCount} transfers`, 'good');
+              pushToast(fill(t('platformWarehouse.warehouseModule.transferReconciliationRecordedTransfers'), { okCount: String(okCount) }), 'good');
               modal.close();
             }}
           />
@@ -1469,12 +1485,12 @@ export function WarehouseModule() {
 
   const approveVariance = async (transfer: TransferRow, task: WarehouseTask) => {
     if (!canCompleteTasks) {
-      pushToast('Task completion permission required', 'warn');
+      pushToast(t('platformWarehouse.warehouseModule.taskCompletionPermissionRequired'), 'warn');
       return;
     }
     const nextStatus = taskActionNextStatus('approve');
     if (!nextStatus) {
-      pushToast('Approval status is not configured for this task action', 'danger');
+      pushToast(t('platformWarehouse.warehouseModule.approvalStatusIsNot'), 'danger');
       return;
     }
     const workflowRunId = warehouseTaskWorkflowRunId(task);
@@ -1558,20 +1574,20 @@ export function WarehouseModule() {
         workflow_status: readbackString(progressResult.status) ?? readbackString(progressResult.workflow_status),
         status: 'task_completed',
       }));
-      pushToast('Variance approval recorded', 'good');
+      pushToast(t('platformWarehouse.warehouseModule.varianceApprovalRecorded'), 'good');
     } catch (err) {
-      pushToast(`Variance approval failed - ${errorMessage(err)}`, 'danger');
+      pushToast(fill(t('platformWarehouse.warehouseModule.varianceApprovalFailed'), { value: String(errorMessage(err, t)) }), 'danger');
     }
   };
 
-  const openTransferDrawer = (t: TransferRow, snapshot?: WarehouseListSnapshot) => {
-    setOpenTransferId(t.id);
+  const openTransferDrawer = (entry: TransferRow, snapshot?: WarehouseListSnapshot) => {
+    setOpenTransferId(entry.id);
     const items =
-      (snapshot?.transferItems ?? seed?.warehouse_transfer_items ?? []).filter((i) => i.transfer_id === t.id);
+      (snapshot?.transferItems ?? seed?.warehouse_transfer_items ?? []).filter((i) => i.transfer_id === entry.id);
     const scans =
-      (snapshot?.checkpointScans ?? seed?.warehouse_checkpoint_scans ?? []).filter((s) => s.transfer_id === t.id);
+      (snapshot?.checkpointScans ?? seed?.warehouse_checkpoint_scans ?? []).filter((s) => s.transfer_id === entry.id);
     const holds =
-      (snapshot?.exceptionHolds ?? seed?.warehouse_exception_hold ?? []).filter((h) => h.transfer_id === t.id);
+      (snapshot?.exceptionHolds ?? seed?.warehouse_exception_hold ?? []).filter((h) => h.transfer_id === entry.id);
     const scanIds = new Set(scans.map((scan) => scan.id));
     const scanCorrectionTasks = (snapshot?.warehouseTasks ?? warehouseTasks)
       .filter(
@@ -1586,7 +1602,7 @@ export function WarehouseModule() {
       scanCorrectionTasks.find((task) => scanCorrectionTaskOriginalScanId(task) === scanId) ?? null;
     const holdTaskIds = new Set(holds.map((h) => h.supervisor_approval_task_id).filter(Boolean));
     const transferTasks = (snapshot?.warehouseTasks ?? warehouseTasks)
-      .filter((task) => task.resource_id === t.id || metadataRecord(task).resource_id === t.id || holdTaskIds.has(task.id))
+      .filter((task) => task.resource_id === entry.id || metadataRecord(task).resource_id === entry.id || holdTaskIds.has(task.id))
       .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')));
     const activeTasks = transferTasks.filter(isActiveWarehouseTask);
     const activeTaskForDrawer = (taskType: string): WarehouseTask | null =>
@@ -1603,12 +1619,12 @@ export function WarehouseModule() {
         ? transferTasks.find((candidate) => candidate.id === holds[0]?.supervisor_approval_task_id) ?? null
         : null);
     const hasSupervisorApprovalGate = Boolean(supervisorApprovalTask);
-    const canDispatch = t.status === 'draft' && !activeTasks.length;
-    const canScanDeparture = t.status === 'draft' && Boolean(activeDispatchTask);
-    const canScanArrival = t.status === 'in_transit' && Boolean(activeReceiveTask);
-    const canReconcile = t.status === 'received' && Boolean(activeReconcileTask);
+    const canDispatch = entry.status === 'draft' && !activeTasks.length;
+    const canScanDeparture = entry.status === 'draft' && Boolean(activeDispatchTask);
+    const canScanArrival = entry.status === 'in_transit' && Boolean(activeReceiveTask);
+    const canReconcile = entry.status === 'received' && Boolean(activeReconcileTask);
     drawer.open({
-      title: `${t.transfer_code ?? t.transfer_id ?? t.id} · ${t.from_branch_id ?? t.origin_hub ?? '—'} → ${t.to_branch_id ?? t.destination_hub ?? '—'}`,
+      title: `${entry.transfer_code ?? entry.transfer_id ?? entry.id} · ${entry.from_branch_id ?? entry.origin_hub ?? '—'} → ${entry.to_branch_id ?? entry.destination_hub ?? '—'}`,
       size: 'lg',
       onClose: () => setOpenTransferId(null),
       body: (
@@ -1623,12 +1639,12 @@ export function WarehouseModule() {
           */}
           <div className="card">
             {(() => {
-              const statusRow = lookupRow('warehouse_transfer_status', t.status);
+              const statusRow = lookupRow('warehouse_transfer_status', entry.status);
               const statusTone: ChipKind =
                 (statusRow?.tone as ChipKind | undefined) ?? 'neutral';
               const statusLabel = statusRow
-                ? statusRow.label ?? t.status
-                : `${t.status} (missing)`;
+                ? statusRow.label ?? entry.status
+                : `${entry.status} (missing)`;
               return (
                 <Kv
                   k="Status"
@@ -1636,8 +1652,8 @@ export function WarehouseModule() {
                 />
               );
             })()}
-            <Kv k="Items" v={`${t.received_count} received / ${t.item_count} expected`} />
-            {t.variance_flag ? (
+            <Kv k="Items" v={`${entry.received_count} received / ${entry.item_count} expected`} />
+            {entry.variance_flag ? (
               <Kv
                 k="Variance"
                 v={
@@ -1646,10 +1662,10 @@ export function WarehouseModule() {
                       // W11-3: variance_pct dropped from canonical view shape.
                       // Derive client-side from variance_count / item_count.
                       const pct =
-                        t.item_count > 0
-                          ? Math.round(((t.variance_count ?? 0) / t.item_count) * 1000) / 10
+                        entry.item_count > 0
+                          ? Math.round(((entry.variance_count ?? 0) / entry.item_count) * 1000) / 10
                           : 0;
-                      return `${pct}% · ${t.hold_reason ?? '—'}`;
+                      return `${pct}% · ${entry.hold_reason ?? '—'}`;
                     })()}
                   </span>
                 }
@@ -1659,11 +1675,11 @@ export function WarehouseModule() {
 
           <div className="card" data-testid="warehouse-active-task-panel" style={{ marginTop: '10px' }}>
             <div className="dt-toolbar">
-              <span className="eyebrow">Active workflow task</span>
+              <span className="eyebrow">{t('platformWarehouse.warehouseModule.activeWorkflowTask')}</span>
               {activeTasks.length ? (
-                <Chip label={`${activeTasks.length} open`} size="xs" kind="info" />
+                <Chip label={fill(t('platformWarehouse.warehouseModule.open'), { length: String(activeTasks.length) })} size="xs" kind="info" />
               ) : (
-                <Chip label="none" size="xs" kind="neutral" />
+                <Chip label={t('platformWarehouse.warehouseModule.none')} size="xs" kind="neutral" />
               )}
             </div>
             {activeTasks.length ? (
@@ -1688,7 +1704,7 @@ export function WarehouseModule() {
                       </div>
                     </div>
                     <Button
-                      label="Complete task"
+                      label={t('platformWarehouse.warehouseModule.completeTask')}
                       iconName="check"
                       kind="primary"
                       capability={CAP.TASKS_COMPLETE}
@@ -1696,16 +1712,16 @@ export function WarehouseModule() {
                       title={
                         warehouseTaskType(task) === 'warehouse_transfer_pack'
                           ? undefined
-                          : 'Use the dedicated scan or reconcile action for this workflow task.'
+                          : t('platformWarehouse.warehouseModule.useTheDedicatedScan')
                       }
-                      onClick={() => void completeWarehouseTask(t.id, task)}
+                      onClick={() => void completeWarehouseTask(entry.id, task)}
                     />
                   </div>
                 ))}
               </div>
             ) : (
               <p className="state__hint" style={{ margin: '8px 0 0' }}>
-                No open warehouse workflow task is currently blocking this transfer.
+                {t('platformWarehouse.warehouseModule.noOpenWarehouseWorkflow')}
               </p>
             )}
           </div>
@@ -1713,7 +1729,7 @@ export function WarehouseModule() {
           {holds.length ? (
             <>
               <h4 className="eyebrow" style={{ marginTop: '14px' }}>
-                Exception holds
+                {t('platformWarehouse.warehouseModule.exceptionHolds')}
               </h4>
               {holds.map((h) => (
                 <div key={h.id} className="card" style={{ marginTop: '6px' }}>
@@ -1722,7 +1738,7 @@ export function WarehouseModule() {
                   </div>
                   {h.supervisor_approval_task_id ? (
                     <div className="mono" style={{ fontSize: '10.5px', color: 'var(--ink-3)' }}>
-                      {`task ${h.supervisor_approval_task_id}`}
+                      {fill(t('platformWarehouse.warehouseModule.task'), { supervisor_approval_task_id: String(h.supervisor_approval_task_id) })}
                     </div>
                   ) : null}
                 </div>
@@ -1731,11 +1747,11 @@ export function WarehouseModule() {
           ) : null}
 
           <h4 className="eyebrow" style={{ marginTop: '14px' }}>
-            Items · manifest vs received
+            {t('platformWarehouse.warehouseModule.itemsManifestVsReceived')}
           </h4>
           <div style={{ maxHeight: '200px', overflow: 'auto' }}>
             <DataTable<TransferItem & Record<string, unknown>>
-              columns={ITEM_COLUMNS}
+              columns={itemTableColumns}
               rows={items as (TransferItem & Record<string, unknown>)[]}
               allowSelection={false}
               virtualize={false}
@@ -1743,27 +1759,27 @@ export function WarehouseModule() {
           </div>
 
           <h4 className="eyebrow" style={{ marginTop: '14px' }}>
-            Checkpoint scans (sequence-enforced)
+            {t('platformWarehouse.warehouseModule.checkpointScansSequenceEnforced')}
           </h4>
           <div style={{ maxHeight: '200px', overflow: 'auto' }}>
             <DataTable<CheckpointScan & Record<string, unknown>>
-              columns={SCAN_COLUMNS}
+              columns={scanTableColumns}
               rows={scans as (CheckpointScan & Record<string, unknown>)[]}
               allowSelection={false}
               virtualize={false}
-              emptyText="No scans recorded yet."
+              emptyText={t('platformWarehouse.warehouseModule.noScansRecordedYet')}
               rowActions={[
                 {
-                  label: 'Request correction',
+                  label: t('platformWarehouse.warehouseModule.requestCorrection'),
                   icon: 'edit',
                   capability: CAP.WAREHOUSE_WRITE,
                   hidden: (scan) => Boolean(scan.correction_of_scan_event_id),
                   disabled: (scan) => Boolean(scanCorrectionTaskForScan(scan.id)),
                   disabledReason: () => 'A scan correction approval task is already open for this scan.',
-                  onClick: (scan) => openScanCorrectionRequestModal(t, scan),
+                  onClick: (scan) => openScanCorrectionRequestModal(entry, scan),
                 },
                 {
-                  label: 'Record correction',
+                  label: t('platformWarehouse.warehouseModule.recordCorrection'),
                   icon: 'shield',
                   capability: CAP.TASKS_COMPLETE,
                   hidden: (scan) => !scanCorrectionTaskForScan(scan.id),
@@ -1772,7 +1788,7 @@ export function WarehouseModule() {
                   onClick: (scan) => {
                     const task = scanCorrectionTaskForScan(scan.id);
                     if (!task) return;
-                    openScanCorrectionRecordModal(t, scan, task);
+                    openScanCorrectionRecordModal(entry, scan, task);
                   },
                 },
               ]}
@@ -1782,8 +1798,8 @@ export function WarehouseModule() {
           {scanCorrectionTasks.length ? (
             <div className="card" data-testid="warehouse-scan-correction-panel" style={{ marginTop: '10px' }}>
               <div className="dt-toolbar">
-                <span className="eyebrow">Scan correction approvals</span>
-                <Chip label={`${scanCorrectionTasks.length} open`} size="xs" kind="warn" />
+                <span className="eyebrow">{t('platformWarehouse.warehouseModule.scanCorrectionApprovals')}</span>
+                <Chip label={fill(t('platformWarehouse.warehouseModule.open'), { length: String(scanCorrectionTasks.length) })} size="xs" kind="warn" />
               </div>
               <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
                 {scanCorrectionTasks.map((task) => {
@@ -1794,7 +1810,7 @@ export function WarehouseModule() {
                         {warehouseTaskLabel(task)}
                       </div>
                       <div style={{ color: 'var(--ink-3)', fontSize: '11px' }}>
-                        {`${task.task_id ?? task.id} · ${task.status} · scan ${scanCorrectionTaskOriginalScanId(task) ?? 'pending'}`}
+                        {fill(t('platformWarehouse.warehouseModule.scan'), { value: String(task.task_id ?? task.id), status: String(task.status), value2: String(scanCorrectionTaskOriginalScanId(task) ?? 'pending') })}
                       </div>
                       {readbackString(correction.correction_reason) ? (
                         <div style={{ color: 'var(--ink-3)', fontSize: '11px' }}>
@@ -1817,8 +1833,8 @@ export function WarehouseModule() {
             kind="ghost"
             capability={CAP.WAREHOUSE_WRITE}
             disabled={dispatchTransferMutation.isPending || !canDispatch}
-            title={canDispatch ? undefined : 'Dispatch is available only for a draft transfer with no active workflow task.'}
-            onClick={() => void dispatchTransfer(t)}
+            title={canDispatch ? undefined : t('platformWarehouse.warehouseModule.dispatchIsAvailableOnly')}
+            onClick={() => void dispatchTransfer(entry)}
           />
           <Button
             label={commandLabel('warehouse_transfers.scan_departure', 'Scan departure')}
@@ -1826,8 +1842,8 @@ export function WarehouseModule() {
             kind="ghost"
             capability={CAP.WAREHOUSE_WRITE}
             disabled={checkpointMutation.isPending || !canScanDeparture}
-            title={canScanDeparture ? undefined : 'Complete the active pack task before scanning departure.'}
-            onClick={() => openCheckpointModal(t, 'warehouse_transfers.scan_departure')}
+            title={canScanDeparture ? undefined : t('platformWarehouse.warehouseModule.completeTheActivePack')}
+            onClick={() => openCheckpointModal(entry, 'warehouse_transfers.scan_departure')}
           />
           <Button
             label={commandLabel('warehouse_transfers.scan_arrival', 'Scan arrival')}
@@ -1835,11 +1851,11 @@ export function WarehouseModule() {
             kind="ghost"
             capability={CAP.WAREHOUSE_WRITE}
             disabled={checkpointMutation.isPending || !canScanArrival}
-            title={canScanArrival ? undefined : 'Departure must create an active receive task before arrival scan.'}
-            onClick={() => openCheckpointModal(t, 'warehouse_transfers.scan_arrival')}
+            title={canScanArrival ? undefined : t('platformWarehouse.warehouseModule.departureMustCreateAn')}
+            onClick={() => openCheckpointModal(entry, 'warehouse_transfers.scan_arrival')}
           />
           <Button
-            label="Receive"
+            label={t('platformWarehouse.warehouseModule.receive')}
             iconName="check"
             kind="primary"
             capability={CAP.WAREHOUSE_WRITE}
@@ -1849,7 +1865,7 @@ export function WarehouseModule() {
             // status IN ('received', 'reconciled', 'on_hold')). Closes REAUDIT4
             // PLATFORM P1 (W35e-4 partial closure).
             disabled
-            title="Receive is completed by the arrival scan workflow."
+            title={t('platformWarehouse.warehouseModule.receiveIsCompletedBy')}
             onClick={() => undefined}
           />
           <Button
@@ -1859,8 +1875,8 @@ export function WarehouseModule() {
             capability={CAP.WAREHOUSE_WRITE}
             // W37 — canonical past-tense `to_status` value (same rationale).
             disabled={reconcileDestinationMutation.isPending || !canReconcile}
-            title={canReconcile ? undefined : 'Reconciliation requires a received transfer with an active reconcile task.'}
-            onClick={() => openReconcileModal(t)}
+            title={canReconcile ? undefined : t('platformWarehouse.warehouseModule.reconciliationRequiresAReceived')}
+            onClick={() => openReconcileModal(entry)}
           />
           <div style={{ flex: 1 }} />
           {hasSupervisorApprovalGate ? (() => {
@@ -1873,15 +1889,15 @@ export function WarehouseModule() {
             const task = supervisorApprovalTask;
             return (
               <Button
-                label="Approve variance"
+                label={t('platformWarehouse.warehouseModule.approveVariance')}
                 iconName="shield"
                 kind="ghost"
                 capability={CAP.TASKS_COMPLETE}
                 disabled={!task}
-                title={task ? undefined : 'No active supervisor approval task to approve'}
+                title={task ? undefined : t('platformWarehouse.warehouseModule.noActiveSupervisorApproval')}
                 onClick={() => {
                   if (!task) return;
-                  void approveVariance(t, task);
+                  void approveVariance(entry, task);
                 }}
               />
             );
@@ -1927,7 +1943,7 @@ export function WarehouseModule() {
   // card body + drawer footer below).
 
   const variancePendingCount = useMemo(
-    () => transfers.filter((t) => t.variance_flag).length,
+    () => transfers.filter((entry) => entry.variance_flag).length,
     [transfers],
   );
 
@@ -1936,20 +1952,20 @@ export function WarehouseModule() {
       <div className="page">
         <PageHeader
           moduleKey="warehouse"
-          eyebrow="Platform"
-          titleAccent="Warehouse"
-          titlePlain="transfers"
+          eyebrow={t('platformWarehouse.warehouseModule.platform')}
+          titleAccent={t('platformWarehouse.warehouseModule.titleAccent')}
+          titlePlain={t('platformWarehouse.warehouseModule.titlePlain')}
           pills={[
-            <span key="v1" className="chip chip--xs">Transfer workflow - scan sequence enforced</span>,
+            <span key="v1" className="chip chip--xs">{t('platformWarehouse.warehouseModule.transferWorkflowScanSequence')}</span>,
             variancePendingCount > 0 ? (
-              <span key="vr" className="chip chip--xs chip--warn">{`${variancePendingCount} at risk`}</span>
+              <span key="vr" className="chip chip--xs chip--warn">{fill(t('platformWarehouse.warehouseModule.atRisk'), { variancePendingCount: String(variancePendingCount) })}</span>
             ) : null,
           ].filter(Boolean) as ReactNode[]}
         />
         <StateView
           kind="denied"
           capability={CAP.WAREHOUSE_READ}
-          hint="You do not have permission to view warehouse transfers."
+          hint={t('platformWarehouse.warehouseModule.youDoNotHave')}
         />
       </div>
     );
@@ -1959,13 +1975,13 @@ export function WarehouseModule() {
     <div className="page">
       <PageHeader
         moduleKey="warehouse"
-        eyebrow="Platform"
-        titleAccent="Warehouse"
-        titlePlain="transfers"
+        eyebrow={t('platformWarehouse.warehouseModule.platform')}
+        titleAccent={t('platformWarehouse.warehouseModule.titleAccent')}
+        titlePlain={t('platformWarehouse.warehouseModule.titlePlain')}
         pills={[
-          <span key="v1" className="chip chip--xs">Transfer workflow - scan sequence enforced</span>,
+          <span key="v1" className="chip chip--xs">{t('platformWarehouse.warehouseModule.transferWorkflowScanSequence')}</span>,
           variancePendingCount > 0 ? (
-            <span key="vr" className="chip chip--xs chip--warn">{`${variancePendingCount} at risk`}</span>
+            <span key="vr" className="chip chip--xs chip--warn">{fill(t('platformWarehouse.warehouseModule.atRisk'), { variancePendingCount: String(variancePendingCount) })}</span>
           ) : null,
         ].filter(Boolean) as ReactNode[]}
         // W38-PLATFORM closure: scan/execute remain row-bound only because
@@ -1975,7 +1991,7 @@ export function WarehouseModule() {
         actions={[
           <Button
             key="create-manifest"
-            label="Create manifest"
+            label={t('platformWarehouse.warehouseModule.createManifest')}
             iconName="plus"
             kind="primary"
             capability={CAP.WAREHOUSE_WRITE}
@@ -1986,7 +2002,7 @@ export function WarehouseModule() {
 
       <WarehouseActionReadbackPanel readback={lastActionReadback} />
 
-      <div className="section-eyebrow">Transfer board</div>
+      <div className="section-eyebrow">{t('platformWarehouse.warehouseModule.transferBoard')}</div>
       {transfersQuery.isLoading ? (
         <StateView kind="loading" />
       ) : (
@@ -2000,25 +2016,25 @@ export function WarehouseModule() {
                   <span className="kanban__col-count">{`· ${items.length}`}</span>
                 </div>
                 <div className="kanban__col-body">
-                  {items.map((t) => (
+                  {items.map((entry) => (
                     <div
-                      key={t.id}
-                      className={`kanban__card ${t.variance_flag ? 'is-risk' : ''}`}
-                      onClick={() => openTransferDrawer(t)}
+                      key={entry.id}
+                      className={`kanban__card ${entry.variance_flag ? 'is-risk' : ''}`}
+                      onClick={() => openTransferDrawer(entry)}
                       role="button"
                       tabIndex={0}
                     >
                       <div className="kanban__card-head">
                         <span className="kanban__card-id mono">
-                          {t.transfer_code ?? t.transfer_id ?? t.id}
+                          {entry.transfer_code ?? entry.transfer_id ?? entry.id}
                         </span>
-                        {t.variance_flag ? (
+                        {entry.variance_flag ? (
                           <Chip
                             label={(() => {
                               const pct =
-                                t.item_count > 0
+                                entry.item_count > 0
                                   ? Math.round(
-                                      ((t.variance_count ?? 0) / t.item_count) * 1000,
+                                      ((entry.variance_count ?? 0) / entry.item_count) * 1000,
                                     ) / 10
                                   : 0;
                               return `Δ ${pct}%`;
@@ -2029,14 +2045,14 @@ export function WarehouseModule() {
                         ) : null}
                       </div>
                       <div style={{ fontWeight: 500, fontSize: '11.5px' }}>
-                        {`${t.from_branch_id ?? t.origin_hub ?? '—'} → ${t.to_branch_id ?? t.destination_hub ?? '—'}`}
+                        {`${entry.from_branch_id ?? entry.origin_hub ?? '—'} → ${entry.to_branch_id ?? entry.destination_hub ?? '—'}`}
                       </div>
                       <div className="kanban__card-meta mono">
-                        {`${t.received_count}/${t.item_count} items`}
+                        {fill(t('platformWarehouse.warehouseModule.items'), { received_count: String(entry.received_count), item_count: String(entry.item_count) })}
                       </div>
-                      {t.hold_reason ? (
+                      {entry.hold_reason ? (
                         <div className="kanban__card-meta mono" style={{ color: 'var(--warn-ink, var(--ink-2))' }}>
-                          {t.hold_reason}
+                          {entry.hold_reason}
                         </div>
                       ) : null}
                     </div>
@@ -2048,12 +2064,12 @@ export function WarehouseModule() {
         </div>
       )}
 
-      <div className="section-eyebrow">All transfers</div>
+      <div className="section-eyebrow">{t('platformWarehouse.warehouseModule.allTransfers')}</div>
       {transfersQuery.isLoading ? (
         <StateView kind="loading" />
       ) : (
         <DataTable<TransferRow>
-          columns={TRANSFER_COLUMNS}
+          columns={transferTableColumns}
           rows={transfers}
           viewKey="warehouse_transfers"
           entityKind="warehouse_transfers"
@@ -2069,7 +2085,7 @@ export function WarehouseModule() {
           }}
           rowActions={[
             {
-              label: 'Open detail',
+              label: t('platformWarehouse.warehouseModule.openDetail'),
               icon: 'right',
               onClick: openTransferDrawer,
             },
@@ -2098,7 +2114,7 @@ export function WarehouseModule() {
               onClick: (r) => openCheckpointModal(r, 'warehouse_transfers.scan_arrival'),
             },
             {
-              label: 'Receive',
+              label: t('platformWarehouse.warehouseModule.receive'),
               icon: 'check',
               capability: CAP.WAREHOUSE_WRITE,
               hidden: true,
@@ -2114,14 +2130,14 @@ export function WarehouseModule() {
               // W37 — canonical past-tense `to_status` (same rationale).
               onClick: (r) => {
                 if (r.status !== 'received' || !activeTaskForType(r.id, 'warehouse_transfer_reconcile')) {
-                  pushToast('Reconciliation requires a received transfer with an active reconcile task.', 'warn');
+                  pushToast(t('platformWarehouse.warehouseModule.reconciliationRequiresAReceived'), 'warn');
                   return;
                 }
                 openReconcileModal(r);
               },
             },
             {
-              label: 'Approve variance',
+              label: t('platformWarehouse.warehouseModule.approveVariance'),
               icon: 'shield',
               capability: CAP.TASKS_COMPLETE,
               hidden: (r) => !supervisorApprovalTaskForTransfer(r.id),
@@ -2140,7 +2156,7 @@ export function WarehouseModule() {
               onClick: (r) => {
                 const task = supervisorApprovalTaskForTransfer(r.id);
                 if (!task) {
-                  pushToast('No active supervisor approval task to approve', 'warn');
+                  pushToast(t('platformWarehouse.warehouseModule.noActiveSupervisorApproval'), 'warn');
                   return;
                 }
                 void approveVariance(r, task);
@@ -2149,7 +2165,7 @@ export function WarehouseModule() {
           ]}
           bulkActions={[
             {
-              label: 'Receive',
+              label: t('platformWarehouse.warehouseModule.receive'),
               icon: 'check',
               kind: 'primary',
               capability: CAP.WAREHOUSE_WRITE,
@@ -2162,7 +2178,7 @@ export function WarehouseModule() {
               },
             },
             {
-              label: 'Reconcile',
+              label: t('platformWarehouse.warehouseModule.reconcile'),
               icon: 'check',
               capability: CAP.WAREHOUSE_WRITE,
               onClick: (rs) => {

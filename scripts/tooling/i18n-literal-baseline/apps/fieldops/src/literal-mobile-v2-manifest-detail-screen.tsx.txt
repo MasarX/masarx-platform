@@ -1,0 +1,1 @@
+apps/fieldops/src/mobile-v2-manifest-detail-screen.tsx 12

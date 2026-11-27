@@ -32,6 +32,7 @@ import { useRouter } from '@tanstack/react-router';
 import { getSupabaseClient } from '@/lib/supabase';
 import { CONSOLE_LOGIN_PATH, signOutConsole } from '@/lib/auth';
 import { pushToast } from '@/components/toastStore';
+import { fill, useT } from '@/lib/i18n';
 
 // Quick-link target spec. Each entry resolves to a route path or to a callback
 // (e.g. open the keyboard-shortcuts modal). We declare them in one place so
@@ -48,29 +49,32 @@ interface QuickLink {
 
 function buildQuickLinks(opts: {
   onOpenShortcuts?: () => void;
+  t: (path: string) => string;
 }): QuickLink[] {
+  const { t } = opts;
   // Only surface quick links whose target actually exists today. The
   // /platform/* routes below are real (see src/routes/platform/*.tsx) so the
   // links never 404.
   const links: QuickLink[] = [
     {
       key: 'settings',
-      label: 'Settings',
-      hint: 'Tenant configuration',
+      label: t('shell.userMenu.settings'),
+      hint: t('shell.userMenu.settingsHint'),
       routePath: '/platform/config',
     },
+    // English catalog copy for this link: label: 'Access control', hint: 'Scope policy and roles'.
     {
       key: 'access',
-      label: 'Access control',
-      hint: 'Scope policy and roles',
+      label: t('shell.userMenu.access'),
+      hint: t('shell.userMenu.accessHint'),
       routePath: '/platform/access',
     },
   ];
   if (opts.onOpenShortcuts) {
     links.push({
       key: 'shortcuts',
-      label: 'Keyboard shortcuts',
-      hint: 'Press ?',
+      label: t('shell.userMenu.shortcuts'),
+      hint: t('shell.userMenu.shortcutsHint'),
       onPick: opts.onOpenShortcuts,
     });
   }
@@ -93,13 +97,15 @@ function scopeLabel(args: {
   tenantLabel?: string;
   clientLabel?: string;
   senderLabel?: string;
+  t: (path: string) => string;
 }): string {
+  const { t } = args;
   // Plain-language summary of the user's effective scope tier. Mirrors the
   // backend SSOT order (platform → tenant → client → sender).
-  if (args.scopeType === 'platform') return 'Platform · all tenants';
-  if (args.scopeType === 'tenant') return `Tenant · ${args.tenantLabel ?? '—'}`;
-  if (args.scopeType === 'client') return `Client · ${args.clientLabel ?? '—'}`;
-  if (args.scopeType === 'sender') return `Sender · ${args.senderLabel ?? '—'}`;
+  if (args.scopeType === 'platform') return t('shell.userMenu.scopePlatform');
+  if (args.scopeType === 'tenant') return fill(t('shell.userMenu.scopeTenant'), { name: args.tenantLabel ?? '—' });
+  if (args.scopeType === 'client') return fill(t('shell.userMenu.scopeClient'), { name: args.clientLabel ?? '—' });
+  if (args.scopeType === 'sender') return fill(t('shell.userMenu.scopeSender'), { name: args.senderLabel ?? '—' });
   return args.scopeType;
 }
 
@@ -114,6 +120,7 @@ export function UserMenuDrawer({ open, onClose, onOpenShortcuts }: UserMenuDrawe
   const identity = useIdentity();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const t = useT();
   const { user, scope } = identity;
 
   const tenantLabel = scope?.tenant?.label;
@@ -127,9 +134,10 @@ export function UserMenuDrawer({ open, onClose, onOpenShortcuts }: UserMenuDrawe
     tenantLabel,
     clientLabel,
     senderLabel,
+    t,
   });
 
-  const quickLinks = buildQuickLinks({ onOpenShortcuts });
+  const quickLinks = buildQuickLinks({ onOpenShortcuts, t });
 
   const handleSignOut = useCallback(async () => {
     // Live mode: route through Supabase auth so refresh tokens get revoked
@@ -139,9 +147,9 @@ export function UserMenuDrawer({ open, onClose, onOpenShortcuts }: UserMenuDrawe
     if (sb) {
       try {
         await signOutConsole();
-        pushToast('Signed out', 'good');
+        pushToast(t('shell.userMenu.signedOut'), 'good');
       } catch (e) {
-        pushToast(`Sign-out failed - ${(e as Error).message ?? 'unknown'}`, 'danger');
+        pushToast(fill(t('shell.userMenu.signOutFailed'), { reason: (e as Error).message ?? t('shell.unknown') }), 'danger');
         return;
       }
       onClose();
@@ -162,14 +170,14 @@ export function UserMenuDrawer({ open, onClose, onOpenShortcuts }: UserMenuDrawe
       /* in-memory setRole is permissive; if a future build rejects unknown
          ids we still want the drawer to close cleanly. */
     }
-    pushToast('Signed out', 'info');
+    pushToast(t('shell.userMenu.signedOut'), 'info');
     onClose();
-  }, [identity, onClose, queryClient]);
+  }, [identity, onClose, queryClient, t]);
 
   return (
     <Drawer
       open={open}
-      title="Account"
+      title={t('shell.userMenu.title')}
       size="sm"
       onClose={onClose}
       className="user-menu-drawer"
@@ -178,7 +186,7 @@ export function UserMenuDrawer({ open, onClose, onOpenShortcuts }: UserMenuDrawe
         {/* Profile summary */}
         <section
           className="user-menu-drawer__profile"
-          aria-label="Profile summary"
+          aria-label={t('shell.userMenu.profile')}
           data-testid="user-menu-profile"
           style={{
             display: 'flex',
@@ -203,7 +211,7 @@ export function UserMenuDrawer({ open, onClose, onOpenShortcuts }: UserMenuDrawe
               letterSpacing: '0.04em',
             }}
           >
-            {initials || 'RA'}
+            {initials || '?'}
           </span>
           <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             <span
@@ -211,7 +219,7 @@ export function UserMenuDrawer({ open, onClose, onOpenShortcuts }: UserMenuDrawe
               data-testid="user-menu-name"
               style={{ fontWeight: 600, lineHeight: 1.2 }}
             >
-              {user?.name ?? 'Unknown user'}
+              {user?.name ?? t('shell.userMenu.unknownUser')}
             </span>
             {user?.email ? (
               <span
@@ -227,7 +235,7 @@ export function UserMenuDrawer({ open, onClose, onOpenShortcuts }: UserMenuDrawe
               data-testid="user-menu-role"
               style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 4 }}
             >
-              <Chip label={role} kind="info" />
+              <Chip label={<bdi>{role}</bdi>} kind="info" />
               <span style={{ marginInlineStart: 8 }} data-testid="user-menu-scope">
                 {scopeText}
               </span>
@@ -236,10 +244,10 @@ export function UserMenuDrawer({ open, onClose, onOpenShortcuts }: UserMenuDrawe
         </section>
 
         {/* Quick links */}
-        <div className="section-eyebrow">Quick links</div>
+        <div className="section-eyebrow">{t('shell.userMenu.quickLinks')}</div>
         <ul
           className="user-menu-drawer__links"
-          aria-label="Quick links"
+          aria-label={t('shell.userMenu.quickLinks')}
           style={{ listStyle: 'none', padding: '4px 0', margin: 0 }}
         >
           {quickLinks.map((link) => (
@@ -284,26 +292,26 @@ export function UserMenuDrawer({ open, onClose, onOpenShortcuts }: UserMenuDrawe
         {/* Your sessions - backend-backed auth session summary scoped to the current user. */}
         {user?.id ? (
           <div style={{ padding: '4px 12px 0' }} data-testid="user-menu-sessions">
-            <SessionsList userId={user.id} title="Your sessions" />
+            <SessionsList userId={user.id} title={t('shell.userMenu.sessions')} />
           </div>
         ) : null}
 
         {/* Your devices - backend-backed user_device_summary scoped to the current user. */}
         {user?.id ? (
           <div style={{ padding: '4px 12px 0' }} data-testid="user-menu-devices">
-            <UserDevicesList userId={user.id} title="Your devices" />
+            <UserDevicesList userId={user.id} title={t('shell.userMenu.devices')} />
           </div>
         ) : null}
 
         {/* Sign-out — every user can sign out, no capability gate. */}
-        <div className="section-eyebrow">Sign out</div>
+        <div className="section-eyebrow">{t('shell.userMenu.signOut')}</div>
         <div style={{ padding: '4px 12px 16px' }}>
           <Button
-            label="Sign out"
+            label={t('shell.userMenu.signOut')}
             iconName="right"
             kind="danger"
             onClick={handleSignOut}
-            ariaLabel="Sign out"
+            ariaLabel={t('shell.userMenu.signOut')}
           />
         </div>
       </div>

@@ -1,8 +1,9 @@
 import { BARCODE_MAX_CHARS, normalizeBarcodeType } from "../../../../../supabase/functions/_shared/label-barcodes";
+import type { BarcodeEncoder } from "./barcode-encoders";
 export { normalizeBarcodeType };
 
 export type BarcodeTypeConfig = {
-  encoder: string;
+  encoder: BarcodeEncoder;
   label: string;
   validate: RegExp;
   is2D?: boolean;

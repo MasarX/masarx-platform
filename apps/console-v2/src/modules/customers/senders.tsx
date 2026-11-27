@@ -26,6 +26,7 @@ import { getLookups } from '@/lib/api';
 import { CAP } from '@/lib/capabilities';
 import { useConsoleNavigator } from '@/lib/useConsoleNavigator';
 import { readUrlParam } from '@/lib/url-params';
+import { englishT, fill, useT, type Translate } from '@/lib/i18n';
 import { openShipmentContextDrawer } from '@/modules/operate/shipments';
 import { RelatedShipmentsPanel, type CustomerRelatedShipmentRow } from './related-shipments';
 
@@ -115,23 +116,23 @@ function canReactivateSender(row: SenderRow): boolean {
   return senderLifecycle(row.status) === 'suspended';
 }
 
-function formatSenderCreateError(err: unknown): string {
+function formatSenderCreateError(err: unknown, t: Translate = englishT): string {
   const message = err instanceof Error ? err.message : String(err ?? '');
   const lower = message.toLowerCase();
   if (
     lower.includes('sender_create_v1 duplicate active sender name')
     || (lower.includes('duplicate') && lower.includes('sender') && lower.includes('name'))
   ) {
-    return 'An active sender with this name already exists for the selected client.';
+    return t('senders.error.duplicateName');
   }
   return message;
 }
 
-function senderFieldLabel(key: string): string {
+function senderFieldLabel(key: string, t: Translate = englishT): string {
   const labels: Record<string, string> = {
-    name: 'Name',
-    brand_name: 'Brand',
-    status: 'Status',
+    name: t('customers.field.name'),
+    brand_name: t('customers.field.brand'),
+    status: t('customers.field.status'),
   };
   return labels[key] ?? key;
 }
@@ -148,26 +149,26 @@ function humanizeSettingKey(key: string): string {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
-function formatSummaryValue(value: unknown): string {
-  if (value == null || value === '') return 'Not configured';
-  if (typeof value === 'boolean') return value ? 'Enabled' : 'Disabled';
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+function formatSummaryValue(value: unknown, t: Translate = englishT): string {
+  if (value == null || value === '') return t('customers.settings.notConfigured');
+  if (typeof value === 'boolean') return value ? t('customers.settings.enabled') : t('customers.settings.disabled');
+  if (Array.isArray(value)) return fill(t(value.length === 1 ? 'customers.settings.itemOne' : 'customers.settings.itemOther'), { n: value.length });
   if (typeof value === 'object') {
     const count = Object.keys(value as Record<string, unknown>).length;
-    return `${count} nested setting${count === 1 ? '' : 's'}`;
+    return fill(t(count === 1 ? 'customers.settings.nestedOne' : 'customers.settings.nestedOther'), { n: count });
   }
   return String(value);
 }
 
-function objectSummaryRows(value: Record<string, unknown> | null | undefined, prefix: string): KvRow[] {
+function objectSummaryRows(value: Record<string, unknown> | null | undefined, prefix: string, t: Translate = englishT): KvRow[] {
   const entries = Object.entries(value ?? {});
   if (entries.length === 0) {
-    return [{ key: `${prefix}-empty`, label: 'Status', value: 'No custom settings configured', editable: false }];
+    return [{ key: `${prefix}-empty`, label: t('customers.field.status'), value: t('customers.settings.none'), editable: false }];
   }
   return entries.map(([key, val]) => ({
     key: `${prefix}-${key}`,
     label: humanizeSettingKey(key),
-    value: formatSummaryValue(val),
+    value: formatSummaryValue(val, t),
     editable: false,
   }));
 }
@@ -199,6 +200,7 @@ interface NewSenderDraft {
 
 export function SendersModule() {
   const { scope, currentTenantId } = useIdentity();
+  const t = useT();
   const drawer = useDrawer();
   const modal = useModal();
   const go = useConsoleNavigator();
@@ -330,7 +332,7 @@ export function SendersModule() {
       ? senderRowFromSummary(summaryRow)
       : sendersResult.data?.rows.find((row) => row.id === senderId);
     if (!refreshed || (validate && !validate(refreshed))) {
-      throw new Error('The updated sender was not available yet.');
+      throw new Error(t('senders.error.readback'));
     }
     return refreshed;
   }
@@ -359,7 +361,7 @@ export function SendersModule() {
       return (
         <div>
           {clientGap ? (
-            <StateView kind="error" hint="No clients are visible. Create or restore a client before adding senders." />
+            <StateView kind="error" hint={t('senders.error.noClients')} />
           ) : null}
           {formError ? (
             <StateView kind="error" hint={formError} />
@@ -373,7 +375,7 @@ export function SendersModule() {
               padding: '0 4px',
             }}
           >
-            <label className="mono" htmlFor="new-sender-client">Client</label>
+            <label className="mono" htmlFor="new-sender-client">{t('customers.field.client')}</label>
             <select
               id="new-sender-client"
               className="dt-inline-input"
@@ -389,22 +391,22 @@ export function SendersModule() {
                 </option>
               ))}
             </select>
-            <label className="mono" htmlFor="new-sender-name">Name</label>
+            <label className="mono" htmlFor="new-sender-name">{t('customers.field.name')}</label>
             <input
               id="new-sender-name"
               className="dt-inline-input"
-              placeholder="e.g. Riyadh Hub"
+              placeholder={t('senders.namePlaceholder')}
               value={draft.name}
               onChange={(e) => {
                 setFormError('');
                 setDraft((s) => ({ ...s, name: e.target.value }));
               }}
             />
-            <label className="mono" htmlFor="new-sender-brand">Brand</label>
+            <label className="mono" htmlFor="new-sender-brand">{t('customers.field.brand')}</label>
             <input
               id="new-sender-brand"
               className="dt-inline-input"
-              placeholder="optional brand name"
+              placeholder={t('senders.brandPlaceholder')}
               value={draft.brand_name}
               onChange={(e) => {
                 setFormError('');
@@ -413,19 +415,19 @@ export function SendersModule() {
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Create"
+              label={t('common.create')}
               kind="primary"
               capability={WRITE_CAP}
               disabled={clientGap}
               onClick={async () => {
                 if (!draft.client_id) {
-                  surfaceFormError('Client is required', 'warn');
+                  surfaceFormError(t('customers.msg.clientRequired'), 'warn');
                   return;
                 }
                 if (!draft.name.trim()) {
-                  surfaceFormError('Name is required', 'warn');
+                  surfaceFormError(t('customers.msg.nameRequired'), 'warn');
                   return;
                 }
                 try {
@@ -440,7 +442,7 @@ export function SendersModule() {
                       : typeof res.id === 'string'
                         ? res.id
                         : null;
-                  if (!createdId) throw new Error('Sender create did not return a sender id.');
+                  if (!createdId) throw new Error(t('senders.error.createNoId'));
                   await refetchSenderForReadback(
                     createdId,
                     (row) =>
@@ -454,9 +456,9 @@ export function SendersModule() {
                   );
                   if (createdId) setPendingCreatedSenderId(createdId);
                   modal.close();
-                  pushToast(`Sender created · ${draft.name}`, 'good');
+                  pushToast(fill(t('senders.created'), { name: draft.name }), 'good');
                 } catch (err) {
-                  surfaceFormError(formatSenderCreateError(err));
+                  surfaceFormError(formatSenderCreateError(err, t));
                 }
               }}
             />
@@ -464,7 +466,7 @@ export function SendersModule() {
         </div>
       );
     }
-    modal.open({ title: 'New sender', body: <NewSenderForm /> });
+    modal.open({ title: t('senders.newSender'), body: <NewSenderForm /> });
   }
 
   function openSuspendSender(s: SenderRow) {
@@ -473,7 +475,7 @@ export function SendersModule() {
       return (
         <div>
           <p className="state__hint">
-            Suspending pauses new shipment intake for this sender and records the operator reason.
+            {t('senders.suspendIntro')}
           </p>
           <div
             style={{
@@ -485,30 +487,30 @@ export function SendersModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="sender-suspend-reason">Reason</label>
+            <label className="mono" htmlFor="sender-suspend-reason">{t('customers.field.reason')}</label>
             <input
               id="sender-suspend-reason"
               className="dt-inline-input"
-              placeholder="e.g. Webhook compromised; rotating credentials"
+              placeholder={t('senders.reasonPlaceholder')}
               value={draft.reason}
               onChange={(e) => setDraft((cur) => ({ ...cur, reason: e.target.value }))}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Confirm"
+              label={t('common.confirm')}
               kind="danger"
               capability={WRITE_CAP}
               onClick={async () => {
                 if (!draft.reason.trim()) {
-                  pushToast('Reason is required', 'warn');
+                  pushToast(t('customers.msg.reasonRequired'), 'warn');
                   return;
                 }
                 try {
                   await suspendMut.mutateAsync({ sender_id: s.id, reason: draft.reason });
                   modal.close();
-                  pushToast(`Suspended ${s.name}`, 'info');
+                  pushToast(fill(t('senders.suspended'), { name: s.name }), 'info');
                 } catch (err) {
                   pushToast((err as Error).message, 'danger');
                 }
@@ -518,7 +520,7 @@ export function SendersModule() {
         </div>
       );
     }
-    modal.open({ title: `Suspend · ${s.name}`, body: <SuspendForm /> });
+    modal.open({ title: fill(t('customers.msg.suspendTitle'), { name: s.name }), body: <SuspendForm /> });
   }
 
   function senderDrawerSignature(s: SenderRow): string {
@@ -551,11 +553,11 @@ export function SendersModule() {
     const client = clientById.get(s.client_id);
     const summary = summaryById.get(s.id);
     const kvRows: KvRow[] = [
-      { key: 'name', label: 'Name', value: s.name, capability: WRITE_CAP },
-      { key: 'brand_name', label: 'Brand', value: s.brand_name ?? '—', capability: WRITE_CAP },
+      { key: 'name', label: t('customers.field.name'), value: s.name, capability: WRITE_CAP },
+      { key: 'brand_name', label: t('customers.field.brand'), value: s.brand_name ?? '—', capability: WRITE_CAP },
       {
         key: 'client_id',
-        label: 'Client',
+        label: t('customers.field.client'),
         // W21: prefer canonical projection client_label when present, fall
         // back to in-memory clientById join for legacy demo paths.
         value: summary?.client_label
@@ -564,10 +566,10 @@ export function SendersModule() {
         mono: true,
         editable: false,
       },
-      { key: 'status', label: 'Status', value: s.status, lookup: 'sender_status', editable: false },
-      { key: 'suspension_reason', label: 'Suspension reason', value: s.suspension_reason ?? 'â€”', editable: false },
-      { key: 'auto_provisioned', label: 'Auto-provisioned', value: s.auto_provisioned ? 'Yes' : 'No', editable: false },
-      { key: 'auto_recreate', label: 'Auto-recreate', value: s.auto_recreate ? 'Yes' : 'No', editable: false },
+      { key: 'status', label: t('customers.field.status'), value: s.status, lookup: 'sender_status', editable: false },
+      { key: 'suspension_reason', label: t('customers.field.suspensionReason'), value: s.suspension_reason ?? '—', editable: false },
+      { key: 'auto_provisioned', label: t('senders.autoProvisioned'), value: s.auto_provisioned ? t('common.yes') : t('common.no'), editable: false },
+      { key: 'auto_recreate', label: t('senders.autoRecreate'), value: s.auto_recreate ? t('common.yes') : t('common.no'), editable: false },
     ];
 
     drawer.open({
@@ -581,24 +583,24 @@ export function SendersModule() {
       body: (
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-            {s.auto_provisioned ? <Chip label="auto-provisioned" kind="neutral" size="xs" /> : null}
-            {rank != null ? <Chip label={`sender scope priority ${rank}`} kind="info" size="xs" /> : null}
+            {s.auto_provisioned ? <Chip label={t('senders.chip.autoProvisioned')} kind="neutral" size="xs" /> : null}
+            {rank != null ? <Chip label={fill(t('senders.chip.scopePriority'), { rank })} kind="info" size="xs" /> : null}
             {summary ? (
               <>
                 <Chip
-                  label={`${summary.active_shipments ?? 0} active · ${summary.total_shipments ?? 0} total shipments`}
+                  label={fill(t('customers.msg.shipmentsChip'), { active: summary.active_shipments ?? 0, total: summary.total_shipments ?? 0 })}
                   kind="info"
                   size="xs"
                 />
                 {summary.sla_tier_inherited ? (
                   <Chip
-                    label={`SLA · ${summary.sla_tier_inherited}`}
+                    label={fill(t('senders.chip.sla'), { tier: summary.sla_tier_inherited })}
                     kind="neutral"
                     size="xs"
                   />
                 ) : null}
                 {summary.has_warehouse ? (
-                  <Chip label="warehouse override" kind="neutral" size="xs" />
+                  <Chip label={t('senders.chip.warehouseOverride')} kind="neutral" size="xs" />
                 ) : null}
               </>
             ) : null}
@@ -607,7 +609,7 @@ export function SendersModule() {
             rows={kvRows}
             onEdit={async (key, value) => {
               if (key === 'status') {
-                pushToast('Use Reactivate or Suspend so the sender status change has a real audit reason.', 'warn');
+                pushToast(t('senders.statusUseActions'), 'warn');
                 return;
               }
               try {
@@ -616,24 +618,24 @@ export function SendersModule() {
                   [key]: value,
                 } as { sender_id: string } & Record<string, unknown>);
                 await refetchSenderForReadback(s.id, senderFieldMatches(key, value));
-                pushToast(`Saved · ${senderFieldLabel(key)}`, 'good');
+                pushToast(fill(t('customers.msg.saved'), { field: senderFieldLabel(key, t) }), 'good');
               } catch (err) {
                 pushToast((err as Error).message, 'danger');
               }
             }}
           />
 
-          <div className="section-eyebrow" style={{ marginTop: 12 }}>Sender settings</div>
-          <KvGrid rows={objectSummaryRows(s.settings_override, 'sender-setting')} />
+          <div className="section-eyebrow" style={{ marginTop: 12 }}>{t('senders.settings')}</div>
+          <KvGrid rows={objectSummaryRows(s.settings_override, 'sender-setting', t)} />
 
-          <div className="section-eyebrow" style={{ marginTop: 12 }}>Related shipments</div>
+          <div className="section-eyebrow" style={{ marginTop: 12 }}>{t('customers.section.relatedShipments')}</div>
           <div style={{ padding: '0 14px' }}>
             <RelatedShipmentsPanel
               canReadShipments={canReadShipments}
               error={openSenderShipmentsQuery.error}
               isLoading={openSenderShipmentsQuery.isLoading}
               rows={openSenderShipments}
-              scopeLabel="sender"
+              scopeLabel={t('customers.related.scopeSender')}
               onOpenShipment={(shipment) => openShipmentContextDrawer(drawer, shipment.id, {
                 fallbackShipment: {
                   id: shipment.id,
@@ -649,19 +651,19 @@ export function SendersModule() {
             />
           </div>
 
-          <div className="section-eyebrow" style={{ marginTop: 12 }}>Quick links</div>
+          <div className="section-eyebrow" style={{ marginTop: 12 }}>{t('customers.section.quickLinks')}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '0 14px' }}>
-            <Button label="Shipments from sender" iconName="package" kind="ghost" onClick={() => go(`/operate/shipments?sender=${s.id}`)} />
+            <Button label={t('senders.shipmentsFromSender')} iconName="package" kind="ghost" onClick={() => go(`/operate/shipments?sender=${s.id}`)} />
             {client ? (
-              <Button label="Open client" iconName="building" kind="ghost" onClick={() => go(`/customers/clients?focus=${client.id}`)} />
+              <Button label={t('customers.action.openClient')} iconName="building" kind="ghost" onClick={() => go(`/customers/clients?focus=${client.id}`)} />
             ) : null}
           </div>
 
-          <div className="section-eyebrow" style={{ marginTop: 12 }}>Operational controls</div>
+          <div className="section-eyebrow" style={{ marginTop: 12 }}>{t('customers.section.operationalControls')}</div>
           <div className="card mono" style={{ fontSize: 11, lineHeight: 1.6, padding: 10 }}>
-            <SeamLine k="Directory" v="Shipment senders" />
-            <SeamLine k="Webhook intake" v="Provider intake resolver" />
-            <SeamLine k="Override priority" v={`Sender scope${rank != null ? ` - priority ${rank}` : ''}`} />
+            <SeamLine k={t('customers.seam.directory')} v={t('senders.seam.directory')} />
+            <SeamLine k={t('senders.seam.webhookIntake')} v={t('senders.seam.webhookResolver')} />
+            <SeamLine k={t('senders.seam.overridePriority')} v={rank != null ? fill(t('senders.seam.scopePriority'), { rank }) : t('senders.seam.scope')} />
           </div>
         </div>
       ),
@@ -709,21 +711,21 @@ export function SendersModule() {
   }, [pendingCreatedSenderId, displaySenders, summaryById]);
 
   const columns: Array<DataTableColumn<SenderRow>> = [
-    { key: 'name', label: 'Name', sortable: true, filterable: true },
+    { key: 'name', label: t('customers.field.name'), sortable: true, filterable: true },
     {
       key: 'client_label',
-      label: 'Client',
+      label: t('customers.field.client'),
       sortable: true,
     },
-    { key: 'status', label: 'Status', sortable: true, filterable: true, lookup: 'sender_status', editable: false },
-    { key: 'auto_provisioned', label: 'Auto-provisioned', align: 'right', type: 'boolean', sortable: true, filterable: true },
+    { key: 'status', label: t('customers.field.status'), sortable: true, filterable: true, lookup: 'sender_status', editable: false },
+    { key: 'auto_provisioned', label: t('senders.autoProvisioned'), align: 'right', type: 'boolean', sortable: true, filterable: true },
   ];
 
   const pills: ReactNode[] = [
     <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
-        <Chip key="cap" label="Sender access · sender update" kind="info" size="xs" />,
+        <Chip key="cap" label={t('senders.capPill')} kind="info" size="xs" />,
     <span key="seam" className="chip chip--xs mono">
-            Sender directory · status policy{rank != null ? ` · priority ${rank}` : ''}
+            {rank != null ? fill(t('senders.pillPriority'), { rank }) : t('senders.pill')}
     </span>,
   ];
 
@@ -732,14 +734,12 @@ export function SendersModule() {
       <div className="page">
         <PageHeader
           moduleKey="senders"
-          eyebrow="Customers"
-          titleAccent="Senders"
-          titlePlain="— shipment sources within a client"
+          titlePlain={t('senders.titlePlain')}
         />
         <StateView
           kind="denied"
           capability={CAP.SENDERS_READ}
-          hint="You do not have permission to view senders."
+          hint={t('senders.denied')}
         />
       </div>
     );
@@ -749,14 +749,12 @@ export function SendersModule() {
     <div className="page">
       <PageHeader
         moduleKey="senders"
-        eyebrow="Customers"
-        titleAccent="Senders"
-        titlePlain="— shipment sources within a client"
+        titlePlain={t('senders.titlePlain')}
         pills={pills}
         actions={[
           <Button
             key="new"
-            label="New sender"
+            label={t('senders.newSender')}
             iconName="plus"
             kind="primary"
             capability={WRITE_CAP}
@@ -769,19 +767,19 @@ export function SendersModule() {
       {clientsError ? (
         <StateView
           kind="error"
-          title="Sender client directory unavailable"
+          title={t('senders.error.clientDirectory')}
           hint={(clientsError as Error).message}
         />
       ) : sendersError && !tenantId ? (
         <StateView
           kind="error"
-          title="Sender directory unavailable"
+          title={t('senders.error.directory')}
           hint={(sendersError as Error).message}
         />
       ) : tenantId && summaryError ? (
         <StateView
           kind="error"
-          title="Sender directory unavailable"
+          title={t('senders.error.directory')}
           hint={(summaryError as Error).message}
         />
       ) : sendersLoading || (tenantId && summaryLoading) ? (
@@ -798,7 +796,7 @@ export function SendersModule() {
             if (key === 'status') {
               return {
                 ok: false,
-                error: 'Use Reactivate or Suspend so the sender status change has a real audit reason.',
+                error: t('senders.statusUseActions'),
               };
             }
             try {
@@ -813,31 +811,31 @@ export function SendersModule() {
             }
           }}
           rowActions={[
-            { label: 'Open detail', icon: 'eye', kind: 'primary', onClick: openSenderDrawer },
-            { label: 'Open client', icon: 'building', onClick: (s) => go(`/customers/clients?focus=${s.client_id}`) },
-            { label: 'View shipments', icon: 'package', onClick: (s) => go(`/operate/shipments?sender=${s.id}`) },
+            { label: t('customers.action.openDetail'), icon: 'eye', kind: 'primary', onClick: openSenderDrawer },
+            { label: t('customers.action.openClient'), icon: 'building', onClick: (s) => go(`/customers/clients?focus=${s.client_id}`) },
+            { label: t('customers.action.viewShipments'), icon: 'package', onClick: (s) => go(`/operate/shipments?sender=${s.id}`) },
             {
-              label: 'Reactivate',
+              label: t('customers.action.reactivate'),
               icon: 'refresh',
               capability: WRITE_CAP,
               disabled: (s) => !canReactivateSender(s),
-              disabledReason: 'Only suspended senders can be reactivated.',
+              disabledReason: t('senders.onlySuspended'),
               onClick: async (s) => {
                 try {
                   await reactivateMut.mutateAsync({ sender_id: s.id });
-                  pushToast(`Reactivated ${s.name}`, 'good');
+                  pushToast(fill(t('customers.msg.reactivated'), { name: s.name }), 'good');
                 } catch (err) {
                   pushToast((err as Error).message, 'danger');
                 }
               },
             },
             {
-              label: 'Suspend',
+              label: t('customers.action.suspend'),
               icon: 'lock',
               kind: 'danger',
               capability: WRITE_CAP,
               disabled: (s) => !canSuspendSender(s),
-              disabledReason: 'Only active senders can be suspended.',
+              disabledReason: t('senders.onlyActive'),
               onClick: openSuspendSender,
             },
           ]}

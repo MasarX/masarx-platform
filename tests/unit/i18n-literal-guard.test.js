@@ -65,7 +65,7 @@ describe('i18n literal guard rule', () => {
     expect(check(current, baseline)).toEqual([
       'a.tsx: 2 literals, baseline allows 1; move the new ones to the catalogs',
       'new.tsx: 1 new literal(s); move them to the catalogs. First: line 3 "Shipments"',
-      'gone.tsx: no literals left; delete its baseline line',
+      'gone.tsx: no literals left; delete its allowance file or row',
     ]);
     expect(check(new Map([['a.tsx', finding]]), { entries: new Map([['a.tsx', 1]]), problems: [] })).toEqual([]);
   });

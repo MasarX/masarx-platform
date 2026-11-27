@@ -20,6 +20,7 @@ import { Spinner } from '@/components/Spinner';
 import * as api from '@/lib/api';
 import { lookupRow } from '@/lib/api';
 import { useResolveSettings } from '@/lib/queries';
+import { englishT, fill, useT } from '@/lib/i18n';
 import type { DecisionLogEntry } from '@/types/domain';
 import type { ScopeType } from '@/types/domain';
 
@@ -211,6 +212,7 @@ export interface DecisionTrailBodyProps {
 }
 
 export function DecisionTrailBody({ row, entityKind, entries }: DecisionTrailBodyProps): ReactNode {
+  const t = useT();
   const label = displayReferenceForDecisionRow(row, entityKind);
   const live = useDecisionTrail(row);
   const data = entries ?? live.data ?? [];
@@ -218,24 +220,24 @@ export function DecisionTrailBody({ row, entityKind, entries }: DecisionTrailBod
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '14px' }}>
         <Spinner size={12} />
-        <span className="state__hint">Loading decision and settings evidence…</span>
+        <span className="state__hint">{t('shell.trail.loading')}</span>
       </div>
     );
   }
   return (
     <div>
       <div className="state__hint">
-        Decisions, settings resolutions, and audit entries for {label}
+        {fill(t('shell.trail.intro'), { label })}
       </div>
       <table className="dt__table">
         <thead>
           <tr>
-            <th>Time</th>
-            <th>Category</th>
-            <th>Verdict</th>
-            <th>Resolved from</th>
-            <th>Detail</th>
-            <th>Settings</th>
+            <th>{t('shell.trail.time')}</th>
+            <th>{t('shell.trail.category')}</th>
+            <th>{t('shell.trail.verdict')}</th>
+            <th>{t('common.resolved_from')}</th>
+            <th>{t('shell.trail.detail')}</th>
+            <th>{t('shell.trail.settings')}</th>
           </tr>
         </thead>
         <tbody>
@@ -255,7 +257,7 @@ export function DecisionTrailBody({ row, entityKind, entries }: DecisionTrailBod
                 {e.detail}
               </td>
               <td className="mono" style={{ fontSize: '11px', color: 'var(--ink-3)' }}>
-                {e.srlv ? 'Resolved' : 'Not recorded'}
+                {e.srlv ? t('shell.trail.resolved') : t('shell.trail.notRecorded')}
               </td>
             </tr>
           ))}
@@ -281,9 +283,10 @@ export function DecisionTrailDrawer({
   entries,
   onClose,
 }: DecisionTrailDrawerProps) {
+  const t = useT();
   const label = displayReferenceForDecisionRow(row, entityKind);
   return (
-    <Drawer open={true} title={`Decision trail · ${label}`} size="lg" onClose={onClose}>
+    <Drawer open={true} title={fill(t('shell.trail.title'), { label })} size="lg" onClose={onClose}>
       <DecisionTrailBody row={row} entityKind={entityKind} entries={entries} />
     </Drawer>
   );
@@ -300,11 +303,12 @@ export interface DrawerSpec {
 export function buildDecisionTrailDrawerSpec(
   row: DecisionTrailRowShape,
   entityKind?: string,
-  entries?: DecisionTrailEntry[]
+  entries?: DecisionTrailEntry[],
+  t: (path: string) => string = englishT,
 ): DrawerSpec {
   const label = displayReferenceForDecisionRow(row, entityKind);
   return {
-    title: `Decision trail · ${label}`,
+    title: fill(t('shell.trail.title'), { label }),
     size: 'lg',
     body: <DecisionTrailBody row={row} entityKind={entityKind} entries={entries} />,
   };

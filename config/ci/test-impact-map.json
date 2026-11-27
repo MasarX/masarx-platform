@@ -35,8 +35,11 @@
     {
       "id": "ci",
       "include_re": [
+        "^scripts/deploy/apply-guard\\.cjs$",
+        "^scripts/deploy/disable-console-v2-dev-subdomain\\.sh$",
         "^\\.github/",
         "^config/ci/",
+        "^scripts/ci-hosted/review-verdict\\.cjs$",
         "^scripts/ops/ci/",
         "^scripts/ops/security-(?:audit-inventory|scan-gate)\\.js$",
         "^security-(?:audit|scan-summary|vulnerability-inventory)\\.json$",

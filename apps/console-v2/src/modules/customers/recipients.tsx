@@ -46,6 +46,7 @@ import { readUrlParam } from '@/lib/url-params';
 import { e164PhoneError, isE164PhoneNumber } from '@/lib/phone';
 import { openShipmentContextDrawer } from '@/modules/operate/shipments';
 import { RelatedShipmentsPanel, type CustomerRelatedShipmentRow } from './related-shipments';
+import { englishT, fill, useT, type Translate } from '@/lib/i18n';
 
 // Phase G1 schema-drift fix: dropped legacy aliases (`phone_e164`, `language`,
 // `preferred_channel`) that are not canonical columns. Canonical columns are
@@ -97,6 +98,7 @@ interface ClientRow extends Record<string, unknown> {
 // AGENTS.md §4 (SSOT): canonical key sourced from src/lib/capabilities.ts.
 const WRITE_CAP = CAP.RECIPIENTS_WRITE;
 const LANGUAGE_LOOKUP_CATEGORY = 'language_code';
+const PREFERENCES_JSON_PLACEHOLDER = '{"whatsapp_opt_in": true}'; // i18n-literal-ok technical JSON example
 
 // W54-E closure: NO silent fallback. Returns null when the canonical row is
 // missing so the caller can render an explicit `(missing)` danger chip,
@@ -125,26 +127,26 @@ function humanizeSettingKey(key: string): string {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
-function formatSummaryValue(value: unknown): string {
-  if (value == null || value === '') return 'Not configured';
-  if (typeof value === 'boolean') return value ? 'Enabled' : 'Disabled';
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+function formatSummaryValue(value: unknown, t: Translate = englishT): string {
+  if (value == null || value === '') return t('customers.settings.notConfigured');
+  if (typeof value === 'boolean') return value ? t('customers.settings.enabled') : t('customers.settings.disabled');
+  if (Array.isArray(value)) return fill(t(value.length === 1 ? 'customers.settings.itemOne' : 'customers.settings.itemOther'), { n: value.length });
   if (typeof value === 'object') {
     const count = Object.keys(value as Record<string, unknown>).length;
-    return `${count} nested setting${count === 1 ? '' : 's'}`;
+    return fill(t(count === 1 ? 'customers.settings.nestedOne' : 'customers.settings.nestedOther'), { n: count });
   }
   return String(value);
 }
 
-function objectSummaryRows(value: Record<string, unknown> | null | undefined, prefix: string): KvRow[] {
+function objectSummaryRows(value: Record<string, unknown> | null | undefined, prefix: string, t: Translate = englishT): KvRow[] {
   const entries = Object.entries(value ?? {});
   if (entries.length === 0) {
-    return [{ key: `${prefix}-empty`, label: 'Status', value: 'No communication preferences configured', editable: false }];
+    return [{ key: `${prefix}-empty`, label: t('customers.field.status'), value: t('recipients.noPreferences'), editable: false }];
   }
   return entries.map(([key, val]) => ({
     key: `${prefix}-${key}`,
     label: humanizeSettingKey(key),
-    value: formatSummaryValue(val),
+    value: formatSummaryValue(val, t),
     editable: false,
   }));
 }
@@ -154,12 +156,12 @@ function stringifyJsonForTextarea(value: Record<string, unknown> | null | undefi
   return JSON.stringify(value, null, 2);
 }
 
-function parseOptionalJsonObject(value: string): Record<string, unknown> | null {
+function parseOptionalJsonObject(value: string, t: Translate = englishT): Record<string, unknown> | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
   const parsed = JSON.parse(trimmed) as unknown;
   if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Communication preferences must be a JSON object.');
+    throw new Error(t('recipients.error.prefsNotObject'));
   }
   return parsed as Record<string, unknown>;
 }
@@ -169,7 +171,7 @@ function externalReferenceLabel(value: unknown): string {
   return value.trim();
 }
 
-function recipientMutationErrorMessage(err: unknown): string {
+function recipientMutationErrorMessage(err: unknown, t: Translate = englishT): string {
   const raw = err instanceof Error ? err.message : String(err ?? '');
   const message = raw.trim();
   const lower = message.toLowerCase();
@@ -178,10 +180,10 @@ function recipientMutationErrorMessage(err: unknown): string {
     || (lower.includes('duplicate key') && lower.includes('phone'))
     || (lower.includes('recipient') && lower.includes('phone') && lower.includes('already'))
   ) {
-    return 'A recipient with this phone already exists for the selected client.';
+    return t('recipients.error.duplicatePhone');
   }
   if (lower.includes('duplicate key')) {
-    return 'A recipient with these unique details already exists. Search the recipient list or use different values.';
+    return t('recipients.error.duplicate');
   }
   if (
     lower.includes('recipients_phone_number_e164_chk')
@@ -190,7 +192,7 @@ function recipientMutationErrorMessage(err: unknown): string {
   ) {
     return e164PhoneError();
   }
-  return message || 'Recipient action failed. Try again or check the recipient details.';
+  return message || t('recipients.error.generic');
 }
 
 interface RecipientEditDraft {
@@ -230,6 +232,7 @@ function useRecipientPhonePlaceholder(): string {
 
 export function RecipientsModule() {
   const { scope } = useIdentity();
+  const t = useT();
   const drawer = useDrawer();
   const modal = useModal();
   const go = useConsoleNavigator();
@@ -292,9 +295,9 @@ export function RecipientsModule() {
   const clients = useMemo(() => clientsData?.rows ?? [], [clientsData]);
   const clientById = useMemo(() => new Map<string, ClientRow>(clients.map((c) => [c.id, c])), [clients]);
   const clientLabel = (clientId: unknown): string => {
-    if (typeof clientId !== 'string' || !clientId.trim()) return 'Unassigned client';
+    if (typeof clientId !== 'string' || !clientId.trim()) return t('recipients.unassignedClient');
     const client = clientById.get(clientId);
-    return client ? `${client.name}${client.slug ? ` · ${client.slug}` : ''}` : 'Unassigned client';
+    return client ? `${client.name}${client.slug ? ` · ${client.slug}` : ''}` : t('recipients.unassignedClient');
   };
   const directoryById = useMemo(
     () => new Map<string, RecipientDirectoryRow>(
@@ -323,7 +326,7 @@ export function RecipientsModule() {
     ]);
     const refreshed = recipientResult.data?.rows.find((row) => row.id === recipientId);
     if (!refreshed || (validate && !validate(refreshed))) {
-      throw new Error('The updated recipient was not available yet.');
+      throw new Error(t('recipients.error.readback'));
     }
     return refreshed;
   }
@@ -337,7 +340,7 @@ export function RecipientsModule() {
     const stillVisible = recipientResult.data?.rows.some((row) => row.id === recipientId);
     const stillInDirectory = directoryResult.data?.rows.some((row) => row.recipient_id === recipientId);
     if (stillVisible || stillInDirectory) {
-      throw new Error('The deleted recipient is still visible.');
+      throw new Error(t('recipients.error.deleteReadback'));
     }
   }
 
@@ -373,15 +376,15 @@ export function RecipientsModule() {
       return (
         <div>
           <p className="state__hint">
-            Creates a tenant recipient contact and starts phone validation automatically.
+            {t('recipients.createIntro')}
           </p>
           {clientGap ? (
-            <StateView kind="error" hint="No clients are visible. Create or restore a client before adding recipients." />
+            <StateView kind="error" hint={t('recipients.error.noClients')} />
           ) : null}
           {seedGap ? (
             <StateView
               kind="error"
-              hint="Default language or communication channel is missing. Pick a value below."
+              hint={t('recipients.error.seedGap')}
             />
           ) : null}
           {formError ? (
@@ -397,7 +400,7 @@ export function RecipientsModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="rec-create-client">Client</label>
+            <label className="mono" htmlFor="rec-create-client">{t('customers.field.client')}</label>
             <select
               id="rec-create-client"
               className="dt-inline-input"
@@ -413,7 +416,7 @@ export function RecipientsModule() {
                 </option>
               ))}
             </select>
-            <label className="mono" htmlFor="rec-create-name">Name</label>
+            <label className="mono" htmlFor="rec-create-name">{t('customers.field.name')}</label>
             <input
               id="rec-create-name"
               className="dt-inline-input"
@@ -423,7 +426,7 @@ export function RecipientsModule() {
                 setDraft((s) => ({ ...s, name: e.target.value }));
               }}
             />
-            <label className="mono" htmlFor="rec-create-phone">Phone (E.164)</label>
+            <label className="mono" htmlFor="rec-create-phone">{t('recipients.phoneE164')}</label>
             <input
               id="rec-create-phone"
               className="dt-inline-input"
@@ -434,7 +437,7 @@ export function RecipientsModule() {
                 setDraft((s) => ({ ...s, phone_number: e.target.value }));
               }}
             />
-            <label className="mono" htmlFor="rec-create-email">Email</label>
+            <label className="mono" htmlFor="rec-create-email">{t('customers.field.email')}</label>
             <input
               id="rec-create-email"
               className="dt-inline-input"
@@ -444,7 +447,7 @@ export function RecipientsModule() {
                 setDraft((s) => ({ ...s, email: e.target.value }));
               }}
             />
-            <label className="mono" htmlFor="rec-create-external">External ID</label>
+            <label className="mono" htmlFor="rec-create-external">{t('customers.field.externalId')}</label>
             <input
               id="rec-create-external"
               className="dt-inline-input"
@@ -454,7 +457,7 @@ export function RecipientsModule() {
                 setDraft((s) => ({ ...s, external_id: e.target.value }));
               }}
             />
-            <label className="mono" htmlFor="rec-create-lang">Language</label>
+            <label className="mono" htmlFor="rec-create-lang">{t('customers.field.language')}</label>
             <select
               id="rec-create-lang"
               className="dt-inline-input"
@@ -468,7 +471,7 @@ export function RecipientsModule() {
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
-            <label className="mono" htmlFor="rec-create-channel">Channel</label>
+            <label className="mono" htmlFor="rec-create-channel">{t('customers.field.channel')}</label>
             <select
               id="rec-create-channel"
               className="dt-inline-input"
@@ -482,7 +485,7 @@ export function RecipientsModule() {
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
-            <label className="mono" htmlFor="rec-create-quiet-from">Quiet from</label>
+            <label className="mono" htmlFor="rec-create-quiet-from">{t('customers.field.quietFrom')}</label>
             <input
               id="rec-create-quiet-from"
               className="dt-inline-input"
@@ -493,7 +496,7 @@ export function RecipientsModule() {
                 setDraft((s) => ({ ...s, quiet_hours_start: e.target.value }));
               }}
             />
-            <label className="mono" htmlFor="rec-create-quiet-to">Quiet to</label>
+            <label className="mono" htmlFor="rec-create-quiet-to">{t('customers.field.quietTo')}</label>
             <input
               id="rec-create-quiet-to"
               className="dt-inline-input"
@@ -506,23 +509,23 @@ export function RecipientsModule() {
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Create recipient"
+              label={t('recipients.createRecipient')}
               kind="primary"
               capability={WRITE_CAP}
               disabled={clientGap}
               onClick={async () => {
                 if (!selectedClientId) {
-                  surfaceFormError('Client is required', 'warn');
+                  surfaceFormError(t('customers.msg.clientRequired'), 'warn');
                   return;
                 }
                 if (!draft.name.trim()) {
-                  surfaceFormError('Name is required', 'warn');
+                  surfaceFormError(t('customers.msg.nameRequired'), 'warn');
                   return;
                 }
                 if (!draft.phone_number.trim()) {
-                  surfaceFormError('Phone is required', 'warn');
+                  surfaceFormError(t('recipients.error.phoneRequired'), 'warn');
                   return;
                 }
                 if (!isE164PhoneNumber(draft.phone_number)) {
@@ -550,9 +553,9 @@ export function RecipientsModule() {
                   );
                   setPendingCreatedRecipientId(result.recipient_id);
                   modal.close();
-                  pushToast(`Created ${draft.name.trim()}`, 'good');
+                  pushToast(fill(t('recipients.created'), { name: draft.name.trim() }), 'good');
                 } catch (err) {
-                  surfaceFormError(recipientMutationErrorMessage(err));
+                  surfaceFormError(recipientMutationErrorMessage(err, t));
                 }
               }}
             />
@@ -560,7 +563,7 @@ export function RecipientsModule() {
         </div>
       );
     }
-    modal.open({ title: 'Create recipient', body: <CreateForm /> });
+    modal.open({ title: t('recipients.createRecipient'), body: <CreateForm /> });
   }
 
   function openDeleteRecipient(r: RecipientRow) {
@@ -571,27 +574,27 @@ export function RecipientsModule() {
       return (
         <div>
           <p className="state__hint">
-            Deletes the recipient contact and records the operator reason in the audit trail.
+            {t('recipients.deleteIntro')}
           </p>
           <div className="card" style={{ fontSize: 11, lineHeight: 1.55, padding: 10 }}>
-            <SeamLine k="Recipient" v={r.name} />
-            <SeamLine k="Client" v={client?.name ?? 'Client record'} />
-            <SeamLine k="Shipment references" v={String(directory?.total_shipments ?? 0)} />
+            <SeamLine k={t('recipients.seam.recipient')} v={r.name} />
+            <SeamLine k={t('customers.field.client')} v={client?.name ?? t('recipients.seam.clientRecord')} />
+            <SeamLine k={t('recipients.seam.shipmentRefs')} v={String(directory?.total_shipments ?? 0)} />
           </div>
           <div className="field" style={{ marginTop: 12 }}>
-            <label className="field__label" htmlFor="rec-delete-reason">Reason</label>
+            <label className="field__label" htmlFor="rec-delete-reason">{t('customers.field.reason')}</label>
             <textarea
               id="rec-delete-reason"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               rows={3}
-              placeholder="Optional deletion reason"
+              placeholder={t('recipients.deleteReasonPlaceholder')}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Delete recipient"
+              label={t('recipients.deleteRecipient')}
               kind="danger"
               capability={WRITE_CAP}
               onClick={async () => {
@@ -607,9 +610,9 @@ export function RecipientsModule() {
                     setOpenRecipientId(null);
                     openRecipientSignatureRef.current = null;
                   }
-                  pushToast(`Deleted ${r.name}`, 'warn');
+                  pushToast(fill(t('recipients.deleted'), { name: r.name }), 'warn');
                 } catch (err) {
-                  pushToast(recipientMutationErrorMessage(err), 'danger');
+                  pushToast(recipientMutationErrorMessage(err, t), 'danger');
                 }
               }}
             />
@@ -618,7 +621,7 @@ export function RecipientsModule() {
       );
     }
     modal.open({
-      title: `Delete recipient · ${r.name}`,
+      title: fill(t('recipients.deleteTitle'), { name: r.name }),
       body: <DeleteForm />,
     });
   }
@@ -649,12 +652,12 @@ export function RecipientsModule() {
       return (
         <div>
           <p className="state__hint">
-            Operator NDR triage. Saved changes re-run phone validation when the phone number changes.
+            {t('recipients.correctionIntro')}
           </p>
           {seedGap ? (
             <StateView
               kind="error"
-              hint="Default language or communication channel is missing. Pick a value below."
+              hint={t('recipients.error.seedGap')}
             />
           ) : null}
           <div
@@ -667,14 +670,14 @@ export function RecipientsModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="rec-name">Name</label>
+            <label className="mono" htmlFor="rec-name">{t('customers.field.name')}</label>
             <input
               id="rec-name"
               className="dt-inline-input"
               value={draft.name}
               onChange={(e) => setDraft((s) => ({ ...s, name: e.target.value }))}
             />
-            <label className="mono" htmlFor="rec-phone">Phone (E.164)</label>
+            <label className="mono" htmlFor="rec-phone">{t('recipients.phoneE164')}</label>
             <input
               id="rec-phone"
               className="dt-inline-input"
@@ -682,21 +685,21 @@ export function RecipientsModule() {
               value={draft.phone_number}
               onChange={(e) => setDraft((s) => ({ ...s, phone_number: e.target.value }))}
             />
-            <label className="mono" htmlFor="rec-email">Email</label>
+            <label className="mono" htmlFor="rec-email">{t('customers.field.email')}</label>
             <input
               id="rec-email"
               className="dt-inline-input"
               value={draft.email}
               onChange={(e) => setDraft((s) => ({ ...s, email: e.target.value }))}
             />
-            <label className="mono" htmlFor="rec-external-id">External ID</label>
+            <label className="mono" htmlFor="rec-external-id">{t('customers.field.externalId')}</label>
             <input
               id="rec-external-id"
               className="dt-inline-input"
               value={draft.external_id}
               onChange={(e) => setDraft((s) => ({ ...s, external_id: e.target.value }))}
             />
-            <label className="mono" htmlFor="rec-lang">Language</label>
+            <label className="mono" htmlFor="rec-lang">{t('customers.field.language')}</label>
             <select
               id="rec-lang"
               className="dt-inline-input"
@@ -707,7 +710,7 @@ export function RecipientsModule() {
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
-            <label className="mono" htmlFor="rec-channel">Channel</label>
+            <label className="mono" htmlFor="rec-channel">{t('customers.field.channel')}</label>
             <select
               id="rec-channel"
               className="dt-inline-input"
@@ -718,7 +721,7 @@ export function RecipientsModule() {
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
-            <label className="mono" htmlFor="rec-quiet-from">Quiet from</label>
+            <label className="mono" htmlFor="rec-quiet-from">{t('customers.field.quietFrom')}</label>
             <input
               id="rec-quiet-from"
               className="dt-inline-input"
@@ -726,7 +729,7 @@ export function RecipientsModule() {
               value={draft.quiet_hours_start}
               onChange={(e) => setDraft((s) => ({ ...s, quiet_hours_start: e.target.value }))}
             />
-            <label className="mono" htmlFor="rec-quiet-to">Quiet to</label>
+            <label className="mono" htmlFor="rec-quiet-to">{t('customers.field.quietTo')}</label>
             <input
               id="rec-quiet-to"
               className="dt-inline-input"
@@ -734,25 +737,25 @@ export function RecipientsModule() {
               value={draft.quiet_hours_end}
               onChange={(e) => setDraft((s) => ({ ...s, quiet_hours_end: e.target.value }))}
             />
-            <label className="mono" htmlFor="rec-communication-preferences">Preferences JSON</label>
+            <label className="mono" htmlFor="rec-communication-preferences">{t('recipients.preferencesJson')}</label>
             <textarea
               id="rec-communication-preferences"
               className="dt-inline-input"
               rows={4}
-              placeholder='{"whatsapp_opt_in": true}'
+              placeholder={PREFERENCES_JSON_PLACEHOLDER}
               value={draft.communication_preferences_json}
               onChange={(e) => setDraft((s) => ({ ...s, communication_preferences_json: e.target.value }))}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Save"
+              label={t('common.save')}
               kind="primary"
               capability={WRITE_CAP}
               onClick={async () => {
                 if (!draft.name.trim()) {
-                  pushToast('Name is required', 'warn');
+                  pushToast(t('customers.msg.nameRequired'), 'warn');
                   return;
                 }
                 if (draft.phone_number.trim() && !isE164PhoneNumber(draft.phone_number)) {
@@ -760,7 +763,7 @@ export function RecipientsModule() {
                   return;
                 }
                 try {
-                  const communicationPreferences = parseOptionalJsonObject(draft.communication_preferences_json);
+                  const communicationPreferences = parseOptionalJsonObject(draft.communication_preferences_json, t);
                   await updateMut.mutateAsync({
                     recipient_id: r.id,
                     name: draft.name.trim(),
@@ -786,9 +789,9 @@ export function RecipientsModule() {
                       && (row.quiet_hours_end ?? null) === (draft.quiet_hours_end || null),
                   );
                   modal.close();
-                  pushToast(`Updated ${r.name}`, 'good');
+                  pushToast(fill(t('recipients.updated'), { name: r.name }), 'good');
                 } catch (err) {
-                  pushToast(recipientMutationErrorMessage(err), 'danger');
+                  pushToast(recipientMutationErrorMessage(err, t), 'danger');
                 }
               }}
             />
@@ -796,7 +799,7 @@ export function RecipientsModule() {
         </div>
       );
     }
-    modal.open({ title: `Operator correction · ${r.name}`, body: <CorrectionForm /> });
+    modal.open({ title: fill(t('recipients.correctionTitle'), { name: r.name }), body: <CorrectionForm /> });
   }
 
   function recipientDrawerSignature(r: RecipientRow): string {
@@ -836,22 +839,22 @@ export function RecipientsModule() {
     // Console-side writes are operator corrections through recipient_update_v1.
     // Portal self-edit remains split to Portal.
     const kvRows: KvRow[] = [
-      { key: 'name', label: 'Name', value: r.name, editable: false },
+      { key: 'name', label: t('customers.field.name'), value: r.name, editable: false },
       {
         key: 'client_id',
-        label: 'Client',
-        value: client ? clientLabel(r.client_id) : 'Unassigned client',
+        label: t('customers.field.client'),
+        value: client ? clientLabel(r.client_id) : t('recipients.unassignedClient'),
         editable: false,
       },
-      { key: 'external_id', label: 'External ID', value: externalReferenceLabel(r.external_id), mono: true, editable: false },
-      { key: 'email', label: 'Email', value: r.email ?? '—', mono: true, editable: false },
-      { key: 'phone_number', label: 'Phone', value: phone || '—', mono: true, editable: false },
+      { key: 'external_id', label: t('customers.field.externalId'), value: externalReferenceLabel(r.external_id), mono: true, editable: false },
+      { key: 'email', label: t('customers.field.email'), value: r.email ?? '—', mono: true, editable: false },
+      { key: 'phone_number', label: t('customers.field.phone'), value: phone || '—', mono: true, editable: false },
       {
         // W54-E closure: NO hardcoded `'unverified'` literal — fall through to
         // the canonical missing-data marker `'—'` so the gap is visible to
         // operators when phone_validation_status is unset.
         key: 'phone_validation_status',
-        label: 'Phone validation',
+        label: t('recipients.phoneValidation'),
         value: validation ?? '—',
         lookup: 'phone_validation_status',
         editable: false,
@@ -864,14 +867,14 @@ export function RecipientsModule() {
       ...(language || lookupDefault(LANGUAGE_LOOKUP_CATEGORY)
         ? [{
             key: 'preferred_language',
-            label: 'Language',
+            label: t('customers.field.language'),
             value: language || (lookupDefault(LANGUAGE_LOOKUP_CATEGORY) ?? '—'),
             lookup: LANGUAGE_LOOKUP_CATEGORY,
             editable: false,
           } as KvRow]
         : [{
             key: 'preferred_language',
-            label: 'Language',
+            label: t('customers.field.language'),
             value: '—',
             mono: true,
             editable: false,
@@ -879,20 +882,20 @@ export function RecipientsModule() {
       ...(channel || lookupDefault('communication_channel')
         ? [{
             key: 'preferred_comm_channel',
-            label: 'Channel',
+            label: t('customers.field.channel'),
             value: channel || (lookupDefault('communication_channel') ?? '—'),
             lookup: 'communication_channel',
             editable: false,
           } as KvRow]
         : [{
             key: 'preferred_comm_channel',
-            label: 'Channel',
+            label: t('customers.field.channel'),
             value: '—',
             mono: true,
             editable: false,
           } as KvRow]),
-      { key: 'quiet_hours_start', label: 'Quiet from', value: r.quiet_hours_start ?? '—', mono: true, editable: false },
-      { key: 'quiet_hours_end', label: 'Quiet to', value: r.quiet_hours_end ?? '—', mono: true, editable: false },
+      { key: 'quiet_hours_start', label: t('customers.field.quietFrom'), value: r.quiet_hours_start ?? '—', mono: true, editable: false },
+      { key: 'quiet_hours_end', label: t('customers.field.quietTo'), value: r.quiet_hours_end ?? '—', mono: true, editable: false },
     ];
 
     drawer.open({
@@ -910,32 +913,32 @@ export function RecipientsModule() {
               const tone = lookupTone('phone_validation_status', validation);
               return tone == null ? (
                 <Chip
-                  label={`Unknown phone validation value: ${validation}`}
+                  label={fill(t('recipients.chip.unknownValidation'), { value: String(validation) })}
                   kind="danger"
                   size="xs"
                 />
               ) : (
                 <Chip
-                  label={`phone · ${lookupLabel('phone_validation_status', validation)}`}
+                  label={fill(t('recipients.chip.phone'), { label: lookupLabel('phone_validation_status', validation) })}
                   kind={tone}
                   size="xs"
                 />
               );
             })() : null}
             {language ? (
-              <Chip label={`lang · ${lookupLabel(LANGUAGE_LOOKUP_CATEGORY, language)}`} kind="neutral" size="xs" />
+              <Chip label={fill(t('recipients.chip.lang'), { label: lookupLabel(LANGUAGE_LOOKUP_CATEGORY, language) })} kind="neutral" size="xs" />
             ) : null}
             {channel ? (() => {
               const tone = lookupTone('communication_channel', channel);
               return tone == null ? (
                 <Chip
-                  label={`Unknown channel value: ${channel}`}
+                  label={fill(t('recipients.chip.unknownChannel'), { value: channel })}
                   kind="danger"
                   size="xs"
                 />
               ) : (
                 <Chip
-                  label={`channel · ${lookupLabel('communication_channel', channel)}`}
+                  label={fill(t('recipients.chip.channel'), { label: lookupLabel('communication_channel', channel) })}
                   kind={tone}
                   size="xs"
                 />
@@ -944,7 +947,7 @@ export function RecipientsModule() {
             {directory ? (
               <>
                 <Chip
-                  label={`${directory.total_shipments ?? 0} shipments`}
+                  label={fill(t('recipients.chip.shipments'), { n: directory.total_shipments ?? 0 })}
                   kind="info"
                   size="xs"
                 />
@@ -952,20 +955,20 @@ export function RecipientsModule() {
                   const tone = lookupTone('shipment_status', directory.last_shipment_status);
                   return tone == null ? (
                     <Chip
-                      label={`Unknown shipment status: ${directory.last_shipment_status}`}
+                      label={fill(t('recipients.chip.unknownStatus'), { value: String(directory.last_shipment_status) })}
                       kind="danger"
                       size="xs"
                     />
                   ) : (
                     <Chip
-                      label={`last · ${lookupLabel('shipment_status', directory.last_shipment_status)}`}
+                      label={fill(t('recipients.chip.last'), { label: lookupLabel('shipment_status', directory.last_shipment_status) })}
                       kind={tone}
                       size="xs"
                     />
                   );
                 })() : null}
                 {directory.has_quiet_hours ? (
-                  <Chip label="quiet hours set" kind="neutral" size="xs" />
+                  <Chip label={t('recipients.chip.quietHours')} kind="neutral" size="xs" />
                 ) : null}
               </>
             ) : null}
@@ -973,17 +976,17 @@ export function RecipientsModule() {
 
           <KvGrid rows={kvRows} />
 
-          <div className="section-eyebrow" style={{ marginTop: 12 }}>Communication preferences</div>
-          <KvGrid rows={objectSummaryRows(r.communication_preferences, 'recipient-preference')} />
+          <div className="section-eyebrow" style={{ marginTop: 12 }}>{t('recipients.section.preferences')}</div>
+          <KvGrid rows={objectSummaryRows(r.communication_preferences, 'recipient-preference', t)} />
 
-          <div className="section-eyebrow" style={{ marginTop: 12 }}>Related shipments</div>
+          <div className="section-eyebrow" style={{ marginTop: 12 }}>{t('customers.section.relatedShipments')}</div>
           <div style={{ padding: '0 14px' }}>
             <RelatedShipmentsPanel
               canReadShipments={canReadShipments}
               error={openRecipientShipmentsQuery.error}
               isLoading={openRecipientShipmentsQuery.isLoading}
               rows={openRecipientShipments}
-              scopeLabel="recipient"
+              scopeLabel={t('customers.related.scopeRecipient')}
               onOpenShipment={(shipment) => openShipmentContextDrawer(drawer, shipment.id, {
                 fallbackShipment: {
                   id: shipment.id,
@@ -999,24 +1002,24 @@ export function RecipientsModule() {
             />
           </div>
 
-          <div className="section-eyebrow" style={{ marginTop: 12 }}>Recipient actions</div>
+          <div className="section-eyebrow" style={{ marginTop: 12 }}>{t('recipients.section.actions')}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '0 14px' }}>
             <Button
-              label="Correct recipient"
+              label={t('recipients.correctRecipient')}
               iconName="edit"
               kind="ghost"
               capability={WRITE_CAP}
               onClick={() => openOperatorCorrection(r)}
             />
             <Button
-              label="Delete recipient"
+              label={t('recipients.deleteRecipient')}
               iconName="trash"
               kind="danger"
               capability={WRITE_CAP}
               onClick={() => openDeleteRecipient(r)}
             />
             <Button
-              label="Open client"
+              label={t('customers.action.openClient')}
               iconName="building"
               kind="ghost"
               capability={CAP.CLIENTS_READ}
@@ -1026,7 +1029,7 @@ export function RecipientsModule() {
               }}
             />
             <Button
-              label="Shipments"
+              label={t('customers.link.shipments')}
               iconName="package"
               kind="ghost"
               capability={CAP.SHIPMENTS_READ}
@@ -1034,13 +1037,13 @@ export function RecipientsModule() {
             />
           </div>
 
-          <div className="section-eyebrow" style={{ marginTop: 12 }}>Operational controls</div>
+          <div className="section-eyebrow" style={{ marginTop: 12 }}>{t('customers.section.operationalControls')}</div>
           <div className="card mono" style={{ fontSize: 11, lineHeight: 1.6, padding: 10 }}>
-            <SeamLine k="Directory" v="Recipient contacts" />
-            <SeamLine k="Phone validation" v="Automatic validation after phone edits" />
-            <SeamLine k="Channel routing" v="Communication policy" />
-            <SeamLine k="Quiet hours" v="Address and contact policy" />
-            <SeamLine k="Language" v="Arabic or English preference" />
+            <SeamLine k={t('customers.seam.directory')} v={t('recipients.seam.directory')} />
+            <SeamLine k={t('recipients.phoneValidation')} v={t('recipients.seam.phoneValidation')} />
+            <SeamLine k={t('recipients.seam.channelRouting')} v={t('recipients.seam.channelPolicy')} />
+            <SeamLine k={t('recipients.seam.quietHours')} v={t('recipients.seam.quietPolicy')} />
+            <SeamLine k={t('customers.field.language')} v={t('recipients.seam.language')} />
           </div>
         </div>
       ),
@@ -1097,10 +1100,10 @@ export function RecipientsModule() {
   }, [drawer.isOpen, openRecipientId, rows, focusedRecipientData, focusedRecipientQuery.isFetching, data, focusParam, directoryById, openRecipientShipmentSignature]);
 
   const columns: Array<DataTableColumn<RecipientRow>> = [
-    { key: 'name', label: 'Name', sortable: true, filterable: true },
+    { key: 'name', label: t('customers.field.name'), sortable: true, filterable: true },
     {
       key: 'client_id',
-      label: 'Client',
+      label: t('customers.field.client'),
       sortable: true,
       filterable: true,
       render: (raw) => clientLabel(raw),
@@ -1113,7 +1116,7 @@ export function RecipientsModule() {
     },
     {
       key: 'phone_number',
-      label: 'Phone',
+      label: t('customers.field.phone'),
       mono: true,
       sortable: true,
       filterable: true,
@@ -1121,21 +1124,21 @@ export function RecipientsModule() {
     },
     {
       key: 'email',
-      label: 'Email',
+      label: t('customers.field.email'),
       mono: true,
       filterable: true,
       render: (raw) => <span className="mono">{(raw as string) || '—'}</span>,
     },
     {
       key: 'phone_validation_status',
-      label: 'Validation',
+      label: t('recipients.col.validation'),
       sortable: true,
       filterable: true,
       lookup: 'phone_validation_status',
     },
     {
       key: 'preferred_language',
-      label: 'Lang',
+      label: t('recipients.col.lang'),
       sortable: true,
       filterable: true,
       lookup: LANGUAGE_LOOKUP_CATEGORY,
@@ -1147,7 +1150,7 @@ export function RecipientsModule() {
     },
     {
       key: 'preferred_comm_channel',
-      label: 'Channel',
+      label: t('customers.field.channel'),
       sortable: true,
       filterable: true,
       lookup: 'communication_channel',
@@ -1156,34 +1159,34 @@ export function RecipientsModule() {
         if (!value) return <span style={{ color: 'var(--ink-3)' }}>—</span>;
         const tone = lookupTone('communication_channel', value);
         if (tone == null) {
-          return <Chip label={`Unknown channel value: ${value}`} kind="danger" size="xs" />;
+          return <Chip label={fill(t('recipients.chip.unknownChannel'), { value })} kind="danger" size="xs" />;
         }
         return <Chip label={lookupLabel('communication_channel', value)} kind={tone} size="xs" />;
       },
     },
     {
       key: 'external_id',
-      label: 'External ID',
+      label: t('customers.field.externalId'),
       mono: true,
       filterable: true,
       render: (raw) => externalReferenceLabel(raw),
     },
-    { key: 'quiet_hours_start', label: 'Quiet from', mono: true },
-    { key: 'quiet_hours_end', label: 'Quiet to', mono: true },
+    { key: 'quiet_hours_start', label: t('customers.field.quietFrom'), mono: true },
+    { key: 'quiet_hours_end', label: t('customers.field.quietTo'), mono: true },
   ];
 
   const pills: ReactNode[] = [
     <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
-        <Chip key="cap" label="Recipient access · recipient update" kind="info" size="xs" />,
+        <Chip key="cap" label={t('recipients.capPill')} kind="info" size="xs" />,
     <Chip
       key="split"
-      label="Recipient self-service planned for Portal"
+      label={t('recipients.splitChip')}
       kind="warn"
       size="xs"
-      title="Operators can correct recipient delivery contact details here. Recipient self-service belongs in Portal."
+      title={t('recipients.splitTitle')}
     />,
     <span key="seam" className="chip chip--xs mono">
-              Recipient registry · phone validation · quiet hours
+              {t('recipients.pill')}
     </span>,
   ];
 
@@ -1192,14 +1195,12 @@ export function RecipientsModule() {
       <div className="page">
         <PageHeader
           moduleKey="recipients"
-          eyebrow="Customers"
-          titleAccent="Recipients"
-          titlePlain="— operator-managed contacts (NDR + comms)"
+          titlePlain={t('recipients.titlePlain')}
         />
         <StateView
           kind="denied"
           capability={CAP.RECIPIENTS_READ}
-          hint="You do not have permission to view recipients."
+          hint={t('recipients.denied')}
         />
       </div>
     );
@@ -1209,14 +1210,12 @@ export function RecipientsModule() {
     <div className="page">
       <PageHeader
         moduleKey="recipients"
-        eyebrow="Customers"
-        titleAccent="Recipients"
-          titlePlain="— operator-managed contacts (NDR + comms)"
+          titlePlain={t('recipients.titlePlain')}
           pills={pills}
           actions={[
             <Button
               key="create"
-              label="New recipient"
+              label={t('recipients.newRecipient')}
               iconName="plus"
               kind="primary"
               capability={WRITE_CAP}
@@ -1229,19 +1228,19 @@ export function RecipientsModule() {
       {recipientsError ? (
         <StateView
           kind="error"
-          title="Recipient directory unavailable"
+          title={t('recipients.error.directory')}
           hint={(recipientsError as Error).message}
         />
       ) : clientsError ? (
         <StateView
           kind="error"
-          title="Recipient client directory unavailable"
+          title={t('recipients.error.clientDirectory')}
           hint={(clientsError as Error).message}
         />
       ) : directoryError ? (
         <StateView
           kind="error"
-          title="Recipient related data unavailable"
+          title={t('recipients.error.related')}
           hint={(directoryError as Error).message}
         />
       ) : isLoading ? (
@@ -1255,9 +1254,9 @@ export function RecipientsModule() {
           onRowClick={openRecipientDrawer}
           rowDeepLink={(r) => `/customers/recipients?focus=${r.id}`}
           rowActions={[
-            { label: 'Open detail', icon: 'eye', kind: 'primary', onClick: openRecipientDrawer },
+            { label: t('customers.action.openDetail'), icon: 'eye', kind: 'primary', onClick: openRecipientDrawer },
             {
-              label: 'View client',
+              label: t('recipients.action.viewClient'),
               icon: 'building',
               capability: CAP.CLIENTS_READ,
               onClick: (r) => {
@@ -1265,19 +1264,19 @@ export function RecipientsModule() {
               },
             },
             {
-              label: 'View shipments',
+              label: t('customers.action.viewShipments'),
               icon: 'package',
               capability: CAP.SHIPMENTS_READ,
               onClick: (r) => go(`/operate/shipments?recipient=${encodeURIComponent(r.id)}`),
             },
             {
-              label: 'Operator correction…',
+              label: t('recipients.action.correction'),
               icon: 'edit',
               capability: WRITE_CAP,
               onClick: openOperatorCorrection,
             },
             {
-              label: 'Delete recipient…',
+              label: t('recipients.action.delete'),
               icon: 'trash',
               kind: 'danger',
               capability: WRITE_CAP,

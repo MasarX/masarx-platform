@@ -196,7 +196,7 @@ describeIfDb('communications notification dispatch contracts (integration)', () 
       { accessScopeType: 'tenant', userType: 'ops_admin' },
     );
 
-    const recipientPhone = `9665${Math.floor(Math.random() * 90000000 + 10000000)}`;
+    const recipientPhone = '+12025550123';
     const recipientEmail = `recipient-${randomUUID().slice(0, 8)}@example.com`;
     const recipientId = await createRecipient(
       organization.id,
@@ -404,24 +404,38 @@ describeIfDb('communications notification dispatch contracts (integration)', () 
     expect(outboundRows[0]?.headers || {}).not.toHaveProperty('D360-API-KEY');
     expect(outboundRows[0]?.context?.operation_template_id).toBe(fixture.operationTemplateId);
 
-    const { rows: callSpecRows } = await client.query(
-      `SELECT public.get_job_call_spec($1::uuid) AS spec`,
+    const { rows: [{ handoff }] } = await client.query(
+      `SELECT public.dispatch_outbound_call_inline($1::uuid) AS handoff`,
       [outboundCallId],
+    );
+    expect(handoff).toMatchObject({ job_id: outboundCallId, http_status: 202, completed: false });
+
+    const { rows: [claim] } = await client.query(
+      `SELECT * FROM public.claim_edge_job_by_id_v1($1::uuid)`,
+      [outboundCallId],
+    );
+    expect(claim).toEqual({ job_id: outboundCallId, lease_token: expect.any(String) });
+
+    const { rows: callSpecRows } = await client.query(
+      `SELECT public.get_claimed_edge_job_call_spec_v1($1::uuid, $2::uuid) AS spec`,
+      [outboundCallId, claim.lease_token],
     );
 
     expect(callSpecRows[0]?.spec?.headers?.['D360-API-KEY']).toBe('integration-EXAMPLE_PASSWORD');
 
     const providerMessageId = `msg-${randomUUID().slice(0, 12)}`;
     await client.query(
-      `SELECT public.mark_outbound_call_success(
+      `SELECT public.mark_claimed_edge_job_success_v1(
           $1::uuid,
+          $2::uuid,
           200,
           '{}'::jsonb,
-          $2::jsonb,
+          $3::jsonb,
           12
         )`,
       [
         outboundCallId,
+        claim.lease_token,
         JSON.stringify({
           messages: [
             {

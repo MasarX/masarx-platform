@@ -1,0 +1,32 @@
+name: Disable Console V2 DEV provider subdomain
+
+'on':
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
+jobs:
+  disable-subdomain:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: dev
+    concurrency:
+      group: deploy-dev-console-v2
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Disable and verify the provider subdomain and previews
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_WORKER_CONSOLE_V2: ${{ vars.CLOUDFLARE_WORKER_CONSOLE_V2 }}
+        run: bash scripts/deploy/disable-console-v2-dev-subdomain.sh

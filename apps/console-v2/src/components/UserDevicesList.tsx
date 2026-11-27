@@ -8,6 +8,9 @@ import { Chip, type ChipKind } from './Chip';
 import { StateView } from './StateView';
 import { CapabilityLock } from './CapabilityLock';
 import { pushToast } from './toastStore';
+import { fill, useT } from '@/lib/i18n';
+
+type Translate = ReturnType<typeof useT>;
 
 export interface UserDeviceRow extends Record<string, unknown> {
   id: string;
@@ -56,12 +59,12 @@ function deviceIdOf(row: UserDeviceRow): string {
   return String(row.device_id ?? row.device_identifier_sha256 ?? row.id);
 }
 
-function platformOf(row: UserDeviceRow): string {
-  return String(row.platform ?? row.device_platform ?? 'Unknown platform');
+function platformOf(row: UserDeviceRow, t: Translate): string {
+  return String(row.platform ?? row.device_platform ?? t('shell.devices.unknownPlatform'));
 }
 
-function modelOf(row: UserDeviceRow): string {
-  return row.model?.trim() || metadataString(row, 'model') || 'Unknown model';
+function modelOf(row: UserDeviceRow, t: Translate): string {
+  return row.model?.trim() || metadataString(row, 'model') || t('shell.devices.unknownModel');
 }
 
 function attestationStatusOf(row: UserDeviceRow): string {
@@ -72,23 +75,23 @@ function attestationStatusOf(row: UserDeviceRow): string {
   ).toLowerCase();
 }
 
-function formatSeen(ts: string | null | undefined): string {
-  if (!ts) return 'Never seen';
+function formatSeen(ts: string | null | undefined, t: Translate): string {
+  if (!ts) return t('shell.devices.neverSeen');
   const then = Date.parse(ts);
-  if (Number.isNaN(then)) return 'Last seen unknown';
+  if (Number.isNaN(then)) return t('shell.devices.seenUnknown');
   const minutes = Math.max(0, Math.round((Date.now() - then) / 60000));
-  if (minutes < 1) return 'Seen just now';
-  if (minutes < 60) return `Seen ${minutes} min ago`;
+  if (minutes < 1) return t('shell.devices.seenJustNow');
+  if (minutes < 60) return fill(t('shell.devices.seenMinutes'), { n: minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `Seen ${hours} h ago`;
-  return `Seen ${Math.round(hours / 24)} d ago`;
+  if (hours < 24) return fill(t('shell.devices.seenHours'), { n: hours });
+  return fill(t('shell.devices.seenDays'), { n: Math.round(hours / 24) });
 }
 
-function formatRevokedAt(ts: string | null | undefined): string {
-  if (!ts) return 'Revoked timestamp unavailable';
+function formatRevokedAt(ts: string | null | undefined, t: Translate): string {
+  if (!ts) return t('shell.devices.revokedUnknown');
   const parsed = Date.parse(ts);
-  if (Number.isNaN(parsed)) return 'Revoked timestamp unavailable';
-  return `Revoked ${new Date(parsed).toLocaleString()}`;
+  if (Number.isNaN(parsed)) return t('shell.devices.revokedUnknown');
+  return fill(t('shell.devices.revokedAt'), { time: new Date(parsed).toLocaleString() });
 }
 
 function isRevoked(row: UserDeviceRow): boolean {
@@ -97,12 +100,14 @@ function isRevoked(row: UserDeviceRow): boolean {
 
 export function UserDevicesList({
   userId,
-  title = 'User devices',
+  title: titleProp,
   hideTitle = false,
   className,
   readCapability = CAP.USER_DEVICES_READ,
   writeCapability = CAP.USER_DEVICES_WRITE,
 }: UserDevicesListProps) {
+  const t = useT();
+  const title = titleProp ?? t('shell.devices.title');
   const canRead = useCapability(readCapability);
   const canManage = useCapability(writeCapability);
   const devices = useResourceList<UserDeviceRow>(
@@ -122,16 +127,16 @@ export function UserDevicesList({
     const deviceId = deviceIdOf(row);
     const trimmed = reason.trim();
     if (!trimmed) {
-      pushToast('Device revocation reason required', 'warn');
+      pushToast(t('shell.devices.reasonRequiredToast'), 'warn');
       return;
     }
     try {
       await revokeDevice.mutateAsync({ deviceId: deviceRecordId, revokedReason: trimmed });
-      pushToast(`Device revoked - ${deviceId}`, 'good');
+      pushToast(fill(t('shell.devices.revoked'), { id: deviceId }), 'good');
       setRevokeId(null);
       setReason('');
     } catch (err) {
-      pushToast(`Device revoke failed - ${(err as Error)?.message || 'unknown error'}`, 'danger');
+      pushToast(fill(t('shell.devices.revokeFailed'), { reason: (err as Error)?.message || t('shell.unknownError') }), 'danger');
     }
   }
 
@@ -159,8 +164,8 @@ export function UserDevicesList({
         {hideTitle ? null : <div className="section-eyebrow">{title}</div>}
         <StateView
           kind="error"
-          title="Device activity unavailable"
-          hint={(devices.error as Error | undefined)?.message ?? 'The user device registry could not be read.'}
+          title={t('shell.devices.loadFailed')}
+          hint={(devices.error as Error | undefined)?.message ?? t('shell.devices.loadFailedHint')}
         />
       </section>
     );
@@ -172,13 +177,13 @@ export function UserDevicesList({
       {rows.length === 0 ? (
         <StateView
           kind="empty"
-          title="No registered devices"
-          hint="This user has no registered device activity in the current tenant scope."
+          title={t('shell.devices.empty')}
+          hint={t('shell.devices.emptyHint')}
         />
       ) : (
         <ul
           className="user-devices-list__items"
-          aria-label="User devices"
+          aria-label={t('shell.devices.listLabel')}
           style={{ listStyle: 'none', padding: 0, margin: 0 }}
         >
           {rows.map((row) => {
@@ -203,26 +208,26 @@ export function UserDevicesList({
               >
                 <div style={{ minWidth: 0 }}>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <Chip label={attestation} kind={tone} />
-                    {revoked ? <Chip label="revoked" kind="danger" /> : null}
+                    <Chip label={<bdi>{attestation}</bdi>} kind={tone} />
+                    {revoked ? <Chip label={t('shell.devices.revokedChip')} kind="danger" /> : null}
                     <span className="mono" style={{ fontSize: 12, color: 'var(--ink-2)' }}>
                       {deviceId}
                     </span>
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 4 }}>
-                    {`${platformOf(row)} - ${modelOf(row)}`}
+                    <bdi>{platformOf(row, t)}</bdi> - <bdi>{modelOf(row, t)}</bdi>
                   </div>
                   <div className="mono" style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
-                    {`${row.app_version ?? 'App unknown'} - ${row.os_version ?? 'OS unknown'} - ${formatSeen(row.last_seen_at)}`}
+                    {`${row.app_version ?? t('shell.devices.appUnknown')} - ${row.os_version ?? t('shell.devices.osUnknown')} - ${formatSeen(row.last_seen_at, t)}`}
                   </div>
                   {revoked ? (
                     <div
                       data-testid={`user-devices-revoked-state-${row.id}`}
                       style={{ display: 'grid', gap: 2, marginTop: 8, fontSize: 12, color: 'var(--ink-2)' }}
                     >
-                      <span>{formatRevokedAt(row.revoked_at)}</span>
-                      <span>{`Reason: ${row.revoked_reason ?? 'No reason provided'}`}</span>
-                      {row.push_token_cleared ? <span>Push token cleared</span> : null}
+                      <span>{formatRevokedAt(row.revoked_at, t)}</span>
+                      <span>{fill(t('shell.devices.reason'), { reason: row.revoked_reason ?? t('shell.devices.noReason') })}</span>
+                      {row.push_token_cleared ? <span>{t('shell.devices.pushCleared')}</span> : null}
                     </div>
                   ) : null}
                   {isRevoking && !revoked ? (
@@ -231,17 +236,17 @@ export function UserDevicesList({
                       style={{ display: 'grid', gap: 8, marginTop: 8, maxWidth: 420 }}
                     >
                       <label className="field__label" htmlFor={`device-revoke-reason-${row.id}`}>
-                        Revocation reason
+                        {t('shell.revokeReason')}
                       </label>
                       <input
                         id={`device-revoke-reason-${row.id}`}
                         value={reason}
                         onChange={(event) => setReason(event.target.value)}
-                        placeholder="Lost phone, replaced device, or security review"
+                        placeholder={t('shell.devices.reasonPlaceholder')}
                       />
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <Button
-                          label="Cancel"
+                          label={t('common.cancel')}
                           size="sm"
                           kind="ghost"
                           onClick={() => {
@@ -250,7 +255,7 @@ export function UserDevicesList({
                           }}
                         />
                         <Button
-                          label={revokeDevice.isPending ? 'Revoking...' : 'Confirm revoke'}
+                          label={revokeDevice.isPending ? t('shell.revoking') : t('shell.confirmRevoke')}
                           size="sm"
                           kind="danger"
                           capability={writeCapability}
@@ -264,7 +269,7 @@ export function UserDevicesList({
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   {revoked ? (
                     <Button
-                      label="Revoked"
+                      label={t('shell.revoked')}
                       kind="ghost"
                       size="sm"
                       capability={writeCapability}
@@ -272,11 +277,11 @@ export function UserDevicesList({
                     />
                   ) : canManage ? (
                     <Button
-                      label="Revoke"
+                      label={t('shell.revoke')}
                       kind="danger"
                       size="sm"
                       capability={writeCapability}
-                      ariaLabel={`Revoke device ${deviceId}`}
+                      ariaLabel={fill(t('shell.devices.revokeLabel'), { id: deviceId })}
                       disabled={revokeDevice.isPending}
                       onClick={() => {
                         setRevokeId(row.id);

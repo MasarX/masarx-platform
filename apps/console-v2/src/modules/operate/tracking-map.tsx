@@ -26,6 +26,7 @@ import { useResolveSettings, useResourceList, useProposeSettingsChange } from '@
 import { useDrawer } from '@/hooks/useOverlay';
 import { pushToast } from '@/components/toastStore';
 import { useCapability, useIdentity } from '@/lib/identity';
+import { englishT, fill, useT, type Translate } from '@/lib/i18n';
 import { CAP } from '@/lib/capabilities';
 import type { SettingsResolution } from '@/types/domain';
 
@@ -106,17 +107,17 @@ interface Viewport {
   maxLng: number;
 }
 
-function policyDetailRows(value: unknown): Array<{ key: string; value: string }> {
+function policyDetailRows(value: unknown, t: Translate = englishT): Array<{ key: string; value: string }> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
   return Object.entries(value as Record<string, unknown>)
     .slice(0, 8)
-    .map(([key, raw]) => ({ key, value: policyDetailValue(raw) }));
+    .map(([key, raw]) => ({ key, value: policyDetailValue(raw, t) }));
 }
 
-function operatorLabel(value: unknown, fallback = 'Not set'): string {
+function operatorLabel(value: unknown, fallback: string, t: Translate = englishT): string {
   if (value == null || value === '') return fallback;
   const normalized = String(value).trim().toLowerCase();
-  if (normalized === 'rto') return 'Return';
+  if (normalized === 'rto') return t('trackingMap.serviceReturn');
   return String(value)
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -124,15 +125,15 @@ function operatorLabel(value: unknown, fallback = 'Not set'): string {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function policyDetailValue(value: unknown): string {
-  if (value == null || value === '') return 'Not set';
-  if (typeof value === 'boolean') return value ? 'Enabled' : 'Disabled';
+function policyDetailValue(value: unknown, t: Translate = englishT): string {
+  if (value == null || value === '') return t('trackingMap.notSet');
+  if (typeof value === 'boolean') return value ? t('trackingMap.enabled') : t('trackingMap.disabled');
   if (typeof value === 'number') return String(value);
-  if (typeof value === 'string') return operatorLabel(value);
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+  if (typeof value === 'string') return operatorLabel(value, t('trackingMap.notSet'), t);
+  if (Array.isArray(value)) return fill(t(value.length === 1 ? 'trackingMap.itemOne' : 'trackingMap.itemOther'), { n: value.length });
   if (typeof value === 'object') {
     const count = Object.keys(value as Record<string, unknown>).length;
-    return `${count} setting${count === 1 ? '' : 's'}`;
+    return fill(t(count === 1 ? 'trackingMap.settingOne' : 'trackingMap.settingOther'), { n: count });
   }
   return String(value);
 }
@@ -213,6 +214,7 @@ export function resolveTrackingGeocodeCoordinates(row: Record<string, unknown>):
 }
 
 export function TrackingMapModule() {
+  const t = useT();
   const drawer = useDrawer();
   const { scope, currentTenantId } = useIdentity();
   const canRead = useCapability(CAP.SHIPMENTS_READ);
@@ -278,7 +280,6 @@ export function TrackingMapModule() {
   const defaultViewport = policyValue.default_viewport ?? null;
   const zoomPaddingLat = policyValue.zoom_padding?.lat ?? null;
   const zoomPaddingLng = policyValue.zoom_padding?.lng ?? null;
-  const clusterMinimumLabel = minCount === 1 ? 'shipment' : 'shipments';
   // Bind the viewport state to the canonical default the first time policy
   // resolves. Tenants override at tenant scope; toggling clustering keeps
   // the operator-selected viewport intact.
@@ -331,7 +332,7 @@ export function TrackingMapModule() {
   // query so the chip pill updates without a full refetch.
   async function handleToggleClustering() {
     if (!tenantId) {
-      pushToast('Select a tenant before changing map clustering.', 'warn');
+      pushToast(t('trackingMap.toast.selectTenant'), 'warn');
       return;
     }
     const nextEnabled = !clusteringEnabled;
@@ -351,9 +352,9 @@ export function TrackingMapModule() {
         dryRun: false,
         justification: `Operator toggled clustering ${nextEnabled ? 'on' : 'off'} from /operate/tracking-map`,
       });
-      pushToast(`Map clustering ${nextEnabled ? 'enabled' : 'disabled'} for review.`, 'good');
+      pushToast(t(nextEnabled ? 'trackingMap.toast.clusteringEnabled' : 'trackingMap.toast.clusteringDisabled'), 'good');
     } catch {
-      pushToast('Map clustering could not be updated. Try again.', 'danger');
+      pushToast(t('trackingMap.toast.clusteringFailed'), 'danger');
     }
   }
 
@@ -362,7 +363,7 @@ export function TrackingMapModule() {
     // W54-C — zoom padding resolved strictly from canonical
     // `map_policy.zoom_padding`. NO inline `0.004` / `0.005` literals.
     if (zoomPaddingLat == null || zoomPaddingLng == null) {
-      pushToast('Map zoom settings are unavailable. Try again after policy is updated.', 'warn');
+      pushToast(t('trackingMap.toast.zoomUnavailable'), 'warn');
       return;
     }
     const memberCoordinates = cluster.members
@@ -385,22 +386,22 @@ export function TrackingMapModule() {
 
   function openPolicyDrawer() {
     drawer.open({
-      title: 'Map display policy',
+      title: t('trackingMap.policy.title'),
       body: (
         <div>
           <p className="state__hint">
-            These settings control clustering, default view, and map behavior for this tenant.
+            {t('trackingMap.policy.hint')}
           </p>
           {policy ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: '8px 0' }}>
               <ScopePill scopeType={policy.resolved_from} />
-              <Chip size="xs" kind="info" label="Policy applied" />
+              <Chip size="xs" kind="info" label={t('trackingMap.policy.applied')} />
             </div>
           ) : null}
           <LadderViz resolution={policy} />
-          <h4 className="eyebrow" style={{ marginTop: '14px' }}>Resolved settings</h4>
+          <h4 className="eyebrow" style={{ marginTop: '14px' }}>{t('trackingMap.policy.resolved')}</h4>
           <div className="card" style={{ display: 'grid', gap: 6 }}>
-            {policyDetailRows(policy?.value ?? {}).map((row) => (
+            {policyDetailRows(policy?.value ?? {}, t).map((row) => (
               <div
                 key={row.key}
                 style={{
@@ -410,8 +411,8 @@ export function TrackingMapModule() {
                   fontSize: 11,
                 }}
               >
-                <span className="eyebrow">{operatorLabel(row.key)}</span>
-                <span>{row.value}</span>
+                <span className="eyebrow"><bdi>{operatorLabel(row.key, t('trackingMap.notSet'), t)}</bdi></span>
+                <span><bdi>{row.value}</bdi></span>
               </div>
             ))}
           </div>
@@ -422,7 +423,7 @@ export function TrackingMapModule() {
 
   function openShipmentDrawer(s: ShipmentRow) {
     drawer.open(
-      buildDecisionTrailDrawerSpec(s as Record<string, unknown>, 'shipment'),
+      buildDecisionTrailDrawerSpec(s as Record<string, unknown>, 'shipment', undefined, t),
     );
   }
 
@@ -433,25 +434,20 @@ export function TrackingMapModule() {
       scopeType={policyResolved?.resolved_from ?? 'global'}
       scopeId={policyResolved?.resolved_from === 'tenant' ? (tenantId ?? '') : 'global'}
     />,
-    <Chip key="cat" size="xs" label="Clustering policy" />,
+    <Chip key="cat" size="xs" label={t('trackingMap.pills.category')} />,
     !clusteringEnabled ? (
-      <Chip key="off" size="xs" kind="warn" label="Clustering off" />
+      <Chip key="off" size="xs" kind="warn" label={t('trackingMap.pills.off')} />
     ) : null,
   ].filter(Boolean) as ReactNode[];
 
   if (!canRead) {
     return (
       <div className="page">
-        <PageHeader
-          moduleKey="trackingMap"
-          eyebrow="Operate"
-          titleAccent="Tracking"
-          titlePlain="map"
-        />
+        <PageHeader moduleKey="trackingMap" />
         <StateView
           kind="denied"
           capability={CAP.SHIPMENTS_READ}
-          hint="You do not have permission to view the tracking map."
+          hint={t('trackingMap.denied')}
         />
       </div>
     );
@@ -460,7 +456,7 @@ export function TrackingMapModule() {
   if (shipmentsLoading || geocodesLoading) {
     return (
       <div className="page">
-        <PageHeader moduleKey="trackingMap" eyebrow="Operate" titleAccent="Tracking" titlePlain="map" pills={pills} actions={[]} />
+        <PageHeader moduleKey="trackingMap" pills={pills} actions={[]} />
         <StateView kind="loading" />
       </div>
     );
@@ -472,16 +468,16 @@ export function TrackingMapModule() {
   // missing rather than silently substituting FE literals.
   if (policy && (!defaultViewport || gridPxResolved == null || minCountResolved == null)) {
     const missingKeys: string[] = [];
-    if (!defaultViewport) missingKeys.push('Default viewport');
-    if (gridPxResolved == null) missingKeys.push('Cluster grid size');
-    if (minCountResolved == null) missingKeys.push('Minimum shipments per cluster');
+    if (!defaultViewport) missingKeys.push(t('trackingMap.missing.defaultViewport'));
+    if (gridPxResolved == null) missingKeys.push(t('trackingMap.missing.gridSize'));
+    if (minCountResolved == null) missingKeys.push(t('trackingMap.missing.minCount'));
     return (
       <div className="page">
-        <PageHeader moduleKey="trackingMap" eyebrow="Operate" titleAccent="Tracking" titlePlain="map" pills={pills} actions={[]} />
+        <PageHeader moduleKey="trackingMap" pills={pills} actions={[]} />
         <StateView
           kind="error"
-          title="Map settings are incomplete"
-          hint={`Update the map display policy before viewing the tracking map. Missing: ${missingKeys.join(', ')}.`}
+          title={t('trackingMap.incomplete.title')}
+          hint={fill(t('trackingMap.incomplete.hint'), { keys: missingKeys.join(t('trackingMap.listSeparator')) })}
         />
       </div>
     );
@@ -489,7 +485,7 @@ export function TrackingMapModule() {
   if (!viewport) {
     return (
       <div className="page">
-        <PageHeader moduleKey="trackingMap" eyebrow="Operate" titleAccent="Tracking" titlePlain="map" pills={pills} actions={[]} />
+        <PageHeader moduleKey="trackingMap" pills={pills} actions={[]} />
         <StateView kind="loading" />
       </div>
     );
@@ -497,7 +493,7 @@ export function TrackingMapModule() {
   if (!proj) {
     return (
       <div className="page">
-        <PageHeader moduleKey="trackingMap" eyebrow="Operate" titleAccent="Tracking" titlePlain="map" pills={pills} actions={[]} />
+        <PageHeader moduleKey="trackingMap" pills={pills} actions={[]} />
         <StateView kind="loading" />
       </div>
     );
@@ -530,15 +526,12 @@ export function TrackingMapModule() {
     <div className="page">
       <PageHeader
         moduleKey="trackingMap"
-        eyebrow="Operate"
-        titleAccent="Tracking"
-        titlePlain="map"
         pills={pills}
         actions={[
-          <Button key="inspect" label="Inspect policy" iconName="eye" kind="ghost" onClick={openPolicyDrawer} />,
+          <Button key="inspect" label={t('trackingMap.actions.inspect')} iconName="eye" kind="ghost" onClick={openPolicyDrawer} />,
           <Button
             key="toggle-clustering"
-            label={clusteringEnabled ? 'Disable clustering' : 'Enable clustering'}
+            label={t(clusteringEnabled ? 'trackingMap.actions.disableClustering' : 'trackingMap.actions.enableClustering')}
             iconName="bolt"
             kind="ghost"
             capability={CAP.SETTINGS_WRITE}
@@ -691,7 +684,7 @@ export function TrackingMapModule() {
 
             {showLegend ? (
               <text x={12} y={H - 12} fill="var(--ink-3)" fontFamily="Geist Mono" fontSize={11}>
-                {`Clustering: ${gridPx}px grid, ${minCount} ${clusterMinimumLabel} minimum. Click a cluster to zoom.`}
+                {fill(t(minCount === 1 ? 'trackingMap.legendOne' : 'trackingMap.legendOther'), { grid: gridPx, n: minCount })}
               </text>
             ) : null}
           </svg>
@@ -708,7 +701,7 @@ export function TrackingMapModule() {
             }}
             onClick={resetZoom}
           >
-            Reset zoom
+            {t('trackingMap.resetZoom')}
           </button>
           <OpenStreetMapAttribution
             className="tracking-map__attribution"
@@ -733,14 +726,14 @@ export function TrackingMapModule() {
               }}
             >
               <span className="eyebrow" style={{ marginRight: '6px' }}>
-                Missing location
+                {t('trackingMap.missingLocation')}
               </span>
               {missingHubMarkers.map((h) => (
                 <Chip
                   key={h.id}
                   size="xs"
                   kind="warn"
-                  label={`${h.label} - location unavailable`}
+                  label={fill(t('trackingMap.hubUnavailable'), { hub: h.label })}
                 />
               ))}
             </div>
@@ -749,12 +742,12 @@ export function TrackingMapModule() {
 
         {/* Sidebar — clickable shipment cards open the decision-trail drawer */}
         <div style={{ borderLeft: '1px solid var(--line)', overflow: 'auto', background: 'var(--paper)' }}>
-          <div className="section-eyebrow">Shipments in view</div>
+          <div className="section-eyebrow">{t('trackingMap.shipmentsInView')}</div>
           {shipments.slice(0, 18).map((s) => {
             // W38 closure - prefer canonical v_shipment_directory join,
             // fall back to base row destination_city for legacy seed
             // rows that have not yet emitted the directory projection.
-            const detail = `${shipmentDirectoryById.get(s.id)?.destination_city ?? s.destination_city ?? '-'} - ${operatorLabel(s.service_type, 'Service not set')}`;
+            const detail = `${shipmentDirectoryById.get(s.id)?.destination_city ?? s.destination_city ?? '-'} - ${operatorLabel(s.service_type, t('trackingMap.serviceNotSet'), t)}`;
             return (
             <button
               key={s.id}
@@ -771,13 +764,13 @@ export function TrackingMapModule() {
               }}
               onClick={() => openShipmentDrawer(s)}
               // WCAG 2.5.3: the name carries all visible card text after the action.
-              aria-label={`Open ${s.tracking_number}, ${detail}`}
+              aria-label={fill(t('trackingMap.openShipment'), { tracking: s.tracking_number, detail })}
             >
-              <div className="mono" style={{ fontWeight: 600 }}>{s.tracking_number}</div>
+              <div className="mono" style={{ fontWeight: 600 }}><bdi>{s.tracking_number}</bdi></div>
               {/* The space keeps the two lines separate words in the visible text axe compares. */}
               {' '}
               <div className="mono" style={{ fontSize: '10.5px', color: 'var(--ink-3)' }}>
-                {detail}
+                <bdi>{detail}</bdi>
               </div>
             </button>
             );

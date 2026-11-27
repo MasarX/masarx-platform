@@ -33,6 +33,28 @@ RETURNING name, enabled;
 
 Verify one row returns with `enabled = false`, then verify a privileged synthetic session and the application rollback. To recover an individual lost authenticator, have support verify the account owner's identity and route the reset through a separately authorized Auth administrator. Reset only the confirmed lost factor, revoke the affected sessions, and confirm fresh enrollment and verification. Keep the setup key and recovery evidence out of logs.
 
+## Local deploy workflow tests
+
+The outbound wake suite runs `jq` inside Bash. Install a checksum-verified `jq` binary and put it on the PATH inherited by the test command. Run the preflight and focused suite from the repository root.
+
+On Windows, use the same Git for Windows Bash that the suite starts.
+
+```powershell
+$gitBash = Join-Path $env:ProgramFiles 'Git/bin/bash.exe'
+& $gitBash --noprofile --norc -c 'jq --version'
+if ($LASTEXITCODE -ne 0) {
+    throw 'Install jq and make it available on the Git Bash PATH.'
+}
+npm run test:unit -- --runInBand --runTestsByPath tests/unit/ops/outbound-wake-deploy.test.js
+```
+
+On other platforms, check `jq` through the Bash executable on PATH.
+
+```bash
+bash --noprofile --norc -c 'jq --version' &&
+  npm run test:unit -- --runInBand --runTestsByPath tests/unit/ops/outbound-wake-deploy.test.js
+```
+
 ## Local label rendering over HTTP
 
 Set `EDGE_ENVIRONMENT=local` and `LABEL_RENDERER_INVOKE_URL` in the local Edge runtime. In the isolated database, have a database superuser set `app.local_label_renderer_url` to the same exact URL with `ALTER DATABASE <local_database> SET app.local_label_renderer_url = '<local_invoke_url>'`. Use that URL in the global `label_provider` settings and configure the signing key and gateway JWT for the local project. The URL must end in `/functions/v1/label-renderer`. Set this database parameter before running `0zz_label_renderer_url_policy_v1.sql` locally.
