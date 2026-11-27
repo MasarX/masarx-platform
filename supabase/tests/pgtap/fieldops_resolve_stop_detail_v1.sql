@@ -136,6 +136,15 @@ BEGIN
     (v_driver_b,       v_org_b, 'pgt-sd-' || substr(v_driver_b::text, 1, 8) || '@e.test', 'Driver B', 'active')
   ON CONFLICT DO NOTHING;
 
+  UPDATE public.users SET user_type = 'ops_admin' WHERE id = v_supervisor_a;
+  INSERT INTO public.rbac_roles (organization_id, key, name)
+  VALUES (v_org_a, 'supervisor', 'Supervisor');
+  INSERT INTO public.rbac_user_role_assignments (organization_id, user_id, role_id)
+  SELECT v_org_a, v_supervisor_a, id FROM public.rbac_roles
+  WHERE organization_id = v_org_a AND key = 'supervisor';
+  INSERT INTO public.mobile_v2_active_role (user_id, organization_id, role_key)
+  VALUES (v_supervisor_a, v_org_a, 'supervisor');
+
   INSERT INTO public.clients (id, organization_id, name, slug)
   VALUES (v_client_a, v_org_a, 'Client A', 'pgt-sd-c-' || substr(v_client_a::text, 1, 8)),
          (v_client_b, v_org_b, 'Client B', 'pgt-sd-c-' || substr(v_client_b::text, 1, 8))

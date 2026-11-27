@@ -36,7 +36,7 @@ export function LoadingState({
       className={cn("space-y-4", className)}
     >
       {showHeader ? (
-        <div className="space-y-2">
+        <div className="space-y-2" data-testid="loading-state-header">
           <Skeleton aria-hidden className="h-7 w-2/3" />
           <Skeleton aria-hidden className="h-4 w-1/2" />
         </div>

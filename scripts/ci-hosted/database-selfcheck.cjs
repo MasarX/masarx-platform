@@ -13,10 +13,10 @@ const { checkInstallPolicy } = require('./install-policy.cjs');
 const { loadExceptions, assessFile, exceptionEvidence } = require('./pgtap-exceptions.cjs');
 const { prepareImages } = require('./images.cjs');
 const { imageRequest, rewrite } = require('./docker-images.cjs');
-const { captureDatabaseLog, collectStackDiagnostics, belongsToStack, imagePrefix } = require('./stack-diagnostics.cjs');
+const { captureDatabaseLog, collectStackDiagnostics, belongsToStack, imagePrefix, needsHostedDatabaseInit } = require('./stack-diagnostics.cjs');
 const { checkTransport } = require('./docker-selfcheck.cjs');
 const { migrationIssues, invocation, lintResult } = require('./db-lint.cjs');
-const { loadBackendLocalPreSuiteCommands, loadBackendLocalPgtapEnv, writePsqlWrapper } = require('../ops/ci/cloud-pool-db-local.js');
+const { loadBackendLocalPreSuiteCommands, loadBackendLocalPgtapEnv, loadLaneConfig, writePsqlWrapper } = require('../ops/ci/cloud-pool-db-local.js');
 const { runHostedPgtap } = require('../ops/ci/cloud-pool-db-local-pgtap.js');
 const { databaseResult, PGTAP_SHARD_COUNT } = require('./database-result.cjs');
 
@@ -28,15 +28,23 @@ async function checkDatabaseLog(temp) {
   const jobStartedAt = 1800000000;
   const jobStartedAtMs = jobStartedAt * 1000;
   const shardStartedAt = jobStartedAtMs + 240000;
+  const hostedBuilds = [];
   for (const jobId of ['database-build', 'database-pgtap']) {
     const job = workflow.split(`\n  ${jobId}:\n`)[1]?.split(/\n  \S/)[0] || '';
     const jobTimeoutMinutes = Number(job.match(/^    timeout-minutes: (\d+)$/m)?.[1]);
     assert.equal(pgtapDeadline(shardStartedAt, String(jobStartedAt)), jobStartedAtMs + jobTimeoutMinutes * 60000 - 120000, jobId);
     assert.match(job, /steps:\n      - name: Record database job start\n        run: echo "JOB_STARTED_AT=\$\(date \+%s\)" >> "\$GITHUB_ENV"\n/, jobId);
     assert.match(job, /id: qualification\n +if: steps\.subject\.outputs\.present == 'true'\n +run: node scripts\/ci-hosted\/backend\.cjs\n/, jobId);
+    if (!/^      PGTAP_SHARD:/m.test(job)) hostedBuilds.push(jobId);
     assert.match(job, /- name: Upload Postgres server log\n +if: \$\{\{ !cancelled\(\) && steps\.qualification\.outputs\.postgres_log == 'true' \}\}\n +uses: actions\/upload-artifact@[a-f0-9]{40}/, jobId);
     assert.match(job, /path: ci-reports\/postgres-server\.log\n +if-no-files-found: ignore\n +retention-days: 1\n/, jobId);
   }
+  assert.deepEqual(hostedBuilds, ['database-build']);
+  assert.equal(needsHostedDatabaseInit({
+    GITHUB_ACTIONS: 'true',
+    RUNNER_ENVIRONMENT: 'github-hosted',
+    GITHUB_JOB: hostedBuilds[0],
+  }), true, 'the from-zero workflow job enables database init without a shard');
   assert.equal(pgtapDeadline(shardStartedAt, String(jobStartedAt + 300)), shardStartedAt + 1080000, 'never widen the shard timeout');
   assert.equal(pgtapDeadline(shardStartedAt), shardStartedAt + 1080000, 'local callers keep the shard timeout');
   assert.equal(pgtapDeadline(shardStartedAt, 'invalid'), shardStartedAt + 1080000, 'ignore an invalid job timestamp');
@@ -44,6 +52,31 @@ async function checkDatabaseLog(temp) {
   const backend = fs.readFileSync(require.resolve('./backend.cjs'), 'utf8');
   const qualify = backend.split('async function qualify(')[1].split('function saveFailure(')[0];
   const parallel = backend.split('async function runHostedShard(')[1].split('async function recordMigrationDeadlock(')[0];
+  assert.match(qualify,
+    /const useDatabaseInit\s*=\s*!pinState\.qualificationOnly\s*&&\s*needsHostedDatabaseInit\(process\.env\);/,
+    'hosted qualification evaluates the database init classifier');
+  assert.match(qualify,
+    /guard\s*=\s*await imageGuard\(pins,\s*path\.join\(temp,\s*'runtime-image-pins\.json'\),\s*env,\s*useDatabaseInit\s*\?\s*databaseContainer\s*:\s*undefined\);/,
+    'the classifier controls the init container passed to the image guard');
+  assert.match(qualify,
+    /if\s*\(useDatabaseInit\)\s*\{\s*summary\.databasePid1\s*=\s*await timed\('database-init',\s*\(\)\s*=>\s*verifyHostedDatabaseInit\(checked,\s*env,\s*databaseContainer\)\);\s*\}/,
+    'the classifier controls the database PID 1 verification');
+  assert(loadLaneConfig().exclude.includes('postgrest'), 'PostgREST is excluded during migration replay');
+  let previousIndex = -1;
+  for (const step of [
+    "await startStack('stack-start', lane.exclude)",
+    "await timed('migrations'",
+    "throw new Error('Applied migration stamps do not match the complete source inventory')",
+    "await timed('integration-stack-stop'",
+    'const integrationExclude = lane.exclude.filter(service => !Object.hasOwn(integrationImages, service))',
+    "await startStack('integration-stack-start', integrationExclude)",
+    'await timed(`pgtap:',
+    'await timed(`integration:',
+  ]) {
+    const index = qualify.indexOf(step);
+    assert(index > previousIndex, `Missing or out-of-order hosted shard step: ${step}`);
+    previousIndex = index;
+  }
   assert.match(qualify, /ok: false \}/);
   assert.match(qualify, /await timed\('migrations',[\s\S]*?migrationError = error;[\s\S]*?throw error;/, 'from-zero migration failure');
   assert.match(qualify, /await timed\(`pgtap:\$\{shard\}`,[\s\S]*?pgtapDeadline\(Date\.now\(\), env\.JOB_STARTED_AT\)[\s\S]*?\? runHostedShard\([\s\S]*?remaining, admin:[\s\S]*?: checked\(process\.execPath, \['scripts\/ci-hosted\/pgtap\.cjs'\], testEnv, remaining\(\)\);/, 'serial and parallel share the deadline');
@@ -421,13 +454,13 @@ async function main() {
     await assert.rejects(cloneHostedDatabases(async (...commands) => {
       cloneCommands.push(...commands);
       if (commands[0].includes('json_build_object')) return JSON.stringify({ owner: 'synthetic', limit: -1, explicitAcl: false });
-      if (commands[0].includes('pg_terminate_backend')) return 't';
+      if (commands[0].includes('pg_terminate_backend')) return '0';
       if (commands[0].startsWith('CREATE DATABASE pgtap_worker_2')) throw new Error('synthetic clone failure');
       return '[]';
     }, ['pgtap_worker_1', 'pgtap_worker_2'], clones), /synthetic clone failure/);
     assert.deepEqual(clones, ['pgtap_worker_1']);
     assert.equal(cloneCommands[1], 'ALTER DATABASE postgres ALLOW_CONNECTIONS false');
-    assert.match(cloneCommands[3], /TEMPLATE postgres STRATEGY WAL_LOG/);
+    assert.match(cloneCommands[4], /TEMPLATE postgres STRATEGY WAL_LOG/);
     assert.equal(cloneCommands.at(-1), 'ALTER DATABASE postgres ALLOW_CONNECTIONS true');
     const syntheticSql = {
       'autocommit.sql': 'INSERT INTO fixture VALUES (1); BEGIN; ROLLBACK;',

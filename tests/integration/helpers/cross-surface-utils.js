@@ -258,7 +258,7 @@ async function createShipmentViaTabularImport(client, input) {
     input.clientReferenceNumber
     || `CS-IMP-REF-${Date.now()}-${randomBytes(2).toString('hex').toUpperCase()}`;
   const recipientName = input.recipientName || 'Cross Surface Import Recipient';
-  const recipientPhone = input.recipientPhone || `+9665${randomBytes(4).toString('hex').slice(0, 8)}`;
+  const recipientPhone = input.recipientPhone || '+12025550123';
   const addressLine1 = input.addressLine1 || '742 Import Flow Street';
   const city = input.city || 'Riyadh';
   const province = input.province || 'Riyadh';
@@ -337,6 +337,12 @@ async function createShipmentViaTabularImport(client, input) {
             enabled: true,
           },
           { source_column: 'Country', target_field: 'destination_address.country', enabled: true },
+          {
+            target_field: 'destination_address.validation_status',
+            value_mode: 'fixed',
+            fixed_value: 'pending',
+            enabled: true,
+          },
         ],
         rows: [
           {
@@ -356,7 +362,8 @@ async function createShipmentViaTabularImport(client, input) {
 
   const preparedRun = parseRpcResult(prepareRows[0]?.run, 'tabular_import_prepare_v1');
   if (Number(preparedRun?.blocked_count || 0) > 0) {
-    throw new Error(`tabular_import_prepare_v1 blocked cross-surface shipment import for ${trackingNumber}`);
+    const reasonCodes = preparedRun.rows?.[0]?.reason_codes ?? [];
+    throw new Error(`tabular_import_prepare_v1 blocked cross-surface shipment import for ${trackingNumber}: ${reasonCodes.join(', ')}`);
   }
 
   await setServiceContext(client, input.organizationId, input.userId);
@@ -391,15 +398,16 @@ async function createShipmentViaTabularImport(client, input) {
     [preparedRun.run_id],
   );
 
+  const importedRow = processedRun.rows?.find(row => row.target_record_id === shipmentId);
   return {
     shipmentId,
-    workflowRunId: null,
-    correlationId: null,
+    workflowRunId: importedRow?.workflow_run_id,
+    correlationId: importedRow?.primary_result?.metadata?.correlation_id,
     trackingNumber,
     clientReferenceNumber: shipmentRows[0]?.client_reference_number || clientReferenceNumber,
     importRunId: preparedRun.run_id,
     reportId: importRunRows[0]?.report_id ?? null,
-    result: processedRun,
+    result: importedRow?.primary_result,
   };
 }
 
@@ -539,6 +547,17 @@ async function createShipmentViaWebhookIntake(client, input) {
       service_type: input.serviceType || 'delivery',
       source: 'integration.cross-surface-delivery',
       source_origin: 'webhook',
+      recipient: {
+        name: 'Cross Surface Webhook Recipient',
+        phone_number: '+12025550123',
+        address: {
+          line1: '742 Example Street',
+          city: 'Riyadh',
+          province: 'Riyadh',
+          postal_code: '11564',
+          country: 'SA',
+        },
+      },
     },
   };
   const headers = {
@@ -561,14 +580,14 @@ async function createShipmentViaWebhookIntake(client, input) {
     throw new Error(`workflow_intake_webhook failed: ${JSON.stringify(response)}`);
   }
 
-  const plannedResource = response.body?.resource || {};
+  const plannedResource = response.body?.planned_resource || {};
   const plannedShipmentId = plannedResource.id ?? null;
   const plannedTrackingNumber = plannedResource.tracking_number ?? null;
   const followupWorkflowRunId = response.followup_workflow_run_id || response.body?.followup_workflow_run_id || null;
   if (!followupWorkflowRunId) {
     throw new Error(`workflow_intake_webhook did not return a follow-up workflow run: ${JSON.stringify(response)}`);
   }
-  if (!plannedShipmentId || !plannedTrackingNumber) {
+  if (plannedResource.type !== 'shipment' || !plannedShipmentId || !plannedTrackingNumber) {
     throw new Error(`workflow_intake_webhook did not return a planned shipment resource: ${JSON.stringify(response)}`);
   }
 

@@ -17,6 +17,7 @@ export function SpreadsheetPreview({
   sampleRowLimit = 5,
 }: SpreadsheetPreviewProps) {
   const t = useTranslations("ui.tabularFile");
+  const tPreview = useTranslations("ui.mappingStudio.spreadsheetPreview");
   const previewId = React.useId();
   const [showAllColumns, setShowAllColumns] = React.useState(false);
   const initialColumns = columns.slice(0, Math.max(1, columnLimit));
@@ -26,9 +27,9 @@ export function SpreadsheetPreview({
 
   return (
     <div className="space-y-3">
-      <div id={`${previewId}-label`} className="text-sm font-medium text-ui-ink">Spreadsheet preview</div>
+      <div id={`${previewId}-label`} className="text-sm font-medium text-ui-ink">{tPreview("title")}</div>
       {columns.length === 0 ? (
-        <p className="text-sm text-ui-muted">Upload a CSV/XLSX file to inspect headers and sample rows.</p>
+        <p className="text-sm text-ui-muted">{tPreview("empty")}</p>
       ) : (
         <>
           {hasColumnLimit ? (

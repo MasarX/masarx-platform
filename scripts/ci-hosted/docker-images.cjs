@@ -9,6 +9,8 @@ function pinnedReference(image, pins) {
   const host = slash === -1 ? '' : image.slice(0, slash);
   const name = host === 'ghcr.io' || host === 'public.ecr.aws' ? image.slice(slash + 1) : image;
   const normalized = name.split('@')[0].split(':')[0]
+    .replace(/^postgrest\/postgrest$/, 'supabase/postgrest')
+    .replace(/^axllent\/mailpit$/, 'supabase/mailpit')
     .replace(/^(?:docker\/)?library\/kong$/, 'supabase/kong');
   const pin = pins.find(row => row.image === normalized || row.runtimeId === image);
   const digest = image.includes('@') ? image.slice(image.indexOf('@') + 1) : undefined;

@@ -7,17 +7,12 @@ const { upsertSettings } = require('../../utils/policies');
 const { verifySignedUrl } = require('../workflows/helpers/label-print-helpers');
 const { ensureStorageBucket, resolveStorageAdminKey } = require('../helpers/storage-admin');
 const { fetchJsonWithRetry, truncateText } = require('../helpers/http');
+const { signedRendererHeaders } = require('../helpers/renderer-request');
 
 loadEnv();
 
 const { SUPABASE_URL, DATABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
-const LABEL_RENDERER_AUTH =
-  process.env.LABEL_RENDERER_DB_JWT ||
-  process.env.LABEL_RENDERER_TOKEN ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SERVICE_ROLE_KEY ||
-  '';
 const SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   process.env.SERVICE_ROLE_KEY ||
@@ -35,7 +30,6 @@ if (
   !SUPABASE_URL ||
   !DATABASE_URL ||
   !SUPABASE_ANON_KEY ||
-  !LABEL_RENDERER_AUTH ||
   !STORAGE_ADMIN_KEY ||
   !labelsEdgeEnabled
 ) {
@@ -155,11 +149,7 @@ if (
           `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/label-renderer`,
           {
             method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              authorization: `Bearer ${LABEL_RENDERER_AUTH}`,
-              apikey: SUPABASE_ANON_KEY,
-            },
+            headers: await signedRendererHeaders(`${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/label-renderer`),
             body: JSON.stringify({
               mode: 'print',
               organization_id: orgId,
@@ -169,7 +159,7 @@ if (
               expires_seconds: 600,
             }),
           },
-          { purpose: `print sync ${orgId}` },
+          { attempts: 1, purpose: `print sync ${orgId}` },
         );
 
         const payload = jsonError || !json ? { raw: truncateText(bodyText) } : json;

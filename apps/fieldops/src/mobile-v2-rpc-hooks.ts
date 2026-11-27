@@ -521,6 +521,10 @@ export function getMobileV2SupabaseSchemaClient(
   return schemaClientFactory.call(supabase, schema);
 }
 
+export function isMobileV2RpcAccessDenied(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "42501";
+}
+
 async function callRpc<TParams extends Record<string, unknown>>(
   input: RpcCallInput<TParams>,
 ): Promise<unknown> {
@@ -558,9 +562,11 @@ async function callRpc<TParams extends Record<string, unknown>>(
       rpc: input.name,
       correlationId: trace.correlationId,
       durationMs: Math.round(durationMs),
-      message: error.message ?? "unknown",
+      message: error.code === "42501" ? error.code : error.message ?? "unknown",
     });
-    throw new Error(`mobile_v2_rpc:${input.name} failed — ${error.message ?? "unknown"}`);
+    throw Object.assign(new Error(`mobile_v2_rpc:${input.name} failed — ${error.message ?? "unknown"}`), {
+      code: error.code,
+    });
   }
   emitMobileV2TraceEvent("rpc.end", {
     rpc: input.name,
