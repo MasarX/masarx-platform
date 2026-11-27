@@ -9,6 +9,26 @@ LANGUAGE sql SECURITY DEFINER SET search_path TO public, pg_temp AS $test$
   SELECT scope_id FROM public.resolve_settings_row_from_context(p_category, p_context);
 $test$;
 
+CREATE FUNCTION pg_temp.policy_query_error(p_sql_role TEXT, p_sql TEXT) RETURNS TEXT
+LANGUAGE plpgsql AS $test$
+DECLARE
+  v_error TEXT;
+BEGIN
+  IF p_sql_role IS NOT NULL THEN
+    EXECUTE format('SET LOCAL ROLE %I', p_sql_role);
+  END IF;
+  BEGIN
+    EXECUTE p_sql;
+  EXCEPTION WHEN OTHERS THEN
+    v_error := SQLSTATE || ': ' || SQLERRM;
+  END;
+  IF p_sql_role IS NOT NULL THEN
+    EXECUTE 'RESET ROLE';
+  END IF;
+  RETURN v_error;
+END;
+$test$;
+
 CREATE FUNCTION pg_temp.policy_claim_one_job() RETURNS UUID
 LANGUAGE sql SECURITY DEFINER SET search_path TO public, pg_temp AS $test$
   SELECT job_id FROM public.claim_pending_jobs(1);
@@ -38,8 +58,10 @@ DECLARE
   v_context JSONB := jsonb_build_object('organization_id', p_org, 'client_id', p_client,
     'sender_id', v_sender, 'webhook_source_id', v_source);
   v_claims JSONB := jsonb_build_object('sub', 'edge-function', 'role', 'edge_api_gateway_role', 'aud', 'authenticated');
-  v_denial CONSTANT TEXT := 'Policy context is outside the permitted organization scope';
+  v_denial CONSTANT TEXT := '42501: Policy context is outside the permitted organization scope';
   v_result JSONB;
+  v_scope_id UUID;
+  v_scope_denial TEXT;
   v_job UUID;
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', '', TRUE);
@@ -85,32 +107,30 @@ BEGIN
   PERFORM set_config('request.jwt.claim.role', 'edge_api_gateway_role', TRUE);
   PERFORM set_config('request.jwt.claims', v_claims::text, TRUE);
   EXECUTE 'SET LOCAL ROLE edge_api_gateway_role';
-  RETURN NEXT is(pg_temp.policy_scope_id(v_category, v_context), p_org,
-    'Gateway resolves the configured account for its source organization');
-  RETURN NEXT throws_ok(format('SELECT pg_temp.policy_scope_id(%L, %L::jsonb)', 'tabular_import_policy', v_context),
-    '42501', v_denial, 'Gateway scope is limited to configured lookups');
+  v_scope_id := pg_temp.policy_scope_id(v_category, v_context);
+  v_scope_denial := pg_temp.policy_query_error(NULL,
+    format('SELECT pg_temp.policy_scope_id(%L, %L::jsonb)', 'tabular_import_policy', v_context));
   v_result := public.workflow_intake_api_gateway_v1(v_token, 'POST', v_path, '', '{}', '{}');
   EXECUTE 'RESET ROLE';
+  RETURN NEXT is(v_scope_id::text, p_org::text, 'Gateway resolves the configured account for its source organization');
+  RETURN NEXT is(v_scope_denial, v_denial, 'Gateway scope is limited to configured lookups');
   RETURN NEXT is(v_result->>'action', 'proxy', 'Intake accepts the configured account');
 
-  EXECUTE 'SET LOCAL ROLE authenticated';
-  RETURN NEXT throws_ok(format('SELECT pg_temp.policy_scope_id(%L, %L::jsonb)', v_category, v_context),
-    '42501', v_denial, 'Gateway lookup requires the database role');
-  EXECUTE 'RESET ROLE';
+  RETURN NEXT is(pg_temp.policy_query_error('authenticated',
+    format('SELECT pg_temp.policy_scope_id(%L, %L::jsonb)', v_category, v_context)),
+    v_denial, 'Gateway lookup requires the database role');
 
   PERFORM set_config('request.jwt.claim.role', 'edge_webhook_role', TRUE);
   PERFORM set_config('request.jwt.claims', (v_claims || '{"role":"edge_webhook_role"}')::text, TRUE);
-  EXECUTE 'SET LOCAL ROLE edge_webhook_role';
-  RETURN NEXT lives_ok(format('SELECT pg_temp.policy_scope_id(%L, %L::jsonb)', 'workflow_defaults', v_context),
-    'Webhook resolves workflow defaults for its source');
-  EXECUTE 'RESET ROLE';
+  RETURN NEXT is(pg_temp.policy_query_error('edge_webhook_role',
+    format('SELECT pg_temp.policy_scope_id(%L, %L::jsonb)', 'workflow_defaults', v_context)),
+    NULL::text, 'Webhook resolves workflow defaults for its source');
 
   PERFORM set_config('request.jwt.claim.role', 'edge_api_caller_role', TRUE);
   PERFORM set_config('request.jwt.claims', (v_claims || '{"role":"edge_api_caller_role"}')::text, TRUE);
-  EXECUTE 'SET LOCAL ROLE edge_api_caller_role';
-  RETURN NEXT lives_ok(format('SELECT pg_temp.policy_scope_id(%L, %L::jsonb)', 'outbound_retry_policy', v_context),
-    'API caller resolves retry policy for its work');
-  EXECUTE 'RESET ROLE';
+  RETURN NEXT is(pg_temp.policy_query_error('edge_api_caller_role',
+    format('SELECT pg_temp.policy_scope_id(%L, %L::jsonb)', 'outbound_retry_policy', v_context)),
+    NULL::text, 'API caller resolves retry policy for its work');
 
   PERFORM set_config('request.jwt.claim.role', '', TRUE);
   PERFORM set_config('request.jwt.claims', '', TRUE);
@@ -123,7 +143,7 @@ BEGIN
   EXECUTE 'SET LOCAL ROLE authenticated';
   v_job := pg_temp.policy_claim_one_job();
   EXECUTE 'RESET ROLE';
-  RETURN NEXT is(v_job, v_own_job, 'Inline worker claims a job for the active organization');
+  RETURN NEXT is(v_job::text, v_own_job::text, 'Inline worker claims a job for the active organization');
   RETURN NEXT ok((SELECT lease_expires_at IS NULL FROM public.outbound_calls WHERE id = v_other_job),
     'Inline worker leaves other organizations available for background work');
 END;
@@ -158,7 +178,9 @@ DECLARE
   v_endpoint RECORD;
   v_scope RECORD;
   v_sql TEXT;
-  v_denial CONSTANT TEXT := 'Policy context is outside the permitted organization scope';
+  v_sql_role TEXT;
+  v_scope_type TEXT;
+  v_denial CONSTANT TEXT := '42501: Policy context is outside the permitted organization scope';
   v_authenticated_claims TEXT := jsonb_build_object('sub', v_actor, 'role', 'authenticated')::text;
   v_service_claims TEXT := jsonb_build_object('sub', v_actor, 'role', 'service_role')::text;
 BEGIN
@@ -201,9 +223,7 @@ BEGIN
     PERFORM set_config('request.jwt.claim.sub', v_actor::text, TRUE);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', TRUE);
     PERFORM set_config('request.jwt.claims', v_authenticated_claims, TRUE);
-    IF v_endpoint.api_role THEN
-      EXECUTE 'SET LOCAL ROLE authenticated';
-    END IF;
+    v_sql_role := CASE WHEN v_endpoint.api_role THEN 'authenticated' END;
 
     FOR v_scope IN
       SELECT * FROM (VALUES
@@ -213,19 +233,17 @@ BEGIN
         ('resource', jsonb_build_object('resource_id', v_branch))
       ) AS inputs(label, context)
     LOOP
-      RETURN NEXT throws_ok(format(v_endpoint.query, v_scope.context), '42501', v_denial,
+      RETURN NEXT is(pg_temp.policy_query_error(v_sql_role, format(v_endpoint.query, v_scope.context)), v_denial,
         format('%s checks the %s scope', v_endpoint.name, v_scope.label));
     END LOOP;
-    RETURN NEXT lives_ok(format(v_endpoint.query, v_own), format('%s accepts the caller scope', v_endpoint.name));
+    RETURN NEXT is(pg_temp.policy_query_error(v_sql_role, format(v_endpoint.query, v_own)),
+      NULL::text, format('%s accepts the caller scope', v_endpoint.name));
 
-    EXECUTE 'RESET ROLE';
     PERFORM set_config('request.jwt.claim.role', 'service_role', TRUE);
     PERFORM set_config('request.jwt.claims', v_service_claims, TRUE);
-    IF v_endpoint.api_role THEN
-      EXECUTE 'SET LOCAL ROLE service_role';
-    END IF;
-    RETURN NEXT lives_ok(format(v_endpoint.query, v_other), format('%s accepts the service scope', v_endpoint.name));
-    EXECUTE 'RESET ROLE';
+    v_sql_role := CASE WHEN v_endpoint.api_role THEN 'service_role' END;
+    RETURN NEXT is(pg_temp.policy_query_error(v_sql_role, format(v_endpoint.query, v_other)),
+      NULL::text, format('%s accepts the service scope', v_endpoint.name));
   END LOOP;
 
   FOR v_endpoint IN
@@ -234,7 +252,6 @@ BEGIN
   LOOP
     PERFORM set_config('request.jwt.claim.role', 'authenticated', TRUE);
     PERFORM set_config('request.jwt.claims', v_authenticated_claims, TRUE);
-    EXECUTE 'SET LOCAL ROLE authenticated';
     FOR v_scope IN
       SELECT * FROM (VALUES
         ('organization', v_other_org, NULL::uuid, NULL::uuid),
@@ -254,49 +271,46 @@ BEGIN
       END IF;
 
       IF v_scope.label = 'service' THEN
-        EXECUTE 'RESET ROLE';
         PERFORM set_config('request.jwt.claim.role', 'service_role', TRUE);
         PERFORM set_config('request.jwt.claims', v_service_claims, TRUE);
-        EXECUTE 'SET LOCAL ROLE service_role';
       END IF;
+      v_sql_role := CASE WHEN v_scope.label = 'service' THEN 'service_role' ELSE 'authenticated' END;
       IF v_scope.label IN ('caller', 'service') THEN
-        RETURN NEXT lives_ok(v_sql, format('%s next action %s accepts the %s scope',
+        RETURN NEXT is(pg_temp.policy_query_error(v_sql_role, v_sql), NULL::text, format('%s next action %s accepts the %s scope',
           v_endpoint.schema_name, v_endpoint.version_name, v_scope.label));
       ELSE
-        RETURN NEXT throws_ok(v_sql, '42501', v_denial, format('%s next action %s checks the %s scope',
+        RETURN NEXT is(pg_temp.policy_query_error(v_sql_role, v_sql), v_denial, format('%s next action %s checks the %s scope',
           v_endpoint.schema_name, v_endpoint.version_name, v_scope.label));
       END IF;
     END LOOP;
-    EXECUTE 'RESET ROLE';
   END LOOP;
 
   PERFORM set_config('request.jwt.claim.role', 'authenticated', TRUE);
   PERFORM set_config('request.jwt.claims', v_authenticated_claims, TRUE);
-  EXECUTE 'SET LOCAL ROLE authenticated';
   FOR v_scope IN
     SELECT * FROM (VALUES ('client_id', v_client), ('sender_id', v_sender), ('resource_id', v_branch)) AS inputs(key, id)
   LOOP
-    RETURN NEXT throws_ok(format('SELECT api.resolve_mobile_shell_policy(''driver'', %L::jsonb)',
-      jsonb_build_object(v_scope.key, v_scope.id)), '42501', v_denial, 'Shell checks the ' || v_scope.key || ' scope');
+    RETURN NEXT is(pg_temp.policy_query_error('authenticated', format('SELECT api.resolve_mobile_shell_policy(''driver'', %L::jsonb)',
+      jsonb_build_object(v_scope.key, v_scope.id))), v_denial, 'Shell checks the ' || v_scope.key || ' scope');
   END LOOP;
-  RETURN NEXT lives_ok(format('SELECT api.resolve_mobile_shell_policy(''driver'', %L::jsonb)', v_own),
-    'Shell accepts the caller scope');
+  RETURN NEXT is(pg_temp.policy_query_error('authenticated', format('SELECT api.resolve_mobile_shell_policy(''driver'', %L::jsonb)', v_own)),
+    NULL::text, 'Shell accepts the caller scope');
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  v_result := api.resolve_mobile_shell_policy('driver', v_other);
+  EXECUTE 'RESET ROLE';
   RETURN NEXT ok(
-    (api.resolve_mobile_shell_policy('driver', v_other) -> 'scope_path') @>
+    (v_result -> 'scope_path') @>
       jsonb_build_array(jsonb_build_object('scope_type', 'tenant', 'scope_id', v_org)),
     'Shell applies the active organization');
-  RETURN NEXT throws_ok(format('SELECT * FROM api.resolve_tabular_import_policy_v1(%L::jsonb)',
-    jsonb_build_object('organizationId', v_other_org)), '42501', v_denial, 'Tabular policy checks registry context keys');
-  RETURN NEXT throws_ok(format('SELECT * FROM api.resolve_tabular_import_policy_v1(%L::jsonb)',
-    jsonb_build_object('providerId', v_provider)), '42501', v_denial, 'Tabular policy checks the registered resource scope');
+  RETURN NEXT is(pg_temp.policy_query_error('authenticated', format('SELECT * FROM api.resolve_tabular_import_policy_v1(%L::jsonb)',
+    jsonb_build_object('organizationId', v_other_org))), v_denial, 'Tabular policy checks registry context keys');
+  RETURN NEXT is(pg_temp.policy_query_error('authenticated', format('SELECT * FROM api.resolve_tabular_import_policy_v1(%L::jsonb)',
+    jsonb_build_object('providerId', v_provider))), v_denial, 'Tabular policy checks the registered resource scope');
 
-  EXECUTE 'RESET ROLE';
   PERFORM set_config('request.jwt.claim.role', 'service_role', TRUE);
   PERFORM set_config('request.jwt.claims', v_service_claims, TRUE);
-  EXECUTE 'SET LOCAL ROLE service_role';
-  RETURN NEXT lives_ok(format('SELECT api.resolve_mobile_shell_policy(''driver'', %L::jsonb)', v_own),
-    'Shell accepts the service scope');
-  EXECUTE 'RESET ROLE';
+  RETURN NEXT is(pg_temp.policy_query_error('service_role', format('SELECT api.resolve_mobile_shell_policy(''driver'', %L::jsonb)', v_own)),
+    NULL::text, 'Shell accepts the service scope');
 
   PERFORM set_config('request.jwt.claims', '', TRUE);
   PERFORM set_config('request.jwt.claim.role', '', TRUE);
@@ -314,9 +328,9 @@ BEGIN
   INSERT INTO public.tracking_sessions(organization_id, client_id, shipment_id, token, expires_at)
     VALUES (v_org, v_own_client, v_shipment, v_session, '2099-01-01T00:00:00Z');
 
+  RETURN NEXT is(pg_temp.policy_query_error('service_role', format('SELECT * FROM api.resolve_device_policy(%L::jsonb)', v_other)),
+    NULL::text, 'SQL service session resolves a supplied organization');
   EXECUTE 'SET LOCAL ROLE service_role';
-  RETURN NEXT lives_ok(format('SELECT * FROM api.resolve_device_policy(%L::jsonb)', v_other),
-    'SQL service session resolves a supplied organization');
   v_result := api.public_tracking_live_session_v1(jsonb_build_object('session_token', v_session, 'ip_hash', gen_random_uuid()));
   EXECUTE 'RESET ROLE';
   RETURN NEXT is(v_result->>'ok', 'true', 'Tracking resolves the organization of a valid session');
@@ -330,26 +344,31 @@ BEGIN
 
   PERFORM set_config('request.jwt.claims', v_authenticated_claims, TRUE);
   EXECUTE 'SET LOCAL ROLE authenticated';
-  RETURN NEXT ok((SELECT r.scope_path FROM api.resolve_pod_policy(v_own || jsonb_build_object(
-    'resource_type', 'route_stop', 'resource_id', v_stop)) AS r) @>
+  SELECT r.scope_path INTO v_result FROM api.resolve_pod_policy(v_own || jsonb_build_object(
+    'resource_type', 'route_stop', 'resource_id', v_stop)) AS r;
+  EXECUTE 'RESET ROLE';
+  RETURN NEXT ok(v_result @>
     jsonb_build_array(jsonb_build_object('scope_type', 'resource', 'scope_id', v_own_branch)),
     'POD resolves a route stop through its branch');
-  RETURN NEXT throws_ok(format('SELECT * FROM api.resolve_pod_policy(%L::jsonb)',
-    v_other || jsonb_build_object('resource_type', 'route_stop', 'resource_id', v_stop)),
-    '42501', v_denial, 'POD checks explicit organization with a resolved stop branch');
-  RETURN NEXT is((SELECT scope_type FROM api.resolve_device_policy(jsonb_build_object('resource_id', 'invalid'))),
-    'global', 'Device policy uses global scope for a malformed resource');
-  RETURN NEXT is((SELECT scope_type FROM api.resolve_mobile_shell_policy('[]'::jsonb)),
-    'global', 'Mobile shell uses global scope for non-object context');
-  RETURN NEXT lives_ok(format('SELECT * FROM api.resolve_device_policy(%L::jsonb)',
-    v_own || jsonb_build_object('actor_id', 'fixture')), 'Device policy accepts a non-scope actor label');
-  RETURN NEXT throws_ok(format('SELECT * FROM api.resolve_device_policy(%L::jsonb)',
-    jsonb_build_object('organization_id', NULL, 'client_id', v_client)), '42501', v_denial,
-    'Device policy still checks the client with a null organization');
-  RETURN NEXT throws_ok(format('SELECT * FROM api.resolve_device_policy(%L::jsonb)',
-    jsonb_build_object('organization_id', 'invalid', 'client_id', v_client)), '42501', v_denial,
-    'Device policy still checks the client with a malformed organization');
+  RETURN NEXT is(pg_temp.policy_query_error('authenticated', format('SELECT * FROM api.resolve_pod_policy(%L::jsonb)',
+    v_other || jsonb_build_object('resource_type', 'route_stop', 'resource_id', v_stop))),
+    v_denial, 'POD checks explicit organization with a resolved stop branch');
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  SELECT scope_type INTO v_scope_type FROM api.resolve_device_policy(jsonb_build_object('resource_id', 'invalid'));
   EXECUTE 'RESET ROLE';
+  RETURN NEXT is(v_scope_type, 'global', 'Device policy uses global scope for a malformed resource');
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  SELECT scope_type INTO v_scope_type FROM api.resolve_mobile_shell_policy('[]'::jsonb);
+  EXECUTE 'RESET ROLE';
+  RETURN NEXT is(v_scope_type, 'global', 'Mobile shell uses global scope for non-object context');
+  RETURN NEXT is(pg_temp.policy_query_error('authenticated', format('SELECT * FROM api.resolve_device_policy(%L::jsonb)',
+    v_own || jsonb_build_object('actor_id', 'fixture'))), NULL::text, 'Device policy accepts a non-scope actor label');
+  RETURN NEXT is(pg_temp.policy_query_error('authenticated', format('SELECT * FROM api.resolve_device_policy(%L::jsonb)',
+    jsonb_build_object('organization_id', NULL, 'client_id', v_client))), v_denial,
+    'Device policy still checks the client with a null organization');
+  RETURN NEXT is(pg_temp.policy_query_error('authenticated', format('SELECT * FROM api.resolve_device_policy(%L::jsonb)',
+    jsonb_build_object('organization_id', 'invalid', 'client_id', v_client))), v_denial,
+    'Device policy still checks the client with a malformed organization');
 
   RETURN NEXT ok(public.ensure_task_type_from_catalog_v1(v_other_org, 'route_stop_execute', '{}') IS NOT NULL,
     'System provisioning resolves the bound task organization');
@@ -358,11 +377,12 @@ BEGIN
 
   UPDATE public.route_runs SET branch_id = NULL WHERE id = v_run;
   EXECUTE 'SET LOCAL ROLE authenticated';
-  RETURN NEXT ok((SELECT r.scope_path FROM api.resolve_pod_policy(jsonb_build_object(
-    'resource_type', 'route_stop', 'resource_id', v_stop)) AS r) @>
+  SELECT r.scope_path INTO v_result FROM api.resolve_pod_policy(jsonb_build_object(
+    'resource_type', 'route_stop', 'resource_id', v_stop)) AS r;
+  EXECUTE 'RESET ROLE';
+  RETURN NEXT ok(v_result @>
     jsonb_build_array(jsonb_build_object('scope_type', 'tenant', 'scope_id', v_org)),
     'POD binds a stop without a branch to its route organization');
-  EXECUTE 'RESET ROLE';
 
   INSERT INTO public.marketplace_participant_profiles(organization_id, participant_type_key, display_name)
     VALUES (v_other_org, 'provider_tenant', 'Policy fixture') RETURNING id INTO v_profile;
