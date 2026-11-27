@@ -32,9 +32,6 @@ apps/console-v2/src/modules/integrations/ExternalIntakeWorkspaceToolbar.tsx 15
 apps/console-v2/src/modules/integrations/_helpers.ts 1
 apps/console-v2/src/modules/integrations/_webhook-replay-outcome.ts 1
 apps/console-v2/src/modules/integrations/_webhook-tester/envelopes.ts 1
-apps/console-v2/src/modules/operate/fleet/driver-applications.tsx 115
-apps/console-v2/src/modules/operate/fleet/drivers.tsx 197
-apps/console-v2/src/modules/operate/fleet/vehicles.tsx 221
 apps/console-v2/src/modules/platform/access.tsx 217
 apps/console-v2/src/modules/platform/commands.tsx 17
 apps/console-v2/src/modules/platform/organizations.tsx 162
