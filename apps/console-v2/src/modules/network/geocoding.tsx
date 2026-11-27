@@ -721,7 +721,7 @@ function AddressGeocodeAction({
 export function GeocodingModule() {
   const { scope, currentTenantId } = useIdentity();
   const go = useConsoleNavigator();
-  const { fmtNumber, fmtDateTime } = useI18n();
+  const { t, fmtNumber, fmtDateTime } = useI18n();
   const drawer = useDrawer();
   const modal = useModal();
   const canRead = useCapability(CAP.NETWORK_READ);
@@ -1702,10 +1702,25 @@ export function GeocodingModule() {
   function renderPolicyTab(): ReactNode {
     return (
       <div>
-        <PolicyWorkflowControls
-          readback={policyMutationReadback}
-          onConfigure={openPolicyEditor}
-        />
+        {canonicalScopeOrder.length > 0 ? (
+          <PolicyWorkflowControls
+            readback={policyMutationReadback}
+            onConfigure={openPolicyEditor}
+          />
+        ) : scopeRegistryQuery.isPending ? (
+          <StateView kind="loading" hint={t('modules.geocoding.scopeTypes.loading', 'Loading scope types…')} />
+        ) : scopeRegistryQuery.isError ? (
+          <StateView kind="error" hint={t('modules.geocoding.scopeTypes.error', 'Could not load scope types.')} />
+        ) : (
+          <StateView
+            kind="empty"
+            title={t('modules.geocoding.scopeTypes.emptyTitle', 'No scope types registered')}
+            hint={t(
+              'modules.geocoding.scopeTypes.emptyHint',
+              'The scope type registry has no rows, so geocoding policies cannot be configured at any scope. Ask a platform administrator to register scope types.',
+            )}
+          />
+        )}
         <PolicyCapabilitySummary
           mapPolicy={mapPolicyValue}
           addressResolutionPolicy={addressResolutionPolicy}

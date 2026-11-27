@@ -6,7 +6,7 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { englishT } from '@/lib/i18n';
 import * as toastStore from '@/components/toastStore';
-import { ar } from '@/lib/seed-raw/i18n/areas/operate-queues';
+import ar from '@/lib/seed-raw/i18n/areas/ar/operate-queues';
 import { PickupsModule } from '@/modules/operate/pickups';
 
 // Header title, header actions, tabs and table headers are module copy; table cells hold seeded data.

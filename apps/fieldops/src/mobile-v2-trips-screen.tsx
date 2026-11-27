@@ -14,6 +14,7 @@ import {
   type ViewStyle,
 } from "react-native";
 
+import { getStrings, resolveLocaleCode, type FieldOpsStrings } from "./i18n";
 import { FxIcon } from "./mobile-v2-icon";
 import type { MobileV2IconName } from "./mobile-v2-icon-specs";
 import { FxButton, FxCard, FxChip, FxChipButton, FxCol, FxRow } from "./mobile-v2-primitives";
@@ -40,35 +41,27 @@ export type MobileV2TripStage =
   | "reconciled";
 
 export interface MobileV2TripStep {
-  readonly stage: MobileV2TripStage;
-  readonly label: string;
-  readonly hint: string;
+  readonly stage: Exclude<MobileV2TripStage, "assigned">;
   readonly icon: MobileV2IconName;
 }
 
 // Demo-parity alignment: TRIP_STEPS in the design source (flow-network.jsx
 // line 465) treats "assigned" as a pre-step meta state — not counted in
 // trip-progress — so the steps list has 7 entries starting from gate-in.
-// Labels and hints follow the design source verbatim:
-//   gate-in:    Gate-in              · Vehicle inspection · ID + odometer
-//   loading:    Load & scan          · Scan each manifest
-//   sealed:     Apply seal           · Capture seal photo
-//   in-transit: Depart               · Sets ETA · live track
-//   arrived:    Arrive               · Geo-fence + dock confirm
-//   gate-out:   Seal verify          · Compare seal at receiving hub
-//   reconciled: Reconcile manifest   · Receiving counts + exceptions
+// Labels and hints live in the FieldOps catalogs (`trips.stepLabel` and
+// `trips.stepHint`, keyed by stage), verbatim from the design source.
 //
 // When trip.stage === "assigned", `findIndex` returns -1 so the progress
 // counter renders as 0/7 with sub "Assigned · next: Gate-in" — matching
 // reference 01-start.png exactly.
 export const MOBILE_V2_TRIP_STEPS: ReadonlyArray<MobileV2TripStep> = Object.freeze([
-  Object.freeze({ stage: "gate-in" as const, label: "Gate-in", hint: "Vehicle inspection · ID + odometer", icon: "shield" as MobileV2IconName }),
-  Object.freeze({ stage: "loading" as const, label: "Load & scan", hint: "Scan each manifest", icon: "package" as MobileV2IconName }),
-  Object.freeze({ stage: "sealed" as const, label: "Apply seal", hint: "Capture seal photo", icon: "shield" as MobileV2IconName }),
-  Object.freeze({ stage: "in-transit" as const, label: "Depart", hint: "Sets ETA · live track", icon: "truck" as MobileV2IconName }),
-  Object.freeze({ stage: "arrived" as const, label: "Arrive", hint: "Geo-fence + dock confirm", icon: "pin" as MobileV2IconName }),
-  Object.freeze({ stage: "gate-out" as const, label: "Seal verify", hint: "Compare seal at receiving hub", icon: "check" as MobileV2IconName }),
-  Object.freeze({ stage: "reconciled" as const, label: "Reconcile manifest", hint: "Receiving counts + exceptions", icon: "check-double" as MobileV2IconName }),
+  Object.freeze({ stage: "gate-in" as const, icon: "shield" as MobileV2IconName }),
+  Object.freeze({ stage: "loading" as const, icon: "package" as MobileV2IconName }),
+  Object.freeze({ stage: "sealed" as const, icon: "shield" as MobileV2IconName }),
+  Object.freeze({ stage: "in-transit" as const, icon: "truck" as MobileV2IconName }),
+  Object.freeze({ stage: "arrived" as const, icon: "pin" as MobileV2IconName }),
+  Object.freeze({ stage: "gate-out" as const, icon: "check" as MobileV2IconName }),
+  Object.freeze({ stage: "reconciled" as const, icon: "check-double" as MobileV2IconName }),
 ]);
 
 // Aligned to design SSOT `docs/design/fieldops-mobile-v2/screens/flow-network.jsx`
@@ -90,17 +83,6 @@ const STAGE_TONE: Readonly<Record<MobileV2TripStage, FxChipTone>> = Object.freez
   arrived: "success",
   "gate-out": "warning",
   reconciled: "success",
-});
-
-const STAGE_LABEL: Readonly<Record<MobileV2TripStage, string>> = Object.freeze({
-  assigned: "Assigned",
-  "gate-in": "Gate-in",
-  loading: "Loading",
-  sealed: "Sealed",
-  "in-transit": "In transit",
-  arrived: "Arrived",
-  "gate-out": "Gate-out",
-  reconciled: "Reconciled",
 });
 
 export interface MobileV2TripLocation {
@@ -131,11 +113,15 @@ export interface MobileV2Trip {
   readonly manifest: ReadonlyArray<MobileV2TripManifestEntry>;
 }
 
-function formatEta(etaMin: number | null): string {
+function formatEta(etaMin: number | null, t: FieldOpsStrings["trips"]): string {
   if (etaMin === null) return "—";
-  if (etaMin === 0) return "Now";
-  if (etaMin > 0) return `${Math.floor(etaMin / 60)}h ${etaMin % 60}m`;
-  return `${Math.abs(etaMin)}m late`;
+  if (etaMin === 0) return t.etaNow;
+  if (etaMin > 0) {
+    return t.etaDuration
+      .replace("{hours}", () => String(Math.floor(etaMin / 60)))
+      .replace("{minutes}", () => String(etaMin % 60));
+  }
+  return t.etaLate.replace("{minutes}", () => String(Math.abs(etaMin)));
 }
 
 // ---------------------------------------------------------------------------
@@ -144,11 +130,13 @@ function formatEta(etaMin: number | null): string {
 
 function TripCard({
   theme,
+  strings,
   trip,
   hero,
   onOpen,
 }: {
   readonly theme: MobileV2Theme;
+  readonly strings: FieldOpsStrings;
   readonly trip: MobileV2Trip;
   readonly hero?: boolean;
   readonly onOpen: () => void;
@@ -158,9 +146,10 @@ function TripCard({
   const heroFg = hero === true ? theme.onChrome : theme.ink;
   const subFg = hero === true ? "rgba(255,255,255,0.7)" : theme.muted;
   const lineBg = hero === true ? "rgba(255,255,255,0.25)" : theme.border;
+  const t = strings.trips;
 
   return (
-    <Pressable onPress={onOpen} accessibilityRole="button" accessibilityLabel={`Open trip ${trip.id}`}>
+    <Pressable onPress={onOpen} accessibilityRole="button" accessibilityLabel={t.openTrip.replace("{id}", () => trip.id)}>
       {/* Outer card wraps both the main info area and the footer slab so
           they share a single rounded border. `overflow: hidden` clips
           the footer's distinct background to the card's rounded
@@ -200,7 +189,7 @@ function TripCard({
                 {trip.id}
               </Text>
               <FxChip theme={theme} tone={STAGE_TONE[trip.stage]} dense>
-                {STAGE_LABEL[trip.stage]}
+                {t.stage[trip.stage]}
               </FxChip>
             </FxRow>
             <Text
@@ -227,7 +216,7 @@ function TripCard({
                 fontFamily: MOBILE_V2_FONT_SANS,
               }}
             >
-              ETA
+              {t.eta}
             </Text>
             <Text
               style={{
@@ -237,7 +226,7 @@ function TripCard({
                 color: heroFg,
               }}
             >
-              {formatEta(trip.etaMin)}
+              {formatEta(trip.etaMin, t)}
             </Text>
           </FxCol>
         </FxRow>
@@ -246,7 +235,7 @@ function TripCard({
         <FxRow gap={MOBILE_V2_SPACING.xl} align="center" style={{ marginBottom: MOBILE_V2_SPACING.xl }}>
           <FxCol gap={1}>
             <Text style={{ fontSize: 10, color: heroFg, opacity: 0.55, fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold, letterSpacing: 0.6 }}>
-              FROM
+              {t.from}
             </Text>
             <Text style={{ fontSize: 12.5, fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold, color: heroFg, fontFamily: MOBILE_V2_FONT_SANS }}>
               {trip.origin.name}
@@ -304,7 +293,7 @@ function TripCard({
 
           <FxCol gap={1} style={{ alignItems: "flex-end" }}>
             <Text style={{ fontSize: 10, color: heroFg, opacity: 0.55, fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold, letterSpacing: 0.6 }}>
-              TO
+              {t.to}
             </Text>
             <Text style={{ fontSize: 12.5, fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold, color: heroFg, fontFamily: MOBILE_V2_FONT_SANS }}>
               {trip.dest.name}
@@ -348,7 +337,7 @@ function TripCard({
                 fontFamily: MOBILE_V2_FONT_SANS,
               }}
             >
-              Vehicle
+              {t.vehicle}
             </Text>
             <Text
               style={{
@@ -373,7 +362,7 @@ function TripCard({
                 fontFamily: MOBILE_V2_FONT_SANS,
               }}
             >
-              Parcels
+              {t.parcels}
             </Text>
             <Text
               style={{
@@ -398,7 +387,7 @@ function TripCard({
                 fontFamily: MOBILE_V2_FONT_SANS,
               }}
             >
-              Seal
+              {t.seal}
             </Text>
             <Text
               style={{
@@ -421,7 +410,7 @@ function TripCard({
             fontFamily: MOBILE_V2_FONT_SANS,
           }}
         >
-          Open →
+          {t.open}
         </Text>
       </View>
       </View>
@@ -449,11 +438,15 @@ export interface MobileV2TripsScreenProps {
   readonly onSearchChange?: (q: string) => void;
   /** Scan-seal action invoked by the design-canvas yellow CTA next to the search input. */
   readonly onScanSeal?: () => void;
+  readonly locale?: string;
   readonly style?: StyleProp<ViewStyle>;
 }
 
 export function MobileV2TripsScreen(props: MobileV2TripsScreenProps): React.ReactElement {
   const { theme } = props;
+  const strings = getStrings(resolveLocaleCode(props.locale));
+  const t = strings.trips;
+  const count = (template: string, n: number): string => template.replace("{count}", () => String(n));
   const base = props.trips;
   const filtered =
     props.tab === "mine"
@@ -502,9 +495,9 @@ export function MobileV2TripsScreen(props: MobileV2TripsScreenProps): React.Reac
           <TextInput
             value={props.searchQuery ?? ""}
             onChangeText={(v) => props.onSearchChange?.(v)}
-            placeholder="Search trip ID, vehicle, seal, leg…"
+            placeholder={t.searchPlaceholder}
             placeholderTextColor={theme.muted}
-            accessibilityLabel="Search trips"
+            accessibilityLabel={t.searchLabel}
             style={{
               flex: 1,
               color: theme.ink,
@@ -516,7 +509,7 @@ export function MobileV2TripsScreen(props: MobileV2TripsScreenProps): React.Reac
           <Pressable
             onPress={() => props.onScanSeal?.()}
             accessibilityRole="button"
-            accessibilityLabel="Scan seal"
+            accessibilityLabel={t.scanSeal}
             style={{
               backgroundColor: theme.accent,
               height: 32,
@@ -537,7 +530,7 @@ export function MobileV2TripsScreen(props: MobileV2TripsScreenProps): React.Reac
                 fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold,
               }}
             >
-              Scan seal
+              {t.scanSeal}
             </Text>
           </Pressable>
         </View>
@@ -554,34 +547,34 @@ export function MobileV2TripsScreen(props: MobileV2TripsScreenProps): React.Reac
           <FxChipButton
             theme={theme}
             icon="truck"
-            label={`All · ${base.length}`}
+            label={count(t.tabAll, base.length)}
             active={props.tab === "all"}
             onPress={() => props.onTabChange("all")}
-            accessibilityLabel="Show all trips"
+            accessibilityLabel={t.showAll}
           />
           <FxChipButton
             theme={theme}
             icon="user"
-            label={`Mine · ${base.filter((tr) => tr.driver === "You").length}`}
+            label={count(t.tabMine, base.filter((tr) => tr.driver === "You").length)}
             active={props.tab === "mine"}
             onPress={() => props.onTabChange("mine")}
-            accessibilityLabel="Show my trips"
+            accessibilityLabel={t.showMine}
           />
           <FxChipButton
             theme={theme}
             icon="clock"
-            label={`In transit · ${base.filter((tr) => tr.stage === "in-transit").length}`}
+            label={count(t.tabTransit, base.filter((tr) => tr.stage === "in-transit").length)}
             active={props.tab === "transit"}
             onPress={() => props.onTabChange("transit")}
-            accessibilityLabel="Show in-transit trips"
+            accessibilityLabel={t.showTransit}
           />
           <FxChipButton
             theme={theme}
             icon="check"
-            label={`Reconciled · ${base.filter((tr) => tr.stage === "reconciled" || tr.stage === "gate-out").length}`}
+            label={count(t.tabReconciled, base.filter((tr) => tr.stage === "reconciled" || tr.stage === "gate-out").length)}
             active={props.tab === "reconciled"}
             onPress={() => props.onTabChange("reconciled")}
-            accessibilityLabel="Show reconciled trips"
+            accessibilityLabel={t.showReconciled}
           />
         </ScrollView>
       </View>
@@ -608,9 +601,9 @@ export function MobileV2TripsScreen(props: MobileV2TripsScreenProps): React.Reac
                 paddingVertical: MOBILE_V2_SPACING.xs,
               }}
             >
-              My trip
+              {t.myTrip}
             </Text>
-            <TripCard theme={theme} trip={mine} hero onOpen={() => props.onOpenTrip(mine)} />
+            <TripCard strings={strings} theme={theme} trip={mine} hero onOpen={() => props.onOpenTrip(mine)} />
           </>
         ) : null}
         {others.length > 0 ? (
@@ -627,10 +620,10 @@ export function MobileV2TripsScreen(props: MobileV2TripsScreenProps): React.Reac
                 paddingTop: MOBILE_V2_SPACING.xl,
               }}
             >
-              Network · all hubs
+              {t.network}
             </Text>
             {others.map((tr) => (
-              <TripCard key={tr.id} theme={theme} trip={tr} onOpen={() => props.onOpenTrip(tr)} />
+              <TripCard strings={strings} key={tr.id} theme={theme} trip={tr} onOpen={() => props.onOpenTrip(tr)} />
             ))}
           </>
         ) : null}
@@ -653,11 +646,13 @@ export interface MobileV2TripDetailScreenProps {
   readonly onLiveNav?: () => void;
   readonly onReportIncident?: () => void;
   readonly onClose?: () => void;
+  readonly locale?: string;
   readonly style?: StyleProp<ViewStyle>;
 }
 
 export function MobileV2TripDetailScreen(props: MobileV2TripDetailScreenProps): React.ReactElement {
   const { theme, trip } = props;
+  const t = getStrings(resolveLocaleCode(props.locale)).trips;
   const stageActionBusy = props.isAdvancingStage === true;
   const idx = MOBILE_V2_TRIP_STEPS.findIndex((s) => s.stage === trip.stage);
   const nextStep = MOBILE_V2_TRIP_STEPS[idx + 1] ?? null;
@@ -678,7 +673,7 @@ export function MobileV2TripDetailScreen(props: MobileV2TripDetailScreenProps): 
           <FxRow justify="space-between" align="flex-start">
             <FxCol gap={4}>
               <Text style={{ fontSize: 11, color: theme.onChrome, opacity: 0.7, letterSpacing: 0.6, textTransform: "uppercase", fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold, fontFamily: MOBILE_V2_FONT_SANS }}>
-                Trip progress
+                {t.progress}
               </Text>
               <View style={{ flexDirection: "row", alignItems: "baseline" }}>
                 <Text style={{ fontSize: 32, fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold, fontFamily: MOBILE_V2_FONT_MONO, color: theme.onChrome, letterSpacing: -1 }}>
@@ -689,16 +684,16 @@ export function MobileV2TripDetailScreen(props: MobileV2TripDetailScreenProps): 
                 </Text>
               </View>
               <Text style={{ fontSize: 12, color: theme.onChrome, opacity: 0.7, fontFamily: MOBILE_V2_FONT_SANS }}>
-                {STAGE_LABEL[trip.stage]}
-                {nextStep !== null ? ` · next: ${nextStep.label}` : ""}
+                {t.stage[trip.stage]}
+                {nextStep !== null ? ` · ${t.next.replace("{step}", () => t.stepLabel[nextStep.stage])}` : ""}
               </Text>
             </FxCol>
             <FxCol gap={2} style={{ alignItems: "flex-end" }}>
               <Text style={{ fontSize: 10, color: theme.onChrome, opacity: 0.6, fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold, letterSpacing: 0.6, textTransform: "uppercase", fontFamily: MOBILE_V2_FONT_SANS }}>
-                Distance
+                {t.distance}
               </Text>
               <Text style={{ fontSize: 18, fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold, fontFamily: MOBILE_V2_FONT_MONO, color: theme.onChrome }}>
-                {trip.distance} km
+                {t.distanceKm.replace("{distance}", () => String(trip.distance))}
               </Text>
               <Text style={{ fontSize: 11, color: theme.onChrome, opacity: 0.6, fontFamily: MOBILE_V2_FONT_SANS, marginTop: 2 }}>
                 {trip.driver}
@@ -714,7 +709,7 @@ export function MobileV2TripDetailScreen(props: MobileV2TripDetailScreenProps): 
         {/* Stages timeline */}
         <FxCol gap={MOBILE_V2_SPACING.lg}>
           <Text style={{ fontSize: 10, color: theme.muted, fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold, letterSpacing: 0.8, textTransform: "uppercase", fontFamily: MOBILE_V2_FONT_SANS, paddingHorizontal: MOBILE_V2_SPACING.xs }}>
-            Stages
+            {t.stages}
           </Text>
           <FxCard theme={theme} padding={0}>
             {MOBILE_V2_TRIP_STEPS.map((step, i) => {
@@ -767,16 +762,16 @@ export function MobileV2TripDetailScreen(props: MobileV2TripDetailScreenProps): 
                   <FxCol gap={2} style={{ flex: 1 }}>
                     <FxRow gap={MOBILE_V2_SPACING.md} align="center">
                       <Text style={{ fontSize: 13, fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold, color: theme.ink, fontFamily: MOBILE_V2_FONT_SANS }}>
-                        {step.label}
+                        {t.stepLabel[step.stage]}
                       </Text>
                       {current ? (
                         <FxChip theme={theme} tone="accent" dense>
-                          Current
+                          {t.current}
                         </FxChip>
                       ) : null}
                     </FxRow>
                     <Text style={{ fontSize: 11.5, color: theme.muted, fontFamily: MOBILE_V2_FONT_SANS }}>
-                      {step.hint}
+                      {t.stepHint[step.stage]}
                     </Text>
                   </FxCol>
                   {done ? <FxIcon name="check" size={14} color={theme.success} stroke={2.2} /> : null}
@@ -789,16 +784,16 @@ export function MobileV2TripDetailScreen(props: MobileV2TripDetailScreenProps): 
         {/* Manifest */}
         <FxCol gap={MOBILE_V2_SPACING.lg}>
           <Text style={{ fontSize: 10, color: theme.muted, fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold, letterSpacing: 0.8, textTransform: "uppercase", fontFamily: MOBILE_V2_FONT_SANS, paddingHorizontal: MOBILE_V2_SPACING.xs }}>
-            Manifest
+            {t.manifest}
           </Text>
           <FxCard theme={theme} padding={0}>
             <FxRow justify="space-between" style={{ paddingHorizontal: MOBILE_V2_SPACING["3xl"], paddingVertical: MOBILE_V2_SPACING["2xl"] }}>
               <FxCol gap={2}>
                 <Text style={{ fontSize: 13, fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold, color: theme.ink, fontFamily: MOBILE_V2_FONT_SANS }}>
-                  {trip.totalParcels} parcels · {trip.manifest.length} sub-manifests
+                  {t.manifestSummary.replace("{parcels}", () => String(trip.totalParcels)).replace("{manifests}", () => String(trip.manifest.length))}
                 </Text>
                 <Text style={{ fontSize: 11, color: theme.muted, fontFamily: MOBILE_V2_FONT_MONO }}>
-                  Scanned {trip.scanned}/{trip.totalParcels} · {pct}%
+                  {t.scannedSummary.replace("{scanned}", () => String(trip.scanned)).replace("{total}", () => String(trip.totalParcels)).replace("{pct}", () => String(pct))}
                 </Text>
               </FxCol>
               <FxChip theme={theme} tone={trip.scanned === trip.totalParcels ? "success" : "warning"} dense mono>
@@ -826,7 +821,7 @@ export function MobileV2TripDetailScreen(props: MobileV2TripDetailScreenProps): 
                     {m.wb}
                   </Text>
                   <Text style={{ fontSize: 11, color: theme.muted, fontFamily: MOBILE_V2_FONT_SANS }}>
-                    {m.count} parcels
+                    {t.manifestParcels.replace("{count}", () => String(m.count))}
                   </Text>
                 </FxCol>
                 <FxIcon name="chevron-right" size={16} color={theme.muted} />
@@ -838,25 +833,25 @@ export function MobileV2TripDetailScreen(props: MobileV2TripDetailScreenProps): 
         {/* Trailer seal */}
         <FxCol gap={MOBILE_V2_SPACING.lg}>
           <Text style={{ fontSize: 10, color: theme.muted, fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold, letterSpacing: 0.8, textTransform: "uppercase", fontFamily: MOBILE_V2_FONT_SANS, paddingHorizontal: MOBILE_V2_SPACING.xs }}>
-            Trailer seal
+            {t.trailerSeal}
           </Text>
           <FxCard theme={theme} padding={14}>
             <FxRow justify="space-between" align="center">
               <FxCol gap={2}>
                 <Text style={{ fontSize: 11, color: theme.muted, fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold, letterSpacing: 0.6, textTransform: "uppercase", fontFamily: MOBILE_V2_FONT_SANS }}>
-                  Seal number
+                  {t.sealNumber}
                 </Text>
                 <Text style={{ fontSize: 18, fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold, fontFamily: MOBILE_V2_FONT_MONO, color: theme.ink }}>
-                  {trip.sealNo ?? "Not yet sealed"}
+                  {trip.sealNo ?? t.notSealed}
                 </Text>
               </FxCol>
               {trip.sealNo !== null ? (
                 <FxChip theme={theme} tone="success" icon="shield" dense>
-                  Verified
+                  {t.verified}
                 </FxChip>
               ) : (
                 <FxButton theme={theme} variant="soft" size="sm" icon="scan" onPress={props.onScanSeal} disabled={stageActionBusy}>
-                  Scan seal
+                  {t.scanSeal}
                 </FxButton>
               )}
             </FxRow>
@@ -867,46 +862,46 @@ export function MobileV2TripDetailScreen(props: MobileV2TripDetailScreenProps): 
         <FxCol gap={MOBILE_V2_SPACING.lg}>
           {trip.stage === "assigned" ? (
             <FxButton theme={theme} variant="primary" full size="lg" icon="shield" onPress={() => props.onAdvanceStage?.("gate-in")} disabled={stageActionBusy}>
-              Start gate-in
+              {t.startGateIn}
             </FxButton>
           ) : null}
           {trip.stage === "gate-in" ? (
             <FxButton theme={theme} variant="primary" full size="lg" icon="package" onPress={() => props.onAdvanceStage?.("loading")} disabled={stageActionBusy}>
-              Begin loading
+              {t.beginLoading}
             </FxButton>
           ) : null}
           {trip.stage === "loading" ? (
             <FxButton theme={theme} variant="primary" full size="lg" icon="shield" onPress={props.onScanSeal} disabled={stageActionBusy || trip.scanned < trip.totalParcels}>
-              Apply seal · {trip.scanned}/{trip.totalParcels}
+              {t.applySeal.replace("{scanned}", () => String(trip.scanned)).replace("{total}", () => String(trip.totalParcels))}
             </FxButton>
           ) : null}
           {trip.stage === "sealed" ? (
             <FxButton theme={theme} variant="success" full size="lg" icon="truck" onPress={() => props.onAdvanceStage?.("in-transit")} disabled={stageActionBusy}>
-              Depart · start trip
+              {t.depart}
             </FxButton>
           ) : null}
           {trip.stage === "in-transit" ? (
             <FxButton theme={theme} variant="primary" full size="lg" icon="map" onPress={props.onLiveNav}>
-              Live nav · {trip.dest.name}
+              {t.liveNav.replace("{destination}", () => trip.dest.name)}
             </FxButton>
           ) : null}
           {trip.stage === "arrived" ? (
             <FxButton theme={theme} variant="primary" full size="lg" icon="check" onPress={() => props.onAdvanceStage?.("gate-out")} disabled={stageActionBusy}>
-              Seal verify · gate-out
+              {t.sealVerify}
             </FxButton>
           ) : null}
           {trip.stage === "gate-out" ? (
             <FxButton theme={theme} variant="success" full size="lg" icon="check-double" onPress={() => props.onAdvanceStage?.("reconciled")} disabled={stageActionBusy}>
-              Reconcile manifest
+              {t.reconcile}
             </FxButton>
           ) : null}
           {trip.stage === "reconciled" ? (
             <FxButton theme={theme} variant="soft" full size="lg" icon="check" onPress={props.onClose}>
-              Trip closed · back
+              {t.closed}
             </FxButton>
           ) : null}
           <FxButton theme={theme} variant="ghost" full icon="alert" onPress={props.onReportIncident}>
-            Report incident on trip
+            {t.reportIncident}
           </FxButton>
         </FxCol>
       </ScrollView>

@@ -9,6 +9,7 @@ DECLARE
   v_org UUID := gen_random_uuid();
   v_other_org UUID := gen_random_uuid();
   v_user UUID := gen_random_uuid();
+  v_reviewer UUID := gen_random_uuid();
   v_client UUID := gen_random_uuid();
   v_other_client UUID := gen_random_uuid();
   v_sender UUID := gen_random_uuid();
@@ -70,6 +71,14 @@ BEGIN
     'ops_admin',
     'tenant',
     NULL
+  ), (
+    v_reviewer,
+    v_org,
+    v_reviewer::text || '@example.test',
+    'Settings Governance Reviewer',
+    'ops_admin',
+    'tenant',
+    NULL
   );
 
   SELECT role_id
@@ -87,6 +96,12 @@ BEGIN
     ) VALUES (
       v_org,
       v_user,
+      v_role_id,
+      v_user,
+      '{"seed":true,"source":"pgtap","template_key":"ops_admin"}'::jsonb
+    ), (
+      v_org,
+      v_reviewer,
       v_role_id,
       v_user,
       '{"seed":true,"source":"pgtap","template_key":"ops_admin"}'::jsonb
@@ -261,7 +276,7 @@ BEGIN
     'active policy remains unchanged before approval'
   );
 
-  PERFORM set_config('request.jwt.claim.sub', v_user::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_reviewer::text, true);
   PERFORM set_config('request.jwt.claims', json_build_object('role', 'authenticated')::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
 
@@ -400,7 +415,7 @@ BEGIN
   PERFORM is((SELECT COUNT(*)::INT FROM public.manual_review_tasks WHERE id = v_rejected_task), 1, 'rejection path creates one manual review task');
   PERFORM is((SELECT COUNT(*)::INT FROM public.tasks WHERE id = v_rejected_operator_task), 1, 'rejection path creates one Review Queue task');
 
-  PERFORM set_config('request.jwt.claim.sub', v_user::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_reviewer::text, true);
   PERFORM set_config('request.jwt.claims', json_build_object('role', 'authenticated')::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
 

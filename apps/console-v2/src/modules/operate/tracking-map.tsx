@@ -26,9 +26,9 @@ import { useResolveSettings, useResourceList, useProposeSettingsChange } from '@
 import { useDrawer } from '@/hooks/useOverlay';
 import { pushToast } from '@/components/toastStore';
 import { useCapability, useIdentity } from '@/lib/identity';
+import { englishT, fill, useT, type Translate } from '@/lib/i18n';
 import { CAP } from '@/lib/capabilities';
 import type { SettingsResolution } from '@/types/domain';
-import { englishT, fill, useI18n, type Translate } from '@/lib/i18n';
 
 // Wave 6 schema-drift remediation (OPERATIONS Sections 13, 14, 15):
 // FE row interfaces annotated against canonical `public.geocodes`,
@@ -214,7 +214,7 @@ export function resolveTrackingGeocodeCoordinates(row: Record<string, unknown>):
 }
 
 export function TrackingMapModule() {
-  const { t } = useI18n();
+  const t = useT();
   const drawer = useDrawer();
   const { scope, currentTenantId } = useIdentity();
   const canRead = useCapability(CAP.SHIPMENTS_READ);
@@ -423,7 +423,7 @@ export function TrackingMapModule() {
 
   function openShipmentDrawer(s: ShipmentRow) {
     drawer.open(
-      buildDecisionTrailDrawerSpec(s as Record<string, unknown>, 'shipment'),
+      buildDecisionTrailDrawerSpec(s as Record<string, unknown>, 'shipment', undefined, t),
     );
   }
 

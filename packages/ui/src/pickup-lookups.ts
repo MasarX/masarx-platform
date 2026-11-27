@@ -5,7 +5,7 @@ import { loadPickupRequestRows } from "./pickup-page-shared";
 import { normalizeObject, stringValue } from "./pickup-operations-utils";
 import { pickupErrorText, pickupKindLabel } from "./pickup-text";
 import { formatReferenceValue } from "./resource-utils";
-import { formatUiError } from "./utils";
+import { formatUiError, UiMessageError } from "./utils";
 
 export type PickupLookupOption = { value: string; label: string; groupValue?: string };
 type Context = {
@@ -41,7 +41,7 @@ export async function loadPickupLookups(me: Context | null, mode: "request" | "w
   if (senderId) {
     try {
       clientId = text(normalizeObject(await ui.getResource("senders", senderId))?.client_id);
-      if (!clientId) throw new Error(pickupErrorText("senderClientScope"));
+      if (!clientId) throw new UiMessageError(pickupErrorText("senderClientScope"));
     } catch (error) {
       return { options, error: formatUiError(error, pickupErrorText("senderScope")) };
     }

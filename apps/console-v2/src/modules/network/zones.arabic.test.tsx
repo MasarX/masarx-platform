@@ -6,7 +6,7 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { getLookups } from '@/lib/data-source';
 import { englishT, fill } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/customers-network';
+import ar from '@/lib/seed-raw/i18n/areas/ar/customers-network';
 import { ZonesModule } from './zones';
 
 async function waitForLookups(category: string) {

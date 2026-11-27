@@ -28,7 +28,7 @@ async function filesystemUsed(dockerRoot, env) {
   }
 }
 
-function watchDiskGrowth(dockerRoot, env) {
+function watchDiskGrowth(dockerRoot, env, quiet) {
   const pulls = new Set();
   let timer; let sampling; let previousBytes; let warned = false;
   const sample = async () => {
@@ -41,7 +41,7 @@ function watchDiskGrowth(dockerRoot, env) {
       if (bytes > previousBytes) for (const progress of pulls) progress();
       previousBytes = bytes;
     } catch (error) {
-      if (!warned) {
+      if (!quiet && !warned) {
         const cause = sanitize(error.message, environmentSecrets(env)).replace(/[\r\n]+/g, ' ');
         console.warn(`Docker data-root sampling unavailable; treating missing samples as no growth: ${cause}`);
         warned = true;
@@ -80,8 +80,8 @@ async function capturePullDiagnostics(env, logFile, label, reason) {
   }
 }
 
-async function prepareImages(pins, { env, checked, timed, summary, wait, dockerRoot, logFile, checkDisk = () => {} }) {
-  const subscribeProgress = dockerRoot ? watchDiskGrowth(dockerRoot, env) : undefined;
+async function prepareImages(pins, { env, checked, timed, summary, wait, dockerRoot, logFile, checkDisk = () => {}, quiet = false }) {
+  const subscribeProgress = dockerRoot ? watchDiskGrowth(dockerRoot, env, quiet) : undefined;
   const inspect = async (reference, pin) => {
     const id = (await checked('docker', ['image', 'inspect', '--format', '{{.Id}}', reference], env, 30000, { quiet: true })).trim();
     if (id !== pin.image_id) throw new Error(`Reviewed image ID mismatch: ${pin.image}`);
@@ -113,11 +113,12 @@ async function prepareImages(pins, { env, checked, timed, summary, wait, dockerR
           budgetError.failure = error.failure;
           error = budgetError;
         }
-        if (logFile) await capturePullDiagnostics(env, logFile, label, error.message);
+        if (!quiet && logFile) await capturePullDiagnostics(env, logFile, label, error.message);
         throw error;
       }
     }, wait, {
       attempts: PULL_ATTEMPTS,
+      quiet,
       retryable(error) {
         const output = `${error.message}\n${error.failure?.output || ''}`;
         return Date.now() < deadline && !FINAL_PULL_ERROR.test(output) && (error.failure?.timeout || TRANSIENT_PULL_ERROR.test(output));
@@ -125,7 +126,7 @@ async function prepareImages(pins, { env, checked, timed, summary, wait, dockerR
     }));
     pin.runtimeId = await inspect(reference, pin);
     await checked('docker', ['tag', pin.runtimeId, alias(pin)], env, 30000);
-    console.log(`Reviewed image ${pin.image}@${pin.digest} served by ${served}; verified ${pin.runtimeId}`);
+    if (!quiet) console.log(`Reviewed image ${pin.image}@${pin.digest} served by ${served}; verified ${pin.runtimeId}`);
     return { image: pin.image, digest: pin.digest, id: pin.runtimeId, served };
   }));
   summary.images = results.filter(result => result.status === 'fulfilled').map(result => result.value);

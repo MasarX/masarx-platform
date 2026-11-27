@@ -5,7 +5,7 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { TrackingMapModule } from '@/modules/operate/tracking-map';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/dispatch';
+import ar from '@/lib/seed-raw/i18n/areas/ar/dispatch';
 
 describe('TrackingMapModule in Arabic', () => {
   afterEach(() => {

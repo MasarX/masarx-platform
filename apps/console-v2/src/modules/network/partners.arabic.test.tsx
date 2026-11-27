@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { englishT, fill } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/customers-network';
+import ar from '@/lib/seed-raw/i18n/areas/ar/customers-network';
 import { PartnersModule } from './partners';
 
 const untranslated = (selector: string, allow: string[] = []) =>

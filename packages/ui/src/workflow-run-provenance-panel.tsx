@@ -38,6 +38,10 @@ function resolveSourceLabel(
   if (source === "webhook") return labels.sources.webhook;
   if (source === "api") return labels.sources.api;
   if (source === "worker") return labels.sources.worker;
+  if (source === "schedule") return labels.sources.schedule;
+  if (source === "schedule_manual") return labels.sources.scheduleManual;
+  if (source === "task") return labels.sources.task;
+  if (source === "workflow_run_trigger") return labels.sources.workflowRunTrigger;
   return labels.sources.unknown;
 }
 

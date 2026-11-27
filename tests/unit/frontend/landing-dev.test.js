@@ -19,6 +19,9 @@ const intake = {
   LANDING_CLIENTS_ENDPOINT: `${devUrl}/marketing-lead-intake/clients`,
 };
 
+// Expected <form> count per landing route; track/ also has the delivery-options form.
+const formCounts = { "": 4, "track/": 5, "drivers/": 4, "drivers/apply/": 4, "drivers/status/": 4 };
+
 function withBuild(env, check) {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), "landing-dev-test-"));
   try {
@@ -56,14 +59,14 @@ for (const env of ["dev", "stg", "prod"]) {
         ["", "Test environment: do not enter real personal data."],
         ["ar/", "بيئة اختبار: لا تُدخل بيانات شخصية حقيقية."],
       ]) {
-        for (const route of ["", "track/", "drivers/", "drivers/apply/", "drivers/status/"]) {
+        for (const route of Object.keys(formCounts)) {
           const html = read(`${prefix}${route}index.html`);
           assert.equal(html.includes('<meta name="robots" content="noindex, nofollow">'), expected);
           const forms = [...html.matchAll(/<form\b/g)];
           const notices = [...html.matchAll(
             /<p id="(dev-form-notice-\d+)" class="dev-form-notice" data-i18n="dev_form_notice">([^<]+)<\/p>\s*<form\b[^>]*aria-describedby="\1"/g
           )];
-          assert.equal(forms.length, 4);
+          assert.equal(forms.length, formCounts[route]);
           assert.equal(notices.length, expected ? forms.length : 0);
           assert.equal(html.includes("dev_form_notice"), expected);
           assert.ok(!html.includes("dev-form-disabled"));
@@ -80,10 +83,10 @@ test("dev builds with all endpoints empty and disables every form", () => {
   withBuild({ DEPLOY_ENV: "dev", NEXT_PUBLIC_SUPABASE_URL: "", ...emptyEndpoints }, (result, read) => {
     assert.equal(result.status, 0, result.stderr);
     for (const prefix of ["", "ar/"]) {
-      for (const route of ["", "track/", "drivers/", "drivers/apply/", "drivers/status/"]) {
+      for (const route of Object.keys(formCounts)) {
         const html = read(`${prefix}${route}index.html`);
         const forms = [...html.matchAll(/<form\b[^>]*>([\s\S]*?)<\/form>/g)];
-        assert.equal(forms.length, 4);
+        assert.equal(forms.length, formCounts[route]);
         for (const [, contents] of forms) {
           assert.match(contents, /^<fieldset class="dev-form-disabled" disabled>[\s\S]*<\/fieldset>$/);
         }

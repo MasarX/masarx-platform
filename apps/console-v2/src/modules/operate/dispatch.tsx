@@ -223,6 +223,23 @@ export function routeStopLoadScanStatus(
   return { label: t('dispatch.loadScan.missing'), tone: 'neutral', detail: null };
 }
 
+export function routeStopDeliveryOption(
+  stop: Pick<RouteStopRow, 'metadata'>,
+  t: (path: string, fallback?: string) => string,
+): { label: string; tone: ChipKind; instruction: string | null } | null {
+  const option = objectRecord(stop.metadata?.recipient_delivery_option);
+  if (option?.option === 'branch_pickup') {
+    return { label: t('deliveryOption.branchPickup', 'Branch pickup'), tone: 'warn', instruction: null };
+  }
+  if (option?.option !== 'safe_place') return null;
+  const place = nonBlankText(option.place) ?? 'other';
+  return {
+    label: t('deliveryOption.safePlace', 'Safe place: {place}').replace('{place}', t(`deliveryOption.place.${place}`, place)),
+    tone: 'info',
+    instruction: place === 'other' ? nonBlankText(option.instruction) ?? null : null,
+  };
+}
+
 function objectRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -4151,6 +4168,7 @@ export function DispatchModule() {
                             pending: transitionTaskMutation.isPending,
                           }, t);
                           const loadScan = routeStopLoadScanStatus(s, t);
+                          const deliveryOption = routeStopDeliveryOption(s, t);
                           const start = s.planned_window_start_at
                             ? new Date(s.planned_window_start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                             : '—';
@@ -4204,7 +4222,17 @@ export function DispatchModule() {
                                   />
                                 </div>
                               </td>
-                              <td>{s.stop_kind ?? '—'}</td>
+                              <td>
+                                {s.stop_kind ?? '—'}
+                                {deliveryOption ? (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginBlockStart: 4 }}>
+                                    <Chip size="xs" kind={deliveryOption.tone} label={deliveryOption.label} />
+                                    {deliveryOption.instruction ? (
+                                      <span className="state__hint"><bdi>{deliveryOption.instruction}</bdi></span>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </td>
                               <td className="mono">{`${start}–${end}`}</td>
                               <td className="cell-num mono">{stopCod != null ? String(stopCod) : '—'}</td>
                               <td>
