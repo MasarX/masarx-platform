@@ -36,6 +36,7 @@
       "id": "ci",
       "include_re": [
         "^scripts/deploy/apply-guard\\.cjs$",
+        "^scripts/deploy/disable-console-v2-dev-subdomain\\.sh$",
         "^\\.github/",
         "^config/ci/",
         "^scripts/ci-hosted/review-verdict\\.cjs$",
