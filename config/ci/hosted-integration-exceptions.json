@@ -195,47 +195,7 @@
     "maxSkipped": 2
   },
   {
-    "file": "tests/integration/workflows/dispatch-stop-exceptions.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Hosted results differ from the current integration assertions",
-    "issue": "#575",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/cross-surface-delivery.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Hosted results differ from the current integration assertions",
-    "issue": "#575",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/automation-marketplace-v1-completion.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Hosted results differ from the current integration assertions",
-    "issue": "#575",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/tasks/tasks-ssot-core.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Hosted results differ from the current integration assertions",
-    "issue": "#575",
-    "expires": "2026-12-08"
-  },
-  {
     "file": "tests/integration/workflows/shipment-amend-cancel.test.js",
-    "kind": "known-failure",
-    "runner": "Hosted integration",
-    "reason": "Hosted results differ from the current integration assertions",
-    "issue": "#575",
-    "expires": "2026-12-08"
-  },
-  {
-    "file": "tests/integration/ack/ack-mapping.test.js",
     "kind": "known-failure",
     "runner": "Hosted integration",
     "reason": "Hosted results differ from the current integration assertions",

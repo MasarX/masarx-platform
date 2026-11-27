@@ -258,7 +258,7 @@ async function createShipmentViaTabularImport(client, input) {
     input.clientReferenceNumber
     || `CS-IMP-REF-${Date.now()}-${randomBytes(2).toString('hex').toUpperCase()}`;
   const recipientName = input.recipientName || 'Cross Surface Import Recipient';
-  const recipientPhone = input.recipientPhone || `+9665${randomBytes(4).toString('hex').slice(0, 8)}`;
+  const recipientPhone = input.recipientPhone || '+12025550123';
   const addressLine1 = input.addressLine1 || '742 Import Flow Street';
   const city = input.city || 'Riyadh';
   const province = input.province || 'Riyadh';
@@ -561,14 +561,14 @@ async function createShipmentViaWebhookIntake(client, input) {
     throw new Error(`workflow_intake_webhook failed: ${JSON.stringify(response)}`);
   }
 
-  const plannedResource = response.body?.resource || {};
+  const plannedResource = response.body?.planned_resource || {};
   const plannedShipmentId = plannedResource.id ?? null;
   const plannedTrackingNumber = plannedResource.tracking_number ?? null;
   const followupWorkflowRunId = response.followup_workflow_run_id || response.body?.followup_workflow_run_id || null;
   if (!followupWorkflowRunId) {
     throw new Error(`workflow_intake_webhook did not return a follow-up workflow run: ${JSON.stringify(response)}`);
   }
-  if (!plannedShipmentId || !plannedTrackingNumber) {
+  if (plannedResource.type !== 'shipment' || !plannedShipmentId || !plannedTrackingNumber) {
     throw new Error(`workflow_intake_webhook did not return a planned shipment resource: ${JSON.stringify(response)}`);
   }
 
