@@ -17,12 +17,8 @@ apps/console-v2/src/components/TimelineLog.tsx 2
 apps/console-v2/src/components/expiryDescriptor.ts 7
 apps/console-v2/src/lib/auth.ts 1
 apps/console-v2/src/lib/data-source.ts 25
-apps/console-v2/src/lib/route-meta.ts 1
 apps/console-v2/src/modules/auth/AuthCallbackModule.tsx 5
 apps/console-v2/src/modules/auth/LoginModule.tsx 14
-apps/console-v2/src/modules/catalog/lookups.tsx 72
-apps/console-v2/src/modules/catalog/product-context-setup.tsx 42
-apps/console-v2/src/modules/catalog/service-offerings.tsx 154
 apps/console-v2/src/modules/customers/clients.tsx 70
 apps/console-v2/src/modules/customers/recipients.tsx 98
 apps/console-v2/src/modules/customers/related-shipments.tsx 9
@@ -79,7 +75,6 @@ apps/console-v2/src/modules/support/cases.tsx 180
 apps/console-v2/src/modules/workflows/_bindings/condition-model.ts 7
 apps/console-v2/src/modules/workflows/review-queue.tsx 193
 apps/console-v2/src/modules/workflows/runs.tsx 269
-apps/console-v2/src/modules/workflows/templates.tsx 240
 apps/console-v2/src/modules/workflows/workflow-run-context.tsx 17
 apps/console/app/_components/webhook-tester-page.tsx 1
 apps/console/app/integrations/plugins/[plugin_id]/page.tsx 2
