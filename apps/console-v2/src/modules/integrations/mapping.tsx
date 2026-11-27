@@ -29,6 +29,7 @@ import { useConsoleNavigator } from '@/lib/useConsoleNavigator';
 import { prettyOperatorJson, redactJsonForOperator, redactSensitiveText } from '@/lib/operator-redaction';
 import type { ChipKind } from '@/components/Chip';
 import { ExternalIntakeWorkspaceToolbar } from './ExternalIntakeWorkspaceToolbar';
+import { fill, useI18n } from '@/lib/i18n';
 
 // W18-4 schema-drift closure (see __audit__/SCHEMA-DRIFT/INTEGRATIONS.md §6):
 // Canonical SSOT is `public.mapping_configs`
@@ -242,12 +243,13 @@ function enabledStateKey(value: boolean): string {
 }
 
 function MappingEnabledChip({ value }: { value: boolean }) {
+  const { t } = useI18n();
   const state = enabledStateKey(value);
   const row = lookupRow('enabled_state', state);
   return row ? (
     <Chip label={row.label} kind={(row.tone as ChipKind) ?? 'neutral'} size="xs" />
   ) : (
-    <Chip label={`enabled_state/${state} (missing)`} kind="danger" size="xs" />
+    <Chip label={fill(t('integrationsMapping.mappingEnabledChip.enabledStateMissing'), { state: String(state) })} kind="danger" size="xs" />
   );
 }
 
@@ -265,7 +267,8 @@ function isArchivedSource(row: WebhookSourceDirectoryRow): boolean {
 }
 
 function SourceBindingStatus({ row }: { row: WebhookSourceDirectoryRow }) {
-  if (isArchivedSource(row)) return <Chip label="Archived" kind="warn" size="xs" />;
+  const { t } = useI18n();
+  if (isArchivedSource(row)) return <Chip label={t('integrationsMapping.sourceBindingStatus.archived')} kind="warn" size="xs" />;
   return <MappingEnabledChip value={row.enabled !== false} />;
 }
 
@@ -443,15 +446,17 @@ function remediationPayload(row: WebhookInboxRemediationRow | null | undefined):
 // `public.mapping_configs.mapping_type` CHECK enum). Missing canonical row
 // renders a danger-toned `(missing)` chip rather than a silent neutral default.
 function MappingTypeChip({ value }: { value: string }) {
+  const { t } = useI18n();
   const row = lookupRow('mapping_type', value);
   return row ? (
     <Chip label={row.label} kind={row.tone as ChipKind} size="xs" />
   ) : (
-    <Chip label={`mapping_type/${value} (missing)`} kind="danger" size="xs" />
+    <Chip label={fill(t('integrationsMapping.mappingTypeChip.mappingTypeMissing'), { value: String(value) })} kind="danger" size="xs" />
   );
 }
 
 export function MappingModule() {
+  const { t } = useI18n();
   const drawer = useDrawer();
   const modal = useModal();
   const go = useConsoleNavigator();
@@ -733,39 +738,39 @@ export function MappingModule() {
     const readbackReady = impact.readbackReady;
     modal.open({
       title: readbackReady
-        ? `Disable mapped intake dependency - ${row.mapping_key}`
-        : `Usage confirmation required - ${row.mapping_key}`,
+        ? fill(t('integrationsMapping.mappingModule.disableMappedIntakeDependency'), { mapping_key: String(row.mapping_key) })
+        : fill(t('integrationsMapping.mappingModule.usageConfirmationRequired'), { mapping_key: String(row.mapping_key) }),
       body: (
         <div data-testid="mapping-disable-impact-confirm">
           <StateView
             kind="error"
-            title={readbackReady ? 'This mapping is used by live intake configuration' : 'Mapping usage confirmation is required'}
+            title={readbackReady ? t('integrationsMapping.mappingModule.thisMappingIsUsed') : t('integrationsMapping.mappingModule.mappingUsageConfirmationIs')}
             hint={
               readbackReady
-                ? 'Disabling it can stop webhook/API payload normalization for bound sources, routing rules, or API routes. Confirm only after moving those dependencies to another mapping.'
-                : 'Disable is blocked until the mapping directory projection confirms whether live sources, routing rules, or API routes depend on this mapping.'
+                ? t('integrationsMapping.mappingModule.disablingItCanStop')
+                : t('integrationsMapping.mappingModule.disableIsBlockedUntil')
             }
           />
           <div className="kvgrid" style={{ marginTop: '10px' }}>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Mapping</span>
+              <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.mapping')}</span>
               <span className="kvgrid__val mono">{row.mapping_key}</span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Target</span>
+              <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.target')}</span>
               <span className="kvgrid__val mono">{mappingDirectoryById.get(row.id)?.target ?? mappingTarget(row)}</span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Impact</span>
+              <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.impact')}</span>
               <span className="kvgrid__val mono">
                 {readbackReady
-                  ? `${impact.sourceCount} sources - ${impact.ruleUsageCount} rules - ${impact.apiRouteCount} API routes`
-                  : 'Pending confirmation'}
+                  ? fill(t('integrationsMapping.mappingModule.sourcesRulesApiRoutes'), { sourceCount: String(impact.sourceCount), ruleUsageCount: String(impact.ruleUsageCount), apiRouteCount: String(impact.apiRouteCount) })
+                  : t('integrationsMapping.mappingModule.pendingConfirmation')}
               </span>
             </div>
             {sourceLabels.length > 0 ? (
               <div className="kvgrid__row">
-                <span className="kvgrid__key mono">Sources</span>
+                <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.sources')}</span>
                 <span className="kvgrid__val">{sourceLabels.join(', ')}</span>
               </div>
             ) : null}
@@ -774,10 +779,10 @@ export function MappingModule() {
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('integrationsMapping.mappingModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           {!readbackReady ? (
             <Button
-              label="Refresh usage"
+              label={t('integrationsMapping.mappingModule.refreshUsage')}
               kind="primary"
               onClick={async () => {
                 await Promise.all([
@@ -785,13 +790,13 @@ export function MappingModule() {
                   focusedMappingDirectoryQuery.refetch(),
                   canReadSources ? sourceDirectoryQuery.refetch() : Promise.resolve(),
                 ]);
-                pushToast('Mapping usage refreshed; review the disable action again.', 'info');
+                pushToast(t('integrationsMapping.mappingModule.mappingUsageRefreshedReview'), 'info');
                 modal.close();
               }}
             />
           ) : (
             <Button
-              label="Confirm disable"
+              label={t('integrationsMapping.mappingModule.confirmDisable')}
               iconName="lock"
               kind="danger"
               capability={CAP.MAPPINGS_WRITE}
@@ -800,11 +805,11 @@ export function MappingModule() {
                 try {
                   await disableMappingWithBackendReadback(row);
                   pushToast(
-                    `Disabled · ${row.mapping_key}`,
+                    fill(t('integrationsMapping.mappingModule.disabled'), { mapping_key: String(row.mapping_key) }),
                     seedDiagnosticsEnabled ? 'info' : 'good',
                   );
                 } catch (err) {
-                  pushToast(`Disable failed · ${(err as Error)?.message ?? ''}`, 'danger');
+                  pushToast(fill(t('integrationsMapping.mappingModule.disableFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
                 }
               }}
             />
@@ -816,29 +821,29 @@ export function MappingModule() {
 
   function openDeleteConfirm(row: MappingConfig) {
     modal.open({
-      title: `Delete mapping - ${row.mapping_key}`,
+      title: fill(t('integrationsMapping.mappingModule.deleteMapping'), { mapping_key: String(row.mapping_key) }),
       body: (
         <div data-testid="mapping-delete-confirm">
           <StateView
             kind="error"
-            title="Delete this mapping?"
-            hint="This removes the saved mapping profile from External Intake. Use delete only after dependencies have already been cleared."
+            title={t('integrationsMapping.mappingModule.deleteThisMapping')}
+            hint={t('integrationsMapping.mappingModule.thisRemovesTheSaved')}
           />
           <div className="kvgrid" style={{ marginTop: '10px' }}>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Mapping</span>
+              <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.mapping')}</span>
               <span className="kvgrid__val mono">{row.mapping_key}</span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Type</span>
+              <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.type')}</span>
               <span className="kvgrid__val mono">{row.mapping_type}</span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Target</span>
+              <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.target')}</span>
               <span className="kvgrid__val mono">{mappingDirectoryById.get(row.id)?.target ?? mappingTarget(row)}</span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Version</span>
+              <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.version')}</span>
               <span className="kvgrid__val mono">v{row.mapping_version ?? 1}</span>
             </div>
           </div>
@@ -846,9 +851,9 @@ export function MappingModule() {
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('integrationsMapping.mappingModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Delete mapping"
+            label={t('integrationsMapping.mappingModule.deleteMapping2')}
             iconName="trash"
             kind="danger"
             capability={CAP.MAPPINGS_WRITE}
@@ -862,11 +867,11 @@ export function MappingModule() {
                 await refetchDeletedMappingRows([row.id]);
                 await removeRowsInSeedDiagnostics([row.id]);
                 pushToast(
-                  `Deleted - ${row.mapping_key}`,
+                  fill(t('integrationsMapping.mappingModule.deleted'), { mapping_key: String(row.mapping_key) }),
                   seedDiagnosticsEnabled ? 'info' : 'good',
                 );
               } catch {
-                pushToast('Delete did not complete. Refresh the mapping list and try again.', 'danger');
+                pushToast(t('integrationsMapping.mappingModule.deleteDidNotComplete'), 'danger');
               }
             }}
           />
@@ -926,21 +931,21 @@ export function MappingModule() {
         <div>
           <div className="kvgrid">
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Type</span>
+              <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.type')}</span>
               <span className="kvgrid__val">
                 <MappingTypeChip value={row.mapping_type} />
               </span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Key</span>
+              <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.key')}</span>
               <span className="kvgrid__val mono">{row.mapping_key}</span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Target</span>
+              <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.target')}</span>
               <span className="kvgrid__val mono">{proj?.target ?? row.target}</span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Status</span>
+              <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.status')}</span>
               <span className="kvgrid__val">
                 <MappingEnabledChip value={mappingEnabled(row)} />
               </span>
@@ -948,20 +953,19 @@ export function MappingModule() {
             {proj ? (
               <>
                 <div className="kvgrid__row">
-                  <span className="kvgrid__key mono">Rules</span>
+                  <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.rules')}</span>
                   <span className="kvgrid__val mono">
-                    {proj.rules_count ?? 0} field rules
-                    {proj.has_rules ? '' : ' · empty'}
+                    {fill(t('integrationsMapping.mappingModule.fieldRules'), { value: String(proj.rules_count ?? 0), value2: String(proj.has_rules ? '' : t('integrationsMapping.mappingModule.empty')) })}
                   </span>
                 </div>
                 <div className="kvgrid__row">
-                  <span className="kvgrid__key mono">Used by</span>
+                  <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.usedBy')}</span>
                   <span className="kvgrid__val mono">
-                    {(proj.source_count ?? 0)} sources · {(proj.rule_usage_count ?? 0)} rules · {(proj.api_route_count ?? 0)} API routes
+                    {fill(t('integrationsMapping.mappingModule.sourcesRulesApiRoutes2'), { value: String((proj.source_count ?? 0)), value2: String((proj.rule_usage_count ?? 0)), value3: String((proj.api_route_count ?? 0)) })}
                   </span>
                 </div>
                 <div className="kvgrid__row">
-                  <span className="kvgrid__key mono">Usage</span>
+                  <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.usage')}</span>
                   <span className="kvgrid__val">
                     {(() => {
                       // W69 Cycle F-R-9 closure (AGENTS.md §2 ZERO HARDCODING
@@ -980,7 +984,7 @@ export function MappingModule() {
                       if (!row)
                         return (
                           <Chip
-                            label={`mapping_usage_state/${usageState} (missing)`}
+                            label={fill(t('integrationsMapping.mappingModule.mappingUsageStateMissing'), { usageState: String(usageState) })}
                             kind="danger"
                             size="xs"
                           />
@@ -998,21 +1002,21 @@ export function MappingModule() {
               </>
             ) : null}
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Updated</span>
+              <span className="kvgrid__key mono">{t('integrationsMapping.mappingModule.updated')}</span>
               <span className="kvgrid__val">{new Date(row.updated_at).toLocaleString()}</span>
             </div>
           </div>
-          <div className="wf-insp__section-eyebrow">Bound sources</div>
+          <div className="wf-insp__section-eyebrow">{t('integrationsMapping.mappingModule.boundSources')}</div>
           {!canReadSources ? (
             <StateView
               kind="denied"
               capability={CAP.WEBHOOKS_READ}
-              hint="Intake source binding details require source read permission."
+              hint={t('integrationsMapping.mappingModule.intakeSourceBindingDetails')}
             />
           ) : sourceDirectoryQuery.isLoading ? (
-            <StateView kind="loading" hint="Reading source bindings." />
+            <StateView kind="loading" hint={t('integrationsMapping.mappingModule.readingSourceBindings')} />
           ) : sourceDirectoryQuery.isError ? (
-            <StateView kind="error" hint="Source binding confirmation failed. Retry from the mapping drawer." />
+            <StateView kind="error" hint={t('integrationsMapping.mappingModule.sourceBindingConfirmationFailed')} />
           ) : boundSources.length > 0 ? (
             <div style={{ display: 'grid', gap: '8px', padding: '0 14px 14px' }}>
               {boundSources.map((source) => (
@@ -1040,22 +1044,22 @@ export function MappingModule() {
                       <Chip
                         size="xs"
                         kind={source.client_label ? 'neutral' : 'warn'}
-                        label={`Client: ${source.client_label ?? 'not bound'}`}
+                        label={fill(t('integrationsMapping.mappingModule.client'), { value: String(source.client_label ?? 'not bound') })}
                       />
                       <Chip
                         size="xs"
                         kind={source.sender_label ? 'neutral' : 'warn'}
-                        label={`Sender: ${source.sender_label ?? 'not bound'}`}
+                        label={fill(t('integrationsMapping.mappingModule.sender'), { value: String(source.sender_label ?? 'not bound') })}
                       />
                       <Chip
                         size="xs"
                         kind={(source.active_rule_count ?? 0) > 0 ? 'good' : 'neutral'}
-                        label={`${source.active_rule_count ?? 0}/${source.rule_count ?? 0} rules active`}
+                        label={fill(t('integrationsMapping.mappingModule.rulesActive'), { value: String(source.active_rule_count ?? 0), value2: String(source.rule_count ?? 0) })}
                       />
                     </div>
                   </div>
                   <Button
-                    label="Open source"
+                    label={t('integrationsMapping.mappingModule.openSource')}
                     iconName="arrow-right"
                     kind="ghost"
                     onClick={() => {
@@ -1071,8 +1075,8 @@ export function MappingModule() {
               kind="empty"
               hint={
                 (proj?.source_count ?? 0) > 0
-                  ? 'No source rows were returned for this mapping in the current tenant scope.'
-                  : 'No intake sources are bound to this mapping profile.'
+                  ? t('integrationsMapping.mappingModule.noSourceRowsWere')
+                  : t('integrationsMapping.mappingModule.noIntakeSourcesAre')
               }
             />
           )}
@@ -1085,7 +1089,7 @@ export function MappingModule() {
              render an explicit empty state — never synthesize fictional
              rules / Riyadh / EXAMPLEMARKET payloads.
           */}
-          <div className="wf-insp__section-eyebrow">Mapping body</div>
+          <div className="wf-insp__section-eyebrow">{t('integrationsMapping.mappingModule.mappingBody')}</div>
           {row.mapping_config && Object.keys(row.mapping_config).length > 0 ? (
             <pre className="wf-code-block">
 {prettyOperatorJson(row.mapping_config)}
@@ -1093,7 +1097,7 @@ export function MappingModule() {
           ) : (
             <StateView
               kind="empty"
-              hint="mapping_config not yet projected — author rules in the editor or via plugin-studio."
+              hint={t('integrationsMapping.mappingModule.mappingConfigNotYet')}
             />
           )}
           {(() => {
@@ -1105,7 +1109,7 @@ export function MappingModule() {
             if (!hasSample) return null;
             return (
               <>
-                <div className="wf-insp__section-eyebrow">Sample input → output</div>
+                <div className="wf-insp__section-eyebrow">{t('integrationsMapping.mappingModule.sampleInputOutput')}</div>
                 <div
                   style={{
                     display: 'grid',
@@ -1119,14 +1123,14 @@ export function MappingModule() {
                       className="mono"
                       style={{ fontSize: '10px', color: 'var(--ink-3)', marginBottom: '4px' }}
                     >
-                      INPUT
+                      {t('integrationsMapping.mappingModule.input')}
                     </div>
                     {cfg.sample_input != null ? (
                       <pre className="wf-code-block">
 {prettyOperatorJson(cfg.sample_input)}
                       </pre>
                     ) : (
-                      <StateView kind="empty" hint="No sample_input projected." />
+                      <StateView kind="empty" hint={t('integrationsMapping.mappingModule.noSampleInputProjected')} />
                     )}
                   </div>
                   <div>
@@ -1134,14 +1138,14 @@ export function MappingModule() {
                       className="mono"
                       style={{ fontSize: '10px', color: 'var(--ink-3)', marginBottom: '4px' }}
                     >
-                      OUTPUT
+                      {t('integrationsMapping.mappingModule.output')}
                     </div>
                     {cfg.sample_output != null ? (
                       <pre className="wf-code-block">
 {prettyOperatorJson(cfg.sample_output)}
                       </pre>
                     ) : (
-                      <StateView kind="empty" hint="No sample_output projected." />
+                      <StateView kind="empty" hint={t('integrationsMapping.mappingModule.noSampleOutputProjected')} />
                     )}
                   </div>
                 </div>
@@ -1150,18 +1154,18 @@ export function MappingModule() {
           })()}
           {showRemediationContext ? (
             <div className="card" style={{ marginTop: 12 }} data-testid="mapping-remediation-context">
-              <h4 className="eyebrow">Failed inbound request</h4>
+              <h4 className="eyebrow">{t('integrationsMapping.mappingModule.failedInboundRequest')}</h4>
               <div className="kvgrid" style={{ marginBottom: 10 }}>
-                <span className="kvgrid__key">Inbox</span>
+                <span className="kvgrid__key">{t('integrationsMapping.mappingModule.inbox')}</span>
                 <span className="kvgrid__val mono">{focusedInboxContext?.id}</span>
-                <span className="kvgrid__key">Source</span>
+                <span className="kvgrid__key">{t('integrationsMapping.mappingModule.source')}</span>
                 <span className="kvgrid__val">
-                  {focusedInboxContext?.source_label ?? focusedInboxContext?.source_identifier ?? 'Intake source'}
+                  {focusedInboxContext?.source_label ?? focusedInboxContext?.source_identifier ?? t('integrationsMapping.mappingModule.intakeSource')}
                 </span>
-                <span className="kvgrid__key">Status</span>
-                <span className="kvgrid__val mono">{focusedInboxContext?.processing_status ?? 'pending confirmation'}</span>
-                <span className="kvgrid__key">Idempotency</span>
-                <span className="kvgrid__val mono">{focusedInboxContext?.idempotency_key ?? 'not projected'}</span>
+                <span className="kvgrid__key">{t('integrationsMapping.mappingModule.status')}</span>
+                <span className="kvgrid__val mono">{focusedInboxContext?.processing_status ?? t('integrationsMapping.mappingModule.pendingConfirmation2')}</span>
+                <span className="kvgrid__key">{t('integrationsMapping.mappingModule.idempotency')}</span>
+                <span className="kvgrid__val mono">{focusedInboxContext?.idempotency_key ?? t('integrationsMapping.mappingModule.notProjected')}</span>
               </div>
               {focusedInboxContext?.error_message ? (
                 <p className="state__hint" style={{ color: 'var(--danger-ink)' }}>
@@ -1169,14 +1173,14 @@ export function MappingModule() {
                 </p>
               ) : null}
               <p className="state__hint">
-                Terminal failed shipment-create rows stay preserved. Test and fix the mapping here, then prove success with a fresh receiver POST.
+                {t('integrationsMapping.mappingModule.terminalFailedShipmentCreate')}
               </p>
               <pre className="wf-code-block" style={{ maxHeight: '220px', overflow: 'auto' }}>
-{failedPayload ? prettyOperatorJson(failedPayload) : 'No remediation payload is projected for this inbox event.'}
+{failedPayload ? prettyOperatorJson(failedPayload) : t('integrationsMapping.mappingModule.noRemediationPayloadIs')}
               </pre>
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                 <Button
-                  label="Open in Test webhook intake"
+                  label={t('integrationsMapping.mappingModule.openInTestWebhook')}
                   iconName="webhook"
                   kind="ghost"
                   capability={CAP.WEBHOOKS_READ}
@@ -1187,7 +1191,7 @@ export function MappingModule() {
                   }}
                 />
                 <Button
-                  label="Test failed payload"
+                  label={t('integrationsMapping.mappingModule.testFailedPayload')}
                   iconName="play"
                   kind="primary"
                   capability={CAP.MAPPINGS_WRITE}
@@ -1202,13 +1206,13 @@ export function MappingModule() {
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
           <Button
-            label="Test"
+            label={t('integrationsMapping.mappingModule.test')}
             iconName="play"
             kind="ghost"
             onClick={() => openMappingTester(row)}
           />
           <Button
-            label="Promote version"
+            label={t('integrationsMapping.mappingModule.promoteVersion')}
             iconName="up"
             kind="ghost"
             capability={CAP.MAPPINGS_WRITE}
@@ -1222,14 +1226,14 @@ export function MappingModule() {
                 ]);
                 const refreshedRow = refreshedRows.find((candidate) => candidate.id === row.id);
                 if (refreshedRow) openMappingDrawer(refreshedRow);
-                pushToast(`Promoted · ${row.mapping_key}`, 'good');
+                pushToast(fill(t('integrationsMapping.mappingModule.promoted'), { mapping_key: String(row.mapping_key) }), 'good');
               } catch (err) {
-                pushToast(`Promote failed · ${(err as Error)?.message ?? ''}`, 'danger');
+                pushToast(fill(t('integrationsMapping.mappingModule.promoteFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
               }
             }}
           />
           <Button
-            label="Edit body"
+            label={t('integrationsMapping.mappingModule.editBody')}
             iconName="edit"
             kind="primary"
             capability={CAP.MAPPINGS_WRITE}
@@ -1259,14 +1263,14 @@ export function MappingModule() {
   function openMappingBodyEditor(row: MappingConfig) {
     let mappingBody = JSON.stringify(mappingConfigBody(row), null, 2);
     modal.open({
-      title: `Edit mapping body · ${row.mapping_key}`,
+      title: fill(t('integrationsMapping.mappingModule.editMappingBody'), { mapping_key: String(row.mapping_key) }),
       body: (
         <div>
           <p className="state__hint">
-            Edit the mapping body. Save confirms the update and refreshes the open drawer in place.
+            {t('integrationsMapping.mappingModule.editTheMappingBody')}
           </p>
           <label className="wf-insp__section-eyebrow" htmlFor="mapping-body-editor">
-            Mapping body
+            {t('integrationsMapping.mappingModule.mappingBody')}
           </label>
           <textarea
             id="mapping-body-editor"
@@ -1281,9 +1285,9 @@ export function MappingModule() {
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('integrationsMapping.mappingModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Save body"
+            label={t('integrationsMapping.mappingModule.saveBody')}
             iconName="check"
             kind="primary"
             capability={CAP.MAPPINGS_WRITE}
@@ -1296,7 +1300,7 @@ export function MappingModule() {
                 }
                 parsedBody = decoded as Record<string, unknown>;
               } catch {
-                pushToast('Mapping body needs valid object format', 'danger');
+                pushToast(t('integrationsMapping.mappingModule.mappingBodyNeedsValid'), 'danger');
                 return;
               }
 
@@ -1324,11 +1328,11 @@ export function MappingModule() {
                 modal.close();
                 openMappingDrawer(refreshedRow);
                 pushToast(
-                  `Saved body · ${row.mapping_key}`,
+                  fill(t('integrationsMapping.mappingModule.savedBody'), { mapping_key: String(row.mapping_key) }),
                   seedDiagnosticsEnabled ? 'info' : 'good',
                 );
               } catch (err) {
-                pushToast(`Save failed · ${(err as Error)?.message ?? ''}`, 'danger');
+                pushToast(fill(t('integrationsMapping.mappingModule.saveFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
               }
             }}
           />
@@ -1350,14 +1354,14 @@ export function MappingModule() {
     const cfg = (row.mapping_config ?? {}) as { sample_input?: unknown };
     let payload = JSON.stringify(initialPayload ?? cfg.sample_input ?? {}, null, 2);
     modal.open({
-      title: `Test mapping · ${row.mapping_key}`,
+      title: fill(t('integrationsMapping.mappingModule.testMapping'), { mapping_key: String(row.mapping_key) }),
       body: (
         <div>
           <p className="state__hint">
-            Provide {contextLabel}; Console V2 runs the mapping test and confirms the result in place.
+            {fill(t('integrationsMapping.mappingModule.provideConsoleV2Runs'), { contextLabel: String(contextLabel) })}
           </p>
           <label className="wf-insp__section-eyebrow" htmlFor="mapping-test-payload">
-            Input
+            {t('integrationsMapping.mappingModule.input2')}
           </label>
           <textarea
             id="mapping-test-payload"
@@ -1372,9 +1376,9 @@ export function MappingModule() {
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('integrationsMapping.mappingModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Run"
+            label={t('integrationsMapping.mappingModule.run')}
             kind="primary"
             iconName="play"
             capability={CAP.MAPPINGS_WRITE}
@@ -1387,7 +1391,7 @@ export function MappingModule() {
                 }
                 parsed = decoded as Record<string, unknown>;
               } catch {
-                pushToast('Input needs valid object format', 'danger');
+                pushToast(t('integrationsMapping.mappingModule.inputNeedsValidObject'), 'danger');
                 return;
               }
               try {
@@ -1413,60 +1417,60 @@ export function MappingModule() {
                 const missingOutput = missingRequiredOutputPaths(target, output, targetLookupRows);
                 pushToast(
                   failed
-                    ? 'Mapping test needs review'
+                    ? t('integrationsMapping.mappingModule.mappingTestNeedsReview')
                     : missingOutput.length > 0
-                    ? `Mapping test output missing required fields · ${missingOutput.map((item) => item.label).join(', ')}`
+                    ? fill(t('integrationsMapping.mappingModule.mappingTestOutputMissing'), { value: String(missingOutput.map((item) => item.label).join(', ')) })
                     : reportId
-                    ? 'Mapping test completed'
+                    ? t('integrationsMapping.mappingModule.mappingTestCompleted')
                     : seedDiagnosticsEnabled
-                      ? 'Mapping test completed'
-                      : 'Mapping test completed',
+                      ? t('integrationsMapping.mappingModule.mappingTestCompleted')
+                      : t('integrationsMapping.mappingModule.mappingTestCompleted'),
                   failed ? 'danger' : missingOutput.length > 0 ? 'warn' : reportId ? 'good' : seedDiagnosticsEnabled ? 'info' : 'warn',
                 );
                 modal.open({
-                  title: `Mapping test result · ${row.mapping_key}`,
+                  title: fill(t('integrationsMapping.mappingModule.mappingTestResult'), { mapping_key: String(row.mapping_key) }),
                   body: (
                     <div data-testid="mapping-test-result" style={{ display: 'grid', gap: '12px' }}>
                       <div className="kvgrid">
-                        <span className="kvgrid__key">Status</span>
-                        <span className="kvgrid__val">{failed ? 'failed' : missingOutput.length > 0 ? 'needs attention' : String(result.status ?? 'succeeded')}</span>
-                        <span className="kvgrid__key">Confirmation</span>
-                        <span className="kvgrid__val">{reportId ? 'Confirmed' : 'Pending confirmation'}</span>
-                        <span className="kvgrid__key">Target</span>
+                        <span className="kvgrid__key">{t('integrationsMapping.mappingModule.status')}</span>
+                        <span className="kvgrid__val">{failed ? t('integrationsMapping.mappingModule.failed') : missingOutput.length > 0 ? t('integrationsMapping.mappingModule.needsAttention') : String(result.status ?? 'succeeded')}</span>
+                        <span className="kvgrid__key">{t('integrationsMapping.mappingModule.confirmation')}</span>
+                        <span className="kvgrid__val">{reportId ? t('integrationsMapping.mappingModule.confirmed') : t('integrationsMapping.mappingModule.pendingConfirmation')}</span>
+                        <span className="kvgrid__key">{t('integrationsMapping.mappingModule.target')}</span>
                         <span className="kvgrid__val mono">{target}</span>
                       </div>
                       {failed ? (
                         <StateView
                           kind="error"
-                          title="Mapping test failed"
-                          hint="The mapping test returned review details. Check the input and output below, adjust the mapping, then run the test again."
+                          title={t('integrationsMapping.mappingModule.mappingTestFailed')}
+                          hint={t('integrationsMapping.mappingModule.theMappingTestReturned')}
                         />
                       ) : null}
                       {missingOutput.length > 0 ? (
                         <StateView
                           kind="error"
-                          title="Output missing required fields"
-                          hint={`The mapping test completed, but ${target} still needs: ${missingOutput.map((item) => item.label).join(', ')}. Fix the mapping before replaying or asking the provider to resend.`}
+                          title={t('integrationsMapping.mappingModule.outputMissingRequiredFields')}
+                          hint={fill(t('integrationsMapping.mappingModule.theMappingTestCompleted'), { target: String(target), value: String(missingOutput.map((item) => item.label).join(', ')) })}
                         />
                       ) : null}
                       <StateView
                         kind={missingOutput.length > 0 ? 'error' : 'empty'}
-                        title="Mapping output protected"
-                        hint="The transformed output was checked against required fields. Sensitive submitted details are hidden in this summary."
+                        title={t('integrationsMapping.mappingModule.mappingOutputProtected')}
+                        hint={t('integrationsMapping.mappingModule.theTransformedOutputWas')}
                       />
                       <StateView
                         kind="empty"
-                        title="Mapping input protected"
-                        hint="The test input was accepted for this run. Sensitive submitted details are hidden in this summary."
+                        title={t('integrationsMapping.mappingModule.mappingInputProtected')}
+                        hint={t('integrationsMapping.mappingModule.theTestInputWas')}
                       />
                       {Object.keys(diagnostics).length > 0 ? (
                         <StateView
                           kind={failed ? 'error' : 'empty'}
-                          title="Review details available"
+                          title={t('integrationsMapping.mappingModule.reviewDetailsAvailable')}
                           hint={
                             failed
-                              ? 'The mapping test returned extra review details. Check the failed fields above, then adjust the mapping and run the test again.'
-                              : 'The mapping test returned extra review details. Check the output above before saving changes.'
+                              ? t('integrationsMapping.mappingModule.theMappingTestReturned2')
+                              : t('integrationsMapping.mappingModule.theMappingTestReturned3')
                           }
                         />
                       ) : null}
@@ -1474,12 +1478,12 @@ export function MappingModule() {
                   ),
                   footer: (
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      <Button label="Close" kind="primary" onClick={() => modal.close()} />
+                      <Button label={t('integrationsMapping.mappingModule.close')} kind="primary" onClick={() => modal.close()} />
                     </div>
                   ),
                 });
               } catch (err) {
-                pushToast(`Mapping test failed · ${(err as Error).message}`, 'danger');
+                pushToast(fill(t('integrationsMapping.mappingModule.mappingTestFailed2'), { message: String((err as Error).message) }), 'danger');
               }
             }}
           />
@@ -1502,17 +1506,17 @@ export function MappingModule() {
     } catch (error) {
       if (!seedDiagnosticsEnabled) {
         modal.open({
-          title: 'New mapping',
+          title: t('integrationsMapping.mappingModule.newMapping'),
           body: (
             <StateView
               kind="error"
-              title="Could not load mapping lookups"
+              title={t('integrationsMapping.mappingModule.couldNotLoadMapping')}
               hint={String(error)}
             />
           ),
           footer: (
             <div style={{ display: 'flex', gap: '8px' }}>
-              <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+              <Button label={t('integrationsMapping.mappingModule.close')} kind="ghost" onClick={() => modal.close()} />
             </div>
           ),
         });
@@ -1528,17 +1532,17 @@ export function MappingModule() {
     const typeOptions = mappingTypeOptions(typeRows);
     if (typeOptions.length === 0) {
       modal.open({
-        title: 'New mapping',
+        title: t('integrationsMapping.mappingModule.newMapping'),
         body: (
           <StateView
             kind="error"
-            title="Mapping type options are not configured"
-            hint="Add mapping type options before creating new mapping profiles."
+            title={t('integrationsMapping.mappingModule.mappingTypeOptionsAre')}
+            hint={t('integrationsMapping.mappingModule.addMappingTypeOptions')}
           />
         ),
         footer: (
           <div style={{ display: 'flex', gap: '8px' }}>
-            <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('integrationsMapping.mappingModule.close')} kind="ghost" onClick={() => modal.close()} />
           </div>
         ),
       });
@@ -1547,17 +1551,17 @@ export function MappingModule() {
     const targetOptions = mappingTargetOptions(targetRows);
     if (targetOptions.length === 0) {
       modal.open({
-        title: 'New mapping',
+        title: t('integrationsMapping.mappingModule.newMapping'),
         body: (
           <StateView
             kind="error"
-            title="Mapping target options are not configured"
-            hint="Add active mapping target options before creating mapping profiles. Existing targets stay read-only until setup is complete."
+            title={t('integrationsMapping.mappingModule.mappingTargetOptionsAre')}
+            hint={t('integrationsMapping.mappingModule.addActiveMappingTarget')}
           />
         ),
         footer: (
           <div style={{ display: 'flex', gap: '8px' }}>
-            <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('integrationsMapping.mappingModule.close')} kind="ghost" onClick={() => modal.close()} />
           </div>
         ),
       });
@@ -1566,7 +1570,7 @@ export function MappingModule() {
     const initialType = typeOptions[0]!;
     const initialTarget = targetOptions[0]!.value;
     modal.open({
-      title: 'New mapping',
+      title: t('integrationsMapping.mappingModule.newMapping'),
       body: (
         <form id="mapping-config-form" data-testid="mapping-config-form">
           <div
@@ -1579,39 +1583,39 @@ export function MappingModule() {
             }}
           >
             <label className="mono" htmlFor="mapping-config-type">
-              Type
+              {t('integrationsMapping.mappingModule.type')}
             </label>
             <select
               id="mapping-config-type"
               name="mapping_type"
               className="dt-inline-input"
-              aria-label="Mapping type"
+              aria-label={t('integrationsMapping.mappingModule.mappingType')}
               defaultValue={initialType}
             >
-              {typeOptions.map((t) => (
-                <option key={t} value={t}>
-                  {t}
+              {typeOptions.map((entry) => (
+                <option key={entry} value={entry}>
+                  {entry}
                 </option>
               ))}
             </select>
             <label className="mono" htmlFor="mapping-config-key">
-              Key
+              {t('integrationsMapping.mappingModule.key')}
             </label>
             <input
               id="mapping-config-key"
               name="mapping_key"
               className="dt-inline-input"
-              aria-label="Mapping key"
-              placeholder="e.g. exampleparcel_ksa_v3.shipment_inbound"
+              aria-label={t('integrationsMapping.mappingModule.mappingKey')}
+              placeholder={t('integrationsMapping.mappingModule.eGExampleparcelKsa')}
             />
             <label className="mono" htmlFor="mapping-config-target">
-              Target
+              {t('integrationsMapping.mappingModule.target')}
             </label>
             <select
               id="mapping-config-target"
               name="target"
               className="dt-inline-input"
-              aria-label="Mapping target"
+              aria-label={t('integrationsMapping.mappingModule.mappingTarget')}
               defaultValue={initialTarget}
             >
               {targetOptions.map((option) => (
@@ -1625,9 +1629,9 @@ export function MappingModule() {
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('integrationsMapping.mappingModule.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Create"
+            label={t('integrationsMapping.mappingModule.create')}
             kind="primary"
             capability={CAP.MAPPINGS_WRITE}
             onClick={async () => {
@@ -1637,7 +1641,7 @@ export function MappingModule() {
               const draftKey = String(data.get('mapping_key') ?? '').trim();
               const draftTarget = String(data.get('target') ?? '').trim();
               if (!draftKey || !draftTarget) {
-                pushToast('Fill all fields first', 'warn');
+                pushToast(t('integrationsMapping.mappingModule.fillAllFieldsFirst'), 'warn');
                 return;
               }
               try {
@@ -1672,14 +1676,14 @@ export function MappingModule() {
                 modal.close();
                 pushToast(
                   createdId
-                    ? `Mapping created · ${draftKey}`
+                    ? fill(t('integrationsMapping.mappingModule.mappingCreated'), { draftKey: String(draftKey) })
                     : seedDiagnosticsEnabled
-                      ? `Mapping created · ${draftKey}`
-                      : `Mapping create submitted · ${draftKey}; waiting for confirmation`,
+                      ? fill(t('integrationsMapping.mappingModule.mappingCreated'), { draftKey: String(draftKey) })
+                      : fill(t('integrationsMapping.mappingModule.mappingCreateSubmittedWaiting'), { draftKey: String(draftKey) }),
                   createdId || seedDiagnosticsEnabled ? 'good' : 'info',
                 );
               } catch (err) {
-                pushToast(`Create failed · ${(err as Error)?.message ?? ''}`, 'danger');
+                pushToast(fill(t('integrationsMapping.mappingModule.createFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
               }
             }}
           />
@@ -1691,7 +1695,7 @@ export function MappingModule() {
   const COLUMNS: Array<DataTableColumn<MappingConfig>> = [
     {
       key: 'mapping_type',
-      label: 'Type',
+      label: t('integrationsMapping.mappingModule.type'),
       sortable: true,
       filterable: true,
       editable: true,
@@ -1699,7 +1703,7 @@ export function MappingModule() {
     },
     {
       key: 'mapping_key',
-      label: 'Key',
+      label: t('integrationsMapping.mappingModule.key'),
       mono: true,
       sortable: true,
       filterable: true,
@@ -1708,10 +1712,10 @@ export function MappingModule() {
         <span title={row.mapping_key}>{mappingDisplayLabel(row)}</span>
       ),
     },
-    { key: 'target', label: 'Target', mono: true, sortable: true, filterable: true, editable: false },
+    { key: 'target', label: t('integrationsMapping.mappingModule.target'), mono: true, sortable: true, filterable: true, editable: false },
     {
       key: 'mapping_version',
-      label: 'Version',
+      label: t('integrationsMapping.mappingModule.version'),
       mono: true,
       sortable: true,
       filterable: true,
@@ -1723,28 +1727,28 @@ export function MappingModule() {
     },
     {
       key: 'enabled',
-      label: 'Status',
+      label: t('integrationsMapping.mappingModule.status'),
       sortable: true,
       filterable: true,
       editable: false,
       render: (_raw, row) => <MappingEnabledChip value={mappingEnabled(row)} />,
     },
-    { key: 'updated_at', label: 'Updated', format: 'datetime', sortable: true },
+    { key: 'updated_at', label: t('integrationsMapping.mappingModule.updated'), format: 'datetime', sortable: true },
   ];
   const tableColumns: Array<DataTableColumn<MappingConfig>> = canWrite
     ? COLUMNS
     : COLUMNS.map((column) => ({ ...column, editable: false }));
 
   const ROW_ACTIONS: Array<DataTableAction<MappingConfig>> = [
-    { label: 'Edit mapping', icon: 'edit', kind: 'primary', onClick: (row) => openMappingDrawer(row) },
+    { label: t('integrationsMapping.mappingModule.editMapping'), icon: 'edit', kind: 'primary', onClick: (row) => openMappingDrawer(row) },
     {
-      label: 'Test with sample payload',
+      label: t('integrationsMapping.mappingModule.testWithSamplePayload'),
       icon: 'play',
       capability: CAP.MAPPINGS_WRITE,
       onClick: (row) => openMappingTester(row),
     },
     {
-      label: 'Duplicate',
+      label: t('integrationsMapping.mappingModule.duplicate'),
       icon: 'copy',
       capability: CAP.MAPPINGS_WRITE,
       onClick: async (row) => {
@@ -1779,19 +1783,19 @@ export function MappingModule() {
           }
           pushToast(
             createdId
-              ? `Duplicated · ${row.mapping_key}`
+              ? fill(t('integrationsMapping.mappingModule.duplicated'), { mapping_key: String(row.mapping_key) })
               : seedDiagnosticsEnabled
-                ? `Duplicated · ${row.mapping_key}`
-                : `Duplicate submitted · ${row.mapping_key}; waiting for confirmation`,
+                ? fill(t('integrationsMapping.mappingModule.duplicated'), { mapping_key: String(row.mapping_key) })
+                : fill(t('integrationsMapping.mappingModule.duplicateSubmittedWaitingFor'), { mapping_key: String(row.mapping_key) }),
             createdId || seedDiagnosticsEnabled ? 'good' : 'info',
           );
         } catch (err) {
-          pushToast(`Duplicate failed · ${(err as Error)?.message ?? ''}`, 'danger');
+          pushToast(fill(t('integrationsMapping.mappingModule.duplicateFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
         }
       },
     },
     {
-      label: 'Promote version',
+      label: t('integrationsMapping.mappingModule.promoteVersion'),
       icon: 'up',
       capability: CAP.MAPPINGS_WRITE,
       onClick: async (row) => {
@@ -1800,14 +1804,14 @@ export function MappingModule() {
             promoteVersion.mutateAsync({ mapping_config_id: row.id }),
           );
           await refetchVisibleMappingRows([{ id: row.id, mapping_version: mappingPromotionVersion(result) }]);
-          pushToast(`Promoted · ${row.mapping_key}`, 'good');
+          pushToast(fill(t('integrationsMapping.mappingModule.promoted'), { mapping_key: String(row.mapping_key) }), 'good');
         } catch (err) {
-          pushToast(`Promote failed · ${(err as Error)?.message ?? ''}`, 'danger');
+          pushToast(fill(t('integrationsMapping.mappingModule.promoteFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
         }
       },
     },
     {
-      label: 'Disable',
+      label: t('integrationsMapping.mappingModule.disable'),
       icon: 'lock',
       kind: 'danger',
       capability: CAP.MAPPINGS_WRITE,
@@ -1825,16 +1829,16 @@ export function MappingModule() {
           // canonical seam (see __audit__/CROSSWALK/INTEGRATIONS.md §4).
           await disableMappingWithBackendReadback(row);
           pushToast(
-            `Disabled · ${row.mapping_key}`,
+            fill(t('integrationsMapping.mappingModule.disabled'), { mapping_key: String(row.mapping_key) }),
             seedDiagnosticsEnabled ? 'info' : 'good',
           );
         } catch (err) {
-          pushToast(`Disable failed · ${(err as Error)?.message ?? ''}`, 'danger');
+          pushToast(fill(t('integrationsMapping.mappingModule.disableFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
         }
       },
     },
     {
-      label: 'Enable',
+      label: t('integrationsMapping.mappingModule.enable'),
       icon: 'check',
       kind: 'primary',
       capability: CAP.MAPPINGS_WRITE,
@@ -1855,16 +1859,16 @@ export function MappingModule() {
           await refetchVisibleMappingRows([{ id: row.id, enabled: true }]);
           await markRowsEnabledInSeedDiagnostics([row.id], true);
           pushToast(
-            `Enabled · ${row.mapping_key}`,
+            fill(t('integrationsMapping.mappingModule.enabled'), { mapping_key: String(row.mapping_key) }),
             seedDiagnosticsEnabled ? 'info' : 'good',
           );
         } catch (err) {
-          pushToast(`Enable failed · ${(err as Error)?.message ?? ''}`, 'danger');
+          pushToast(fill(t('integrationsMapping.mappingModule.enableFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
         }
       },
     },
     {
-      label: 'Delete mapping',
+      label: t('integrationsMapping.mappingModule.deleteMapping2'),
       icon: 'trash',
       kind: 'danger',
       capability: CAP.MAPPINGS_WRITE,
@@ -1878,7 +1882,7 @@ export function MappingModule() {
 
   const BULK_ACTIONS: Array<DataTableBulkAction<MappingConfig>> = [
     {
-      label: 'Bulk disable',
+      label: t('integrationsMapping.mappingModule.bulkDisable'),
       icon: 'lock',
       kind: 'danger',
       capability: CAP.MAPPINGS_WRITE,
@@ -1891,13 +1895,13 @@ export function MappingModule() {
         const eligibleRows = rs.filter((row) => !impactById.get(row.id)?.impacted);
         if (skippedUnknown.length > 0) {
           pushToast(
-            `Skipped ${skippedUnknown.length} mapping${skippedUnknown.length === 1 ? '' : 's'} while usage confirmation is unavailable; refresh before disabling.`,
+            fill(t(skippedUnknown.length === 1 ? 'integrationsMapping.mappingModule.skippedMappingWhileUsageOne' : 'integrationsMapping.mappingModule.skippedMappingWhileUsageOther'), { length: String(skippedUnknown.length) }),
             'warn',
           );
         }
         if (skippedSourceBound.length > 0) {
           pushToast(
-            `Skipped ${skippedSourceBound.length} live-used mapping${skippedSourceBound.length === 1 ? '' : 's'}; review each impact before disabling.`,
+            fill(t(skippedSourceBound.length === 1 ? 'integrationsMapping.mappingModule.skippedLiveUsedMappingOne' : 'integrationsMapping.mappingModule.skippedLiveUsedMappingOther'), { length: String(skippedSourceBound.length) }),
             'warn',
           );
         }
@@ -1923,16 +1927,16 @@ export function MappingModule() {
           await refetchVisibleMappingRows(disabledIds.map((id) => ({ id, enabled: false })));
           await markRowsEnabledInSeedDiagnostics(disabledIds, false);
           pushToast(
-            `Disabled ${disabledIds.length}/${eligibleRows.length} mappings`,
+            fill(t('integrationsMapping.mappingModule.disabledMappings'), { length: String(disabledIds.length), length2: String(eligibleRows.length) }),
             disabledIds.length === eligibleRows.length && skipped.length === 0 ? 'good' : 'warn',
           );
         } catch (err) {
-          pushToast(`Bulk disable confirmation failed · ${(err as Error)?.message ?? ''}`, 'danger');
+          pushToast(fill(t('integrationsMapping.mappingModule.bulkDisableConfirmationFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
         }
       },
     },
     {
-      label: 'Bulk enable',
+      label: t('integrationsMapping.mappingModule.bulkEnable'),
       icon: 'check',
       kind: 'primary',
       capability: CAP.MAPPINGS_WRITE,
@@ -1959,16 +1963,16 @@ export function MappingModule() {
           await refetchVisibleMappingRows(enabledIds.map((id) => ({ id, enabled: true })));
           await markRowsEnabledInSeedDiagnostics(enabledIds, true);
           pushToast(
-            `Enabled ${enabledIds.length}/${rs.length} mappings`,
+            fill(t('integrationsMapping.mappingModule.enabledMappings'), { length: String(enabledIds.length), length2: String(rs.length) }),
             enabledIds.length === rs.length ? 'good' : 'warn',
           );
         } catch (err) {
-          pushToast(`Bulk enable confirmation failed · ${(err as Error)?.message ?? ''}`, 'danger');
+          pushToast(fill(t('integrationsMapping.mappingModule.bulkEnableConfirmationFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
         }
       },
     },
     {
-      label: 'Bulk export JSON',
+      label: t('integrationsMapping.mappingModule.bulkExportJson'),
       icon: 'download',
       onClick: (rs) => {
         const blob = new Blob([JSON.stringify(rs, null, 2)], { type: 'application/json' });
@@ -1978,7 +1982,7 @@ export function MappingModule() {
         a.download = `mapping-configs-${Date.now()}.json`;
         a.click();
         URL.revokeObjectURL(url);
-        pushToast(`Exported ${rs.length} mappings`, 'good');
+        pushToast(fill(t('integrationsMapping.mappingModule.exportedMappings'), { length: String(rs.length) }), 'good');
       },
     },
   ];
@@ -1988,7 +1992,7 @@ export function MappingModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-mapping"
-          eyebrow="External intake"
+          eyebrow={t('integrationsMapping.mappingModule.externalIntake')}
           titleAccent="Intake"
           titlePlain="mappings"
           pills={[]}
@@ -1996,7 +2000,7 @@ export function MappingModule() {
         <StateView
           kind="denied"
           capability={CAP.MAPPINGS_READ}
-          hint="You do not have permission to view the mapping studio."
+          hint={t('integrationsMapping.mappingModule.youDoNotHave')}
         />
       </div>
     );
@@ -2007,7 +2011,7 @@ export function MappingModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-mapping"
-          eyebrow="External intake"
+          eyebrow={t('integrationsMapping.mappingModule.externalIntake')}
           titleAccent="Intake"
           titlePlain="mappings"
           pills={[]}
@@ -2022,7 +2026,7 @@ export function MappingModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-mapping"
-          eyebrow="External intake"
+          eyebrow={t('integrationsMapping.mappingModule.externalIntake')}
           titleAccent="Intake"
           titlePlain="mappings"
           pills={[]}
@@ -2036,21 +2040,21 @@ export function MappingModule() {
     <div className="page">
       <PageHeader
         moduleKey="int-mapping"
-        eyebrow="External intake"
+        eyebrow={t('integrationsMapping.mappingModule.externalIntake')}
         titleAccent="Intake"
         titlePlain="mappings"
         pills={[
           <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
-          <span key="src" className="chip chip--xs mono">Mapping profiles</span>,
-          <span key="dir" className="chip chip--xs mono">Usage directory</span>,
+          <span key="src" className="chip chip--xs mono">{t('integrationsMapping.mappingModule.mappingProfiles')}</span>,
+          <span key="dir" className="chip chip--xs mono">{t('integrationsMapping.mappingModule.usageDirectory')}</span>,
           <span key="mode" className="chip chip--xs mono">
-            {seedDiagnosticsEnabled ? 'Review checks' : 'Hosted confirmation'}
+            {seedDiagnosticsEnabled ? t('integrationsMapping.mappingModule.reviewChecks') : t('integrationsMapping.mappingModule.hostedConfirmation')}
           </span>,
         ]}
         actions={[
           <Button
             key="new"
-            label={openingNewMapping ? 'Loading lookups' : 'New mapping'}
+            label={openingNewMapping ? t('integrationsMapping.mappingModule.loadingLookups') : t('integrationsMapping.mappingModule.newMapping')}
             iconName="plus"
             kind="primary"
             capability={CAP.MAPPINGS_WRITE}
@@ -2102,10 +2106,10 @@ export function MappingModule() {
                 },
               ]);
             }
-            pushToast(`Updated ${key}`, 'good');
+            pushToast(fill(t('integrationsMapping.mappingModule.updated2'), { key: String(key) }), 'good');
             return { ok: true };
           } catch (err) {
-            pushToast(`Update failed · ${(err as Error)?.message ?? ''}`, 'danger');
+            pushToast(fill(t('integrationsMapping.mappingModule.updateFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
             return { ok: false };
           }
         } : undefined}
