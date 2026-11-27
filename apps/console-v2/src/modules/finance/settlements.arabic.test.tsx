@@ -7,7 +7,7 @@ import { findUntranslated } from '@/test/helpers/untranslated';
 import * as api from '@/lib/api';
 import { getLookups } from '@/lib/data-source';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/finance';
+import ar from '@/lib/seed-raw/i18n/areas/ar/finance';
 import { SettlementsModule } from './settlements';
 
 const realCompleteList = api.ui_list_resource_complete;

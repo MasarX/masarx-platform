@@ -8,7 +8,7 @@ import { BillingModule } from './billing';
 import * as api from '@/lib/api';
 import { getLookups } from '@/lib/data-source';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/finance';
+import ar from '@/lib/seed-raw/i18n/areas/ar/finance';
 import {
   billing_invoice_events,
   billing_invoice_lines,

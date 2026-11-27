@@ -101,7 +101,7 @@ describe("MarketplaceRequestCreatePage private pool", () => {
   it.each([
     ["request_kind_key", null, "Request kind is required."],
     ["title", "   ", "Title is required."],
-    ["payload_json", "[", "Unexpected end of JSON input"],
+    ["payload_json", "[", "Enter valid JSON in this field, then submit again."],
     ["payload_json", "[]", "Payload must be a JSON object."],
   ])("shows a validation error for %s = %j and sends no mutation", async (name, value, message) => {
     const { form, rpc } = await renderPage();

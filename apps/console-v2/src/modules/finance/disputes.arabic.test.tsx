@@ -7,7 +7,7 @@ import { findUntranslated } from '@/test/helpers/untranslated';
 import * as api from '@/lib/api';
 import { getLookups } from '@/lib/data-source';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/finance';
+import ar from '@/lib/seed-raw/i18n/areas/ar/finance';
 import { DisputesModule } from './disputes';
 
 vi.mock('@tanstack/react-router', () => ({

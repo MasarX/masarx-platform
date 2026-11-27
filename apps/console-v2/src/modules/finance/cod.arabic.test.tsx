@@ -6,7 +6,7 @@ import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import * as api from '@/lib/api';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/finance';
+import ar from '@/lib/seed-raw/i18n/areas/ar/finance';
 import { CodModule } from './cod';
 
 // Same data seams as the trunk cod.test.tsx setup.

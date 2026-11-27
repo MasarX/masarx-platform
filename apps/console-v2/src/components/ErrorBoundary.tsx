@@ -9,6 +9,8 @@ import { reportError } from '@/lib/telemetry';
 interface Props {
   children: ReactNode;
   fallback?: (error: Error, reset: () => void) => ReactNode;
+  /** Runs when "Try again" is pressed, before the children render again. */
+  onReset?: () => void;
 }
 
 interface State {
@@ -26,7 +28,10 @@ export class ErrorBoundary extends Component<Props, State> {
     reportError(error, { component_stack: info.componentStack });
   }
 
-  reset = () => this.setState({ error: null });
+  reset = () => {
+    this.props.onReset?.();
+    this.setState({ error: null });
+  };
 
   render() {
     if (this.state.error) {

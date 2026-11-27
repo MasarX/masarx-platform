@@ -8,7 +8,7 @@ import { BankReconModule } from '@/modules/finance/bank-recon';
 import * as api from '@/lib/api';
 import { getLookups } from '@/lib/data-source';
 import { englishT } from '@/lib/i18n';
-import { ar } from '@/lib/seed-raw/i18n/areas/finance';
+import ar from '@/lib/seed-raw/i18n/areas/ar/finance';
 
 const realListResource = api.ui_list_resource_v1;
 const realListResourceComplete = api.ui_list_resource_complete;

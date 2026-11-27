@@ -1,4 +1,5 @@
 import type { MobileV2DamageSeverity } from "./mobile-v2-sheet-damage-hold";
+import { EN_STRINGS, type FieldOpsStrings } from "./i18n";
 
 export interface MobileV2DamageHoldPolicy {
   readonly version: number;
@@ -7,11 +8,11 @@ export interface MobileV2DamageHoldPolicy {
 
 export const MOBILE_V2_DAMAGE_HOLD_DEFAULT_CATEGORIES: ReadonlyArray<MobileV2DamageSeverity> =
   Object.freeze([
-    Object.freeze({ id: "crushed", label: "Crushed", color: "danger" as const }),
-    Object.freeze({ id: "wet", label: "Wet / leaking", color: "danger" as const }),
-    Object.freeze({ id: "tampered", label: "Open / tampered", color: "danger" as const }),
-    Object.freeze({ id: "wrong-label", label: "Wrong label", color: "warning" as const }),
-    Object.freeze({ id: "missing-barcode", label: "Missing barcode", color: "warning" as const }),
+    Object.freeze({ id: "crushed", label: EN_STRINGS.damageHold.severity.crushed, color: "danger" as const }),
+    Object.freeze({ id: "wet", label: EN_STRINGS.damageHold.severity.wet, color: "danger" as const }),
+    Object.freeze({ id: "tampered", label: EN_STRINGS.damageHold.severity.tampered, color: "danger" as const }),
+    Object.freeze({ id: "wrong-label", label: EN_STRINGS.damageHold.severity["wrong-label"], color: "warning" as const }),
+    Object.freeze({ id: "missing-barcode", label: EN_STRINGS.damageHold.severity["missing-barcode"], color: "warning" as const }),
   ]);
 
 export const MOBILE_V2_DAMAGE_HOLD_DEFAULT_POLICY: MobileV2DamageHoldPolicy =
@@ -19,6 +20,20 @@ export const MOBILE_V2_DAMAGE_HOLD_DEFAULT_POLICY: MobileV2DamageHoldPolicy =
     version: 1,
     severities: MOBILE_V2_DAMAGE_HOLD_DEFAULT_CATEGORIES,
   });
+
+/**
+ * Display label for a damage category. The built-in default label (English
+ * catalog text) is shown in the active locale; any other label came from the
+ * policy row and is shown as-is.
+ */
+export function damageSeverityLabel(
+  severity: MobileV2DamageSeverity,
+  strings: FieldOpsStrings = EN_STRINGS,
+): string {
+  const defaults: Readonly<Record<string, string>> = EN_STRINGS.damageHold.severity;
+  const localized: Readonly<Record<string, string>> = strings.damageHold.severity;
+  return defaults[severity.id] === severity.label ? localized[severity.id] ?? severity.label : severity.label;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)

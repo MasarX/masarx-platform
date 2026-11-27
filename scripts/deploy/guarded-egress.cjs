@@ -1,6 +1,8 @@
 const { readFileSync } = require('node:fs');
+const { createHash } = require('node:crypto');
 
 const proxyNames = ['URL', 'USERNAME', 'PASSWORD'].map(suffix => `API_CALLER_GUARDED_EGRESS_PROXY_${suffix}`);
+const emptyDigest = createHash('sha256').digest('hex');
 
 function readEgressMode(environment) {
   let listed;
@@ -23,7 +25,9 @@ function readEgressMode(environment) {
 
   return present.every(name => {
     const digest = digests.get(name);
-    return typeof digest === 'string' && digest.trim() !== '';
+    if (typeof digest !== 'string') return false;
+    const normalized = digest.trim().toLowerCase();
+    return normalized !== '' && normalized !== emptyDigest;
   }) ? 'proxy' : null;
 }
 

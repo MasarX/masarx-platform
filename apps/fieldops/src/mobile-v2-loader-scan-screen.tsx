@@ -19,6 +19,7 @@ import {
 } from "./mobile-v2-primitives";
 import {
   getEnabledLoaderActions,
+  loaderActionLabel,
   resolveEffectiveLoaderAction,
   type MobileV2LoaderPolicy,
   type MobileV2LoaderScanMode,
@@ -26,6 +27,7 @@ import {
 import { isMobileV2LoaderReadbackScanEntry } from "./mobile-v2-loader-readback";
 import { normalizeMobileV2LoaderBarcodeInput } from "./mobile-v2-loader-scan-input";
 import { buildMobileV2LoaderSubmitControlState } from "./mobile-v2-loader-submit-control";
+import { getStrings, resolveLocaleCode } from "./i18n";
 import {
   MOBILE_V2_FONT_MONO,
   MOBILE_V2_FONT_SANS,
@@ -59,6 +61,7 @@ export interface MobileV2LoaderScanScreenProps {
   readonly onSimulateScan: () => void;
   readonly onBarcodeEntry?: (code: string) => void;
   readonly onSubmit: () => void;
+  readonly locale?: string;
   readonly style?: StyleProp<ViewStyle>;
 }
 
@@ -79,6 +82,8 @@ function statusKindFromStatus(s: MobileV2LoaderScanEntry["status"]): "done" | "c
 
 export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): React.ReactElement {
   const { theme, policy } = props;
+  const strings = getStrings(resolveLocaleCode(props.locale));
+  const copy = strings.loaderScan;
   const enabledActions = React.useMemo(() => getEnabledLoaderActions(policy), [policy]);
   const effectiveAction = resolveEffectiveLoaderAction(policy, props.activeActionKey);
   const activeActionRecord = enabledActions.find((a) => a.key === effectiveAction) ?? enabledActions[0];
@@ -98,7 +103,11 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
   const allVisibleScansConfirmed = submitControl.allVisibleScansConfirmed;
   const willConfirmBulk = submitControl.willConfirmBulk;
   const submitDisabled = submitControl.disabled;
-  const submitLabel = submitControl.label;
+  // Same wording as submitControl.label, from the catalog.
+  const submitLabel = allVisibleScansConfirmed
+    ? copy.scansConfirmed
+    : (willConfirmBulk ? copy.confirmScans : pendingScanCount === 1 ? copy.submitScanOne : copy.submitScanOther)
+        .replace("{count}", () => String(pendingScanCount));
   const barcodeReady =
     onBarcodeEntry !== undefined && normalizeMobileV2LoaderBarcodeInput(barcodeValue).length > 0;
   const submitTouchHandledRef = React.useRef(false);
@@ -160,7 +169,7 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
       >
         {/* Mode segmented control */}
         <FxCol gap={MOBILE_V2_SPACING.lg}>
-          <FxSectionHead theme={theme} label={`Mode · ${policy.scanModes.length} from policy`} />
+          <FxSectionHead theme={theme} label={copy.modeHeading.replace("{count}", () => String(policy.scanModes.length))} />
           <FxRow gap={MOBILE_V2_SPACING.md}>
             {policy.scanModes.map((m) => {
               const active = m === props.mode;
@@ -196,7 +205,7 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
                       fontSize: MOBILE_V2_TYPE_SIZES.bodyStrong,
                     }}
                   >
-                    {m === "bulk" ? "Bulk" : "Single"}
+                    {m === "bulk" ? copy.modeBulk : copy.modeSingle}
                   </Text>
                 </Pressable>
               );
@@ -212,7 +221,7 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
                 <FxIcon name={activeActionRecord.icon} size={22} color={theme.accent} />
               ) : null}
               <Text style={{ ...sansSemibold, color: theme.ink, fontSize: MOBILE_V2_TYPE_SIZES.bodyStrong, flex: 1 }}>
-                {activeActionRecord?.label ?? effectiveAction}
+                {activeActionRecord !== undefined ? loaderActionLabel(activeActionRecord, strings) : effectiveAction}
               </Text>
               <FxChip theme={theme} tone="accent" dense mono>
                 {effectiveAction}
@@ -226,9 +235,7 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
                 fontWeight: MOBILE_V2_TYPE_WEIGHTS.medium,
               }}
             >
-              {props.mode === "bulk"
-                ? "Bulk mode — scan multiple parcels then submit together"
-                : "Single mode — one parcel at a time"}
+              {props.mode === "bulk" ? copy.bulkHint : copy.singleHint}
             </Text>
           </FxCol>
         </FxCard>
@@ -237,7 +244,9 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
         <FxCol gap={MOBILE_V2_SPACING.lg}>
           <FxSectionHead
             theme={theme}
-            label={`Actions · ${enabledActions.length}/${policy.actions.length} enabled for hub`}
+            label={copy.actionsHeading
+              .replace("{enabled}", () => String(enabledActions.length))
+              .replace("{total}", () => String(policy.actions.length))}
           />
           <FxRow gap={MOBILE_V2_SPACING.md} wrap>
             {enabledActions.map((action) => {
@@ -250,7 +259,7 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
                   accessibilityState={{ selected: active }}
                 >
                   <FxChip theme={theme} tone={active ? "accent" : "neutral"} icon={action.icon}>
-                    {action.label}
+                    {loaderActionLabel(action, strings)}
                   </FxChip>
                 </Pressable>
               );
@@ -261,7 +270,7 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
         {/* Context chips */}
         {policy.contextChips.length > 0 ? (
           <FxCol gap={MOBILE_V2_SPACING.md}>
-            <FxSectionHead theme={theme} label="Context" />
+            <FxSectionHead theme={theme} label={copy.context} />
             <FxRow gap={MOBILE_V2_SPACING.md} wrap>
               {policy.contextChips.includes("route") ? (
                 <FxChip theme={theme} tone="info" icon="route" mono>
@@ -270,7 +279,7 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
               ) : null}
               {policy.contextChips.includes("bay") ? (
                 <FxChip theme={theme} tone="info" icon="layers" mono>
-                  {`Bay ${props.contextLabels.bay ?? "—"}`}
+                  {copy.bay.replace("{bay}", () => props.contextLabels.bay ?? "—")}
                 </FxChip>
               ) : null}
             </FxRow>
@@ -281,7 +290,7 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
         <Pressable
           onPress={props.onSimulateScan}
           accessibilityRole="button"
-          accessibilityLabel="Simulate barcode scan"
+          accessibilityLabel={copy.simulateScan}
         >
           <FxCard theme={theme} soft>
             <View
@@ -294,7 +303,7 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
             >
               <FxIcon name="scan" size={56} color={theme.accent} stroke={2.0} />
               <Text style={{ ...sansSemibold, color: theme.ink, fontSize: MOBILE_V2_TYPE_SIZES.bodyStrong }}>
-                Tap to scan
+                {copy.tapToScan}
               </Text>
               <Text
                 style={{
@@ -313,28 +322,28 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
         {submitControl.inlineVisible ? (
           <FxCard theme={theme} accent>
             <FxCol gap={MOBILE_V2_SPACING.lg}>
-              <FxSectionHead theme={theme} label="Ready to submit" />
-              <FxRow gap={MOBILE_V2_SPACING.lg}>{renderSubmitButton(submitControl.inlineTestId, "Submit scans")}</FxRow>
+              <FxSectionHead theme={theme} label={copy.readyToSubmit} />
+              <FxRow gap={MOBILE_V2_SPACING.lg}>{renderSubmitButton(submitControl.inlineTestId, copy.submitScans)}</FxRow>
             </FxCol>
           </FxCard>
         ) : null}
 
         <FxCard theme={theme} soft>
           <FxCol gap={MOBILE_V2_SPACING.lg}>
-            <FxSectionHead theme={theme} label="Scanner input" />
+            <FxSectionHead theme={theme} label={copy.scannerInput} />
             <FxRow gap={MOBILE_V2_SPACING.md} align="stretch">
               <TextInput
                 ref={barcodeInputRef}
                 value={barcodeValue}
                 onChangeText={setBarcodeValue}
                 onSubmitEditing={(event) => submitBarcode(event.nativeEvent.text)}
-                placeholder="Scan or type parcel barcode"
+                placeholder={copy.barcodePlaceholder}
                 placeholderTextColor={theme.muted}
                 autoCapitalize="characters"
                 autoCorrect={false}
                 returnKeyType="done"
                 blurOnSubmit
-                accessibilityLabel="Parcel barcode input"
+                accessibilityLabel={copy.barcodeInput}
                 testID="mobile-v2-loader-barcode-input"
                 style={{
                   backgroundColor: theme.surface,
@@ -359,10 +368,10 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
                 icon="scan"
                 onPress={() => submitBarcode()}
                 disabled={!barcodeReady}
-                accessibilityLabel="Add scanned parcel barcode"
+                accessibilityLabel={copy.addScanLabel}
                 testID="mobile-v2-loader-add-barcode"
               >
-                Add scan
+                {copy.addScan}
               </FxButton>
             </FxRow>
           </FxCol>
@@ -374,12 +383,14 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
             theme={theme}
             label={
               confirmedScanCount > 0
-                ? `Scans confirmed · ${confirmedScanCount}/${scanCount}`
-                : `Recent · ${scanCount}`
+                ? copy.confirmedHeading
+                    .replace("{confirmed}", () => String(confirmedScanCount))
+                    .replace("{total}", () => String(scanCount))
+                : copy.recentHeading.replace("{count}", () => String(scanCount))
             }
             right={
               props.onUndoLast !== undefined && scanCount > 0 && !allVisibleScansConfirmed ? (
-                <Pressable onPress={props.onUndoLast} accessibilityRole="button" accessibilityLabel="Undo last scan">
+                <Pressable onPress={props.onUndoLast} accessibilityRole="button" accessibilityLabel={copy.undoLast}>
                   <FxRow gap={MOBILE_V2_SPACING.sm} align="center">
                     <FxIcon name="refresh" size={14} color={theme.muted} />
                     <Text
@@ -390,7 +401,7 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
                         fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold,
                       }}
                     >
-                      Undo
+                      {copy.undo}
                     </Text>
                   </FxRow>
                 </Pressable>
@@ -400,7 +411,7 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
           {scanCount === 0 ? (
             <FxCard theme={theme} soft>
               <Text style={{ color: theme.muted, fontFamily: MOBILE_V2_FONT_SANS }}>
-                No scans yet. Scan or type a parcel barcode.
+                {copy.empty}
               </Text>
             </FxCard>
           ) : (
@@ -424,7 +435,7 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
                   </Text>
                   {isMobileV2LoaderReadbackScanEntry(entry) ? (
                     <FxChip theme={theme} tone="success" dense>
-                      Confirmed
+                      {copy.confirmed}
                     </FxChip>
                   ) : null}
                   <FxChip
@@ -452,9 +463,12 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
 
       <FxStickyAction
         theme={theme}
-        sub={`${props.mode} · ${pendingScanCount} pending · ${enabledActions.length} actions enabled${
-          willConfirmBulk ? ` · confirm above ${policy.confirmThreshold}` : ""
-        }${allVisibleScansConfirmed ? " · saved scans confirmed" : ""}`}
+        sub={`${copy.stickySub
+          .replace("{mode}", () => (props.mode === "bulk" ? copy.modeBulkLower : copy.modeSingleLower))
+          .replace("{pending}", () => String(pendingScanCount))
+          .replace("{actions}", () => String(enabledActions.length))}${
+          willConfirmBulk ? copy.stickyConfirmAbove.replace("{threshold}", () => String(policy.confirmThreshold)) : ""
+        }${allVisibleScansConfirmed ? copy.stickySaved : ""}`}
       >
         <FxRow gap={MOBILE_V2_SPACING.lg}>
           <FxButton
@@ -465,7 +479,7 @@ export function MobileV2LoaderScanScreen(props: MobileV2LoaderScanScreenProps): 
             onPress={props.onUndoLast}
             disabled={scanCount === 0 || allVisibleScansConfirmed}
           >
-            Undo
+            {copy.undo}
           </FxButton>
           {renderSubmitButton(submitControl.stickyTestId)}
         </FxRow>

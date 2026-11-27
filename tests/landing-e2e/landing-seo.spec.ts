@@ -31,28 +31,28 @@ test.describe("landing SEO meta tags", () => {
     await expect(twitterDescription).toHaveAttribute("content", /.+/);
   });
 
-  test("EN page has JSON-LD Organization schema (when LANDING_SITE_URL is set)", async ({ page }) => {
+  test("EN page has JSON-LD Organization schema for the configured site URL", async ({ page, baseURL }) => {
+    // The local Playwright server uses its baseURL as LANDING_SITE_URL.
+    const configuredSiteUrl = process.env.LANDING_SITE_URL?.trim() || baseURL;
+    if (!configuredSiteUrl) {
+      throw new Error("Landing E2E requires a configured site URL");
+    }
+    const { origin, pathname } = new URL(configuredSiteUrl);
+    const siteUrl = (origin + pathname).replace(/\/+$/, "");
+
     await page.goto("/?motion=off");
 
-    const jsonLdScripts = page.locator('script[type="application/ld+json"]');
-    const count = await jsonLdScripts.count();
+    const jsonLdScript = page.locator('script[type="application/ld+json"]').first();
+    await expect(jsonLdScript).toBeAttached();
 
-    // JSON-LD is only injected when LANDING_SITE_URL is set at build time.
-    if (count === 0) {
-      test.skip();
-      return;
-    }
-
-    const jsonLdContent = await jsonLdScripts.first().textContent();
-    expect(jsonLdContent).toBeTruthy();
-
-    const parsed = JSON.parse(jsonLdContent!);
+    const parsed = JSON.parse((await jsonLdScript.textContent()) ?? "");
     const schemas = Array.isArray(parsed) ? parsed : [parsed];
-
-    const orgSchema = schemas.find(
-      (s: { "@type"?: string }) => s["@type"] === "Organization"
+    expect(schemas).toContainEqual(
+      expect.objectContaining({
+        "@type": "Organization",
+        name: "MasarX",
+        url: siteUrl,
+      })
     );
-    expect(orgSchema).toBeTruthy();
-    expect(orgSchema.name).toBe("MasarX");
   });
 });

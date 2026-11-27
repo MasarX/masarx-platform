@@ -11,8 +11,12 @@ import { PageHeader } from "./page-header";
 import { Section } from "./section";
 import { formatUiError } from "./utils";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
+import { createUiTranslator } from "./i18n";
 
 type SearchParams = Record<string, string | string[] | undefined>;
+
+const READ_CAPABILITY = "workflow_runs.read";
+const WRITE_CAPABILITY = "workflow_runs.write";
 
 type WorkflowBindingsPageProps = {
   appKey: "console" | "portal";
@@ -71,6 +75,7 @@ export async function WorkflowBindingsPage({
   testIdPrefix,
   searchParams,
 }: WorkflowBindingsPageProps) {
+  const t = createUiTranslator("ui.workflowBindings");
   const ui = createUiServerClient();
   const client = createServerClient({ allowCookieSet: false });
 
@@ -94,12 +99,12 @@ export async function WorkflowBindingsPage({
       currentScopeLabel = me?.access_scope?.scope_label ?? null;
     }
   } catch (error) {
-    meError = formatUiError(error, "Unable to load current scope.");
+    meError = formatUiError(error, t("errors.loadScope"));
   }
 
   const capabilitySet = resolveCapabilitySet(capabilities);
-  const canRead = hasCapability(capabilitySet, "workflow_runs.read");
-  const canWrite = hasCapability(capabilitySet, "workflow_runs.write");
+  const canRead = hasCapability(capabilitySet, READ_CAPABILITY);
+  const canWrite = hasCapability(capabilitySet, WRITE_CAPABILITY);
 
   try {
     const { data, error } = await client.rpc("ui_list_workflow_bindings_v1", {
@@ -107,7 +112,7 @@ export async function WorkflowBindingsPage({
       p_scope_id: requestedScopeId,
     });
     if (error) {
-      bindingsError = formatUiError(error, "Unable to load workflow bindings.");
+      bindingsError = formatUiError(error, t("errors.loadBindings"));
     } else {
       const items = arrayValue((data as Record<string, unknown> | null)?.items);
       bindingItems = items.filter(
@@ -115,7 +120,7 @@ export async function WorkflowBindingsPage({
       );
     }
   } catch (error) {
-    bindingsError = formatUiError(error, "Unable to load workflow bindings.");
+    bindingsError = formatUiError(error, t("errors.loadBindings"));
   }
 
   try {
@@ -124,7 +129,7 @@ export async function WorkflowBindingsPage({
       .select("*")
       .order("binding_key", { ascending: true });
     if (error) {
-      inventoryError = formatUiError(error, "Unable to load workflow business action inventory.");
+      inventoryError = formatUiError(error, t("errors.loadInventory"));
     } else {
       inventoryItems = Array.isArray(data)
         ? data.filter(
@@ -133,7 +138,7 @@ export async function WorkflowBindingsPage({
         : [];
     }
   } catch (error) {
-    inventoryError = formatUiError(error, "Unable to load workflow business action inventory.");
+    inventoryError = formatUiError(error, t("errors.loadInventory"));
   }
 
   async function cloneOverride(formData: FormData) {
@@ -151,7 +156,8 @@ export async function WorkflowBindingsPage({
       p_scope_id: scopeId,
     });
     if (error) {
-      throw new Error(formatUiError(error, "Workflow binding override clone failed."));
+      // A server action cannot close over the render translator, so it builds its own.
+      throw new Error(formatUiError(error, createUiTranslator("ui.workflowBindings")("errors.cloneFailed")));
     }
     revalidatePath(baseHref);
   }
@@ -171,7 +177,7 @@ export async function WorkflowBindingsPage({
       p_scope_id: scopeId,
     });
     if (error) {
-      throw new Error(formatUiError(error, "Workflow binding reset failed."));
+      throw new Error(formatUiError(error, createUiTranslator("ui.workflowBindings")("errors.resetFailed")));
     }
     revalidatePath(baseHref);
   }
@@ -182,39 +188,39 @@ export async function WorkflowBindingsPage({
       data-testid={`${testIdPrefix}-ready`}
     >
       <PageHeader
-        title="Workflow bindings"
-        eyebrow={appKey === "console" ? "Console" : "Portal"}
-        description="Resolve effective workflow bindings for business-affecting actions, clone scoped overrides, and audit which actions are workflow-native versus still hybrid or direct."
+        title={t("header.title")}
+        eyebrow={appKey === "console" ? t("header.eyebrowConsole") : t("header.eyebrowPortal")}
+        description={t("header.description")}
       />
 
       <Section
-        title="Resolved scope"
-        description="Bindings resolve through the dynamic scope ladder. The page below shows the currently requested scope and whether each stage is overridden there."
+        title={t("scope.title")}
+        description={t("scope.description")}
       >
         <div
           className="grid gap-3 text-sm sm:grid-cols-3"
           data-testid={`${testIdPrefix}-scope`}
         >
           <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4">
-            <div className="text-xs uppercase tracking-wide text-ui-muted">Scope type</div>
+            <div className="text-xs uppercase tracking-wide text-ui-muted">{t("scope.scopeType")}</div>
             <div className="mt-1 font-medium text-ui-ink" data-testid={`${testIdPrefix}-scope-summary`}>
-              {resolveScopeSummaryLabel(requestedScopeType, currentScopeLabel, requestedScopeId) || "Not available"}
+              {resolveScopeSummaryLabel(requestedScopeType, currentScopeLabel, requestedScopeId) || t("scope.notAvailable")}
             </div>
           </div>
           <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4">
-            <div className="text-xs uppercase tracking-wide text-ui-muted">Scope id</div>
+            <div className="text-xs uppercase tracking-wide text-ui-muted">{t("scope.scopeId")}</div>
             <div className="mt-1 break-all font-medium text-ui-ink" data-testid={`${testIdPrefix}-scope-reference`}>
-              {resolveScopeReferenceLabel(requestedScopeId) || "Not available"}
+              {resolveScopeReferenceLabel(requestedScopeId) || t("scope.notAvailable")}
             </div>
           </div>
           <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4">
-            <div className="text-xs uppercase tracking-wide text-ui-muted">Capabilities</div>
+            <div className="text-xs uppercase tracking-wide text-ui-muted">{t("scope.capabilities")}</div>
             <div className="mt-1 flex flex-wrap gap-2">
               <Badge tone={canRead ? "success" : "neutral"}>
-                {canRead ? "workflow_runs.read" : "read missing"}
+                {canRead ? READ_CAPABILITY : t("scope.readMissing")}
               </Badge>
               <Badge tone={canWrite ? "success" : "neutral"}>
-                {canWrite ? "workflow_runs.write" : "write missing"}
+                {canWrite ? WRITE_CAPABILITY : t("scope.writeMissing")}
               </Badge>
             </div>
           </div>
@@ -223,14 +229,14 @@ export async function WorkflowBindingsPage({
       </Section>
 
       <Section
-        title="Bindings"
-        description="Each row is one binding stage. Use clone override to fork the resolved template into the current scope, or reset to inherit from the parent scope again."
+        title={t("bindings.title")}
+        description={t("bindings.description")}
         collapsible
         collapseKey="workflow-bindings.bindings"
       >
         {!canRead ? (
           <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4 text-sm text-ui-muted">
-            This surface requires the `workflow_runs.read` capability.
+            {t("bindings.readRequired")}
           </div>
         ) : bindingsError ? (
           <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4 text-sm text-ui-muted">
@@ -238,19 +244,19 @@ export async function WorkflowBindingsPage({
           </div>
         ) : bindingItems.length === 0 ? (
           <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4 text-sm text-ui-muted">
-            No workflow bindings were resolved for this scope.
+            {t("bindings.empty")}
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm" data-testid={`${testIdPrefix}-bindings-table`}>
               <thead className="text-xs uppercase tracking-wide text-ui-muted">
                 <tr className="border-b border-ui-border/60">
-                  <th className="px-3 py-3">Binding</th>
-                  <th className="px-3 py-3">Stage</th>
-                  <th className="px-3 py-3">Resolved from</th>
-                  <th className="px-3 py-3">Template</th>
-                  <th className="px-3 py-3">Status</th>
-                  <th className="px-3 py-3">Actions</th>
+                  <th className="px-3 py-3">{t("bindings.columns.binding")}</th>
+                  <th className="px-3 py-3">{t("bindings.columns.stage")}</th>
+                  <th className="px-3 py-3">{t("bindings.columns.resolvedFrom")}</th>
+                  <th className="px-3 py-3">{t("bindings.columns.template")}</th>
+                  <th className="px-3 py-3">{t("bindings.columns.status")}</th>
+                  <th className="px-3 py-3">{t("bindings.columns.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -289,27 +295,29 @@ export async function WorkflowBindingsPage({
                       </td>
                       <td className="px-3 py-4">
                         <div className="font-medium text-ui-ink">
-                          {resolveScopeSummaryLabel(resolvedScopeType, resolvedLabel, resolvedScopeId) || "Unknown"}
+                          {resolveScopeSummaryLabel(resolvedScopeType, resolvedLabel, resolvedScopeId) || t("bindings.unknown")}
                         </div>
                         <div className="text-xs text-ui-muted">
-                          Requested: {resolveScopeSummaryLabel(requestedType, requestedLabel, requestedId) || "Unknown"}
+                          {t("bindings.requested", {
+                            scope: resolveScopeSummaryLabel(requestedType, requestedLabel, requestedId) || t("bindings.unknown"),
+                          })}
                         </div>
                       </td>
                       <td className="px-3 py-4">
                         <div className="font-medium text-ui-ink">
-                          {templateName ?? "Template missing"}
+                          {templateName ?? t("bindings.templateMissing")}
                         </div>
                         <div className="text-xs text-ui-muted break-all">
-                          {templateId ?? "No template"}
+                          {templateId ?? t("bindings.noTemplate")}
                         </div>
                       </td>
                       <td className="px-3 py-4">
                         <div className="flex flex-wrap gap-2">
                           <Badge tone={overridden ? "warning" : "neutral"}>
-                            {overridden ? "Scoped override" : "Inherited"}
+                            {overridden ? t("bindings.scopedOverride") : t("bindings.inherited")}
                           </Badge>
                           <Badge tone={stageEnabled ? "success" : "neutral"}>
-                            {stageEnabled ? "Enabled" : "Disabled"}
+                            {stageEnabled ? t("bindings.enabled") : t("bindings.disabled")}
                           </Badge>
                         </div>
                       </td>
@@ -318,7 +326,7 @@ export async function WorkflowBindingsPage({
                           {templateId ? (
                             <Button asChild size="sm" variant="ghost">
                               <a href={`${appBasePath}/workflows/templates/${encodeURIComponent(templateId)}`}>
-                                Open in studio
+                                {t("bindings.openInStudio")}
                               </a>
                             </Button>
                           ) : null}
@@ -328,7 +336,7 @@ export async function WorkflowBindingsPage({
                             <input type="hidden" name="scope_type" value={requestedScopeType ?? ""} />
                             <input type="hidden" name="scope_id" value={requestedScopeId ?? ""} />
                             <Button size="sm" variant="soft" disabled={!canWrite}>
-                              Clone override
+                              {t("bindings.cloneOverride")}
                             </Button>
                           </form>
                           <form action={resetOverride}>
@@ -337,7 +345,7 @@ export async function WorkflowBindingsPage({
                             <input type="hidden" name="scope_type" value={requestedScopeType ?? ""} />
                             <input type="hidden" name="scope_id" value={requestedScopeId ?? ""} />
                             <Button size="sm" variant="ghost" disabled={!canWrite}>
-                              Reset
+                              {t("bindings.reset")}
                             </Button>
                           </form>
                         </div>
@@ -352,8 +360,8 @@ export async function WorkflowBindingsPage({
       </Section>
 
       <Section
-        title="Business action inventory"
-        description="Audit snapshot of business-affecting actions and whether they are workflow-native, hybrid, or still direct."
+        title={t("inventory.title")}
+        description={t("inventory.description")}
         collapsible
         collapseKey="workflow-bindings.inventory"
       >
@@ -363,7 +371,7 @@ export async function WorkflowBindingsPage({
           </div>
         ) : inventoryItems.length === 0 ? (
           <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4 text-sm text-ui-muted">
-            No business action inventory rows are registered yet.
+            {t("inventory.empty")}
           </div>
         ) : (
           <div className="grid gap-4 lg:grid-cols-2" data-testid={`${testIdPrefix}-inventory`}>
@@ -385,10 +393,10 @@ export async function WorkflowBindingsPage({
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Badge tone={toneForExecutionKind(executionKind)}>
-                        {executionKind ?? "unknown"}
+                        {executionKind ?? t("inventory.unknown")}
                       </Badge>
                       <Badge tone={toneForConfigurability(configurability)}>
-                        {configurability ?? "unknown"}
+                        {configurability ?? t("inventory.unknown")}
                       </Badge>
                     </div>
                   </div>
@@ -399,27 +407,30 @@ export async function WorkflowBindingsPage({
                   ) : null}
                   <dl className="mt-4 grid gap-3 text-xs sm:grid-cols-2">
                     <div>
-                      <dt className="uppercase tracking-wide text-ui-muted">Entrypoint</dt>
+                      <dt className="uppercase tracking-wide text-ui-muted">{t("inventory.entrypoint")}</dt>
                       <dd className="mt-1 text-ui-ink">
-                        {stringValue(item.entrypoint_type) ?? "unknown"}
+                        {stringValue(item.entrypoint_type) ?? t("inventory.unknown")}
                       </dd>
                     </div>
                     <div>
-                      <dt className="uppercase tracking-wide text-ui-muted">Surface</dt>
+                      <dt className="uppercase tracking-wide text-ui-muted">{t("inventory.surface")}</dt>
                       <dd className="mt-1 text-ui-ink">
-                        {stringValue(item.actor_surface) ?? "unknown"}
+                        {stringValue(item.actor_surface) ?? t("inventory.unknown")}
                       </dd>
                     </div>
                     <div>
-                      <dt className="uppercase tracking-wide text-ui-muted">Stages</dt>
+                      <dt className="uppercase tracking-wide text-ui-muted">{t("inventory.stages")}</dt>
                       <dd className="mt-1 text-ui-ink">
-                        {String(item.registered_stage_count ?? 0)} total / {String(item.enabled_stage_count ?? 0)} enabled
+                        {t("inventory.stageCounts", {
+                          total: String(item.registered_stage_count ?? 0),
+                          enabled: String(item.enabled_stage_count ?? 0),
+                        })}
                       </dd>
                     </div>
                     <div>
-                      <dt className="uppercase tracking-wide text-ui-muted">Owner</dt>
+                      <dt className="uppercase tracking-wide text-ui-muted">{t("inventory.owner")}</dt>
                       <dd className="mt-1 text-ui-ink">
-                        {stringValue(item.owner) ?? "unknown"} / {stringValue(item.migration_phase) ?? "unknown"}
+                        {stringValue(item.owner) ?? t("inventory.unknown")} / {stringValue(item.migration_phase) ?? t("inventory.unknown")}
                       </dd>
                     </div>
                   </dl>

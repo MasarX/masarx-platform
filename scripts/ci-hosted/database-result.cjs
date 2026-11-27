@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { loadExceptions, exceptionEvidence } = require('./pgtap-exceptions.cjs');
 const { sanitize } = require('./diagnostics.cjs');
+const { integrationCoverage, integrationInventory, exceptionFile } = require('./integration.cjs');
 
 const PGTAP_SHARD_COUNT = 6;
 const cell = value => sanitize(value ?? 'UNKNOWN').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\|/g, '&#124;').replace(/[\r\n]+/g, ' ');
@@ -85,14 +86,23 @@ function main() {
   const build = builds.length === 1 ? builds[0] : undefined;
   const shards = latest(path.join(root, 'shards'), 'pgtap.json');
   let entries = []; let inventory = [];
+  let integration = '';
   if (process.env.DATABASE_PRESENT === 'true') {
     try {
       entries = loadExceptions();
       inventory = fs.readdirSync('supabase/tests/pgtap');
+      if (process.env.HOSTED_INTEGRATION_REQUIRED === 'true') {
+        const coverage = integrationCoverage(shards, integrationInventory(), read(exceptionFile) ?? []);
+        integration = `\nIntegration coverage: ${coverage.ok ? 'PASS' : 'FAIL'} (${coverage.seen}/${coverage.expected} reported, ${coverage.ran} executed, ${coverage.skipped.length} fully skipped with numbered exceptions)\n`;
+        integration += coverage.skipped.map(row => `\n- Skipped: ${cell(row)}`).join('');
+        integration += coverage.knownFailures.map(row => `\n- Known failure: ${cell(row)}`).join('');
+        errors.push(...coverage.errors);
+        if (!coverage.ok && !coverage.errors.length) errors.push('Integration inventory is empty');
+      }
     } catch (error) { errors.push(sanitize(error.message)); }
   }
   const result = databaseResult(build, shards, inventory, process.env, entries);
-  const markdown = result.markdown + errors.map(error => `\nReport error: ${cell(error)}\n`).join('');
+  const markdown = result.markdown + integration + errors.map(error => `\nReport error: ${cell(error)}\n`).join('');
   console.log(markdown);
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown);
   if (!result.ok || errors.length) process.exitCode = 1;
