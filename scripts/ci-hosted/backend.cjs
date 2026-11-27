@@ -11,6 +11,9 @@ const { sanitize, environmentSecrets } = require('./diagnostics.cjs');
 const { run, stage, writeReport } = require('./process.cjs');
 const { captureDatabaseLog, collectStackDiagnostics, isHostedPgtap, needsHostedDatabaseInit } = require('./stack-diagnostics.cjs');
 const { shardFiles, shardEnvironment, shardResults, hostedBatches } = require('./pgtap.cjs');
+const { integrationEdgeEnvironment, integrationFunctionConfig, integrationShardFiles, integrationCoverage,
+  exceptionFile, restoreIntegrationDatabase, runIntegration } = require('./integration.cjs');
+const { isJwtSignedWithSecret } = require('../ops/workspace/edge-db-jwt.js');
 
 const { prepareImages } = require('./images.cjs');
 const { install } = require('./tasks.cjs');
@@ -27,17 +30,17 @@ function canBindPort(port) {
     server.listen(port, '0.0.0.0', () => server.close(error => error ? reject(error) : resolve(true)));
   });
 }
-async function hostedStackPorts(probe = canBindPort) {
+async function hostedStackPorts(probe = canBindPort, withMail = false) {
   // Keep Docker's published ports away from the default Linux ephemeral range.
   const ports = [];
   for (let port = HOSTED_PORT_MIN; port <= HOSTED_PORT_MAX; port++) {
     if (await probe(port)) ports.push(port);
-    if (ports.length === 3) {
-      const [shadowPort, apiPort, dbPort] = ports;
-      return { shadowPort, apiPort, dbPort };
+    if (ports.length === (withMail ? 4 : 3)) {
+      const [shadowPort, apiPort, dbPort, mailPort] = ports;
+      return { shadowPort, apiPort, dbPort, ...(withMail ? { mailPort } : {}) };
     }
   }
-  throw new Error(`Could not find three free hosted Supabase ports in ${HOSTED_PORT_MIN}-${HOSTED_PORT_MAX}`);
+  throw new Error(`Could not find ${withMail ? 'four' : 'three'} free hosted Supabase ports in ${HOSTED_PORT_MIN}-${HOSTED_PORT_MAX}`);
 }
 async function installHostedCli(checked, env, temp, bin) {
   const asset = buildSupabaseCliAsset({ version: '2.116.0', platform: 'linux', arch: 'amd64' });
@@ -119,7 +122,7 @@ async function reloadHostedCloneLogging(admin, command, level) {
   throw new Error(`Postgres clone logging did not reach ${level}`);
 }
 
-async function cloneHostedDatabases(admin, databases, created, restore = admin) {
+async function cloneHostedDatabases(admin, databases, created, restore = admin, strategy = 'WAL_LOG') {
   if (!databases.length) return;
   const { owner, limit, explicitAcl } = JSON.parse(await admin(`SELECT json_build_object(
     'owner', quote_ident(pg_get_userbyid(datdba)), 'limit', datconnlimit, 'explicitAcl', datacl IS NOT NULL)
@@ -129,7 +132,7 @@ async function cloneHostedDatabases(admin, databases, created, restore = admin) 
     const live = (await admin("SELECT bool_and(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity WHERE datname = 'postgres'")).trim();
     if (live && live !== 't') throw new Error('Could not release connections to the migrated template');
     for (const database of databases) {
-      await admin(`CREATE DATABASE ${database} TEMPLATE postgres STRATEGY WAL_LOG OWNER ${owner} CONNECTION LIMIT ${limit}`);
+      await admin(`CREATE DATABASE ${database} TEMPLATE postgres STRATEGY ${strategy} OWNER ${owner} CONNECTION LIMIT ${limit}`);
       created.push(database);
       if (explicitAcl) {
         const grants = JSON.parse(await admin(`SELECT coalesce(json_agg(format('GRANT %s ON DATABASE %I TO %s%s',
@@ -205,6 +208,38 @@ async function withHostedCloneIsolation(admin, restore, clone) {
       cloneError.restoreError = restoreError;
     }
   }
+}
+
+const integrationSnapshot = 'integration_pristine';
+
+async function snapshotIntegrationDatabase({ checked, env, admin, dockerRoot, project }) {
+  const size = Number((await admin("SELECT pg_database_size('postgres')")).trim());
+  if (!Number.isSafeInteger(size) || size < 1) throw new Error('Could not measure the pristine integration database');
+  diskFloor(dockerRoot, size);
+  const services = (await checked('docker', ['ps', '--filter', `label=com.supabase.cli.project=${project}`, '--format', '{{.Names}}'],
+    env, 15000, { quiet: true })).trim().split(/\s+/).filter(name => name && name !== `supabase_db_${project}`);
+  try {
+    if (services.length) await checked('docker', ['stop', ...services], env, 15000);
+    await withHostedCloneIsolation(admin, admin, restore => {
+      // A single copy of this disposable database avoids the WAL replay overhead of worker clones.
+      return cloneHostedDatabases(admin, [integrationSnapshot], [], restore, 'FILE_COPY');
+    });
+  } finally {
+    if (services.length) await checked('docker', ['start', ...services], env, 15000);
+  }
+  return (await admin(`SELECT oid FROM pg_database WHERE datname = '${integrationSnapshot}'`)).trim();
+}
+
+async function activateIntegrationDatabase(admin, expectedOid) {
+  if (!/^[1-9]\d*$/.test(expectedOid)) throw new Error('Missing pristine integration database identity');
+  await admin('ALTER DATABASE postgres ALLOW_CONNECTIONS false');
+  const terminated = (await admin("SELECT bool_and(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity WHERE datname = 'postgres'")).trim();
+  if (terminated && terminated !== 't') throw new Error('Could not release pgTAP database connections');
+  // Keep the local services' normal database name and switch both names atomically.
+  await admin(`ALTER DATABASE postgres RENAME TO pgtap_completed;
+    ALTER DATABASE ${integrationSnapshot} RENAME TO postgres`);
+  const actualOid = (await admin("SELECT oid FROM pg_database WHERE datname = 'postgres'")).trim();
+  if (actualOid !== expectedOid) throw new Error('The integration database does not match the pristine snapshot');
 }
 
 function availableMemory() {
@@ -383,12 +418,15 @@ function diskFloor(directory, cloneBytes = 0) {
     throw new Error('Less than 6 GiB free; backend qualification blocked');
   }
 }
-function completePins(pins) {
+const integrationImages = { postgrest: 'supabase/postgrest', 'edge-runtime': 'supabase/edge-runtime', mailpit: 'supabase/mailpit' };
+function completePins(pins, integration = false) {
   const expected = { database: 'supabase/postgres', auth: 'supabase/gotrue', storage: 'supabase/storage-api', gateway: 'supabase/kong', realtime: 'supabase/realtime' };
+  if (integration) Object.assign(expected, integrationImages);
   return Array.isArray(pins) && pins.length === Object.keys(expected).length && Object.entries(expected).every(([role, image]) =>
     pins.filter(pin => pin.role === role && pin.image === image && /^[a-zA-Z0-9_.-]+$/.test(pin.tag)
       && /^sha256:[a-f0-9]{64}$/.test(pin.digest) && /^sha256:[a-f0-9]{64}$/.test(pin.image_id)
-      && pin.mirror === 'ghcr.io' && /^[a-zA-Z0-9_.-]+$/.test(pin.cli_tag)).length === 1);
+      && pin.mirror === 'ghcr.io'
+      && /^[a-zA-Z0-9_.-]+$/.test(pin.cli_tag)).length === 1);
 }
 function mainSwitch(env = process.env, read = git, file = targetFile) {
   if (env.GITHUB_EVENT_NAME !== 'workflow_dispatch' || env.GITHUB_REF !== 'refs/heads/main') return '';
@@ -461,6 +499,10 @@ async function qualify(diagnostic) {
   const disposableShard = isHostedPgtap(process.env);
   if (disposableShard && pinState.qualificationOnly) throw new Error('Hosted pgTAP database init requires the digest-pinned Docker guard');
   const useDatabaseInit = !pinState.qualificationOnly && needsHostedDatabaseInit(process.env);
+  if (disposableShard) {
+    pins.push(...JSON.parse(fs.readFileSync('config/ci/hosted-integration-images.json', 'utf8')));
+    if (!completePins(pins, true)) throw new Error('PIN_NEEDED: hosted integration requires every reviewed service image');
+  }
   const workers = process.env.PGTAP_WORKERS || 'nproc';
   if (disposableShard) hostedWorkerLimit(workers, PGTAP_WORKER_CAP);
   const selected = shard ? shardFiles(fs.readdirSync('supabase/tests/pgtap'), shard, { hosted: disposableShard }) : undefined;
@@ -488,7 +530,7 @@ async function qualify(diagnostic) {
   let started = false; let guard; let cliEnv = env; let dockerRoot;
   const summary = { stages: [], sha: process.env.GITHUB_SHA || 'unknown', migrations: 0, pgtap: 'NOT_RUN',
     ...(shard ? { shard, selected, files: [] } : {}),
-    integration: 'SKIPPED_BY_DESIGN: local equivalence of the integration inventory is unproved',
+    integration: disposableShard ? 'NOT_RUN' : 'DEFERRED_TO_HOSTED_SHARDS',
     serviceImagePins: pinState.qualificationOnly ? 'PIN_NEEDED' : 'resolved SHA-256 indices', imageQualificationOnly: pinState.qualificationOnly, ok: false };
   fs.mkdirSync('ci-reports', { recursive: true });
   const logFile = `ci-reports/${reportName}.log`;
@@ -538,13 +580,36 @@ async function qualify(diagnostic) {
     // This workdir owns an empty DB. No remote profiles, seed files or cached schema are copied.
     const sb = path.join(temp, 'supabase');
     diagnostic.stage = 'stack-configuration';
-    summary.stackPorts = await hostedStackPorts();
-    const { dbPort } = summary.stackPorts;
-    writeHostedStackConfig(temp, project, summary.stackPorts, major, ['site_url = "http://127.0.0.1:3001"']);
+    if (disposableShard) {
+      await timed('edge-preparation', async () => {
+        await checked('npm', ['run', 'edge:sync-shared'], env);
+        await checked('npm', ['run', 'edge:prepare-resource-import-exceljs'], env);
+        fs.cpSync('supabase/functions', path.join(sb, 'functions'), { recursive: true });
+      });
+    }
+    summary.stackPorts = await hostedStackPorts(canBindPort, disposableShard);
+    const { apiPort, dbPort, mailPort } = summary.stackPorts;
+    const edge = disposableShard ? integrationEdgeEnvironment(apiPort) : undefined;
+    if (edge) {
+      // PostgREST needs the empty schema for startup, before the tracked migrations replay.
+      fs.writeFileSync(path.join(sb, 'seed.sql'), 'CREATE SCHEMA IF NOT EXISTS api;\n', { mode: 0o600 });
+      Object.assign(env, edge.vars);
+      // The Edge worker reaches Kong on the stack network.
+      cliEnv = { ...cliEnv, ...edge.vars, EDGE_SUPABASE_URL: 'http://kong:8000',
+        SUPABASE_AUTH_JWT_SECRET: edge.jwtSecret };
+    }
+    writeHostedStackConfig(temp, project, summary.stackPorts, major, [
+      'site_url = "http://127.0.0.1:3001"',
+      ...(edge ? ['jwt_secret = "env(SUPABASE_AUTH_JWT_SECRET)"',
+        '[edge_runtime]', 'enabled = true', 'policy = "per_worker"', 'deno_version = 2',
+        '[edge_runtime.secrets]', ...Object.keys(edge.vars).map(name => `${name} = "env(${name})"`),
+        ...integrationFunctionConfig(), '[local_smtp]', 'enabled = true', `port = ${mailPort}`] : []),
+    ], Boolean(edge));
     diagnostic.stage = 'stack-start';
     started = true; // A partial start must also be stopped.
-    console.log(`Stack service exclusions: ${lane.exclude.join(',')}`);
-    await timed('stack-start', () => checked(cli, ['start', '--debug', '--workdir', temp, '-x', lane.exclude.join(',')], cliEnv, 6 * 60000));
+    const exclude = lane.exclude.filter(service => !edge || !Object.hasOwn(integrationImages, service)).join(',');
+    console.log(`Stack service exclusions: ${exclude}`);
+    await timed('stack-start', () => checked(cli, ['start', '--debug', '--workdir', temp, '-x', exclude], cliEnv, 6 * 60000));
     if (useDatabaseInit) {
       summary.databasePid1 = await timed('database-init', () => verifyHostedDatabaseInit(checked, env, databaseContainer));
     }
@@ -556,6 +621,10 @@ async function qualify(diagnostic) {
       SUPABASE_URL: status.API_URL || '', SUPABASE_ANON_KEY: status.ANON_KEY || '',
       SUPABASE_SERVICE_ROLE_KEY: status.SERVICE_ROLE_KEY || '', WORKSPACE_NAME: project });
     local.assertLoopbackOnly(env, 'local stack');
+    if (edge && (!env.SUPABASE_URL || new URL(env.SUPABASE_URL).port !== String(apiPort)
+      || !env.SUPABASE_ANON_KEY || !isJwtSignedWithSecret(env.SUPABASE_SERVICE_ROLE_KEY, edge.jwtSecret))) {
+      throw new Error('The integration stack did not report its local API and job-local signing key');
+    }
     diagnostic.stage = 'database-connect';
     const { Client } = require('pg');
     const db = new Client({ connectionString: env.DATABASE_URL, connectionTimeoutMillis: 15000, query_timeout: 15000 });
@@ -628,12 +697,15 @@ async function qualify(diagnostic) {
       console.log(`Migration cron isolation: ${JSON.stringify(summary.cron)}`);
     } finally { await db.end(); }
     if (shard) {
+      const templateAdmin = (...commands) => stackAdminFor('template1', 15000, ...commands);
+      const integrationOid = edge && await timed('integration-database-snapshot', () =>
+        snapshotIntegrationDatabase({ checked, env, admin: templateAdmin, dockerRoot, project }));
       if (selected.includes('0zz_label_renderer_url_policy_v1.sql')) {
         // Only the disposable stack administrator can persist custom database settings.
         await stackAdmin(`DO $fixture$
           BEGIN
             EXECUTE format('ALTER DATABASE %I SET app.local_label_renderer_url = %L', current_database(),
-              concat('http', '://', concat_ws('.', 127, 0, 0, 1), ':54321/functions/v1/label-renderer'));
+              concat('http', '://', concat_ws('.', 127, 0, 0, 1), ':${apiPort}/functions/v1/label-renderer'));
           END
         $fixture$`);
       }
@@ -659,6 +731,33 @@ async function qualify(diagnostic) {
       if (JSON.stringify(rows.map(row => row.file)) !== JSON.stringify(selected) || rows.some(row => row.status !== 'passed')) throw new Error('Incomplete pgTAP shard results');
       summary.pgtap = 'passed';
       summary.ok = true;
+      if (edge) {
+        diagnostic.stage = 'integration';
+        summary.integration = 'running';
+        const deadline = pgtapDeadline(Date.now(), env.JOB_STARTED_AT);
+        const remaining = () => {
+          const milliseconds = deadline - Date.now();
+          if (milliseconds < 1) throw new Error('Integration shard exceeded the database job deadline');
+          return milliseconds;
+        };
+        const integrationAdmin = (...commands) => stackAdminFor('postgres', Math.min(15000, remaining()), ...commands);
+        summary.integrationDatabase = await timed('integration-database-restore', async () => {
+          await activateIntegrationDatabase(templateAdmin, integrationOid);
+          const settings = await restoreIntegrationDatabase(integrationAdmin);
+          return { ...settings, origin: 'pristine-migrated-snapshot' };
+        });
+        await integrationAdmin("NOTIFY pgrst, 'reload schema'");
+        await timed(`integration:${shard}`, async () => {
+          const chosen = integrationShardFiles(shard);
+          const files = await runIntegration(chosen, env, checked, remaining, path.join(temp, 'integration-jest.json'));
+          summary.integrationFiles = files;
+          const entries = JSON.parse(fs.readFileSync(exceptionFile, 'utf8')).filter(entry => chosen.includes(entry.file));
+          const verdict = integrationCoverage([{ shard, integration: 'passed', integrationFiles: files }], chosen, entries);
+          if (!verdict.ok) throw new Error(verdict.errors.join('\n'));
+          summary.integrationKnownFailures = verdict.knownFailures;
+        });
+        summary.integration = 'passed';
+      }
     } else {
       diagnostic.stage = 'backend-lint';
       await backendLint(summary, local.loadBackendLocalPreSuiteCommands(), lint => checked('npm', ['run', lint.script], {
@@ -670,7 +769,9 @@ async function qualify(diagnostic) {
     console.log(summary.integration);
     diagnostic.stage = 'complete';
   } catch (error) {
+    summary.ok = false;
     if (summary.pgtap === 'running') summary.pgtap = 'failed';
+    if (summary.integration === 'running') summary.integration = 'failed';
     if (guard && fs.existsSync(guard.policyFile)) diagnostic.imagePolicy = { ...diagnostic.imagePolicy, ...JSON.parse(fs.readFileSync(guard.policyFile, 'utf8')) };
     saveFailure(diagnostic, error, environmentSecrets(env)); // Persist before stack teardown and temporary-file removal.
     if (started && diagnostic.stage === 'stack-start') {
