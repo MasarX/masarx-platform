@@ -72,12 +72,12 @@ BEGIN
   INSERT INTO public.workflow_template_steps(id, workflow_template_id, sequence_order, operation_name,
     transition_condition, handler_key, handler_version, enabled)
     VALUES (v_template_step, v_template, 1, 'workflow_control', 'always', 'workflow_control', 'v1', TRUE);
+  PERFORM set_config('app.workflow_run_id', v_run::text, TRUE);
   INSERT INTO public.workflow_runs(id, workflow_template_id, workflow_template_version, entry_point, workflow_status, context)
     VALUES (v_run, v_template, 1, 'test', 'pending', jsonb_build_object('organization_id', p_org));
   INSERT INTO public.workflow_run_steps(id, workflow_run_id, workflow_template_step_id, sequence_order,
     step_status, operation_name, handler_key, handler_version, max_retries, enqueued_at)
     VALUES (v_step, v_run, v_template_step, 1, 'pending', 'workflow_control', 'workflow_control', 'v1', 1, now());
-  PERFORM set_config('app.workflow_run_id', v_run::text, TRUE);
   PERFORM set_config('app.workflow_run_step_id', v_step::text, TRUE);
   PERFORM set_config('platform.workflow_engine', '1', TRUE);
   PERFORM set_config('platform.workflow_run_step_id', v_step::text, TRUE);

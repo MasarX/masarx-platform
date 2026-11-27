@@ -55,18 +55,20 @@ BEGIN
         OR (v_role IN ('edge_api_gateway_role', 'edge_webhook_role') AND p_category = 'shipment_operation_policy'),
         FALSE
       );
-      IF NOT v_has_privileged_scope AND v_role = 'edge_api_gateway_role'
+      IF p_bound_org IS NULL AND NOT v_has_privileged_scope AND v_role = 'edge_api_gateway_role'
           AND v_context ? 'webhook_source_id' THEN
-        -- Provider account categories are configured by enabled routes.
-        SELECT EXISTS (
-          SELECT 1 FROM public.api_routes r
-          JOIN public.api_route_packs p ON p.id = r.pack_id
-          JOIN public.webhook_sources s ON s.id = public.mapping_studio_try_uuid_v1(v_context ->> 'webhook_source_id')
-          WHERE r.enabled AND p.enabled AND s.enabled
-            AND s.organization_id = public.mapping_studio_try_uuid_v1(v_context ->> 'organization_id')
-            AND COALESCE(NULLIF(r.policy #>> '{provider_account,category}', ''),
-                         NULLIF(r.policy #>> '{auth,binding_category}', '')) = p_category
-        ) INTO v_has_privileged_scope;
+        -- Bind configured account lookups to the source's organization.
+        SELECT s.organization_id INTO p_bound_org
+        FROM public.webhook_sources s
+        WHERE s.id = public.mapping_studio_try_uuid_v1(v_context ->> 'webhook_source_id')
+          AND s.enabled
+          AND EXISTS (
+            SELECT 1 FROM public.api_routes r
+            JOIN public.api_route_packs p ON p.id = r.pack_id
+            WHERE r.enabled AND p.enabled
+              AND COALESCE(NULLIF(r.policy #>> '{provider_account,category}', ''),
+                           NULLIF(r.policy #>> '{auth,binding_category}', '')) = p_category
+          );
       END IF;
     ELSIF v_role = 'edge_api_gateway_role' THEN
       v_has_privileged_scope := COALESCE(p_category IN ('public_tracking_policy', 'shipment_promise_policy'), FALSE);
