@@ -57,9 +57,9 @@ test('the DEV label probe requires HTTP 200, ok true and canonical base64 PDF by
 });
 
 test.each([
-  [[null, 503, 200], 0, [1000, 2000]],
+  [[null, 503, 200], 0, [1000, 2000], null],
   [[503, 502, 500], EXIT.renderStatus, [1000, 2000], 'LABEL_PROBE_RENDER_ERROR status=500 renderer_code=unavailable'],
-  [[null, null, null], EXIT.renderNetwork, [1000, 2000]],
+  [[null, null, null], EXIT.renderNetwork, [1000, 2000], null],
   [[403], EXIT.renderStatus, [], 'LABEL_PROBE_RENDER_ERROR status=403 renderer_code=auth_required'],
 ])('DEV label probe handles renderer results %j with code %i and waits %j', async (statuses, code, waits, diagnostic) => {
   const pdf = Buffer.from('%PDF-1.7\n\n');
