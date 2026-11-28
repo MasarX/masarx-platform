@@ -2,8 +2,7 @@
 
 This guide explains how to run, interpret, and extend the test suites for the MasarX Delivery Platform.
 
-The repo is cloud-first: most suites run against the Supabase cloud database using `ENV_FILE=path/to/cloud-config` Replace the sample path with the path to your private cloud configuration file.
-(or an exported `DATABASE_URL`). Local runs are optional and should use the `local:*` commands.
+The repo is cloud-first: most suites run against the Supabase cloud database using `ENV_FILE=path/to/cloud-config` (or an exported `DATABASE_URL`). Replace the sample path with the path to your private cloud configuration file. Local runs are optional and should use the `local:*` commands.
 
 Shell note:
 - PowerShell: `$env:ENV_FILE = "path/to/cloud-config"; <command>`
