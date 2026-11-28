@@ -1,7 +1,7 @@
 BEGIN;
 SET LOCAL search_path TO pg_catalog, public, extensions, pgtap, pg_temp;
 
-SELECT plan(5);
+SELECT plan(7);
 
 CREATE TEMP VIEW public_execute_functions AS
 SELECT p.oid AS function_oid
@@ -71,8 +71,7 @@ SELECT is(
 
 -- The UI executor test separately requires all retained executor grants to match its privilege plan.
 -- The loss allowlist covers database roles that had broader access through PUBLIC than their role contracts require.
-SELECT is_empty(
-  $$
+CREATE TEMP VIEW public_execute_preservation_roles AS
   WITH allowed_loss_roles (role_name) AS (
     VALUES
       ('authenticator'),
@@ -110,17 +109,81 @@ SELECT is_empty(
       ('supabase_replication_admin'),
       ('supabase_storage_admin'),
       ('ui_rpc_executor')
+  ), role_creations (role_name, after_closure) AS (
+    SELECT
+      (parse_ident(parsed.parts[1]))[1]::name,
+      migration.version > (
+        SELECT version
+        FROM supabase_migrations.schema_migrations
+        WHERE name = 'revoke_public_function_execute'
+      )
+    FROM supabase_migrations.schema_migrations AS migration
+    CROSS JOIN LATERAL unnest(migration.statements) AS recorded(statement)
+    CROSS JOIN LATERAL regexp_matches(
+      recorded.statement,
+      '\mCREATE[[:space:]]+ROLE[[:space:]]+("(?:[^"]|"")+"|[[:alpha:]_][[:alnum:]_$]*)',
+      'gi'
+    ) AS parsed(parts)
+  ), later_created_roles (role_name) AS (
+    -- A name also created at or before the closure is a closure-era role, so a later re-create keeps it in scope.
+    SELECT role_name
+    FROM role_creations
+    GROUP BY role_name
+    HAVING bool_and(coalesce(after_closure, false))
   )
-  SELECT r.rolname, target.signature
+  SELECT r.oid, r.rolname
   FROM pg_roles AS r
+  WHERE NOT EXISTS (
+    SELECT 1 FROM allowed_loss_roles AS allowed WHERE allowed.role_name = r.rolname::text
+  )
+    AND NOT EXISTS (
+      SELECT 1 FROM later_created_roles AS later WHERE later.role_name = r.rolname
+    );
+
+DO $fixture$
+DECLARE
+  role_name text := 'pgtap_045b_later_' || replace(gen_random_uuid()::text, '-', '');
+  role_statement text := format('DO $role$ BEGIN CREATE ROLE %I NOLOGIN; END; $role$;', role_name);
+BEGIN
+  INSERT INTO supabase_migrations.schema_migrations (version, name, statements)
+  SELECT (max(version)::bigint + 1)::text, role_name, ARRAY[role_statement]
+  FROM supabase_migrations.schema_migrations;
+
+  EXECUTE role_statement;
+  PERFORM set_config('pgtap.public_execute_later_role', role_name, true);
+END;
+$fixture$;
+
+SELECT is_empty(
+  $$
+  SELECT r.rolname, target.signature
+  FROM pg_temp.public_execute_preservation_roles AS r
   CROSS JOIN pg_temp.public_execute_closure_targets AS target
   WHERE NOT has_function_privilege(r.oid, target.function_oid, 'EXECUTE')
-    AND NOT EXISTS (
-      SELECT 1 FROM allowed_loss_roles AS allowed WHERE allowed.role_name = r.rolname::text
-    )
   ORDER BY r.rolname, target.signature
   $$,
-  'Effective EXECUTE on the closure targets is preserved for every role outside the loss allowlist'
+  'Effective EXECUTE on the closure targets is preserved for roles in scope at the closure'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM pg_roles AS r
+    WHERE r.rolname = current_setting('pgtap.public_execute_later_role')::name
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_temp.public_execute_preservation_roles AS checked WHERE checked.oid = r.oid
+      )
+  ),
+  'The preservation check excludes a role created in a later migration'
+);
+
+SELECT set_eq(
+  $$
+  SELECT rolname::text FROM pg_temp.public_execute_preservation_roles
+  WHERE rolname IN ('anon', 'authenticated', 'service_role')
+  $$,
+  ARRAY['anon', 'authenticated', 'service_role'],
+  'The preservation check includes anon, authenticated and service_role, which existed at the closure and are outside the loss allowlist'
 );
 
 SELECT finish();
