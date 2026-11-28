@@ -1,6 +1,6 @@
 BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
-SELECT plan(26);
+SELECT plan(40);
 
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid = 'public.contactless_pod_submissions'::regclass),
   'signing receipts have row-level security');
@@ -21,6 +21,15 @@ SELECT set_eq(
     CROSS JOIN pg_catalog.pg_roles AS r
     WHERE n.nspname IN ('public', 'api')
       AND p.prokind <> 'p'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_depend AS d
+        WHERE d.classid = 'pg_proc'::regclass
+          AND d.objid = p.oid
+          AND d.objsubid = 0
+          AND d.refclassid = 'pg_extension'::regclass
+          AND d.deptype = 'e'
+      )
       AND r.rolname = 'contactless_pod_intake'
       AND has_function_privilege(r.oid, p.oid, 'EXECUTE')$$,
   $$SELECT unnest(ARRAY[
@@ -33,7 +42,7 @@ SELECT ok((SELECT NOT rolcanlogin AND NOT rolsuper AND NOT rolbypassrls AND NOT 
   'the signing intake role has NOLOGIN, NOSUPERUSER, NOBYPASSRLS and NOINHERIT');
 
 CREATE FUNCTION pg_temp.contactless_fixture()
-RETURNS TABLE (org uuid, driver uuid, task uuid)
+RETURNS TABLE (org uuid, driver uuid, task uuid, stop uuid)
 LANGUAGE plpgsql AS $$
 DECLARE
   v_branch uuid := gen_random_uuid();
@@ -63,9 +72,10 @@ BEGIN
       'client_id', v_client, 'shipment_id', v_shipment, 'stop_kind', 'delivery', 'sequence_order', 1
     ))
   ));
+  stop := v_route.stop_ids[1];
   SELECT result.task_id INTO STRICT task FROM public.create_task_system_v1(jsonb_build_object(
     'task_type_key', 'route_stop_execute', 'context', jsonb_build_object('organization_id', org, 'client_id', v_client),
-    'resource_type', 'route_stop', 'resource_id', v_route.stop_ids[1], 'actor_system', 'dispatch_engine',
+    'resource_type', 'route_stop', 'resource_id', stop, 'actor_system', 'dispatch_engine',
     'idempotency_key', 'signing-fixture-' || org::text
   )) result;
   PERFORM public.assign_task_v1(task, driver);
@@ -183,5 +193,76 @@ END;
 $$;
 
 SELECT * FROM pg_temp.test_contactless_submissions();
+
+CREATE FUNCTION pg_temp.check_contactless_signing_access(
+  p_actor uuid, p_task uuid, p_allowed boolean, p_case text
+)
+RETURNS SETOF text LANGUAGE plpgsql AS $$
+DECLARE
+  v_link text;
+BEGIN
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  PERFORM set_config('request.jwt.claim.sub', p_actor::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated', 'sub', p_actor)::text, true);
+  SET LOCAL ROLE authenticated;
+  RETURN NEXT is(api.contactless_pod_link_available_v1(p_task), p_allowed, 'signing availability: ' || p_case);
+  v_link := api.mint_contactless_pod_token_v1(p_task);
+  RETURN NEXT ok(
+    CASE WHEN p_allowed
+      THEN v_link ~ '^https://signing[.]example[.]invalid/delivery-signing#token=[0-9a-f]{64}$'
+      ELSE v_link IS NULL
+    END, 'signing mint: ' || p_case
+  );
+  RESET ROLE;
+  PERFORM set_config('request.jwt.claim.role', 'service_role', true);
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', true);
+END;
+$$;
+
+CREATE FUNCTION pg_temp.test_contactless_signing_access()
+RETURNS SETOF text LANGUAGE plpgsql AS $$
+DECLARE
+  v_home record;
+  v_foreign record;
+  v_other_driver uuid := gen_random_uuid();
+  v_limited_actor uuid := gen_random_uuid();
+BEGIN
+  PERFORM set_config('request.jwt.claim.role', 'service_role', true);
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  SELECT * INTO STRICT v_home FROM pg_temp.contactless_fixture();
+  SELECT * INTO STRICT v_foreign FROM pg_temp.contactless_fixture();
+  DELETE FROM vault.secrets WHERE name = 'contactless_pod_signing_origin';
+  PERFORM vault.create_secret('https://signing.example.invalid', 'contactless_pod_signing_origin', 'Rollback-only signing access test');
+  INSERT INTO storage.buckets (id, name, public) VALUES ('fieldops-evidence', 'fieldops-evidence', false) ON CONFLICT DO NOTHING;
+  INSERT INTO public.users (id, organization_id, email, full_name, user_type, status, access_scope_type)
+  VALUES
+    (v_other_driver, v_home.org, v_other_driver || '@example.test', 'Other signing driver', 'driver', 'active', 'tenant'),
+    (v_limited_actor, v_home.org, v_limited_actor || '@example.test', 'Limited signing actor', 'finance_viewer', 'active', 'tenant');
+
+  RETURN QUERY SELECT * FROM pg_temp.check_contactless_signing_access(v_home.driver, v_home.task, true, 'assigned driver');
+  RETURN QUERY SELECT * FROM pg_temp.check_contactless_signing_access(v_other_driver, v_home.task, false, 'unassigned driver in the same tenant');
+
+  -- Represent a stale foreign assignment so the tenant check is exercised independently.
+  UPDATE public.tasks SET assigned_to = v_foreign.driver WHERE id = v_home.task;
+  RETURN QUERY SELECT * FROM pg_temp.check_contactless_signing_access(v_foreign.driver, v_home.task, false, 'assigned actor in another tenant');
+  UPDATE public.tasks SET assigned_to = v_limited_actor WHERE id = v_home.task;
+  RETURN QUERY SELECT * FROM pg_temp.check_contactless_signing_access(v_limited_actor, v_home.task, false, 'assigned actor without tasks.complete');
+  UPDATE public.tasks SET assigned_to = v_home.driver WHERE id = v_home.task;
+
+  UPDATE public.route_stops SET stop_kind = 'pickup' WHERE id = v_home.stop;
+  RETURN QUERY SELECT * FROM pg_temp.check_contactless_signing_access(v_home.driver, v_home.task, false, 'assigned pickup stop');
+  UPDATE public.route_stops SET stop_kind = 'delivery' WHERE id = v_home.stop;
+
+  UPDATE public.tasks SET status = 'open' WHERE id = v_home.task;
+  RETURN QUERY SELECT * FROM pg_temp.check_contactless_signing_access(v_home.driver, v_home.task, false, 'delivery task outside active status');
+  UPDATE public.tasks SET status = 'assigned' WHERE id = v_home.task;
+
+  PERFORM public.upsert_settings_value_v1('customer_device_sign_policy', 'tenant', v_home.org, '{"enabled":false}', 1, 'Signing access fixture opt-out');
+  RETURN QUERY SELECT * FROM pg_temp.check_contactless_signing_access(v_home.driver, v_home.task, false, 'tenant without signing opt-in');
+END;
+$$;
+
+SELECT * FROM pg_temp.test_contactless_signing_access();
 SELECT * FROM finish();
 ROLLBACK;
