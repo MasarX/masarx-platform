@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 /**
- * Cloud pgTAP runner
+ * pgTAP runner for an isolated PostgreSQL test database.
  *
- * Loads DATABASE_URL from .env.cloud and executes the pgTAP suite against the
- * shared Supabase database. Mirrors the behaviour of `supabase test db`, but
- * without spinning up local containers.
+ * Hosted CI calls this runner against its disposable database. The CLI needs
+ * a verified, isolated target because fixture bootstrap can write to it.
+ * See DELIVERY.md for the cloud-target qualification retirement.
  */
 
 const fs = require('fs');

@@ -177,7 +177,7 @@ function ciCoverage(files) {
   const tapDir = 'supabase/tests/pgtap';
   const shards = ci.jobs['database-pgtap'].strategy.matrix.shard;
   for (const shard of shards) addFiles(covered, shardFiles(fs.readdirSync(tapDir), shard + '/' + shards.length).map(file => path.join(tapDir, file)));
-  addScripts('package.json', ['test:pgtap', 'test:pgtap:local', 'test:pgtap:cloud']);
+  addScripts('package.json', ['test:pgtap', 'test:pgtap:local']);
 
   for (const { run } of ci.jobs['append-only'].steps) {
     for (const line of (run || '').split('\n')) {
