@@ -1,8 +1,9 @@
 // AppGuard.tsx - operator-console front-door gate.
 import { useEffect, useState, type ReactNode } from 'react';
+import { AuthMfa } from '@masarx/ui/auth-mfa';
 import { StateView } from '@/components/StateView';
 import { Button } from '@/components/Button';
-import { CONSOLE_LOGIN_PATH, rememberConsoleAuthRedirect, signOutConsole } from '@/lib/auth';
+import { CONSOLE_LOGIN_PATH, getConsoleAuthClient, rememberConsoleAuthRedirect, signOutConsole } from '@/lib/auth';
 import { hasConsoleLiveBackend, hydrateConsoleLiveMetadata, isConsoleSeedModeEnabled } from '@/lib/api';
 import { useIdentity } from '@/lib/identity';
 import { useI18n } from '@/lib/i18n';
@@ -22,7 +23,7 @@ export interface AppGuardProps {
 }
 
 export function AppGuard({ children, portalHref = PORTAL_HREF }: AppGuardProps) {
-  const { user, authStatus, isPortalUser, currentScopeType } = useIdentity();
+  const { user, authStatus, isPortalUser, currentScopeType, refreshSession } = useIdentity();
   const { t } = useI18n();
   const hasLiveBackend = hasConsoleLiveBackend();
   const liveBackendMissing = !isConsoleSeedModeEnabled() && !hasLiveBackend;
@@ -115,6 +116,19 @@ export function AppGuard({ children, portalHref = PORTAL_HREF }: AppGuardProps) 
     );
   }
 
+  const authClient = authStatus === 'mfa_required' ? getConsoleAuthClient() : null;
+  if (authClient) {
+    return (
+      <div className="app-guard app-guard--unauthenticated">
+        <AuthMfa
+          mfa={authClient.auth.mfa}
+          onVerified={refreshSession}
+          onSignOut={signOutConsole}
+        />
+      </div>
+    );
+  }
+
   if (authStatus === 'unauthenticated') {
     return (
       <div
@@ -143,7 +157,7 @@ export function AppGuard({ children, portalHref = PORTAL_HREF }: AppGuardProps) 
     );
   }
 
-  if (authStatus === 'error') {
+  if (authStatus === 'error' || authStatus === 'mfa_required') {
     return (
       <div
         className="app-guard app-guard--auth-error"

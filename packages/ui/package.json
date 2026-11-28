@@ -10,6 +10,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
+    "./auth-assurance": "./src/auth-assurance.ts",
+    "./auth-mfa": "./src/auth-mfa.tsx",
     "./label-designer": "./src/label-designer/index.ts",
     "./label-designer/asset-dropzone": "./src/label-designer/asset-dropzone.tsx",
     "./label-designer/asset-manager": "./src/label-designer/asset-manager.tsx",

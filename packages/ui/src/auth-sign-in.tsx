@@ -7,6 +7,7 @@ import { z } from "zod";
 import { getUiDefaults } from "@masarx/config";
 import { useTranslations } from "next-intl";
 import { Button } from "./button";
+import { AuthMfa } from "./auth-mfa";
 import { Form, FormField, useZodForm } from "./form";
 import { Input } from "./input";
 import { normalizeAppHref, normalizeBasePath, stripBasePath } from "./navigation-paths";
@@ -52,6 +53,22 @@ const buildAuthSchema = (t: (key: string) => string) =>
         });
       }
     });
+
+export function AuthMfaSignIn() {
+  const router = useRouter();
+  const supabase = React.useMemo(() => createBrowserClient(), []);
+  return (
+    <AuthMfa
+      mfa={supabase.auth.mfa}
+      onVerified={() => router.refresh()}
+      onSignOut={async () => {
+        const { error } = await supabase.auth.signOut();
+        if (error) throw error;
+        router.refresh();
+      }}
+    />
+  );
+}
 
 function filterAuthMethods(methods: string[]) {
   const normalized = methods

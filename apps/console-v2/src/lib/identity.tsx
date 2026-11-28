@@ -26,6 +26,7 @@ import {
   type ConsoleAuthStatus,
   type ConsoleIdentitySnapshot,
 } from './auth';
+import { isMfaRequired } from '@masarx/ui/auth-assurance';
 import { hasWildcardCapability } from './capabilities';
 import {
   assertValidUserAccessScope,
@@ -205,7 +206,7 @@ export function IdentityProvider({ children, mockValue }: IdentityProviderProps)
 
     setLiveIdentity((prev) => ({
       ...prev,
-      authStatus: 'loading',
+      authStatus: prev.authStatus === 'mfa_required' ? 'mfa_required' : 'loading',
       authError: null,
     }));
 
@@ -231,10 +232,11 @@ export function IdentityProvider({ children, mockValue }: IdentityProviderProps)
           snapshot,
         });
       } catch (error) {
+        const needsMfa = isMfaRequired(error);
         setLiveScopeOverride(null);
         setLiveIdentity({
-          authStatus: 'error',
-          authError: (error as Error).message || 'Unable to hydrate Console session',
+          authStatus: needsMfa ? 'mfa_required' : 'error',
+          authError: needsMfa ? null : (error as Error).message || 'Unable to hydrate Console session',
           snapshot: null,
         });
       }
