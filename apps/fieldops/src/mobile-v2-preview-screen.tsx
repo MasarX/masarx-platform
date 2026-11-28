@@ -41,7 +41,7 @@ import {
   collectMobileV2Capabilities,
   filterMobileV2Navigation,
   hasMobileV2Capability,
-  isMobileV2CashDropTabDenied,
+  resolveMobileV2GatedTabAccess,
   parseMobileV2NavigationPayload,
   type MobileV2NavigationItem,
   type MobileV2NavigationSection,
@@ -304,6 +304,7 @@ import {
   MobileV2MoreScreen,
   type MobileV2DriverShiftPanel,
   type MobileV2LoaderSessionPanel,
+  type MobileV2MoreIdentityState,
   type MobileV2MoreOutboxEntry,
 } from "./mobile-v2-more-screen";
 import {
@@ -441,6 +442,7 @@ import {
   type MobileV2SupervisorQueueEnvelope,
   type MobileV2EorEnvelope,
   type MobileV2WalletEnvelope,
+  type MobileV2ProfileEnvelope,
   type MobileV2DamageHoldReadback,
   type MobileV2IncidentReadback,
   type MobileV2OnboardingCleaningReadback,
@@ -458,7 +460,7 @@ import {
   type MobileV2RawOutboxSyncEntry,
 } from "./mobile-v2-connectivity";
 
-import { MobileV2IncidentSheet } from "./mobile-v2-sheet-incident";
+import { MobileV2IncidentSheet, type MobileV2IncidentType } from "./mobile-v2-sheet-incident";
 import {
   MobileV2DamageHoldSheet,
   type MobileV2DamageHoldPhotoCapture,
@@ -534,6 +536,10 @@ const EMPTY_MOBILE_V2_COD_LEDGER_STOPS: ReadonlyArray<MobileV2CodLedgerStop> = O
 // list-state wrappers show the loading or error state over it; fixtures
 // reach screens only through the read hooks in showcase mode.
 const EMPTY_MOBILE_V2_TASKS: ReadonlyArray<MobileV2Task> = Object.freeze([]);
+const EMPTY_MOBILE_V2_ROUTE_ROWS: ReadonlyArray<MobileV2RouteStop> = Object.freeze([]);
+const EMPTY_MOBILE_V2_INCIDENT_TYPES: ReadonlyArray<MobileV2IncidentType> = Object.freeze([]);
+// Name and badge are empty, never the showcase identity.
+const EMPTY_MOBILE_V2_PROFILE: MobileV2ProfileEnvelope = Object.freeze({ name: "", badge: "" });
 const EMPTY_MOBILE_V2_PICKUPS: ReadonlyArray<MobileV2Pickup> = Object.freeze([]);
 const EMPTY_MOBILE_V2_TRIPS: ReadonlyArray<MobileV2Trip> = Object.freeze([]);
 const EMPTY_MOBILE_V2_WALLET: MobileV2WalletEnvelope = Object.freeze({
@@ -904,8 +910,10 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
     preferredTaskId: isMobileV2PersistedUuid(activeStopId) ? activeStopTaskId : null,
     query: { staleTime: MOBILE_V2_TAB_FLOW_REFETCH_STALE_MS },
   });
-  const routeRows = routeRpc.data?.rows ?? MOBILE_V2_PREVIEW_ROUTE.rows;
-  const routeTotalStops = routeRpc.data?.totalStops ?? MOBILE_V2_PREVIEW_ROUTE.totalStops;
+  // #600: the route hook confines the fixture route to showcase mode; a
+  // live read that has not settled shows no stops.
+  const routeRows = routeRpc.data?.rows ?? EMPTY_MOBILE_V2_ROUTE_ROWS;
+  const routeTotalStops = routeRpc.data?.totalStops ?? 0;
   const routeManifestSummary: MobileV2RouteManifestSummary | null =
     routeRpc.data?.manifestSummary ?? null;
   const previousResolverFocusRef = React.useRef<string | null>(null);
@@ -949,14 +957,13 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
   ]);
   // E2 fix: the Live-route map screen now derives its data from the
   // resolver-driven route stops (projectMobileV2RouteMap) instead of the
-  // PREVIEW/DEV route fixture. The fixture's mapRouteId is used only as
-  // the route-id label fallback when the resolver returned no run id
-  // (preview / no active route).
+  // PREVIEW/DEV route fixture. With no run id (no active route, or the
+  // read has not settled) the route label is empty (#600).
   const routeMapView = React.useMemo(
     () =>
       projectMobileV2RouteMap(
         routeRows,
-        routeRpc.data?.routeId ?? MOBILE_V2_PREVIEW_ROUTE.mapRouteId,
+        routeRpc.data?.routeId ?? "",
       ),
     [routeRows, routeRpc.data?.routeId],
   );
@@ -1548,7 +1555,18 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
   // `MOBILE_V2_PREVIEW_USER` fixture is the preview/offline fallback
   // only. The resolver is the single identity source for every role.
   const profileRpc = useFieldopsProfileRpc({ fallback: MOBILE_V2_PREVIEW_PROFILE });
-  const profile = profileRpc.data ?? MOBILE_V2_PREVIEW_PROFILE;
+  const profile = profileRpc.data ?? EMPTY_MOBILE_V2_PROFILE;
+  // #600: while the live profile read loads or fails, the identity card shows that state, not a profile.
+  const profileIdentityState: MobileV2MoreIdentityState | undefined = profileRpc.data !== undefined
+    ? undefined
+    : profileRpc.isError
+      ? {
+          kind: "error",
+          message: formatMobileV2UserError(profileRpc.error, strings.liveReads.profileLoadFailed),
+          retryLabel: strings.liveReads.retry,
+          onRetry: () => { void profileRpc.refetch(); },
+        }
+      : { kind: "loading", label: strings.liveReads.profileLoading };
   const liveCodLedgerCurrency = isShowcase ? SAMPLE_COD_LEDGER.currency : profile.currency;
 
   // ---------------------------------------------------------------------
@@ -3852,7 +3870,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
   const incidentTypesRpc = useFieldopsIncidentTypesRpc({
     fallback: MOBILE_V2_PREVIEW_INCIDENT_TYPES,
   });
-  const incidentTypes = incidentTypesRpc.data ?? MOBILE_V2_PREVIEW_INCIDENT_TYPES;
+  const incidentTypes = incidentTypesRpc.data ?? EMPTY_MOBILE_V2_INCIDENT_TYPES;
   const [incidentReadbackError, setIncidentReadbackError] = React.useState<string | null>(null);
   const [incidentVerifiedReadback, setIncidentVerifiedReadback] =
     React.useState<MobileV2IncidentReadback | null>(null);
@@ -3993,8 +4011,13 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
     "mobile-trip-detail": tripsRpc.error,
     "mobile-trip-nav": tripsRpc.error,
   };
+  const gatedTabAccess = resolveMobileV2GatedTabAccess(activeTabId, {
+    navigationSettled: navigationRpc.data !== undefined,
+    cashDropAccessEnabled,
+    walletAccessEnabled,
+  });
   const routeReadDenied = isMobileV2RpcAccessDenied(routeReadErrors[activeTabId])
-    || isMobileV2CashDropTabDenied(activeTabId, cashDropAccessEnabled);
+    || gatedTabAccess === "denied";
   const routeReadAccess = getStrings(resolveLocaleCode(ctx.locale)).routeReadAccess;
 
   return (
@@ -4031,7 +4054,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                             : activeTabId === "mobile-lookup"
                               ? "Track shipment"
                             : activeTabId === "mobile-today"
-                              ? `Hello, ${profile.name.split(" ")[0] ?? profile.name}`
+                              ? (profile.name.length === 0 ? "" : `Hello, ${profile.name.split(" ")[0] ?? profile.name}`)
                               : activeTabId === "mobile-pre-shift"
                                 ? "Before you start"
                                 : activeTabId === "mobile-cleaning"
@@ -4117,12 +4140,14 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
               // "<visible stops> of <total stops> · <sort label>". The
               // visible count + sort label are now LIVE — they reflect
               // the active saved view's filter + sort (F8/F9).
-              `${routeViewResult.rows.length} of ${routeTotalStops} · ${getMobileV2RouteSortLabel(routeSortKey).toLowerCase()}`
+              (routeRpc.data === undefined ? "" : `${routeViewResult.rows.length} of ${routeTotalStops} · ${getMobileV2RouteSortLabel(routeSortKey).toLowerCase()}`)
             : activeTabId === "mobile-map"
               ? // E2: map subtitle is resolver-driven (route id +
                 // pending count from projectMobileV2RouteMap). Distance
                 // is omitted — no live route-distance resolver yet.
-                `${routeMapView.routeId} · ${routeMapView.pendingCount} pending`
+                (routeRpc.data === undefined ? "" : [routeMapView.routeId, `${routeMapView.pendingCount} pending`]
+                  .filter((seg) => seg.length > 0)
+                  .join(" · "))
               : activeTabId === "mobile-pickups"
             ? (pickupsRpc.data === undefined ? "" : `${livePickups.filter((p) => p.status === "pending").length} pending · ${livePickups.reduce((n, p) => n + p.picked, 0)}/${livePickups.reduce((n, p) => n + p.expectedQty, 0)} parcels`)
             : activeTabId === "mobile-pickup-detail"
@@ -4441,6 +4466,17 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
           >
             {null}
           </MobileV2ListStateView>
+        ) : gatedTabAccess === "pending" ? (
+          <MobileV2ListStateView
+            theme={ctx.theme}
+            isLoading={!navigationRpc.isError}
+            isError={navigationRpc.isError}
+            errorMessage={formatMobileV2UserError(navigationRpc.error, strings.liveReads.accessLoadFailed)}
+            retryLabel={strings.liveReads.retry}
+            onRetry={() => { void navigationRpc.refetch(); }}
+          >
+            {null}
+          </MobileV2ListStateView>
         ) : activeTabId === "mobile-more" ? (
           <MobileV2MoreScreen
             theme={ctx.theme}
@@ -4459,6 +4495,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
             outbox={outboxEntries}
             userName={profile.name}
             userBadge={profile.badge}
+            identityState={profileIdentityState}
             onSyncNow={handleManualSync}
             driverShift={moreDriverShift}
             loaderSession={loaderSessionPanel}
@@ -6813,6 +6850,13 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
           setIncidentVerifiedReadback(null);
         }}
         types={incidentTypes}
+        typesState={{
+          isLoading: isMobileV2ListLoading(incidentTypesRpc),
+          isError: incidentTypesRpc.isError,
+          errorMessage: formatMobileV2UserError(incidentTypesRpc.error, strings.liveReads.incidentTypesLoadFailed),
+          retryLabel: strings.liveReads.retry,
+          onRetry: () => { void incidentTypesRpc.refetch(); },
+        }}
         selectedTypeId={incidentTypeId}
         photoCaptured={incidentPhoto}
         statement={incidentStatement}

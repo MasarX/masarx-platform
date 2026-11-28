@@ -1599,10 +1599,10 @@ export function useFieldopsRouteRpc(
       options.preferredTaskId ?? null,
       options.preferredRouteRunId ?? null,
     ],
-    queryFn: async () => {
-      if (isPreviewMode(ctx.supabase)) return fallback;
+    // #600: the fixture route is a showcase sample only.
+    ...fieldopsSurfaceQuery<MobileV2RouteEnvelope>(ctx.supabase, fallback, async (supabase) => {
       const raw = await callRpc({
-        supabase: ctx.supabase,
+        supabase,
         name: "resolve_fieldops_tasks_v1",
         params: {
           p_active_role: ctx.activeRole,
@@ -1632,7 +1632,7 @@ export function useFieldopsRouteRpc(
         .slice()
         .sort((a, b) => a.seq - b.seq);
       const manifestSummary = routeRunId
-        ? await fetchMobileV2RouteManifestSummary(ctx.supabase, routeRunId, routeId)
+        ? await fetchMobileV2RouteManifestSummary(supabase, routeRunId, routeId)
         : null;
       return Object.freeze({
         rows: Object.freeze(rows),
@@ -1641,7 +1641,7 @@ export function useFieldopsRouteRpc(
         routeRunId,
         manifestSummary,
       });
-    },
+    }),
     ...options.query,
   });
 }
@@ -3038,13 +3038,31 @@ export function useFieldopsSupervisorQueueRpc(
 // in the production native shell. This hook binds the chrome identity to
 // `resolve_fieldops_profile_v1` (migration 202605180000), which returns
 // the CALLER's real name (users.full_name) + a stable display badge.
-// The fixture is the preview/offline fallback only; a not-yet-migrated
-// DB degrades to it via `isMissingRpcError` rather than erroring.
+// The fixture is a showcase sample only (#600).
 // ---------------------------------------------------------------------------
 
 export interface UseFieldopsProfileOptions {
-  /** Fallback identity used in preview mode or when the resolver is absent. */
+  /** Showcase identity; never shown in live mode. */
   readonly fallback: MobileV2ProfileEnvelope;
+}
+
+/**
+ * #600: the resolver returns `name` and `badge` as text or NULL (NULL when
+ * the caller has no org or users row) and no `currency`, so every field is
+ * optional: NULL or absent stays empty. A non-object payload, or a field of
+ * the wrong type, is malformed. No field is ever filled from the fixture.
+ */
+export function mapFieldopsProfileEnvelope(raw: unknown): MobileV2ProfileEnvelope {
+  const r = asRecord(raw);
+  const text = (value: unknown): string | null =>
+    typeof value === "string" ? value : value === null || value === undefined ? "" : null;
+  const name = r === null ? null : text(r.name);
+  const badge = r === null ? null : text(r.badge);
+  const currency = r === null ? null : text(r.currency);
+  if (name === null || badge === null || currency === null) {
+    throw mobileV2MalformedPayload("resolve_fieldops_profile_v1");
+  }
+  return Object.freeze(currency.length > 0 ? { name, badge, currency } : { name, badge });
 }
 
 export function useFieldopsProfileRpc(
@@ -3053,36 +3071,12 @@ export function useFieldopsProfileRpc(
   const ctx = useMobileV2Rpc();
   return useQuery<MobileV2ProfileEnvelope, Error>({
     queryKey: ["mobile-v2", "profile", ctx.activeRole],
-    queryFn: async () => {
-      if (isPreviewMode(ctx.supabase)) return options.fallback;
-      let raw: unknown;
-      try {
-        raw = await callRpc({
-          supabase: ctx.supabase,
-          name: "resolve_fieldops_profile_v1",
-          params: { p_active_role: ctx.activeRole, p_context: ctx.policyContext ?? {} },
-        });
-      } catch (error) {
-        if (isMissingRpcError(error)) return options.fallback;
-        throw error;
-      }
-      if (raw === null || typeof raw !== "object") return options.fallback;
-      const r = raw as Record<string, unknown>;
-      // Each field falls through to the fixture value when the resolver
-      // returns null (caller has no users row / no org) — never an empty
-      // chrome label.
-      return Object.freeze({
-        name: typeof r.name === "string" && r.name.length > 0 ? r.name : options.fallback.name,
-        badge:
-          typeof r.badge === "string" && r.badge.length > 0
-            ? r.badge
-            : options.fallback.badge,
-        currency:
-          typeof r.currency === "string" && r.currency.length > 0
-            ? r.currency
-            : options.fallback.currency,
-      });
-    },
+    ...fieldopsSurfaceQuery(ctx.supabase, options.fallback, async (supabase) =>
+      mapFieldopsProfileEnvelope(await callRpc({
+        supabase,
+        name: "resolve_fieldops_profile_v1",
+        params: { p_active_role: ctx.activeRole, p_context: ctx.policyContext ?? {} },
+      }))),
   });
 }
 
@@ -3344,25 +3338,36 @@ export function useFieldopsIncidentTypesRpc(
   return useQuery<ReadonlyArray<MobileV2IncidentType>, Error>({
     ...(options.query ?? {}),
     queryKey: ["mobile-v2", "incident-types", ctx.activeRole, ctx.policyContext ?? null],
-    queryFn: async () => {
-      if (isPreviewMode(ctx.supabase)) return fallback;
-      const raw = await callRpc({
-        supabase: ctx.supabase,
+    ...fieldopsSurfaceQuery(ctx.supabase, fallback, async (supabase) =>
+      mapFieldopsIncidentTypesPayload(await callRpc({
+        supabase,
         schema: "api",
         name: "resolve_settings_row_from_policy_context_v1",
         params: {
           p_category: "mobile_incident_policy",
           p_context: ctx.policyContext ?? {},
         },
-      });
-      const row = Array.isArray(raw) ? raw[0] : raw;
-      if (row === null || row === undefined || typeof row !== "object") return fallback;
-      const value = (row as Record<string, unknown>).value;
-      if (value === undefined || value === null) return fallback;
-      const types = parseMobileV2IncidentTypeList(value);
-      return types.length > 0 ? types : fallback;
-    },
+      }))),
   });
+}
+
+/**
+ * #600: no policy row (or a row with no value) is a valid empty registry.
+ * A value that is not a type list, or a non-empty list with no valid type,
+ * is malformed. The fixture is never substituted in live mode.
+ */
+export function mapFieldopsIncidentTypesPayload(raw: unknown): ReadonlyArray<MobileV2IncidentType> {
+  const row = Array.isArray(raw) ? raw[0] : raw;
+  if (row === null || row === undefined) return Object.freeze([]);
+  const record = asRecord(row);
+  if (record === null) throw mobileV2MalformedPayload("mobile_incident_policy");
+  const value = record.value;
+  if (value === null || value === undefined) return Object.freeze([]);
+  const list = Array.isArray(value) ? value : asRecord(value)?.types;
+  if (!Array.isArray(list)) throw mobileV2MalformedPayload("mobile_incident_policy");
+  const types = parseMobileV2IncidentTypeList(list);
+  if (list.length > 0 && types.length === 0) throw mobileV2MalformedPayload("mobile_incident_policy");
+  return types;
 }
 
 // ---------------------------------------------------------------------------

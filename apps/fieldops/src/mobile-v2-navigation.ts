@@ -283,3 +283,23 @@ export function hasMobileV2Capability(
 export function isMobileV2CashDropTabDenied(tabId: string, cashDropAccessEnabled: boolean): boolean {
   return !cashDropAccessEnabled && (tabId === "mobile-cash-drop" || tabId === "mobile-cod-ledger");
 }
+
+/**
+ * #600: the access state of a capability-gated tab (cash drop, COD ledger
+ * and the wallet, which needs `wallet.read`). Until the navigation read
+ * settles the capabilities are unknown, so the tab is "pending" and shows
+ * that read's loading or error state, never a denied flash.
+ */
+export function resolveMobileV2GatedTabAccess(
+  tabId: string,
+  access: {
+    readonly navigationSettled: boolean;
+    readonly cashDropAccessEnabled: boolean;
+    readonly walletAccessEnabled: boolean;
+  },
+): "allowed" | "pending" | "denied" {
+  const denied = isMobileV2CashDropTabDenied(tabId, access.cashDropAccessEnabled)
+    || (tabId === "mobile-wallet" && !access.walletAccessEnabled);
+  if (!denied) return "allowed";
+  return access.navigationSettled ? "denied" : "pending";
+}
