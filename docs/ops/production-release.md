@@ -88,7 +88,7 @@ node scripts/deploy/check-supabase-backup.cjs < "$BACKUP_READ_TOKEN_FILE" || exi
 )
 ```
 
-`SUPABASE_CLI` is the checksum-verified version qualified with the release. Compare the dry-run migration list to the approved tagged migration plan. Once approved, run `db push` once through the same linked checkout. Keep the raw output in the operator's private release evidence.
+`SUPABASE_CLI` is the checksum-verified version qualified with the release. Compare the dry-run migration list to the approved tagged migration plan. Once approved, prepare the renderer upgrade and run `db push` once through the same linked checkout. The renderer pre-apply uses `psql` with the linked session pooler and the committed CA. Keep its result and the raw apply output in the operator's private release evidence.
 
 ```bash
 set -euo pipefail
@@ -108,6 +108,7 @@ node scripts/deploy/check-supabase-backup.cjs < "$BACKUP_READ_TOKEN_FILE" || exi
   [[ -n "$SUPABASE_ACCESS_TOKEN" && -n "$SUPABASE_DB_PASSWORD" ]]
   export SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD
   "$SUPABASE_CLI" link --project-ref "$SUPABASE_PROJECT_REF" --yes
+  DEPLOY_ENV=prod bash scripts/deploy/prepare-executor-plan.sh renderer
   "$SUPABASE_CLI" db push --linked --yes
   "$SUPABASE_CLI" secrets set --project-ref "$SUPABASE_PROJECT_REF" --env-file "$EDGE_SECRET_FILE"
 )
