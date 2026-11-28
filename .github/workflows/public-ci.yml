@@ -398,11 +398,13 @@ jobs:
           fi
           node scripts/edge/verify-npm-import-lock.js
       - name: Check deploy edge preparation
+        id: edge_prep
         if: steps.subject.outputs.present == 'true'
         run: |
           if git diff --quiet --no-renames "$LOCAL_GATE_BASE_SHA" HEAD -- \
             .github/workflows/deploy.yml .github/workflows/public-ci.yml \
-            package.json package-lock.json deno.lock config/edge/functions.json scripts/ci-hosted/tasks.cjs scripts/edge \
+            package.json package-lock.json deno.lock config/edge/functions.json config/ci/deploy-cli-contract.json \
+            scripts/ci-hosted/tasks.cjs scripts/edge \
             supabase/config.toml supabase/functions tests/unit/ops/edge-frozen-lock.test.js; then
             exit 0
           fi
@@ -432,7 +434,15 @@ jobs:
             exit 1
           fi
           rm -- "$EDGE_FROZEN_WORKDIR/supabase/unexpected.ts"
-          node scripts/edge/verify-label-renderer-preview.cjs
+          printf 'workdir=%s\n' "$EDGE_FROZEN_WORKDIR" >> "$GITHUB_OUTPUT"
+      - name: Pull pinned label renderer runtime
+        if: steps.edge_prep.outputs.workdir != ''
+        run: node scripts/edge/verify-label-renderer-preview.cjs --pull
+      - name: Check label renderer preview
+        if: steps.edge_prep.outputs.workdir != ''
+        env:
+          EDGE_FROZEN_WORKDIR: ${{ steps.edge_prep.outputs.workdir }}
+        run: node scripts/edge/verify-label-renderer-preview.cjs
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs lint
