@@ -130,7 +130,7 @@ async function releasePostgresConnections(admin, message) {
   if ((await admin(releasePostgres, postgresConnections)).trim() !== '0') throw new Error(message);
 }
 
-async function cloneHostedDatabases(admin, databases, created, restore = admin, strategy = 'WAL_LOG') {
+async function cloneHostedDatabases(admin, databases, created, restore = admin) {
   if (!databases.length) return;
   const { owner, limit, explicitAcl } = JSON.parse(await admin(`SELECT json_build_object(
     'owner', quote_ident(pg_get_userbyid(datdba)), 'limit', datconnlimit, 'explicitAcl', datacl IS NOT NULL)
@@ -139,7 +139,8 @@ async function cloneHostedDatabases(admin, databases, created, restore = admin, 
     await admin('ALTER DATABASE postgres ALLOW_CONNECTIONS false');
     await releasePostgresConnections(admin, 'Could not release connections to the migrated template');
     for (const database of databases) {
-      await admin(`CREATE DATABASE ${database} TEMPLATE postgres STRATEGY ${strategy} OWNER ${owner} CONNECTION LIMIT ${limit}`);
+      // Avoid the forced checkpoints that can exhaust the clone deadline.
+      await admin(`CREATE DATABASE ${database} TEMPLATE postgres STRATEGY WAL_LOG OWNER ${owner} CONNECTION LIMIT ${limit}`);
       created.push(database);
       if (explicitAcl) {
         const grants = JSON.parse(await admin(`SELECT coalesce(json_agg(format('GRANT %s ON DATABASE %I TO %s%s',
@@ -227,10 +228,8 @@ async function snapshotIntegrationDatabase({ checked, env, admin, dockerRoot, pr
     env, 15000, { quiet: true })).trim().split(/\s+/).filter(name => name && name !== `supabase_db_${project}`);
   try {
     if (services.length) await checked('docker', ['stop', ...services], env, 15000);
-    await withHostedCloneIsolation(admin, admin, restore => {
-      // A single copy of this disposable database avoids the WAL replay overhead of worker clones.
-      return cloneHostedDatabases(admin, [integrationSnapshot], [], restore, 'FILE_COPY');
-    });
+    await withHostedCloneIsolation(admin, admin, restore =>
+      cloneHostedDatabases(admin, [integrationSnapshot], [], restore));
   } finally {
     if (services.length) await checked('docker', ['start', ...services], env, 15000);
   }
@@ -848,4 +847,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, installHostedCli, writeHostedStackConfig, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, timeHostedCloneCommand, dropHostedDatabases, withHostedCloneIsolation, pgtapDeadline };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, installHostedCli, writeHostedStackConfig, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, timeHostedCloneCommand, dropHostedDatabases, withHostedCloneIsolation, snapshotIntegrationDatabase, pgtapDeadline };
