@@ -7,6 +7,9 @@ SELECT plan(144);
 CREATE TEMP TABLE geocoding_direct_roles (role_name text) ON COMMIT DROP;
 INSERT INTO geocoding_direct_roles VALUES ('geocoding_manual_role'), ('geocoding_worker_role');
 
+-- SET ROLE needs membership; the manual role has no members, so the runner joins it only inside this rolled-back transaction.
+GRANT geocoding_manual_role TO CURRENT_USER;
+
 CREATE TEMP TABLE geocoding_role_fixture ON COMMIT DROP AS
 SELECT org_number, gen_random_uuid() AS org_id, gen_random_uuid() AS client_id,
        gen_random_uuid() AS address_id, gen_random_uuid() AS user_id, gen_random_uuid() AS row_id
