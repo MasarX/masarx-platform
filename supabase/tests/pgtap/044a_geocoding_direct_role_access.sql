@@ -8,7 +8,8 @@ CREATE TEMP TABLE geocoding_direct_roles (role_name text) ON COMMIT DROP;
 INSERT INTO geocoding_direct_roles VALUES ('geocoding_manual_role'), ('geocoding_worker_role');
 
 -- SET ROLE needs membership; the manual role has no members, so the runner joins it only inside this rolled-back transaction.
-GRANT geocoding_manual_role TO CURRENT_USER;
+-- Name the grantee: GRANT ... TO CURRENT_USER crashes the hosted test server (signal 11).
+DO $$ BEGIN EXECUTE format('GRANT geocoding_manual_role TO %I', current_user); END $$;
 
 CREATE TEMP TABLE geocoding_role_fixture ON COMMIT DROP AS
 SELECT org_number, gen_random_uuid() AS org_id, gen_random_uuid() AS client_id,
