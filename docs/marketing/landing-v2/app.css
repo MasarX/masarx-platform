@@ -1,9 +1,18 @@
+/* Tokens. The landing build prepends the shared --ui-* tokens from
+   packages/ui/src/styles.css. Landing names whose values equal a shared token
+   alias it; every other value below is the landing override listed in
+   DESIGN.md section 2 (#162). */
 :root {
   --container: clamp(960px, 92vw, 1440px);
   --gutter: clamp(18px, 3vw, 28px);
   --scroll-offset: 92px;
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
+  /* Status and scrim colors for the tracking map controls and overlays. */
+  --success: #047857;
+  --warning: #B45309;
+  --danger: #B91C1C;
+  --scrim: #080E1C;
 
   --font-sans-en: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
   --font-sans-ar: ui-sans-serif, system-ui, -apple-system, "Noto Sans Arabic", "IBM Plex Sans Arabic", "Tajawal", Segoe UI, Tahoma, Arial;
@@ -27,8 +36,13 @@
 
 html[lang="ar"] { --font-sans: var(--font-sans-ar); }
 
+html {
+  --bg: rgb(var(--ui-paper));
+  --text: rgb(var(--ui-ink));
+}
+
 html[data-variant="ai"] {
-  --brand: #4F46E5;
+  --brand: rgb(var(--ui-accent));
   --accent: #818CF8;
   --accent-2: #10B981;
   --btn-primary-text: #ffffff;
@@ -39,11 +53,10 @@ html[data-variant="ai"] {
 }
 
 html[data-theme="light"] {
-  --bg: #FAFBFE;
   --surface: rgba(255, 255, 255, 0.92);
-  --surface-strong: #ffffff;
-  --text: #0F172A;
+  --surface-strong: rgb(var(--ui-surface));
   --muted: #546275;
+  --brand-text: var(--brand);
   --border: rgba(79, 70, 229, 0.10);
   --tint-1: rgba(79, 70, 229, 0.03);
   --tint-2: rgba(79, 70, 229, 0.06);
@@ -58,11 +71,12 @@ html[data-theme="light"] {
 }
 
 html[data-theme="dark"] {
-  --bg: #0B1121;
+  --brand: #4F46E5;
   --surface: rgba(15, 23, 42, 0.80);
   --surface-strong: #111827;
-  --text: #F1F5F9;
   --muted: rgba(241, 245, 249, 0.65);
+  /* --brand on dark surfaces is under 3:1, so brand-colored text uses the lighter accent (#423). */
+  --brand-text: var(--accent);
   --border: rgba(79, 70, 229, 0.18);
   --tint-1: rgba(79, 70, 229, 0.06);
   --tint-2: rgba(79, 70, 229, 0.10);
@@ -118,20 +132,19 @@ body::before {
   background-size: 28px 28px;
 }
 
-/* Aurora ambient */
+/* Aurora ambient: wide soft gradients, no filter, so a repaint stays cheap (#438) */
 body::after {
   content: "";
   position: fixed;
-  inset: -22%;
+  inset: 0;
   pointer-events: none;
   z-index: -1;
   opacity: 0;
-  filter: blur(80px) saturate(110%);
   transform: translate3d(0, 0, 0);
   background:
-    radial-gradient(520px 360px at 20% 30%, color-mix(in srgb, var(--brand) 22%, transparent), transparent 60%),
-    radial-gradient(520px 360px at 80% 20%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 62%),
-    radial-gradient(460px 320px at 55% 80%, color-mix(in srgb, var(--accent-2) 16%, transparent), transparent 62%);
+    radial-gradient(680px 520px at 7% 21%, color-mix(in srgb, var(--brand) 22%, transparent), transparent 75%),
+    radial-gradient(680px 520px at 93% 7%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 75%),
+    radial-gradient(620px 480px at 57% 93%, color-mix(in srgb, var(--accent-2) 16%, transparent), transparent 75%);
 }
 
 html[data-variant="ai"] body::after { opacity: 0.45; }
@@ -168,18 +181,16 @@ a:hover { text-decoration: underline; }
   border-radius: var(--radius-pill);
   padding: 10px 14px;
   transform: translateY(-200%);
-  transition: transform var(--dur-fast) var(--ease);
   z-index: 999;
 }
 .skip-link:focus { transform: translateY(0); }
 
-/* --- Header (glassmorphism) --- */
+/* --- Header: opaque, no backdrop blur, so focus and scroll repaints stay cheap (#438) --- */
 .header {
   position: sticky;
   top: 0;
   z-index: 50;
-  backdrop-filter: blur(14px);
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
 
@@ -369,7 +380,8 @@ html[data-motion="off"] [data-tilt] { transform: none; }
 }
 
 /* --- Sections --- */
-.section { padding: clamp(72px, 8vw, 140px) 0; content-visibility: auto; contain-intrinsic-size: auto 600px; }
+/* No content-visibility: skipped sections swap a 600px placeholder for their real height after a focus or fragment scroll, moving the target off screen (#626). */
+.section { padding: clamp(72px, 8vw, 140px) 0; }
 .section h2 { margin: 0; font-size: clamp(26px, 2.5vw, 36px); letter-spacing: -0.03em; }
 [data-driver-review-note] { white-space: pre-wrap; overflow-wrap: anywhere; }
 .lead { margin: 12px 0 0; color: var(--muted); max-width: 72ch; line-height: 1.6; font-size: 17px; }
@@ -545,7 +557,7 @@ html.js[data-motion="on"] .hero.is-inview .hero-visual {
   gap: 6px;
   font-size: 12px;
   font-weight: 800;
-  color: var(--brand);
+  color: var(--brand-text);
 }
 .lifecycle-live::before {
   content: "";
@@ -676,7 +688,7 @@ html.js[data-motion="on"] .hero.is-inview .lifecycle-step {
   border-color: color-mix(in srgb, var(--brand) 25%, var(--border));
   background: color-mix(in srgb, var(--brand) 3%, var(--surface));
 }
-.compare-new h3 { margin: 0; font-size: 16px; letter-spacing: -0.02em; color: var(--brand); }
+.compare-new h3 { margin: 0; font-size: 16px; letter-spacing: -0.02em; color: var(--brand-text); }
 .compare-list { margin-top: 14px; }
 
 /* Compare card entrance */
@@ -1149,7 +1161,7 @@ html[dir="rtl"][data-motion="on"] .logos-track {
   content: "\2588";
   display: inline;
   animation: blink-caret 530ms step-end infinite;
-  color: var(--brand);
+  color: var(--brand-text);
   font-weight: 800;
   margin-inline-start: 1px;
 }
@@ -1197,7 +1209,7 @@ html.js[data-motion="on"] .hero.is-inview .lc-icon .drift {
 }
 @keyframes svg-drift { to { transform: translateX(2px); } }
 
-.cap-svg { width: 24px; height: 24px; flex-shrink: 0; color: var(--brand); }
+.cap-svg { width: 24px; height: 24px; flex-shrink: 0; color: var(--brand-text); }
 .cap-svg .spin { transform-origin: center; }
 html.js[data-motion="on"] .cap-card.is-card-visible .cap-svg .spin {
   animation: svg-spin 3s linear infinite;
@@ -1261,7 +1273,7 @@ html.js[data-motion="on"] .cap-card.is-card-visible .cap-svg .draw-line {
 }
 
 /* --- Motion off: immediate visibility --- */
-html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="off"] *::after {
+html[data-motion="off"], html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="off"] *::after {
   scroll-behavior: auto !important;
   transition: none !important;
   animation: none !important;
@@ -1278,8 +1290,7 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
     position: absolute;
     top: 100%;
     inset-inline: 0;
-    background: color-mix(in srgb, var(--bg) 96%, transparent);
-    backdrop-filter: blur(14px);
+    background: var(--bg);
     border-bottom: 1px solid var(--border);
     padding: 12px var(--gutter);
     flex-direction: column;
@@ -1355,7 +1366,7 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
 
 .track-lead {
   max-width: 58ch;
-  color: var(--c-muted);
+  color: var(--muted);
   font-size: 1.08rem;
 }
 
@@ -1384,16 +1395,8 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
 .track-step,
 .track-action-card {
   background:
-    linear-gradient(160deg, rgba(255,255,255,0.96), rgba(240,247,255,0.88)),
-    radial-gradient(circle at top right, rgba(30, 98, 255, 0.08), transparent 38%);
-}
-
-[data-theme="dark"] .track-overview,
-[data-theme="dark"] .track-step,
-[data-theme="dark"] .track-action-card {
-  background:
-    linear-gradient(160deg, rgba(11,17,30,0.96), rgba(15,24,42,0.9)),
-    radial-gradient(circle at top right, rgba(88, 180, 255, 0.12), transparent 42%);
+    linear-gradient(160deg, var(--surface-strong), var(--surface)),
+    radial-gradient(circle at top right, color-mix(in srgb, var(--brand) var(--wash-2), transparent), transparent 40%);
 }
 
 .track-step-head,
@@ -1416,15 +1419,8 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  background: rgba(8, 22, 57, 0.08);
-  color: var(--c-ink);
-}
-
-[data-theme="dark"] .track-step-index,
-[data-theme="dark"] .track-overview-pill,
-[data-theme="dark"] .track-lock {
-  background: rgba(148, 197, 255, 0.12);
-  color: rgba(229, 239, 255, 0.92);
+  background: var(--tint-2);
+  color: var(--text);
 }
 
 .track-form {
@@ -1455,25 +1451,16 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   align-items: start;
   padding: 1rem 1.1rem;
   border-radius: 24px;
-  border: 1px solid var(--line);
-  background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(244,247,252,0.95));
-  box-shadow: 0 16px 34px rgba(6, 29, 77, 0.08);
+  /* The tone tints the theme surface, so both themes follow the shared tokens (#464). */
+  --banner-tone: var(--brand);
+  border: 1px solid color-mix(in srgb, var(--banner-tone) 28%, transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--banner-tone) 10%, var(--surface-strong)), var(--surface-strong));
+  box-shadow: var(--shadow-md);
 }
 
-.track-request-banner[data-tone="success"] {
-  border-color: rgba(8, 127, 91, 0.28);
-  background: linear-gradient(135deg, rgba(235, 255, 248, 0.96), rgba(248, 255, 252, 0.98));
-}
-
-.track-request-banner[data-tone="warning"] {
-  border-color: rgba(191, 94, 0, 0.24);
-  background: linear-gradient(135deg, rgba(255, 247, 237, 0.98), rgba(255, 252, 246, 0.98));
-}
-
-.track-request-banner[data-tone="danger"] {
-  border-color: rgba(201, 42, 42, 0.22);
-  background: linear-gradient(135deg, rgba(255, 241, 242, 0.98), rgba(255, 248, 248, 0.98));
-}
+.track-request-banner[data-tone="success"] { --banner-tone: rgb(var(--ui-success)); }
+.track-request-banner[data-tone="warning"] { --banner-tone: rgb(var(--ui-warning)); }
+.track-request-banner[data-tone="danger"] { --banner-tone: rgb(var(--ui-danger)); }
 
 .track-request-banner-badge {
   width: fit-content;
@@ -1484,8 +1471,8 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text);
-  background: rgba(255,255,255,0.75);
-  border: 1px solid rgba(6,29,77,0.1);
+  background: var(--surface-strong);
+  border: 1px solid color-mix(in srgb, var(--banner-tone) 28%, transparent);
 }
 
 .track-request-banner-text {
@@ -1504,13 +1491,8 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   margin: 0;
   padding: 0.9rem 1rem;
   border-radius: 1rem;
-  border: 1px solid rgba(6, 29, 77, 0.09);
-  background: rgba(255,255,255,0.72);
-}
-
-[data-theme="dark"] .track-definition {
-  border-color: rgba(148, 197, 255, 0.16);
-  background: rgba(7, 12, 22, 0.58);
+  border: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .track-definition dt {
@@ -1519,7 +1501,7 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--c-muted);
+  color: var(--muted);
 }
 
 .track-definition dd {
@@ -1542,8 +1524,8 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   border-radius: 999px;
   padding: 0.55rem 1rem;
   font-weight: 700;
-  background: linear-gradient(120deg, #1147c7, #2aa6ff);
-  color: #fff;
+  background: linear-gradient(120deg, var(--brand), var(--accent));
+  color: var(--btn-primary-text);
 }
 
 .track-timeline {
@@ -1559,17 +1541,11 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   position: relative;
   display: grid;
   gap: 0.25rem;
-  padding: 0.9rem;
-  padding-inline-start: 1.3rem;
-  border-inline-start: 2px solid rgba(23, 77, 196, 0.28);
-  background: rgba(255,255,255,0.66);
+  padding-block: 0.9rem;
+  padding-inline: 1.3rem 0.9rem;
+  border-inline-start: 2px solid color-mix(in srgb, var(--brand) 28%, transparent);
+  background: var(--surface);
   border-radius: 0.9rem;
-}
-
-[data-theme="dark"] .track-timeline-item,
-[data-theme="dark"] .track-timeline-empty {
-  background: rgba(7, 12, 22, 0.55);
-  border-inline-start-color: rgba(88, 180, 255, 0.4);
 }
 
 .track-timeline-item::before {
@@ -1580,8 +1556,8 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   width: 0.65rem;
   height: 0.65rem;
   border-radius: 50%;
-  background: linear-gradient(120deg, #1147c7, #2aa6ff);
-  box-shadow: 0 0 0 4px rgba(42, 166, 255, 0.14);
+  background: linear-gradient(120deg, var(--brand), var(--accent));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .track-help-list,
@@ -1598,9 +1574,9 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
 }
 
 [data-track-reschedule-form][data-available="0"] .btn-primary:disabled {
-  border-color: rgba(6, 29, 77, 0.1);
-  background: linear-gradient(120deg, rgba(125, 138, 168, 0.75), rgba(155, 168, 194, 0.75));
-  color: rgba(255, 255, 255, 0.88);
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--muted) 75%, transparent);
+  color: var(--btn-primary-text);
 }
 
 .track-map-picker {
@@ -1608,8 +1584,8 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   min-height: 260px;
   border-radius: 1.25rem;
   overflow: hidden;
-  border: 1px solid rgba(6, 29, 77, 0.12);
-  background: linear-gradient(180deg, rgba(222, 236, 255, 0.92), rgba(245, 250, 255, 0.98));
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--tint-2), var(--surface-strong));
   touch-action: pan-x pan-y;
   user-select: none;
 }
@@ -1625,7 +1601,7 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
 }
 
 .track-map-picker.has-pin {
-  box-shadow: inset 0 0 0 1px rgba(17, 71, 199, 0.12), 0 18px 38px rgba(17, 71, 199, 0.08);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 12%, transparent), 0 18px 38px color-mix(in srgb, var(--brand) 8%, transparent);
 }
 
 .track-map-meta {
@@ -1633,7 +1609,7 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   display: grid;
   gap: 0.3rem;
   font-size: 0.9rem;
-  color: var(--c-muted);
+  color: var(--muted);
 }
 
 .track-map-status {
@@ -1641,21 +1617,21 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
 }
 
 .track-map-status[data-tone="success"] {
-  color: #087f5b;
+  color: var(--success);
 }
 
 .track-map-status[data-tone="error"] {
-  color: #c92a2a;
+  color: var(--danger);
 }
 
 .track-map-status[data-tone="info"] {
-  color: var(--brand);
+  color: var(--brand-text);
 }
 
 .track-map-picker .leaflet-container {
   width: 100%;
   height: 100%;
-  background: linear-gradient(180deg, #dbeafe, #eff6ff);
+  background: linear-gradient(180deg, var(--tint-2), var(--tint-1));
   font: inherit;
 }
 
@@ -1665,10 +1641,10 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
 }
 
 .track-map-picker .leaflet-control-zoom {
-  border: 1px solid rgba(6, 29, 77, 0.1);
+  border: 1px solid var(--border);
   border-radius: 1rem;
   overflow: hidden;
-  box-shadow: 0 14px 32px rgba(4, 10, 24, 0.14);
+  box-shadow: var(--shadow-sm);
 }
 
 .track-map-picker .leaflet-touch .leaflet-bar a,
@@ -1677,16 +1653,16 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   width: 2.5rem;
   height: 2.5rem;
   line-height: 2.4rem;
-  border-bottom: 1px solid rgba(6, 29, 77, 0.08);
-  background: rgba(255, 255, 255, 0.94);
-  color: var(--c-ink);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-strong);
+  color: var(--text);
 }
 
 .track-map-picker .leaflet-control-attribution {
   padding: 0.2rem 0.45rem;
   border-radius: 0.75rem 0 0 0;
-  background: rgba(255, 255, 255, 0.86);
-  color: var(--c-muted);
+  background: var(--surface);
+  color: var(--muted);
   backdrop-filter: blur(8px);
 }
 
@@ -1707,8 +1683,8 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   height: 22px;
   border-radius: 50% 50% 50% 0;
   transform: rotate(-45deg);
-  background: linear-gradient(145deg, #ff5d3d, #ff1f5a);
-  box-shadow: 0 12px 26px rgba(255, 31, 90, 0.32);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--danger) 70%, var(--warning)), var(--danger));
+  box-shadow: 0 12px 26px color-mix(in srgb, var(--danger) 32%, transparent);
 }
 
 .track-map-marker-pin::before {
@@ -1719,7 +1695,7 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   width: 8px;
   height: 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--btn-primary-text);
 }
 
 .track-map-marker-pin::after {
@@ -1731,30 +1707,12 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   height: 8px;
   transform: translateX(-50%) rotate(45deg);
   border-radius: 999px;
-  background: rgba(255, 31, 90, 0.18);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
   filter: blur(3px);
 }
 
-[data-theme="dark"] .track-map-picker {
-  border-color: rgba(148, 197, 255, 0.16);
-  background: linear-gradient(180deg, rgba(10, 22, 45, 0.95), rgba(8, 16, 31, 0.98));
-}
-
-[data-theme="dark"] .track-map-picker .leaflet-touch .leaflet-bar a,
-[data-theme="dark"] .track-map-picker .leaflet-bar a,
-[data-theme="dark"] .track-map-picker .leaflet-bar a:hover {
-  border-bottom-color: rgba(148, 197, 255, 0.12);
-  background: rgba(7, 12, 22, 0.88);
-  color: rgba(229, 239, 255, 0.94);
-}
-
-[data-theme="dark"] .track-map-picker .leaflet-control-attribution {
-  background: rgba(7, 12, 22, 0.82);
-  color: rgba(214, 228, 255, 0.82);
-}
-
 [data-theme="dark"] .track-map-picker .leaflet-control-attribution a {
-  color: rgba(160, 210, 255, 0.94);
+  color: var(--accent);
 }
 
 .track-map-toolbar {
@@ -1765,7 +1723,7 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
 
 .track-map-hint {
   margin: 0;
-  color: var(--c-muted);
+  color: var(--muted);
   font-size: 0.92rem;
 }
 
@@ -1793,11 +1751,11 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
   border: 0;
   border-radius: 999px;
   background: linear-gradient(135deg, var(--brand), var(--accent));
-  color: #fff;
+  color: var(--btn-primary-text);
   font: inherit;
   font-weight: 700;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.14);
-  box-shadow: 0 18px 36px rgba(17, 71, 199, 0.26);
+  text-shadow: 0 1px 0 color-mix(in srgb, var(--scrim) 14%, transparent);
+  box-shadow: 0 18px 36px color-mix(in srgb, var(--brand) 26%, transparent);
   transform: translateX(-50%);
   transition: transform 180ms ease, box-shadow 180ms ease, opacity 180ms ease, background 180ms ease;
 }
@@ -1808,11 +1766,11 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
 
 html[data-motion="on"] .track-map-confirm:hover:not(:disabled) {
   transform: translateX(-50%) translateY(-1px);
-  box-shadow: 0 22px 42px rgba(17, 71, 199, 0.32);
+  box-shadow: 0 22px 42px color-mix(in srgb, var(--brand) 32%, transparent);
 }
 
 .track-map-confirm:focus-visible {
-  outline: 3px solid rgba(255, 255, 255, 0.78);
+  outline: 3px solid color-mix(in srgb, var(--btn-primary-text) 78%, transparent);
   outline-offset: 3px;
 }
 
@@ -1822,8 +1780,8 @@ html[data-motion="on"] .track-map-confirm:hover:not(:disabled) {
 }
 
 .track-map-confirm.is-confirmed {
-  background: linear-gradient(135deg, #0f9d73, #0a7c5c);
-  box-shadow: 0 18px 36px rgba(8, 127, 91, 0.26);
+  background: var(--success);
+  box-shadow: 0 18px 36px color-mix(in srgb, var(--success) 26%, transparent);
 }
 
 .track-map-toggle {
@@ -1836,15 +1794,15 @@ html[data-motion="on"] .track-map-confirm:hover:not(:disabled) {
   justify-content: center;
   min-height: 40px;
   padding: 0.7rem 0.95rem;
-  border: 1px solid rgba(255, 255, 255, 0.58);
+  border: 1px solid color-mix(in srgb, var(--btn-primary-text) 58%, transparent);
   border-radius: 999px;
-  background: rgba(7, 19, 49, 0.74);
-  color: #fff;
+  background: color-mix(in srgb, var(--scrim) 74%, transparent);
+  color: var(--btn-primary-text);
   font: inherit;
   font-size: 0.83rem;
   font-weight: 800;
   cursor: pointer;
-  box-shadow: 0 14px 32px rgba(4, 10, 24, 0.22);
+  box-shadow: var(--shadow-md);
   backdrop-filter: blur(12px);
 }
 
@@ -1857,7 +1815,7 @@ html[data-motion="on"] .track-map-toggle:hover {
 }
 
 .track-map-toggle:focus-visible {
-  outline: 3px solid rgba(255, 255, 255, 0.78);
+  outline: 3px solid color-mix(in srgb, var(--btn-primary-text) 78%, transparent);
   outline-offset: 3px;
 }
 
@@ -1872,7 +1830,7 @@ body.track-map-overlay-open {
   display: grid;
   place-items: center;
   padding: max(1rem, env(safe-area-inset-top, 0px)) 1rem 1rem;
-  background: rgba(8, 14, 28, 0.56);
+  background: color-mix(in srgb, var(--scrim) 56%, transparent);
   backdrop-filter: blur(10px);
 }
 
@@ -2042,4 +2000,436 @@ body.track-map-overlay-open {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
   .reveal { opacity: 1; transform: none; }
+}
+
+/* --- Live delivery card (#406) --- */
+.track-courier-card {
+  --area-stroke: var(--brand);
+  display: grid;
+  gap: 1.1rem;
+  color: var(--muted);
+}
+
+/* --brand is about 2.8:1 on dark map land; --accent keeps the dashed cell at 3:1 or more. */
+[data-theme="dark"] .track-courier-card {
+  --area-stroke: var(--accent);
+}
+
+.track-courier-card .track-summary-grid {
+  gap: 0.75rem;
+}
+
+.track-courier-stops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-block-start: 0.35rem;
+}
+
+.track-courier-stops span {
+  inline-size: 14px;
+  block-size: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--muted);
+  opacity: 0.55;
+}
+
+.track-courier-stops span.is-you {
+  border-color: var(--brand);
+  background: var(--brand);
+  opacity: 1;
+}
+
+.track-courier-map {
+  position: relative;
+}
+
+.track-courier-map-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.track-courier-map-frame {
+  touch-action: auto;
+}
+
+.track-courier-area {
+  stroke: var(--area-stroke);
+  stroke-width: 2;
+  stroke-dasharray: 6 5;
+  fill: color-mix(in srgb, var(--brand) 16%, transparent);
+  fill-opacity: 1;
+}
+
+.track-courier-area-label {
+  position: absolute;
+  z-index: 500;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  translate: -50% -50%;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--surface-strong);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+}
+
+[dir="rtl"] .track-courier-area-label {
+  translate: 50% -50%;
+}
+
+.track-courier-attrib {
+  position: absolute;
+  z-index: 500;
+  inset-block-end: 6px;
+  inset-inline-end: 8px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface-strong) 80%, transparent);
+}
+
+.track-courier-attrib a {
+  color: inherit;
+}
+
+.track-courier-notice {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  border: 1px dashed var(--border);
+  background: var(--tint-1);
+}
+
+.track-courier-notice strong {
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.track-courier-notice p {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.track-courier-card .track-form-actions:not(:has(button:not([hidden]))) {
+  display: none;
+}
+
+.track-courier-status {
+  display: inline-flex;
+  align-items: center;
+}
+
+.track-courier-dot {
+  display: inline-block;
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  margin-inline-end: 6px;
+}
+
+.track-courier-status:not([data-status="live"]) .track-courier-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--muted);
+}
+
+.track-courier-privacy {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.track-courier-skel {
+  display: block;
+  block-size: 14px;
+  margin-block-start: 6px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--tint-2), color-mix(in srgb, var(--brand) 14%, transparent), var(--tint-2));
+  background-size: 200% 100%;
+  animation: track-courier-shimmer 2s linear infinite;
+}
+
+html[data-motion="off"] .track-courier-skel {
+  animation: none;
+}
+
+@keyframes track-courier-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+@media (max-width: 720px) {
+  .track-courier-map-frame {
+    min-height: 220px;
+  }
+}
+
+/* --- Proof of delivery (#407): the tile reuses the map picker frame's radius and border --- */
+.track-pod {
+  display: grid;
+  gap: 1rem;
+  color: var(--muted);
+}
+
+.pod-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pod-grid:empty {
+  display: none;
+}
+
+.pod-thumb {
+  display: grid;
+  gap: 0.5rem;
+  align-content: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+
+button.pod-thumb {
+  cursor: zoom-in;
+}
+
+.pod-thumb strong {
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.pod-thumb > span:last-child {
+  font-size: 0.82rem;
+}
+
+.pod-thumb:focus-visible {
+  outline: none;
+}
+
+.pod-thumb:focus-visible .pod-tile {
+  outline: 3px solid color-mix(in srgb, var(--brand) 55%, transparent);
+  outline-offset: 3px;
+}
+
+.pod-tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  max-inline-size: 100%;
+  border-radius: 1.2rem;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--tint-1);
+}
+
+.pod-tile.is-signature {
+  background: var(--surface-strong);
+}
+
+.pod-tile img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.pod-tile.is-signature img,
+.track-pod-modal .pod-tile img {
+  object-fit: contain;
+}
+
+.track-pod-modal .pod-tile {
+  aspect-ratio: auto;
+  min-block-size: 12rem;
+  max-block-size: 70vh;
+}
+
+.pod-missing {
+  display: grid;
+  gap: 0.35rem;
+  place-items: center;
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.85rem;
+}
+
+.pod-missing strong {
+  color: var(--text);
+}
+
+.pod-skel.track-courier-skel {
+  block-size: auto;
+  aspect-ratio: 4 / 3;
+  margin-block-start: 0;
+  border-radius: 1.2rem;
+}
+
+.pod-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.track-pod-plain {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.track-pod .track-form-actions:not(:has(button:not([hidden]))) {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .pod-grid {
+    gap: 0.75rem;
+  }
+}
+
+.track-option-card {
+  grid-column: 1 / -1;
+}
+
+.track-option-card > .track-courier-notice {
+  margin-block-end: 1rem;
+}
+
+.track-option-loading,
+.track-option-branch,
+.track-option-place {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.choices.options {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.choices legend {
+  margin-block-end: 0.6rem;
+  padding: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.choices.nested {
+  padding-inline-start: 1rem;
+  border-inline-start: 2px solid var(--border);
+}
+
+.choice {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--tint-1);
+  cursor: pointer;
+}
+
+.choice input,
+.track-option-consent input {
+  flex: none;
+  margin: 0.2rem 0 0;
+  accent-color: var(--brand);
+}
+
+.choice > span {
+  display: grid;
+  gap: 0.2rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.choice small {
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.choice:has(input:checked) {
+  border-color: var(--brand);
+  background: var(--tint-2);
+}
+
+.choice:has(input:focus-visible) {
+  outline: 3px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.choice:has(input:focus-visible) input {
+  outline: none;
+}
+
+[data-theme="dark"] .choice:has(input:checked) {
+  border-color: var(--accent);
+}
+
+[data-theme="dark"] .choice:has(input:focus-visible) {
+  outline-color: var(--accent);
+}
+
+.track-option-detail {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.track-option-detail strong {
+  font-size: 0.98rem;
+  color: var(--text);
+}
+
+.track-option-consent {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.track-option-counter {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+@media (max-width: 720px) {
+  .choices,
+  .choices.options {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

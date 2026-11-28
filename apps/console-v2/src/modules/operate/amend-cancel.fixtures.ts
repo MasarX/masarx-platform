@@ -26,15 +26,15 @@ export const AMEND_REVIEW_TASKS: AmendTaskRow[] = [
 ];
 
 export const AMEND_OP_LOOKUPS = [
-  { value: 'amend_address', label: 'Amend address', tone: 'info', rank: 10, metadata: { is_valid_op: true, backend_operation: 'address' } },
-  { value: 'amend_cod', label: 'Amend COD', tone: 'info', rank: 20, metadata: { is_valid_op: true, backend_operation: 'modify' } },
-  { value: 'cancel', label: 'Cancel', tone: 'danger', rank: 30, metadata: { is_valid_op: true, backend_operation: 'cancel' } },
-  { value: 'reschedule', label: 'Reschedule', tone: 'warn', rank: 40, metadata: { is_valid_op: true, backend_operation: 'reschedule' } },
+  { value: 'amend_address', label: 'Amend address', tone: 'info', rank: 10, metadata: { is_valid_op: true, backend_operation: 'address' } }, // i18n-literal-ok: lookup-row fixture data
+  { value: 'amend_cod', label: 'Amend COD', tone: 'info', rank: 20, metadata: { is_valid_op: true, backend_operation: 'modify' } }, // i18n-literal-ok: lookup-row fixture data
+  { value: 'cancel', label: 'Cancel', tone: 'danger', rank: 30, metadata: { is_valid_op: true, backend_operation: 'cancel' } }, // i18n-literal-ok: lookup-row fixture data
+  { value: 'reschedule', label: 'Reschedule', tone: 'warn', rank: 40, metadata: { is_valid_op: true, backend_operation: 'reschedule' } }, // i18n-literal-ok: lookup-row fixture data
 ];
 
 export const TASK_ACTION_KIND_LOOKUPS = [
-  { value: 'approve', label: 'Approve', tone: 'good', rank: 10, next_status: 'completed', metadata: { next_status: 'completed' } },
-  { value: 'reject', label: 'Reject', tone: 'danger', rank: 20, next_status: 'rejected', metadata: { next_status: 'rejected' } },
+  { value: 'approve', label: 'Approve', tone: 'good', rank: 10, next_status: 'completed', metadata: { next_status: 'completed' } }, // i18n-literal-ok: lookup-row fixture data
+  { value: 'reject', label: 'Reject', tone: 'danger', rank: 20, next_status: 'rejected', metadata: { next_status: 'rejected' } }, // i18n-literal-ok: lookup-row fixture data
 ];
 
 export function amendOpLookup(value: string) {

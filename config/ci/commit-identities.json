@@ -1,0 +1,26 @@
+[
+  {
+    "id": 357558349,
+    "login": "tree-publisher[bot]",
+    "name": "tree-publisher[bot]",
+    "reason": "Publishes project changes through the GitHub App"
+  },
+  {
+    "id": 49699333,
+    "login": "dependabot[bot]",
+    "name": "dependabot[bot]",
+    "reason": "Authors automated dependency updates"
+  },
+  {
+    "id": 41898282,
+    "login": "github-actions[bot]",
+    "name": "github-actions[bot]",
+    "reason": "Publishes automated changes from GitHub Actions"
+  },
+  {
+    "name": "GitHub",
+    "localPart": "noreply",
+    "host": "github.com",
+    "reason": "Records squash commits through GitHub web-flow"
+  }
+]

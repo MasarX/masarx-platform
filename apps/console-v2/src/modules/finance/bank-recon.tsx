@@ -41,7 +41,7 @@ import type { BankAccountBalanceResolution } from '@/lib/api';
 import { getLookups, resolve_workflow_template_id_v1, lookupRow } from '@/lib/api';
 import { ui_list_resource_v1 } from '@/lib/api';
 import { pushToast } from '@/components/toastStore';
-import { useI18n } from '@/lib/i18n';
+import { fill, useI18n } from '@/lib/i18n';
 import { useCapability, useIdentity } from '@/lib/identity';
 import { CAP } from '@/lib/capabilities';
 import {
@@ -324,15 +324,16 @@ function OpenItemsMatchForm({
   fmtDateTime: (iso: string | number | Date) => string;
   onMatched: (accountId: string) => void;
 }) {
+  const { t } = useI18n();
   const [selectedStatementId, setSelectedStatementId] = useState('');
   const [selectedTargetKey, setSelectedTargetKey] = useState('');
   const matchDisabledReason = (() => {
     if (accountActionDisabledReason) return accountActionDisabledReason;
-    if (matchMutation.isPending) return 'Bank statement match is already running.';
-    if (candidates.length === 0) return 'No open statement lines are available for this account.';
-    if (!selectedStatementId) return 'Select a statement line before matching.';
-    if (targets.length === 0) return 'No reconciliation targets are available.';
-    if (!selectedTargetKey) return 'Select a reconciliation target before matching.';
+    if (matchMutation.isPending) return t('bankRecon.reasons.matchRunning');
+    if (candidates.length === 0) return t('bankRecon.reasons.noCandidates');
+    if (!selectedStatementId) return t('bankRecon.reasons.selectLine');
+    if (targets.length === 0) return t('bankRecon.reasons.noTargets');
+    if (!selectedTargetKey) return t('bankRecon.reasons.selectTarget');
     return undefined;
   })();
 
@@ -345,19 +346,19 @@ function OpenItemsMatchForm({
     const selectedLine =
       candidates.find((line) => line.id === selectedStatementId) ?? null;
     if (!selectedLine) {
-      pushToast('Select a bank statement line before matching', 'warn');
+      pushToast(t('bankRecon.toast.selectLine'), 'warn');
       return;
     }
     const target =
       targets.find((candidate) => candidate.key === selectedTargetKey) ??
       null;
     if (!target) {
-      pushToast('Select a reconciliation target before matching', 'warn');
+      pushToast(t('bankRecon.toast.selectTarget'), 'warn');
       return;
     }
     const targetExpectedAmount = Number(target.expectedAmount);
     if (!Number.isFinite(targetExpectedAmount)) {
-      pushToast('Selected reconciliation target is missing expected amount', 'warn');
+      pushToast(t('bankRecon.toast.targetNoAmount'), 'warn');
       return;
     }
 
@@ -371,14 +372,11 @@ function OpenItemsMatchForm({
       policy: matchPolicy,
     });
     if (result.status === 'ambiguous') {
-      pushToast(
-        `bank_statement_match: ambiguous (${result.match_count}) · resolve manually`,
-        'warn',
-      );
+      pushToast(fill(t('bankRecon.toast.ambiguous'), { n: result.match_count }), 'warn');
       return;
     }
     if (result.status !== 'matched') {
-      pushToast('bank_statement_match: no_match · re-poll scheduled', 'info');
+      pushToast(t('bankRecon.toast.noMatch'), 'info');
       return;
     }
 
@@ -397,10 +395,7 @@ function OpenItemsMatchForm({
           setSelectedStatementId('');
           setSelectedTargetKey('');
           onMatched(account.id);
-          pushToast(
-            `Bank statement matched · ${res.bank_recon_match_id}`,
-            'good',
-          );
+          pushToast(fill(t('bankRecon.toast.matched'), { id: res.bank_recon_match_id }), 'good');
         },
         onError: (err: Error) => pushToast(err.message, 'danger'),
       },
@@ -409,21 +404,18 @@ function OpenItemsMatchForm({
 
   return (
     <form onSubmit={handleSubmit}>
-      <p className="state__hint">
-        Statement lines without a matched settlement batch or billing invoice.
-        Matching uses the configured reconciliation policy.
-      </p>
+      <p className="state__hint">{t('bankRecon.match.intro')}</p>
       <div className="card mono" style={{ fontSize: '11px', marginTop: '8px', padding: '10px' }}>
         <SeamLine
-          k="Match window before / after"
+          k={t('bankRecon.match.window')}
           v={`${matchPolicy.window_days_before} / ${matchPolicy.window_days_after}`}
         />
-        <SeamLine k="Amount tolerance" v={fmtCurrency(matchPolicy.amount_tolerance)} />
-        <SeamLine k="Require unique match" v={String(matchPolicy.require_unique)} />
+        <SeamLine k={t('bankRecon.match.tolerance')} v={fmtCurrency(matchPolicy.amount_tolerance)} />
+        <SeamLine k={t('bankRecon.match.requireUnique')} v={String(matchPolicy.require_unique)} />
       </div>
       <div style={{ display: 'grid', gap: '10px', marginTop: '12px' }}>
         <label className="mono" htmlFor="bank-recon-statement-line">
-          Statement line
+          {t('bankRecon.match.statementLine')}
         </label>
         <select
           id="bank-recon-statement-line"
@@ -432,7 +424,7 @@ function OpenItemsMatchForm({
           onChange={(event) => setSelectedStatementId(event.target.value)}
           disabled={candidates.length === 0}
         >
-          <option value="">Select statement line</option>
+          <option value="">{t('bankRecon.match.selectLine')}</option>
           {candidates.map((line) => (
             <option key={line.id} value={line.id}>
               {line.id} - {line.direction} - {fmtDateTime(line.occurred_at)} -{' '}
@@ -442,7 +434,7 @@ function OpenItemsMatchForm({
         </select>
 
         <label className="mono" htmlFor="bank-recon-target">
-          Reconciliation target
+          {t('bankRecon.match.target')}
         </label>
         <select
           id="bank-recon-target"
@@ -451,11 +443,13 @@ function OpenItemsMatchForm({
           onChange={(event) => setSelectedTargetKey(event.target.value)}
           disabled={targets.length === 0}
         >
-          <option value="">Select reconciliation target</option>
+          <option value="">{t('bankRecon.match.selectTarget')}</option>
           {targets.map((target) => (
             <option key={target.key} value={target.key}>
-              {target.label} - {target.status} - expected{' '}
-              {fmtCurrency(target.expectedAmount, target.currency ?? undefined)}
+              {target.label} - {target.status} -{' '}
+              {fill(t('bankRecon.match.expected'), {
+                amount: fmtCurrency(target.expectedAmount, target.currency ?? undefined),
+              })}
             </option>
           ))}
         </select>
@@ -463,7 +457,7 @@ function OpenItemsMatchForm({
       <div className="card" style={{ marginTop: '12px' }}>
         {candidates.length === 0 ? (
           <div className="state__hint" style={{ padding: '10px 0' }}>
-            No open statement lines.
+            {t('bankRecon.match.noLines')}
           </div>
         ) : (
           candidates.map((line) => (
@@ -497,7 +491,7 @@ function OpenItemsMatchForm({
         }}
       >
         <Button
-          label="Try match"
+          label={t('bankRecon.actions.tryMatch')}
           iconName="check"
           kind="primary"
           capability={CAP.FINANCE_WRITE}
@@ -517,7 +511,9 @@ function ActiveMatchesUnmatchForm({
   account: BankAccountRow;
   accountActionDisabledReason?: string;
 }) {
-  const { fmtCurrency } = useI18n();
+  const { t, fmtCurrency } = useI18n();
+  const resourceTypeLabel = (resourceType: string) =>
+    t(`bankRecon.resourceType.${resourceType}`, resourceType.replace(/_/g, ' '));
   const { data: bankStatementsResp } =
     useResourceList<FinanceEventLine>('finance_events_bank_statement');
   const { data: matchesResp } =
@@ -542,10 +538,10 @@ function ActiveMatchesUnmatchForm({
   const trimmedReason = reason.trim();
   const unmatchDisabledReason = (() => {
     if (accountActionDisabledReason) return accountActionDisabledReason;
-    if (unmatchMutation.isPending) return 'Bank reconciliation unmatch is already running.';
-    if (activeMatches.length === 0) return 'No active matches are available for this account.';
-    if (!selectedMatch) return 'Select an active match before unmatching.';
-    if (!trimmedReason) return 'Enter an unmatch reason before submitting.';
+    if (unmatchMutation.isPending) return t('bankRecon.reasons.unmatchRunning');
+    if (activeMatches.length === 0) return t('bankRecon.reasons.noActiveMatches');
+    if (!selectedMatch) return t('bankRecon.reasons.selectActiveMatch');
+    if (!trimmedReason) return t('bankRecon.reasons.enterReason');
     return undefined;
   })();
 
@@ -556,11 +552,11 @@ function ActiveMatchesUnmatchForm({
       return;
     }
     if (!selectedMatch) {
-      pushToast('Select an active match before unmatching', 'warn');
+      pushToast(t('bankRecon.toast.selectActiveMatch'), 'warn');
       return;
     }
     if (!trimmedReason) {
-      pushToast('Unmatch reason required', 'warn');
+      pushToast(t('bankRecon.toast.reasonRequired'), 'warn');
       return;
     }
     unmatchMutation.mutate(
@@ -572,7 +568,7 @@ function ActiveMatchesUnmatchForm({
         onSuccess: (res) => {
           setSelectedMatchId('');
           setReason('');
-          pushToast(`Match unmatched - ${res.bank_recon_match_id}`, 'warn');
+          pushToast(fill(t('bankRecon.toast.unmatched'), { id: res.bank_recon_match_id }), 'warn');
         },
         onError: (err: Error) => pushToast(err.message, 'danger'),
       },
@@ -581,14 +577,11 @@ function ActiveMatchesUnmatchForm({
 
   return (
     <form onSubmit={handleSubmit} data-testid="bank-recon-unmatch-form">
-      <p className="state__hint">
-        Active reconciliation matches against this bank account. Unmatching
-        requires a non-empty reason and records the audit history.
-      </p>
+      <p className="state__hint">{t('bankRecon.unmatch.intro')}</p>
       <div className="card" style={{ marginTop: '12px' }}>
         {activeMatches.length === 0 ? (
           <div className="state__hint" style={{ padding: '10px 0' }}>
-            No active matches for this account.
+            {t('bankRecon.unmatch.none')}
           </div>
         ) : (
           activeMatches.map((m) => (
@@ -607,7 +600,7 @@ function ActiveMatchesUnmatchForm({
                 {m.id}
               </span>
               <span style={{ fontSize: '11.5px' }}>
-                {m.resource_type.replace(/_/g, ' ')} - {m.resource_id}
+                {resourceTypeLabel(m.resource_type)} - <bdi>{m.resource_id}</bdi>
               </span>
               <span className="mono" style={{ fontWeight: 600 }}>
                 {fmtCurrency(m.matched_amount, m.currency)}
@@ -618,7 +611,7 @@ function ActiveMatchesUnmatchForm({
       </div>
       <div style={{ display: 'grid', gap: '10px', marginTop: '12px' }}>
         <label className="mono" htmlFor="bank-recon-unmatch-match">
-          Active match
+          {t('bankRecon.unmatch.activeMatch')}
         </label>
         <select
           id="bank-recon-unmatch-match"
@@ -627,15 +620,15 @@ function ActiveMatchesUnmatchForm({
           onChange={(event) => setSelectedMatchId(event.target.value)}
           disabled={activeMatches.length === 0}
         >
-          <option value="">Select active match</option>
+          <option value="">{t('bankRecon.unmatch.selectMatch')}</option>
           {activeMatches.map((m) => (
             <option key={m.id} value={m.id}>
-              {m.id} - {m.resource_type.replace(/_/g, ' ')} - {fmtCurrency(m.matched_amount, m.currency)}
+              {m.id} - {resourceTypeLabel(m.resource_type)} - {fmtCurrency(m.matched_amount, m.currency)}
             </option>
           ))}
         </select>
         <label className="mono" htmlFor="bank-recon-unmatch-reason">
-          Unmatch reason
+          {t('bankRecon.unmatch.reason')}
         </label>
         <textarea
           id="bank-recon-unmatch-reason"
@@ -644,7 +637,7 @@ function ActiveMatchesUnmatchForm({
           rows={4}
           value={reason}
           onChange={(event) => setReason(event.target.value)}
-          placeholder="Explain why this match is being reversed"
+          placeholder={t('bankRecon.unmatch.reasonPlaceholder')}
         />
       </div>
       <div
@@ -656,7 +649,7 @@ function ActiveMatchesUnmatchForm({
         }}
       >
         <Button
-          label="Unmatch selected match"
+          label={t('bankRecon.actions.unmatch')}
           iconName="close"
           kind="danger"
           capability={CAP.FINANCE_WRITE}
@@ -690,6 +683,7 @@ function ReconciliationWorkflowStartForm({
     payload: Record<string, unknown>;
   }) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const startWorkflowRun = useStartWorkflowRun();
   const branchesQuery = useResourceList<BranchOptionRow>('branches');
   const branches = useMemo(
@@ -716,24 +710,24 @@ function ReconciliationWorkflowStartForm({
   const lookupsConfigured = policyScopesConfigured && kinds.length > 0 && scopeTypes.length > 0;
   const startDisabledReason = (() => {
     if (accountActionDisabledReason) return accountActionDisabledReason;
-    if (!policyScopesConfigured) return 'Settlement policy batch scopes are not configured.';
-    if (!lookupsConfigured) return 'Settlement kind or workflow-supported scope lookups are not configured.';
-    if (!seed.kind) return 'Select a settlement kind before starting reconciliation.';
-    if (!seed.scope_type) return 'Select a settlement scope before starting reconciliation.';
+    if (!policyScopesConfigured) return t('bankRecon.reasons.scopesMissing');
+    if (!lookupsConfigured) return t('bankRecon.reasons.lookupsMissing');
+    if (!seed.kind) return t('bankRecon.reasons.selectKind');
+    if (!seed.scope_type) return t('bankRecon.reasons.selectScope');
     if (
       !allowedSettlementScopeTypes.includes(seed.scope_type) ||
       !BANK_DEPOSIT_RECONCILIATION_SCOPE_TYPES.has(seed.scope_type)
     ) {
-      return 'Selected settlement scope is not allowed for bank_deposit_reconciliation_v2.';
+      return t('bankRecon.reasons.scopeNotAllowed');
     }
-    if (!seed.date) return 'Select a period date before starting reconciliation.';
+    if (!seed.date) return t('bankRecon.reasons.selectDate');
     if (seed.scope_type === 'branch_day' && !seed.branch_id) {
-      return 'Select a branch before starting branch-day reconciliation.';
+      return t('bankRecon.reasons.selectBranch');
     }
     if (!workflowPolicyReady) {
-      return workflowPolicyBlockReason ?? 'Bank reconciliation workflow policy is not ready.';
+      return workflowPolicyBlockReason ?? t('bankRecon.reasons.workflowNotReady');
     }
-    if (startWorkflowRun.isPending) return 'Bank reconciliation workflow start is already running.';
+    if (startWorkflowRun.isPending) return t('bankRecon.reasons.workflowStarting');
     return undefined;
   })();
 
@@ -744,21 +738,21 @@ function ReconciliationWorkflowStartForm({
       return;
     }
     if (!workflowPolicyReady) {
-      pushToast(workflowPolicyBlockReason ?? 'Bank reconciliation workflow policy is not ready', 'warn');
+      pushToast(workflowPolicyBlockReason ?? t('bankRecon.toast.workflowNotReady'), 'warn');
       return;
     }
     const tplId = resolve_workflow_template_id_v1('bank_deposit_reconciliation_v2');
     if (!tplId) {
-      pushToast('Bank reconciliation workflow template is missing', 'danger');
+      pushToast(t('bankRecon.toast.templateMissing'), 'danger');
       return;
     }
     if (!seed.kind || !seed.scope_type || !seed.date) {
-      pushToast('Reconciliation workflow context is incomplete', 'warn');
+      pushToast(t('bankRecon.toast.contextIncomplete'), 'warn');
       return;
     }
     const branch = branches.find((row) => row.id === seed.branch_id) ?? null;
     if (seed.scope_type === 'branch_day' && !branch) {
-      pushToast('Select a branch before starting branch-day reconciliation', 'warn');
+      pushToast(t('bankRecon.toast.selectBranch'), 'warn');
       return;
     }
     const payload = {
@@ -791,12 +785,14 @@ function ReconciliationWorkflowStartForm({
         payload,
       });
       pushToast(
-        `Bank reconciliation started - ${res.workflow_run_id ?? '(pending)'}`,
+        fill(t('bankRecon.toast.started'), { id: res.workflow_run_id ?? t('bankRecon.toast.pendingId') }),
         'good',
       );
     } catch (err) {
       pushToast(
-        `Failed to start bank reconciliation - ${(err as Error)?.message ?? 'unknown error'}`,
+        fill(t('bankRecon.toast.startFailed'), {
+          message: (err as Error)?.message ?? t('bankRecon.toast.unknownError'),
+        }),
         'danger',
       );
     }
@@ -804,13 +800,10 @@ function ReconciliationWorkflowStartForm({
 
   return (
     <form onSubmit={handleSubmit} data-testid="bank-recon-workflow-start-form">
-      <p className="state__hint">
-        Start the bank deposit reconciliation workflow with the settlement
-        context required by the active workflow template.
-      </p>
+      <p className="state__hint">{t('bankRecon.workflow.intro')}</p>
       {!lookupsConfigured ? (
         <p className="state__hint" style={{ color: 'var(--danger)', marginTop: '8px' }}>
-          Settlement policy batch scopes, kinds, or workflow-supported scopes are not configured.
+          {t('bankRecon.workflow.notConfigured')}
         </p>
       ) : null}
       {workflowPolicyBlockReason ? (
@@ -828,7 +821,7 @@ function ReconciliationWorkflowStartForm({
         }}
       >
         <label className="mono" htmlFor="bank-recon-workflow-kind">
-          Kind
+          {t('bankRecon.workflow.kind')}
         </label>
         <select
           id="bank-recon-workflow-kind"
@@ -837,7 +830,7 @@ function ReconciliationWorkflowStartForm({
           disabled={kinds.length === 0}
           onChange={(event) => setSeed((s) => ({ ...s, kind: event.target.value }))}
         >
-          <option value="">Select settlement kind</option>
+          <option value="">{t('bankRecon.workflow.selectKind')}</option>
           {kinds.map((kind) => (
             <option key={kind.value} value={kind.value}>
               {kind.label}
@@ -845,7 +838,7 @@ function ReconciliationWorkflowStartForm({
           ))}
         </select>
         <label className="mono" htmlFor="bank-recon-workflow-scope">
-          Scope
+          {t('bankRecon.workflow.scope')}
         </label>
         <select
           id="bank-recon-workflow-scope"
@@ -854,7 +847,7 @@ function ReconciliationWorkflowStartForm({
           disabled={scopeTypes.length === 0}
           onChange={(event) => setSeed((s) => ({ ...s, scope_type: event.target.value }))}
         >
-          <option value="">Select settlement scope</option>
+          <option value="">{t('bankRecon.workflow.selectScope')}</option>
           {scopeTypes.map((scope) => (
             <option key={scope.value} value={scope.value}>
               {scope.label}
@@ -862,7 +855,7 @@ function ReconciliationWorkflowStartForm({
           ))}
         </select>
         <label className="mono" htmlFor="bank-recon-workflow-branch">
-          Branch
+          {t('bankRecon.workflow.branch')}
         </label>
         <select
           id="bank-recon-workflow-branch"
@@ -871,15 +864,15 @@ function ReconciliationWorkflowStartForm({
           disabled={branches.length === 0}
           onChange={(event) => setSeed((s) => ({ ...s, branch_id: event.target.value }))}
         >
-          <option value="">Select branch</option>
+          <option value="">{t('bankRecon.workflow.selectBranch')}</option>
           {branches.map((branch) => (
             <option key={branch.id} value={branch.id}>
-              {textOf(branch.code) || branch.id} - {textOf(branch.name) || 'Branch'}
+              {textOf(branch.code) || branch.id} - {textOf(branch.name) || t('bankRecon.workflow.branch')}
             </option>
           ))}
         </select>
         <label className="mono" htmlFor="bank-recon-workflow-date">
-          Period date
+          {t('bankRecon.workflow.periodDate')}
         </label>
         <input
           id="bank-recon-workflow-date"
@@ -890,9 +883,9 @@ function ReconciliationWorkflowStartForm({
         />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-        <Button label="Cancel" kind="ghost" onClick={onClose} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onClose} />
         <Button
-          label="Start reconciliation"
+          label={t('bankRecon.actions.startRecon')}
           kind="primary"
           iconName="refresh"
           capability={CAP.FINANCE_WRITE}
@@ -918,6 +911,7 @@ function BankStatementIngestForm({
   onClose: () => void;
   onRecorded: (bankAccountId: string) => void;
 }) {
+  const { t } = useI18n();
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? '');
   const [direction, setDirection] = useState(directionOptions[0]?.value ?? '');
   const [amount, setAmount] = useState('');
@@ -940,25 +934,25 @@ function BankStatementIngestForm({
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedAccount) {
-      pushToast('Select a bank account before ingesting a statement line', 'warn');
+      pushToast(t('bankRecon.toast.selectAccount'), 'warn');
       return;
     }
     if (!direction) {
-      pushToast('Select a finance direction before ingesting a statement line', 'warn');
+      pushToast(t('bankRecon.toast.selectDirection'), 'warn');
       return;
     }
     const parsedAmount = Number(amount);
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      pushToast('Bank statement amount must be greater than zero', 'warn');
+      pushToast(t('bankRecon.toast.amountPositive'), 'warn');
       return;
     }
     const occurredIso = datetimeLocalToIso(occurredAt);
     if (!occurredIso) {
-      pushToast('Bank statement occurred-at timestamp is invalid', 'warn');
+      pushToast(t('bankRecon.toast.occurredInvalid'), 'warn');
       return;
     }
     if (!reference) {
-      pushToast('Bank statement reference is required for idempotency', 'warn');
+      pushToast(t('bankRecon.toast.referenceRequired'), 'warn');
       return;
     }
 
@@ -978,7 +972,7 @@ function BankStatementIngestForm({
       },
       {
         onSuccess: (res) => {
-          pushToast(`Bank statement recorded - ${res.finance_event_id}`, 'good');
+          pushToast(fill(t('bankRecon.toast.recorded'), { id: res.finance_event_id }), 'good');
           onRecorded(selectedAccount.id);
         },
         onError: (err: Error) => pushToast(err.message, 'danger'),
@@ -997,13 +991,13 @@ function BankStatementIngestForm({
         }}
       >
         <label className="mono" htmlFor="bank-statement-account">
-          Bank account
+          {t('bankRecon.fields.bankAccount')}
         </label>
         <select
           id="bank-statement-account"
           className="dt-inline-input"
           value={accountId}
-          aria-label="Bank account"
+          aria-label={t('bankRecon.fields.bankAccount')}
           onChange={(event) => setAccountId(event.target.value)}
           disabled={accounts.length === 0 || ingestMutation.isPending}
         >
@@ -1015,13 +1009,13 @@ function BankStatementIngestForm({
         </select>
 
         <label className="mono" htmlFor="bank-statement-direction">
-          Direction
+          {t('bankRecon.fields.direction')}
         </label>
         <select
           id="bank-statement-direction"
           className="dt-inline-input"
           value={direction}
-          aria-label="Direction"
+          aria-label={t('bankRecon.fields.direction')}
           onChange={(event) => setDirection(event.target.value)}
           disabled={directionOptions.length === 0 || ingestMutation.isPending}
         >
@@ -1033,7 +1027,7 @@ function BankStatementIngestForm({
         </select>
 
         <label className="mono" htmlFor="bank-statement-amount">
-          Amount
+          {t('bankRecon.fields.amount')}
         </label>
         <input
           id="bank-statement-amount"
@@ -1042,55 +1036,55 @@ function BankStatementIngestForm({
           step="0.01"
           min="0.01"
           value={amount}
-          aria-label="Amount"
+          aria-label={t('bankRecon.fields.amount')}
           onChange={(event) => setAmount(event.target.value)}
           disabled={ingestMutation.isPending}
         />
 
         <label className="mono" htmlFor="bank-statement-currency">
-          Currency
+          {t('bankRecon.fields.currency')}
         </label>
         <input
           id="bank-statement-currency"
           className="dt-inline-input"
           value={currency}
-          aria-label="Currency"
+          aria-label={t('bankRecon.fields.currency')}
           readOnly
         />
 
         <label className="mono" htmlFor="bank-statement-occurred-at">
-          Occurred at
+          {t('bankRecon.fields.occurredAt')}
         </label>
         <input
           id="bank-statement-occurred-at"
           className="dt-inline-input"
           type="datetime-local"
           value={occurredAt}
-          aria-label="Occurred at"
+          aria-label={t('bankRecon.fields.occurredAt')}
           onChange={(event) => setOccurredAt(event.target.value)}
           disabled={ingestMutation.isPending}
         />
 
         <label className="mono" htmlFor="bank-statement-reference">
-          Statement reference
+          {t('bankRecon.fields.reference')}
         </label>
         <input
           id="bank-statement-reference"
           className="dt-inline-input"
           value={statementReference}
-          aria-label="Statement reference"
+          aria-label={t('bankRecon.fields.reference')}
           onChange={(event) => setStatementReference(event.target.value)}
           disabled={ingestMutation.isPending}
         />
 
         <label className="mono" htmlFor="bank-statement-description">
-          Description
+          {t('bankRecon.fields.description')}
         </label>
         <input
           id="bank-statement-description"
           className="dt-inline-input"
           value={description}
-          aria-label="Description"
+          aria-label={t('bankRecon.fields.description')}
           onChange={(event) => setDescription(event.target.value)}
           disabled={ingestMutation.isPending}
         />
@@ -1104,13 +1098,13 @@ function BankStatementIngestForm({
         }}
       >
         <Button
-          label="Cancel"
+          label={t('common.cancel')}
           kind="ghost"
           disabled={ingestMutation.isPending}
           onClick={onClose}
         />
         <Button
-          label="Record statement"
+          label={t('bankRecon.actions.recordStatement')}
           iconName="upload"
           kind="primary"
           capability={CAP.FINANCE_WRITE}
@@ -1133,6 +1127,7 @@ function BankAccountSetupForm({
   onClose: () => void;
   onCreated: (bankAccountId: string) => void;
 }) {
+  const { t } = useI18n();
   const [key, setKey] = useState('');
   const [name, setName] = useState('');
   const [bankName, setBankName] = useState('');
@@ -1159,7 +1154,7 @@ function BankAccountSetupForm({
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSubmit) {
-      pushToast('Bank account key, name, currency, and valid last4 identifiers are required', 'warn');
+      pushToast(t('bankRecon.toast.accountInvalid'), 'warn');
       return;
     }
     createMutation.mutate(
@@ -1177,7 +1172,7 @@ function BankAccountSetupForm({
       },
       {
         onSuccess: (res) => {
-          pushToast(`Bank account created - ${res.key}`, 'good');
+          pushToast(fill(t('bankRecon.toast.accountCreated'), { key: res.key }), 'good');
           onCreated(res.bank_account_id);
         },
         onError: (err: Error) => pushToast(err.message, 'danger'),
@@ -1187,9 +1182,7 @@ function BankAccountSetupForm({
 
   return (
     <form onSubmit={handleSubmit} data-testid="bank-account-setup-form">
-      <p className="state__hint">
-        Add the tenant bank account used for bank statement ingestion and reconciliation. Only safe last4 identifiers are stored.
-      </p>
+      <p className="state__hint">{t('bankRecon.setup.intro')}</p>
       <div
         style={{
           display: 'grid',
@@ -1199,65 +1192,65 @@ function BankAccountSetupForm({
           marginTop: '12px',
         }}
       >
-        <label className="mono" htmlFor="bank-account-key">Account key</label>
+        <label className="mono" htmlFor="bank-account-key">{t('bankRecon.fields.accountKey')}</label>
         <input
           id="bank-account-key"
           className="dt-inline-input"
           value={key}
-          aria-label="Account key"
-          placeholder="main-clearing"
+          aria-label={t('bankRecon.fields.accountKey')}
+          placeholder="main-clearing" // i18n-literal-ok example account key
           onChange={(event) => setKey(event.target.value)}
           disabled={createMutation.isPending}
         />
 
-        <label className="mono" htmlFor="bank-account-name">Name</label>
+        <label className="mono" htmlFor="bank-account-name">{t('bankRecon.fields.name')}</label>
         <input
           id="bank-account-name"
           className="dt-inline-input"
           value={name}
-          aria-label="Name"
+          aria-label={t('bankRecon.fields.name')}
           onChange={(event) => setName(event.target.value)}
           disabled={createMutation.isPending}
         />
 
-        <label className="mono" htmlFor="bank-account-bank-name">Bank</label>
+        <label className="mono" htmlFor="bank-account-bank-name">{t('bankRecon.fields.bank')}</label>
         <input
           id="bank-account-bank-name"
           className="dt-inline-input"
           value={bankName}
-          aria-label="Bank"
+          aria-label={t('bankRecon.fields.bank')}
           onChange={(event) => setBankName(event.target.value)}
           disabled={createMutation.isPending}
         />
 
-        <label className="mono" htmlFor="bank-account-currency">Currency</label>
+        <label className="mono" htmlFor="bank-account-currency">{t('bankRecon.fields.currency')}</label>
         <input
           id="bank-account-currency"
           className="dt-inline-input"
           value={currency}
-          aria-label="Currency"
+          aria-label={t('bankRecon.fields.currency')}
           maxLength={3}
           onChange={(event) => setCurrency(event.target.value.toUpperCase())}
           disabled={createMutation.isPending}
         />
 
-        <label className="mono" htmlFor="bank-account-iban-last4">IBAN last4</label>
+        <label className="mono" htmlFor="bank-account-iban-last4">{t('bankRecon.fields.ibanLast4')}</label>
         <input
           id="bank-account-iban-last4"
           className="dt-inline-input"
           value={ibanLast4}
-          aria-label="IBAN last4"
+          aria-label={t('bankRecon.fields.ibanLast4')}
           maxLength={4}
           onChange={(event) => setIbanLast4(event.target.value.toUpperCase())}
           disabled={createMutation.isPending}
         />
 
-        <label className="mono" htmlFor="bank-account-account-last4">Account last4</label>
+        <label className="mono" htmlFor="bank-account-account-last4">{t('bankRecon.fields.accountLast4')}</label>
         <input
           id="bank-account-account-last4"
           className="dt-inline-input"
           value={accountLast4}
-          aria-label="Account last4"
+          aria-label={t('bankRecon.fields.accountLast4')}
           maxLength={4}
           onChange={(event) => setAccountLast4(event.target.value.toUpperCase())}
           disabled={createMutation.isPending}
@@ -1265,7 +1258,7 @@ function BankAccountSetupForm({
       </div>
       {!last4Ok ? (
         <div className="state__hint" style={{ marginTop: '10px', color: 'var(--danger-ink)' }}>
-          Last4 identifiers must contain exactly four letters or numbers.
+          {t('bankRecon.setup.last4Invalid')}
         </div>
       ) : null}
       <div
@@ -1277,13 +1270,13 @@ function BankAccountSetupForm({
         }}
       >
         <Button
-          label="Cancel"
+          label={t('common.cancel')}
           kind="ghost"
           disabled={createMutation.isPending}
           onClick={onClose}
         />
         <Button
-          label="Create bank account"
+          label={t('bankRecon.actions.createAccount')}
           iconName="plus"
           kind="primary"
           capability={CAP.FINANCE_WRITE}
@@ -1298,7 +1291,7 @@ function BankAccountSetupForm({
 export function BankReconModule() {
   // AGENTS.md §7 (CAPABILITY-GATED UI for reads): page-level fail-closed gate.
   const canRead = useCapability(CAP.FINANCE_READ);
-  const { fmtCurrency, fmtDateTime } = useI18n();
+  const { t, fmtCurrency, fmtDateTime } = useI18n();
   const drawer = useDrawer();
   const [activeDrawer, setActiveDrawer] = useState<BankReconDrawerState>(null);
   const now = useMemo(() => new Date(), []);
@@ -1358,12 +1351,12 @@ export function BankReconModule() {
   const matchRequireUnique = bankReconPolicyValue?.match?.require_unique;
   const reconciliationWorkflowPolicyReady = bankReconciliationPolicyValue?.enabled === true;
   const reconciliationWorkflowBlockReason = bankReconciliationPolicy.isLoading
-    ? 'Bank reconciliation workflow policy is still loading.'
+    ? t('bankRecon.reasons.workflowLoading')
     : bankReconciliationPolicy.isError
-      ? 'Bank reconciliation workflow policy could not be resolved.'
+      ? t('bankRecon.reasons.workflowError')
       : reconciliationWorkflowPolicyReady
         ? null
-        : 'Bank reconciliation workflow policy is disabled. Enable bank_reconciliation_policy before starting this workflow.';
+        : t('bankRecon.reasons.workflowDisabled');
   const bankReconciliationPolicyHref = `/platform/config?category=bank_reconciliation_policy${
     activeTenantId
       ? `&scope_type=tenant&scope_id=${encodeURIComponent(activeTenantId)}`
@@ -1493,14 +1486,11 @@ export function BankReconModule() {
       <div className="page">
         <PageHeader
           moduleKey="bankRecon"
-          eyebrow="Finance"
-          titleAccent="Bank"
-          titlePlain="reconciliation"
         />
         <StateView
           kind="denied"
           capability={CAP.FINANCE_READ}
-            hint="Finance access permission is required to view bank reconciliation."
+          hint={t('bankRecon.denied')}
         />
       </div>
     );
@@ -1510,9 +1500,6 @@ export function BankReconModule() {
       <div className="page">
         <PageHeader
           moduleKey="bankRecon"
-          eyebrow="Finance"
-          titleAccent="Bank"
-          titlePlain="reconciliation"
         />
         <StateView kind="loading" />
       </div>
@@ -1523,14 +1510,11 @@ export function BankReconModule() {
       <div className="page">
         <PageHeader
           moduleKey="bankRecon"
-          eyebrow="Finance"
-          titleAccent="Bank"
-          titlePlain="reconciliation"
         />
         <StateView
           kind="error"
-          title="Bank reconciliation policy is not configured"
-          hint="Suspense aging, open-item warning, or match-window settings are missing. Ask an administrator to finish bank reconciliation policy setup before using this surface."
+          title={t('bankRecon.policyMissing.title')}
+          hint={t('bankRecon.policyMissing.hint')}
         />
       </div>
     );
@@ -1544,16 +1528,16 @@ export function BankReconModule() {
     const rowTenantId = textOf(account.organization_id);
     const activeId = textOf(activeTenantId);
     if (rowTenantId && (!activeId || rowTenantId !== activeId)) {
-      return "Switch to this bank account's tenant before changing reconciliation lifecycle.";
+      return t('bankRecon.reasons.tenantAction');
     }
     return undefined;
   }
 
   function statementIngestDisabledReason(): string | undefined {
-    if (accounts.length === 0) return 'Create a bank account before ingesting a statement.';
-    if (directionOptions.length === 0) return 'Finance direction options are not configured.';
+    if (accounts.length === 0) return t('bankRecon.reasons.ingestNoAccounts');
+    if (directionOptions.length === 0) return t('bankRecon.reasons.ingestNoDirections');
     if (!accounts.some((account) => !bankAccountTenantActionDisabledReason(account))) {
-      return "Switch to a bank account's tenant before ingesting statements.";
+      return t('bankRecon.reasons.ingestTenant');
     }
     return undefined;
   }
@@ -1567,7 +1551,7 @@ export function BankReconModule() {
     const mutableAccounts = accounts.filter((account) => !bankAccountTenantActionDisabledReason(account));
     setActiveDrawer(null);
     drawer.open({
-      title: 'Ingest bank statement',
+      title: t('bankRecon.drawer.ingest'),
       size: 'md',
       body: (
         <BankStatementIngestForm
@@ -1593,7 +1577,7 @@ export function BankReconModule() {
   function openBankAccountSetupDrawer() {
     setActiveDrawer(null);
     drawer.open({
-      title: 'New bank account',
+      title: t('bankRecon.actions.newAccount'),
       size: 'md',
       body: (
         <BankAccountSetupForm
@@ -1632,7 +1616,7 @@ export function BankReconModule() {
         key: activeMatchKey('settlement_batch', batch.id),
         id: batch.id,
         resourceType: 'settlement_batch',
-        label: `Settlement batch ${batch.id}`,
+        label: fill(t('bankRecon.target.settlementBatch'), { id: batch.id }),
         status: batch.status,
         expectedAmount: numberOf(batch.expected_amount),
         currency: batch.currency,
@@ -1647,14 +1631,14 @@ export function BankReconModule() {
         key: activeMatchKey('billing_invoice', invoice.id),
         id: invoice.id,
         resourceType: 'billing_invoice',
-        label: `Billing invoice ${invoice.invoice_number ?? invoice.id}`,
-        status: textOf(invoice.payment_status ?? invoice.status) || 'unknown',
+        label: fill(t('bankRecon.target.billingInvoice'), { id: invoice.invoice_number ?? invoice.id }),
+        status: textOf(invoice.payment_status ?? invoice.status) || t('bankRecon.target.unknownStatus'),
         expectedAmount: billingInvoiceReconciliationAmount(invoice),
         currency: invoice.currency,
       }));
     const targets = [...settlementTargets, ...billingInvoiceTargets];
     return {
-      title: `Open items · ${account.key}`,
+      title: fill(t('bankRecon.drawer.openItems'), { key: account.key }),
       size: 'md',
       onClose: () => setActiveDrawer(null),
       body: (
@@ -1675,7 +1659,7 @@ export function BankReconModule() {
 
   function unmatchDrawerOptions(account: BankAccountRow): OpenDrawerOptions {
     return {
-      title: `Active matches - ${account.key}`,
+      title: fill(t('bankRecon.drawer.activeMatches'), { key: account.key }),
       size: 'md',
       onClose: () => setActiveDrawer(null),
       body: (
@@ -1703,7 +1687,7 @@ export function BankReconModule() {
   }) {
     const runId = textOf(workflowRunId);
     if (!runId) {
-      pushToast('Bank reconciliation workflow started, but the workflow reference was missing.', 'warn');
+      pushToast(t('bankRecon.toast.workflowRefMissing'), 'warn');
       return;
     }
 
@@ -1735,7 +1719,7 @@ export function BankReconModule() {
         .slice()
         .sort((a, b) => Number(a.sequence ?? a.sort_order ?? 0) - Number(b.sequence ?? b.sort_order ?? 0))[0] ?? null;
     } catch (err) {
-      pushToast((err as Error)?.message ?? 'Workflow context unavailable.', 'warn');
+      pushToast((err as Error)?.message ?? t('bankRecon.toast.contextUnavailable'), 'warn');
     }
 
     setActiveDrawer(null);
@@ -1744,26 +1728,26 @@ export function BankReconModule() {
       run: latestRun,
       events: latestEvents,
       contextRows: [
-        { label: 'Bank account', value: <span className="mono">{account.key}</span> },
-        { label: 'Account id', value: <span className="mono">{account.id}</span> },
-        { label: 'Settlement kind', value: <span className="mono">{textOf(payload.kind)}</span> },
-        { label: 'Scope type', value: <span className="mono">{textOf(payload.scope_type)}</span> },
+        { label: t('bankRecon.fields.bankAccount'), value: <bdi className="mono">{account.key}</bdi> },
+        { label: t('bankRecon.context.accountId'), value: <bdi className="mono">{account.id}</bdi> },
+        { label: t('bankRecon.context.settlementKind'), value: <bdi className="mono">{textOf(payload.kind)}</bdi> },
+        { label: t('bankRecon.context.scopeType'), value: <bdi className="mono">{textOf(payload.scope_type)}</bdi> },
         {
-          label: 'Window',
+          label: t('bankRecon.context.window'),
           value: (
             <span className="mono">
-              {textOf(payload.window_start_at)} to {textOf(payload.window_end_at)}
+              <bdi>{textOf(payload.window_start_at)}</bdi> {t('bankRecon.context.to')} <bdi>{textOf(payload.window_end_at)}</bdi>
             </span>
           ),
         },
         {
-          label: 'First step',
+          label: t('bankRecon.context.firstStep'),
           value: firstStep ? (
             <span className="mono">
-              {firstStep.label ?? firstStep.step_key ?? firstStep.id} - {firstStep.status ?? firstStep.step_status ?? 'pending'}
+              <bdi>{`${firstStep.label ?? firstStep.step_key ?? firstStep.id} - ${firstStep.status ?? firstStep.step_status ?? t('bankRecon.context.pending')}`}</bdi>
             </span>
           ) : (
-            <span className="mono">pending confirmation</span>
+            <span className="mono">{t('bankRecon.context.pendingConfirmation')}</span>
           ),
         },
       ],
@@ -1777,7 +1761,7 @@ export function BankReconModule() {
 
   function reconciliationWorkflowDrawerOptions(account: BankAccountRow): OpenDrawerOptions {
     return {
-      title: `Start reconciliation - ${account.key}`,
+      title: fill(t('bankRecon.drawer.startRecon'), { key: account.key }),
       size: 'md',
       onClose: () => setActiveDrawer(null),
       body: (
@@ -1819,36 +1803,33 @@ export function BankReconModule() {
         : null;
     return (
       <div>
-        <p className="state__hint">
-          bank_accounts_and_reconciliation policy resolves matching rules by tenant ladder. Open
-          items remain until the matching policy or a manual reviewer clears them.
-        </p>
+        <p className="state__hint">{t('bankRecon.account.intro')}</p>
         <div className="card" style={{ marginTop: '12px' }}>
-          <DetailRow k="Key" v={account.key} mono />
-          <DetailRow k="Name" v={account.name} />
-          <DetailRow k="Bank" v={account.bank_name ?? '—'} />
-          <DetailRow k="Currency" v={account.currency} mono />
+          <DetailRow k={t('bankRecon.fields.key')} v={<bdi>{account.key}</bdi>} mono />
+          <DetailRow k={t('bankRecon.fields.name')} v={<bdi>{account.name}</bdi>} />
+          <DetailRow k={t('bankRecon.fields.bank')} v={<bdi>{account.bank_name ?? '—'}</bdi>} />
+          <DetailRow k={t('bankRecon.fields.currency')} v={<bdi>{account.currency}</bdi>} mono />
           <DetailRow
-            k="Balance"
-            v={fmtCurrency(projection.balance)}
+            k={t('bankRecon.fields.balance')}
+            v={<bdi>{fmtCurrency(projection.balance)}</bdi>}
             danger={projection.balance < 0}
           />
-          <DetailRow k="Open items" v={String(projection.open_items)} />
+          <DetailRow k={t('bankRecon.actions.openItems')} v={String(projection.open_items)} />
           <DetailRow
-            k="Last match"
+            k={t('bankRecon.fields.lastMatch')}
             v={projection.last_match_at ? fmtDateTime(projection.last_match_at) : '—'}
           />
-          {account.iban_last4 ? <DetailRow k="IBAN ··" v={account.iban_last4} mono /> : null}
-          {account.account_last4 ? <DetailRow k="Acct ··" v={account.account_last4} mono /> : null}
+          {account.iban_last4 ? <DetailRow k={t('bankRecon.fields.ibanShort')} v={<bdi>{account.iban_last4}</bdi>} mono /> : null}
+          {account.account_last4 ? <DetailRow k={t('bankRecon.fields.acctShort')} v={<bdi>{account.account_last4}</bdi>} mono /> : null}
           {aging ? (
             <DetailRow
-              k="Aging"
-              v={`${aging.label} unresolved · SLA ${suspenseAgingSlaHours}h`}
+              k={t('bankRecon.fields.aging')}
+              v={fill(t('bankRecon.account.agingValue'), { age: aging.label, hours: suspenseAgingSlaHours ?? '' })}
               danger={aging.tone === 'danger'}
             />
           ) : null}
         </div>
-        <h4 className="eyebrow" style={{ marginTop: '14px' }}>Resolved policy</h4>
+        <h4 className="eyebrow" style={{ marginTop: '14px' }}>{t('bankRecon.account.resolvedPolicy')}</h4>
         <div className="card mono" style={{ fontSize: '11px', lineHeight: 1.6 }}>
           <SeamLine
             k="window_days_before/after"
@@ -1863,17 +1844,17 @@ export function BankReconModule() {
             v={String(matchPolicy.require_unique)}
           />
         </div>
-        <h4 className="eyebrow" style={{ marginTop: '14px' }}>Connected records</h4>
+        <h4 className="eyebrow" style={{ marginTop: '14px' }}>{t('bankRecon.account.connected')}</h4>
         <div className="card" style={{ fontSize: '11px', lineHeight: 1.6 }}>
-          <SeamLine k="Balance" v="Account balance projection" />
-          <SeamLine k="Policy" v="Bank reconciliation policy" />
+          <SeamLine k={t('bankRecon.fields.balance')} v={t('bankRecon.account.balanceValue')} />
+          <SeamLine k={t('bankRecon.account.policy')} v={t('bankRecon.account.policyValue')} />
           <SeamLine
-            k="Workflow policy"
-            v={reconciliationWorkflowPolicyReady ? 'Enabled' : 'Disabled'}
+            k={t('bankRecon.account.workflowPolicy')}
+            v={reconciliationWorkflowPolicyReady ? t('bankRecon.account.enabled') : t('bankRecon.account.disabled')}
           />
-          <SeamLine k="Matching" v="Statement matching workflow" />
-          <SeamLine k="Settlement" v="Finance event attachment" />
-          <SeamLine k="Variance" v="Settlement variance review" />
+          <SeamLine k={t('bankRecon.account.matching')} v={t('bankRecon.account.matchingValue')} />
+          <SeamLine k={t('bankRecon.account.settlement')} v={t('bankRecon.account.settlementValue')} />
+          <SeamLine k={t('bankRecon.account.variance')} v={t('bankRecon.account.varianceValue')} />
         </div>
         {reconciliationWorkflowBlockReason ? (
           <div style={{ marginTop: '12px' }}>
@@ -1886,7 +1867,7 @@ export function BankReconModule() {
               href={bankReconciliationPolicyHref}
               style={{ display: 'inline-flex', marginTop: '8px', textDecoration: 'none' }}
             >
-              Open bank_reconciliation_policy
+              {t('bankRecon.actions.openPolicy')}
             </a>
           </div>
         ) : null}
@@ -1903,7 +1884,7 @@ export function BankReconModule() {
       footer: (
         <div style={{ display: 'flex', gap: '8px', width: '100%', flexWrap: 'wrap' }}>
           <Button
-            label="Run reconciliation"
+            label={t('bankRecon.actions.runRecon')}
             iconName="refresh"
             kind="ghost"
             capability={CAP.FINANCE_WRITE}
@@ -1912,7 +1893,7 @@ export function BankReconModule() {
             onClick={() => openReconciliationWorkflowStart(account)}
           />
           <Button
-            label="Manage matches"
+            label={t('bankRecon.actions.manageMatches')}
             iconName="link"
             kind="ghost"
             capability={CAP.FINANCE_WRITE}
@@ -1922,7 +1903,7 @@ export function BankReconModule() {
           />
           <div style={{ flex: 1 }} />
           <Button
-            label="Open items"
+            label={t('bankRecon.actions.openItems')}
             iconName="list"
             kind="primary"
             onClick={() => {
@@ -1936,21 +1917,18 @@ export function BankReconModule() {
 
   const pills: ReactNode[] = [
     <ScopePill key="scope" scopeType="tenant" scopeId={activeTenantId ?? ''} />,
-    <span key="seam" className="chip chip--xs">Account balance reconciliation</span>,
+    <span key="seam" className="chip chip--xs">{t('bankRecon.seamChip')}</span>,
   ];
 
   return (
     <div className="page">
       <PageHeader
         moduleKey="bankRecon"
-        eyebrow="Finance"
-        titleAccent="Bank"
-        titlePlain="reconciliation"
         pills={pills}
         actions={[
           <Button
             key="new-bank-account"
-            label="New bank account"
+            label={t('bankRecon.actions.newAccount')}
             iconName="plus"
             kind="ghost"
             capability={CAP.FINANCE_WRITE}
@@ -1958,7 +1936,7 @@ export function BankReconModule() {
           />,
           <Button
             key="ingest-statement"
-            label="Ingest statement"
+            label={t('bankRecon.actions.ingestStatement')}
             iconName="upload"
             kind="primary"
             capability={CAP.FINANCE_WRITE}
@@ -1992,10 +1970,10 @@ export function BankReconModule() {
           ))}
           {accounts.length === 0 ? (
             <div className="card" style={{ padding: '24px', textAlign: 'center' }}>
-              <div className="state__hint">No bank accounts configured.</div>
+              <div className="state__hint">{t('bankRecon.empty.accounts')}</div>
               <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'center' }}>
                 <Button
-                  label="New bank account"
+                  label={t('bankRecon.actions.newAccount')}
                   iconName="plus"
                   kind="primary"
                   capability={CAP.FINANCE_WRITE}
@@ -2031,7 +2009,7 @@ function BankAccountCard({
   openItemsWarnThreshold: number;
   onOpen: (a: BankAccountRow) => void;
 }) {
-  const { fmtCurrency } = useI18n();
+  const { t, fmtCurrency, fmtTime } = useI18n();
   const { data: balance } = useBankAccountBalance(account.id);
   const projection = balance ?? EMPTY_BALANCE;
   const aging =
@@ -2040,8 +2018,8 @@ function BankAccountCard({
       : null;
   return (
     <div className="card" style={{ cursor: 'pointer' }} onClick={() => onOpen(account)}>
-      <div className="eyebrow">{account.key.toUpperCase()}</div>
-      <div className="serif" style={{ fontSize: '20px', marginTop: '4px' }}>{account.name}</div>
+      <div className="eyebrow"><bdi>{account.key.toUpperCase()}</bdi></div>
+      <div className="serif" style={{ fontSize: '20px', marginTop: '4px' }}><bdi>{account.name}</bdi></div>
       <div
         style={{
           marginTop: '12px',
@@ -2050,35 +2028,34 @@ function BankAccountCard({
           color: projection.balance < 0 ? 'var(--danger-ink)' : 'var(--ink)',
         }}
       >
-        {fmtCurrency(projection.balance)}
+        <bdi>{fmtCurrency(projection.balance)}</bdi>
       </div>
       <div
         className="mono"
         style={{ marginTop: '4px', fontSize: '10.5px', color: 'var(--ink-3)' }}
       >
-        {`Open items: ${projection.open_items}${
-          projection.last_match_at
-            ? ` · last match ${new Date(projection.last_match_at).toLocaleTimeString()}`
-            : ''
-        }`}
+        {fill(t('bankRecon.card.openItems'), { n: projection.open_items })}
+        {projection.last_match_at
+          ? fill(t('bankRecon.card.lastMatch'), { time: fmtTime(projection.last_match_at) })
+          : null}
       </div>
       <div style={{ display: 'flex', gap: '6px', marginTop: '8px', flexWrap: 'wrap' }}>
         {projection.open_items > 0 ? (
           <Chip
-            label={`${projection.open_items} open`}
+            label={fill(t('bankRecon.card.openChip'), { n: projection.open_items })}
             kind={projection.open_items > openItemsWarnThreshold ? 'warn' : 'info'}
             size="xs"
-            title={`Open-item warning threshold: ${openItemsWarnThreshold}`}
+            title={fill(t('bankRecon.card.openThreshold'), { n: openItemsWarnThreshold })}
           />
         ) : (
-          <Chip label="reconciled" kind="good" size="xs" />
+          <Chip label={t('bankRecon.card.reconciled')} kind="good" size="xs" />
         )}
         {aging ? (
           <Chip
-            label={`unresolved ${aging.label}`}
+            label={fill(t('bankRecon.card.unresolved'), { age: aging.label })}
             kind={aging.tone}
             size="xs"
-            title={`Negative balance unresolved for ${aging.label} · SLA ${suspenseAgingSlaHours}h`}
+            title={fill(t('bankRecon.card.unresolvedTitle'), { age: aging.label, hours: suspenseAgingSlaHours })}
           />
         ) : null}
       </div>

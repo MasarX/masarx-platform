@@ -19,6 +19,7 @@ import { resolveLegacyHashNavigation } from '@/lib/legacy-hash-navigation';
 import { usePalette, type OpenPaletteOptions } from '@/hooks/useOverlay';
 import { formatCapabilityRequirement } from '@/lib/capabilities';
 import { useIdentity } from '@/lib/identity';
+import { useT } from '@/lib/i18n';
 import * as api from '@/lib/api';
 import {
   DEFAULT_NOTIFICATIONS,
@@ -39,6 +40,8 @@ import {
 } from './command-routes';
 
 const NAV_PIN_KEY = 'console-v2.nav-pinned';
+// Matches the phone rule in shell.css, where the shown sidenav is an overlay drawer.
+const PHONE_QUERY = '(max-width: 720px)';
 const NOTIFS_PIN_KEY = 'console-v2.notifs-pinned';
 const FLYOUT_CLOSE_DELAY_MS = 220;
 
@@ -104,6 +107,10 @@ export function AppShell({
   const location = useLocation();
   const router = useRouter();
   const [navPinned, setNavPinned] = useState<boolean>(() => readBoolFromStorage(NAV_PIN_KEY, false));
+  // Phone drawer state is view-only, so a narrow window never rewrites the desktop pin preference.
+  const [isPhone, setIsPhone] = useState<boolean>(() => window.matchMedia?.(PHONE_QUERY).matches ?? false);
+  const [phoneNavOpen, setPhoneNavOpen] = useState<boolean>(false);
+  const navShown = isPhone ? phoneNavOpen : navPinned;
   const [notifsPinned, setNotifsPinned] = useState<boolean>(() =>
     readBoolFromStorage(NOTIFS_PIN_KEY, false)
   );
@@ -113,6 +120,7 @@ export function AppShell({
   const commandPaletteOpenRef = useRef(false);
   const commandPaletteSessionRef = useRef(0);
   const identity = useIdentity();
+  const t = useT();
   const { hasCapability, isAuthenticated, isAuthLoading } = identity;
 
   const [flyoutGroup, setFlyoutGroup] = useState<NavSection | null>(null);
@@ -153,6 +161,21 @@ export function AppShell({
     });
   }, [location.pathname, location.search, router]);
 
+  // At phone width the sidenav is a drawer over the page: it starts closed and closes on navigation.
+  useEffect(() => {
+    const query = window.matchMedia?.(PHONE_QUERY);
+    if (!query) return;
+    const onChange = () => {
+      setIsPhone(query.matches);
+      setPhoneNavOpen(false);
+    };
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+  useEffect(() => {
+    setPhoneNavOpen(false);
+  }, [location.pathname]);
+
   // Persist pin states.
   useEffect(() => {
     writeBoolToStorage(NAV_PIN_KEY, navPinned);
@@ -166,7 +189,7 @@ export function AppShell({
     if (notifsPinned) setNotifsOpen(true);
   }, [notifsPinned]);
 
-  const toggleNavPin = useCallback(() => setNavPinned((v) => !v), []);
+  const toggleNav = useCallback(() => (isPhone ? setPhoneNavOpen : setNavPinned)((v) => !v), [isPhone]);
   const toggleNotifs = useCallback(() => {
     if (notifsPinned) return; // pinned panel ignores toggle
     setNotifsOpen((v) => !v);
@@ -254,12 +277,12 @@ export function AppShell({
   }, [cancelFlyoutClose, location.pathname, location.search, setFlyoutPersistent]);
 
   useEffect(() => {
-    if (!navPinned) return;
+    if (!navShown) return;
     cancelFlyoutClose();
     setFlyoutPersistent(false);
     setFlyoutGroup(null);
     setFlyoutAnchor(null);
-  }, [cancelFlyoutClose, navPinned, setFlyoutPersistent]);
+  }, [cancelFlyoutClose, navShown, setFlyoutPersistent]);
 
   const buildCommandPaletteOptions = useCallback((sessionId: number): OpenPaletteOptions<ShellPaletteItem> => {
     const navGroups = loadNavigation().groups;
@@ -269,7 +292,7 @@ export function AppShell({
         return {
           label: item.label,
           key: item.routePath,
-          meta: allowed ? 'Open module workflow' : navItemAccessLabel(item),
+          meta: allowed ? t('shell.palette.openModule') : navItemAccessLabel(item, t),
           section: group.label,
           disabled: !allowed,
           value: { routePath: item.routePath } satisfies ShellPaletteValue,
@@ -287,7 +310,7 @@ export function AppShell({
       .map((row: unknown) => (row && typeof row === 'object' ? (row as ShellCommandRegistryRow) : null))
       .filter((row): row is ShellCommandRegistryRow => row !== null && Boolean(row.label || row.key));
     return {
-      placeholder: 'Search modules and commands...',
+      placeholder: t('shell.paletteSearch'),
       items: [
         ...navItems,
         ...commandRows.map((row) => {
@@ -298,11 +321,11 @@ export function AppShell({
             label: String(row.label ?? row.key),
             key: String(row.key ?? row.label),
             meta: missingCapability
-              ? formatCapabilityRequirement(capability)
+              ? formatCapabilityRequirement(capability, t)
               : routePath
-                ? 'Open module workflow'
-                : 'Open from a module row',
-            section: row.section ?? 'Commands',
+                ? t('shell.palette.openModule')
+                : t('shell.palette.openFromRow'),
+            section: row.section ?? t('shell.palette.commands'),
             disabled: !routePath || missingCapability,
             value: {
               routePath,
@@ -331,10 +354,10 @@ export function AppShell({
           void router.navigate({ to: value.routePath as never });
           return;
         }
-        onToast?.('This action needs a selected record. Open the matching module first.', 'info');
+        onToast?.(t('shell.palette.needsRecord'), 'info');
       },
     };
-  }, [hasCapability, identity, onToast, router]);
+  }, [hasCapability, identity, onToast, router, t]);
 
   const openCommandPalette = useCallback(() => {
     if (onOpenCommandPalette) {
@@ -376,7 +399,7 @@ export function AppShell({
       }
       if (mod && e.key === '\\') {
         e.preventDefault();
-        toggleNavPin();
+        toggleNav();
         return;
       }
       if (inField) return;
@@ -388,7 +411,7 @@ export function AppShell({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [openCommandPalette, onOpenShortcuts, toggleNavPin]);
+  }, [openCommandPalette, onOpenShortcuts, toggleNav]);
 
   // Reflect pinned states on the DOM element so shell.css cascades resolve.
   // We toggle on .app-shell directly via React data-* props below.
@@ -405,14 +428,14 @@ export function AppShell({
   return (
     <AppGuard>
       <a className="skip-link" href="#main">
-        Skip to main content
+        {t('app.skip')}
       </a>
 
       <div
         id="app"
         className="app-shell"
         aria-busy="false"
-        data-nav-pinned={navPinned ? 'true' : 'false'}
+        data-nav-pinned={navShown ? 'true' : 'false'}
         data-notifs-pinned={notifsPinned ? 'true' : 'false'}
       >
         <Topbar
@@ -420,17 +443,19 @@ export function AppShell({
           onOpenScopePalette={onOpenScopePalette}
           onToggleNotifs={toggleNotifs}
           onOpenUserMenu={openUserMenu}
+          navOpen={navShown}
+          onToggleNav={toggleNav}
           hasUnreadNotifs={hasUnreadNotifs}
         />
 
         <Sidenav
-          pinned={navPinned}
-          onTogglePin={toggleNavPin}
+          pinned={navShown}
+          onTogglePin={toggleNav}
           onHoverGroup={handleHoverGroup}
           onOpenGroup={handleOpenGroup}
         />
 
-        {!navPinned && flyoutGroup ? (
+        {!navShown && flyoutGroup ? (
           <SidenavFlyout
             group={flyoutGroup}
             anchorRect={flyoutAnchor}

@@ -3,6 +3,7 @@
 const { randomUUID } = require('crypto');
 const { Client } = require('pg');
 const { baseUrl: VENDOR_BASE_URL } = require('../../../../tests/fixtures/carrier/vendor-account.synthetic.json');
+const { DIALOG360_FIXTURE_BASE_URL } = require('../../../../tests/fixtures/builders/hosts');
 const { loadEnv } = require('../../../utils/load-env');
 const {
   isRetryableDbConnectError,
@@ -72,7 +73,7 @@ function buildFixtureProfile(env = process.env) {
       },
       clientAckB: {
         sourceIdentifier: 'test-client-b-ack',
-        token: prefix === 'test' ? 'EXAMPLE_PASSWORD' : mk('EXAMPLE_PASSWORD'),
+        token: mk('client-b-ack-token'),
         mappingKey: `${prefix}::webhook::ack-b`,
       },
     },
@@ -916,7 +917,7 @@ function buildDialog360OperationTemplateDefaults(baseUrl) {
   return {
     callType: 'comms_whatsapp',
     method: 'POST',
-    urlTemplate: baseUrl || 'https://waba-sandbox.360dialog.io/v1/messages',
+    urlTemplate: baseUrl || `${DIALOG360_FIXTURE_BASE_URL}/v1/messages`,
     headersTemplate: { 'content-type': 'application/json' },
     bodyTemplate: {
       messaging_product: 'whatsapp',

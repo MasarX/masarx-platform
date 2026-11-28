@@ -34,6 +34,7 @@ import { getLookups, lookupRow } from '@/lib/api';
 import { CAP } from '@/lib/capabilities';
 import { useConsoleNavigator } from '@/lib/useConsoleNavigator';
 import { readUrlParam } from '@/lib/url-params';
+import { englishT, fill, useT, type Translate } from '@/lib/i18n';
 
 // Phase G1 schema-drift fix: dropped fictional `code` column. Canonical key is
 // `slug` (public.clients has no `code`). All references below were migrated to
@@ -147,18 +148,18 @@ function humanizeSettingKey(key: string): string {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
-function formatSummaryValue(value: unknown): string {
-  if (value == null || value === '') return 'Not configured';
-  if (typeof value === 'boolean') return value ? 'Enabled' : 'Disabled';
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+function formatSummaryValue(value: unknown, t: Translate = englishT): string {
+  if (value == null || value === '') return t('customers.settings.notConfigured');
+  if (typeof value === 'boolean') return value ? t('customers.settings.enabled') : t('customers.settings.disabled');
+  if (Array.isArray(value)) return fill(t(value.length === 1 ? 'customers.settings.itemOne' : 'customers.settings.itemOther'), { n: value.length });
   if (typeof value === 'object') {
     const count = Object.keys(value as Record<string, unknown>).length;
-    return `${count} nested setting${count === 1 ? '' : 's'}`;
+    return fill(t(count === 1 ? 'customers.settings.nestedOne' : 'customers.settings.nestedOther'), { n: count });
   }
   return String(value);
 }
 
-function clientMutationErrorMessage(err: unknown): string {
+function clientMutationErrorMessage(err: unknown, t: Translate = englishT): string {
   const raw = err instanceof Error ? err.message : String(err ?? '');
   const message = raw.trim();
   const lower = message.toLowerCase();
@@ -167,29 +168,30 @@ function clientMutationErrorMessage(err: unknown): string {
     || (lower.includes('duplicate key') && lower.includes('slug'))
     || (lower.includes('slug') && lower.includes('already'))
   ) {
-    return 'A client with this slug already exists for the selected tenant.';
+    return t('clients.error.duplicateSlug');
   }
   if (lower.includes('duplicate key')) {
-    return 'A client with these unique details already exists. Search the client list or use different values.';
+    return t('clients.error.duplicate');
   }
-  return message || 'Client action failed. Try again or check the client details.';
+  return message || t('clients.error.generic');
 }
 
-function objectSummaryRows(value: Record<string, unknown> | null | undefined, prefix: string): KvRow[] {
+function objectSummaryRows(value: Record<string, unknown> | null | undefined, prefix: string, t: Translate = englishT): KvRow[] {
   const entries = Object.entries(value ?? {});
   if (entries.length === 0) {
-    return [{ key: `${prefix}-empty`, label: 'Status', value: 'No custom settings configured', editable: false }];
+    return [{ key: `${prefix}-empty`, label: t('customers.field.status'), value: t('customers.settings.none'), editable: false }];
   }
   return entries.map(([key, val]) => ({
     key: `${prefix}-${key}`,
     label: humanizeSettingKey(key),
-    value: formatSummaryValue(val),
+    value: formatSummaryValue(val, t),
     editable: false,
   }));
 }
 
 export function ClientsModule() {
   const { scope, currentTenantId } = useIdentity();
+  const t = useT();
   const drawer = useDrawer();
   const modal = useModal();
   const go = useConsoleNavigator();
@@ -252,7 +254,7 @@ export function ClientsModule() {
     ]);
     const refreshed = clientResult.data?.rows.find((row) => row.id === clientId);
     if (!refreshed || (validate && !validate(refreshed))) {
-      throw new Error('The updated client was not available yet.');
+      throw new Error(t('clients.error.readback'));
     }
     return refreshed;
   }
@@ -294,30 +296,30 @@ export function ClientsModule() {
     openClientSignatureRef.current = clientDrawerSignature(r);
     const summary = summaryById.get(r.id);
     const kvRows: KvRow[] = [
-      { key: 'name', label: 'Name', value: r.name, capability: WRITE_CAP },
+      { key: 'name', label: t('customers.field.name'), value: r.name, capability: WRITE_CAP },
       {
         key: 'slug',
-        label: 'Slug',
+        label: t('customers.field.slug'),
         value: r.slug ?? '—',
         mono: true,
         editable: false,
       },
-      { key: 'sla_tier', label: 'SLA tier', value: r.sla_tier, lookup: 'sla_tier', capability: WRITE_CAP },
-      { key: 'status', label: 'Status', value: r.status, lookup: 'client_status', editable: false },
+      { key: 'sla_tier', label: t('customers.field.slaTier'), value: r.sla_tier, lookup: 'sla_tier', capability: WRITE_CAP },
+      { key: 'status', label: t('customers.field.status'), value: r.status, lookup: 'client_status', editable: false },
       {
         key: 'suspension_reason',
-        label: 'Suspension reason',
+        label: t('customers.field.suspensionReason'),
         value: r.suspension_reason ?? '—',
         editable: false,
       },
       {
         key: 'account_manager_id',
-        label: 'Account manager',
-        value: r.account_manager_id ? 'Assigned account manager' : 'Unassigned',
+        label: t('clients.accountManager'),
+        value: r.account_manager_id ? t('clients.assignedManager') : t('clients.unassigned'),
         editable: false,
       },
-      { key: 'contract_start_date', label: 'Contract start', value: formatDate(r.contract_start_date), mono: true, editable: false },
-      { key: 'contract_end_date', label: 'Contract end', value: formatDate(r.contract_end_date), mono: true, editable: false },
+      { key: 'contract_start_date', label: t('clients.contractStart'), value: formatDate(r.contract_start_date), mono: true, editable: false },
+      { key: 'contract_end_date', label: t('clients.contractEnd'), value: formatDate(r.contract_end_date), mono: true, editable: false },
     ];
 
     drawer.open({
@@ -333,25 +335,25 @@ export function ClientsModule() {
           {summary ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
               <Chip
-                label={`${summary.sender_count ?? 0} senders`}
+                label={fill(t('clients.chip.senders'), { n: summary.sender_count ?? 0 })}
                 kind="neutral"
                 size="xs"
               />
               <Chip
-                label={`${summary.recipient_count ?? 0} recipients`}
+                label={fill(t('clients.chip.recipients'), { n: summary.recipient_count ?? 0 })}
                 kind="neutral"
                 size="xs"
               />
               <Chip
-                label={`${summary.active_shipments ?? 0} active · ${summary.total_shipments ?? 0} total shipments`}
+                label={fill(t('customers.msg.shipmentsChip'), { active: summary.active_shipments ?? 0, total: summary.total_shipments ?? 0 })}
                 kind="info"
                 size="xs"
               />
               {summary.contract_active === false ? (
-                <Chip label="contract inactive" kind="warn" size="xs" />
+                <Chip label={t('clients.chip.contractInactive')} kind="warn" size="xs" />
               ) : null}
               {summary.has_warehouse ? (
-                <Chip label="default warehouse" kind="neutral" size="xs" />
+                <Chip label={t('clients.chip.defaultWarehouse')} kind="neutral" size="xs" />
               ) : null}
             </div>
           ) : null}
@@ -360,10 +362,7 @@ export function ClientsModule() {
             onEdit={async (key, value) => {
               try {
                 if (key === 'status') {
-                  pushToast(
-                    'Use Reactivate or Suspend so the client status change has a real audit reason.',
-                    'warn',
-                  );
+                  pushToast(t('clients.statusUseActions'), 'warn');
                   return;
                 }
                 await updateMut.mutateAsync({
@@ -371,24 +370,24 @@ export function ClientsModule() {
                   [key]: value,
                 } as { client_id: string } & Record<string, unknown>);
                 await refetchClientForReadback(r.id, clientFieldMatches(key, value));
-                pushToast(`Saved · ${key}`, 'good');
+                pushToast(fill(t('customers.msg.saved'), { field: key }), 'good');
               } catch (err) {
-                pushToast(clientMutationErrorMessage(err), 'danger');
+                pushToast(clientMutationErrorMessage(err, t), 'danger');
               }
             }}
           />
 
-          <div className="section-eyebrow" style={{ marginTop: 12 }}>Client settings</div>
-          <KvGrid rows={objectSummaryRows(r.settings_override, 'client-setting')} />
+          <div className="section-eyebrow" style={{ marginTop: 12 }}>{t('clients.settings')}</div>
+          <KvGrid rows={objectSummaryRows(r.settings_override, 'client-setting', t)} />
 
-          <div className="section-eyebrow" style={{ marginTop: 12 }}>Quick links</div>
+          <div className="section-eyebrow" style={{ marginTop: 12 }}>{t('customers.section.quickLinks')}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '0 14px' }}>
-            <Button label="Shipments" iconName="package" kind="ghost" onClick={() => go(`/operate/shipments?client=${r.id}`)} />
-            <Button label="Senders" iconName="right" kind="ghost" onClick={() => go(`/customers/senders?client=${r.id}`)} />
-            <Button label="Recipients" iconName="user_in" kind="ghost" onClick={() => go(`/customers/recipients?client=${r.id}`)} />
-            <Button label="Settlements" iconName="wallet" kind="ghost" onClick={() => go(`/finance/settlements?client=${r.id}`)} />
-            <Button label="Disputes" iconName="alert" kind="ghost" onClick={() => go(`/finance/disputes?client=${r.id}`)} />
-            <Button label="Ledger" iconName="file" kind="ghost" onClick={() => go(`/finance/ledger?client=${r.id}`)} />
+            <Button label={t('customers.link.shipments')} iconName="package" kind="ghost" onClick={() => go(`/operate/shipments?client=${r.id}`)} />
+            <Button label={t('customers.link.senders')} iconName="right" kind="ghost" onClick={() => go(`/customers/senders?client=${r.id}`)} />
+            <Button label={t('customers.link.recipients')} iconName="user_in" kind="ghost" onClick={() => go(`/customers/recipients?client=${r.id}`)} />
+            <Button label={t('customers.link.settlements')} iconName="wallet" kind="ghost" onClick={() => go(`/finance/settlements?client=${r.id}`)} />
+            <Button label={t('customers.link.disputes')} iconName="alert" kind="ghost" onClick={() => go(`/finance/disputes?client=${r.id}`)} />
+            <Button label={t('customers.link.ledger')} iconName="file" kind="ghost" onClick={() => go(`/finance/ledger?client=${r.id}`)} />
           </div>
         </div>
       ),
@@ -457,7 +456,7 @@ export function ClientsModule() {
           {sla === null ? (
             <StateView
               kind="error"
-              hint="Default SLA tier is missing. Pick a value below."
+              hint={t('clients.error.defaultSlaMissing')}
             />
           ) : null}
           {formError ? (
@@ -472,29 +471,29 @@ export function ClientsModule() {
               padding: '0 4px',
             }}
           >
-            <label className="mono" htmlFor="new-client-name">Name</label>
+            <label className="mono" htmlFor="new-client-name">{t('customers.field.name')}</label>
             <input
               id="new-client-name"
               className="dt-inline-input"
-              placeholder="e.g. Riyadh Express LLC"
+              placeholder={t('clients.namePlaceholder')}
               value={draft.name}
               onChange={(e) => {
                 setFormError('');
                 setDraft((s) => ({ ...s, name: e.target.value }));
               }}
             />
-            <label className="mono" htmlFor="new-client-slug">Slug</label>
+            <label className="mono" htmlFor="new-client-slug">{t('customers.field.slug')}</label>
             <input
               id="new-client-slug"
               className="dt-inline-input"
-              placeholder="e.g. riyadh-express"
+              placeholder={t('clients.slugPlaceholder')}
               value={draft.slug}
               onChange={(e) => {
                 setFormError('');
                 setDraft((s) => ({ ...s, slug: e.target.value }));
               }}
             />
-            <label className="mono" htmlFor="new-client-sla">SLA tier</label>
+            <label className="mono" htmlFor="new-client-sla">{t('customers.field.slaTier')}</label>
             <select
               id="new-client-sla"
               className="dt-inline-input"
@@ -510,18 +509,18 @@ export function ClientsModule() {
             </select>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Create"
+              label={t('common.create')}
               kind="primary"
               capability={WRITE_CAP}
               onClick={async () => {
                 if (!draft.name.trim()) {
-                  surfaceFormError('Name is required', 'warn');
+                  surfaceFormError(t('customers.msg.nameRequired'), 'warn');
                   return;
                 }
                 if (!draft.slug.trim()) {
-                  surfaceFormError('Slug is required', 'warn');
+                  surfaceFormError(t('clients.error.slugRequired'), 'warn');
                   return;
                 }
                 try {
@@ -537,7 +536,7 @@ export function ClientsModule() {
                       : typeof res.id === 'string'
                         ? res.id
                         : null;
-                  if (!createdId) throw new Error('Client create did not return a client id.');
+                  if (!createdId) throw new Error(t('clients.error.createNoId'));
                   await refetchClientForReadback(
                     createdId,
                     (row) =>
@@ -547,9 +546,9 @@ export function ClientsModule() {
                   );
                   if (createdId) setPendingCreatedClientId(createdId);
                   modal.close();
-                  pushToast(`Client created · ${draft.name}`, 'good');
+                  pushToast(fill(t('clients.created'), { name: draft.name }), 'good');
                 } catch (err) {
-                  surfaceFormError(clientMutationErrorMessage(err));
+                  surfaceFormError(clientMutationErrorMessage(err, t));
                 }
               }}
             />
@@ -557,7 +556,7 @@ export function ClientsModule() {
         </div>
       );
     }
-    modal.open({ title: 'New client', body: <NewClientForm /> });
+    modal.open({ title: t('clients.newClient'), body: <NewClientForm /> });
   }
 
   function openSuspendClient(r: ClientRow) {
@@ -576,11 +575,11 @@ export function ClientsModule() {
           <div>
             <StateView
               kind="error"
-              title="Suspended client status is missing"
-              hint="Configure the suspended client status before suspending clients."
+              title={t('clients.error.suspendedStatusMissing')}
+              hint={t('clients.error.suspendedStatusHint')}
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-              <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+              <Button label={t('customers.action.close')} kind="ghost" onClick={() => modal.close()} />
             </div>
           </div>
         );
@@ -588,7 +587,7 @@ export function ClientsModule() {
       return (
         <div>
           <p className="state__hint">
-            Suspending pauses the client account and records the required suspension reason.
+            {t('clients.suspendIntro')}
           </p>
           <div
             style={{
@@ -600,34 +599,34 @@ export function ClientsModule() {
               marginTop: 8,
             }}
           >
-            <span className="mono">New status</span>
+            <span className="mono">{t('clients.newStatus')}</span>
             <Chip label={lookupRow('client_status', suspendedStatus)?.label ?? suspendedStatus} kind="warn" size="xs" />
-            <label className="mono" htmlFor="suspend-reason">Reason</label>
+            <label className="mono" htmlFor="suspend-reason">{t('customers.field.reason')}</label>
             <input
               id="suspend-reason"
               className="dt-inline-input"
-              placeholder="e.g. Outstanding balance > 30 days"
+              placeholder={t('clients.reasonPlaceholder')}
               value={draft.reason}
               onChange={(e) => setDraft((s) => ({ ...s, reason: e.target.value }))}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Confirm"
+              label={t('common.confirm')}
               kind="danger"
               capability={WRITE_CAP}
               onClick={async () => {
                 if (!draft.reason.trim()) {
-                  pushToast('Reason is required', 'warn');
+                  pushToast(t('customers.msg.reasonRequired'), 'warn');
                   return;
                 }
                 try {
                   await suspendMut.mutateAsync({ client_id: r.id, reason: draft.reason });
                   modal.close();
-                  pushToast(`Client suspended - ${r.name}`, 'info');
+                  pushToast(fill(t('clients.suspended'), { name: r.name }), 'info');
                 } catch (err) {
-                  pushToast(clientMutationErrorMessage(err), 'danger');
+                  pushToast(clientMutationErrorMessage(err, t), 'danger');
                 }
               }}
             />
@@ -635,30 +634,30 @@ export function ClientsModule() {
         </div>
       );
     }
-    modal.open({ title: `Suspend · ${r.name}`, body: <SuspendForm /> });
+    modal.open({ title: fill(t('customers.msg.suspendTitle'), { name: r.name }), body: <SuspendForm /> });
   }
 
   const columns: Array<DataTableColumn<ClientRow>> = [
-    { key: 'name', label: 'Name', sortable: true, filterable: true },
-    { key: 'slug', label: 'Slug', mono: true, sortable: true, filterable: true },
+    { key: 'name', label: t('customers.field.name'), sortable: true, filterable: true },
+    { key: 'slug', label: t('customers.field.slug'), mono: true, sortable: true, filterable: true },
     // W56-A closure: inline editable columns gate on `canWrite` so users
     // without `clients.write` cannot trigger an RLS-rejected mutation from
     // the surface (FE parity with backend RBAC; reads stay unaffected).
-    { key: 'sla_tier', label: 'SLA tier', sortable: true, filterable: true, lookup: 'sla_tier', editable: canWrite },
-    { key: 'status', label: 'Status', sortable: true, filterable: true, lookup: 'client_status', editable: false },
+    { key: 'sla_tier', label: t('customers.field.slaTier'), sortable: true, filterable: true, lookup: 'sla_tier', editable: canWrite },
+    { key: 'status', label: t('customers.field.status'), sortable: true, filterable: true, lookup: 'client_status', editable: false },
     {
       key: 'contract_end_date',
-      label: 'Contract end',
+      label: t('clients.contractEnd'),
       sortable: true,
       mono: true,
-      render: (raw) => (raw ? <span className="mono">{String(raw)}</span> : <span style={{ color: 'var(--ink-3)' }}>open</span>),
+      render: (raw) => (raw ? <span className="mono">{String(raw)}</span> : <span style={{ color: 'var(--ink-3)' }}>{t('clients.open')}</span>),
     },
   ];
 
   const pills: ReactNode[] = [
     <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
-        <Chip key="cap" label="Client access · client update" kind="info" size="xs" />,
-        <span key="seam" className="chip chip--xs mono">Client registry · status · SLA tier</span>,
+        <Chip key="cap" label={t('clients.capPill')} kind="info" size="xs" />,
+        <span key="seam" className="chip chip--xs mono">{t('clients.seam')}</span>,
   ];
 
   if (!canRead) {
@@ -666,14 +665,12 @@ export function ClientsModule() {
       <div className="page">
         <PageHeader
           moduleKey="clients"
-          eyebrow="Customers"
-          titleAccent="Clients"
-          titlePlain="— operator-managed customer accounts"
+          titlePlain={t('clients.titlePlain')}
         />
         <StateView
           kind="denied"
           capability={CAP.CLIENTS_READ}
-          hint="You do not have permission to view clients."
+          hint={t('clients.denied')}
         />
       </div>
     );
@@ -683,14 +680,12 @@ export function ClientsModule() {
     <div className="page">
       <PageHeader
         moduleKey="clients"
-        eyebrow="Customers"
-        titleAccent="Clients"
-        titlePlain="— operator-managed customer accounts"
+        titlePlain={t('clients.titlePlain')}
         pills={pills}
         actions={[
           <Button
             key="new"
-            label="New client"
+            label={t('clients.newClient')}
             iconName="plus"
             kind="primary"
             capability={WRITE_CAP}
@@ -702,13 +697,13 @@ export function ClientsModule() {
       {clientsError ? (
         <StateView
           kind="error"
-          title="Client directory unavailable"
+          title={t('clients.error.directory')}
           hint={(clientsError as Error).message}
         />
       ) : summaryError ? (
         <StateView
           kind="error"
-          title="Client summary unavailable"
+          title={t('clients.error.summary')}
           hint={(summaryError as Error).message}
         />
       ) : isLoading ? (
@@ -727,14 +722,13 @@ export function ClientsModule() {
             if (key === 'status') {
               return {
                 ok: false,
-                error:
-                  'Use Reactivate or Suspend so the client status change has a real audit reason.',
+                error: t('clients.statusUseActions'),
               };
             }
             if (key === 'sla_tier') {
               const allowed = slaLookup().map((s) => s.value);
               if (!allowed.includes(String(val))) {
-                return { ok: false, error: `Invalid SLA tier — pick one of ${allowed.join(', ')}` };
+                return { ok: false, error: fill(t('clients.error.invalidSla'), { list: allowed.join(', ') }) };
               }
             }
             // All other editable fields go through client_update_v1 (Wave 6).
@@ -746,39 +740,39 @@ export function ClientsModule() {
               await refetchClientForReadback(row.id, clientFieldMatches(key, val));
               return { ok: true };
             } catch (err) {
-              return { ok: false, error: clientMutationErrorMessage(err) };
+              return { ok: false, error: clientMutationErrorMessage(err, t) };
             }
           }}
           rowActions={[
-            { label: 'Open detail', icon: 'eye', kind: 'primary', onClick: openClientDrawer },
-            { label: 'View shipments', icon: 'package', onClick: (r) => go(`/operate/shipments?client=${r.id}`) },
-            { label: 'View senders', icon: 'right', onClick: (r) => go(`/customers/senders?client=${r.id}`) },
-            { label: 'View recipients', icon: 'user_in', onClick: (r) => go(`/customers/recipients?client=${r.id}`) },
-            { label: 'View settlements', icon: 'wallet', onClick: (r) => go(`/finance/settlements?client=${r.id}`) },
-            { label: 'View disputes', icon: 'alert', onClick: (r) => go(`/finance/disputes?client=${r.id}`) },
-            { label: 'View ledger', icon: 'file', onClick: (r) => go(`/finance/ledger?client=${r.id}`) },
+            { label: t('customers.action.openDetail'), icon: 'eye', kind: 'primary', onClick: openClientDrawer },
+            { label: t('customers.action.viewShipments'), icon: 'package', onClick: (r) => go(`/operate/shipments?client=${r.id}`) },
+            { label: t('clients.action.viewSenders'), icon: 'right', onClick: (r) => go(`/customers/senders?client=${r.id}`) },
+            { label: t('clients.action.viewRecipients'), icon: 'user_in', onClick: (r) => go(`/customers/recipients?client=${r.id}`) },
+            { label: t('clients.action.viewSettlements'), icon: 'wallet', onClick: (r) => go(`/finance/settlements?client=${r.id}`) },
+            { label: t('clients.action.viewDisputes'), icon: 'alert', onClick: (r) => go(`/finance/disputes?client=${r.id}`) },
+            { label: t('clients.action.viewLedger'), icon: 'file', onClick: (r) => go(`/finance/ledger?client=${r.id}`) },
             {
-              label: 'Reactivate',
+              label: t('customers.action.reactivate'),
               icon: 'refresh',
               capability: WRITE_CAP,
               disabled: (r) => !canReactivateClient(r),
-              disabledReason: 'Only suspended clients can be reactivated.',
+              disabledReason: t('clients.onlySuspended'),
               onClick: async (r) => {
                 try {
                   await reactivateMut.mutateAsync({ client_id: r.id });
-                  pushToast(`Reactivated ${r.name}`, 'good');
+                  pushToast(fill(t('customers.msg.reactivated'), { name: r.name }), 'good');
                 } catch (err) {
-                  pushToast(clientMutationErrorMessage(err), 'danger');
+                  pushToast(clientMutationErrorMessage(err, t), 'danger');
                 }
               },
             },
             {
-              label: 'Suspend',
+              label: t('customers.action.suspend'),
               icon: 'lock',
               kind: 'danger',
               capability: WRITE_CAP,
               disabled: (r) => !canSuspendClient(r),
-              disabledReason: 'Only active clients can be suspended.',
+              disabledReason: t('clients.onlyActive'),
               onClick: openSuspendClient,
             },
           ]}

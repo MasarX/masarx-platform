@@ -51,6 +51,7 @@ import {
 } from '@/lib/external-intake-token-handoff';
 import { ExternalIntakeWorkspaceToolbar } from './ExternalIntakeWorkspaceToolbar';
 import { readUrlParam } from '@/lib/url-params';
+import { fill, useI18n } from '@/lib/i18n';
 
 interface IntegrationPlugin extends Record<string, unknown> {
   id: string;
@@ -162,7 +163,7 @@ function isReceiverShipmentCreateResult(result: ReceiverResult | null | undefine
   );
 }
 
-function guardReceiverShipmentReadback(result: ReceiverResult): ReceiverResult {
+function guardReceiverShipmentReadback(result: ReceiverResult, missingShipmentMessage: string): ReceiverResult {
   if (
     isReceiverShipmentCreateResult(result) &&
     result.is_terminal === true &&
@@ -175,7 +176,7 @@ function guardReceiverShipmentReadback(result: ReceiverResult): ReceiverResult {
       tracking_number: null,
       error_message:
         result.error_message ??
-        'Terminal shipment intake completed without shipment confirmation',
+        missingShipmentMessage,
     };
   }
   return result;
@@ -273,69 +274,70 @@ function linkedReplayOutcomeLabel(result: Record<string, unknown> | null | undef
 }
 
 function ReceiverInboxEventDrawerBody({ result }: { result: ReceiverResult }) {
+  const { t } = useI18n();
   return (
     <div style={{ display: 'grid', gap: '12px' }}>
-      <h4 className="eyebrow">Inbox event confirmation</h4>
-      <div className="kvgrid" aria-label="Receiver inbox event context">
+      <h4 className="eyebrow">{t('integrationsWebhookTester.receiverInboxEventDrawerBody.inboxEventConfirmation')}</h4>
+      <div className="kvgrid" aria-label={t('integrationsWebhookTester.receiverInboxEventDrawerBody.receiverInboxEventContext')}>
         <div className="kvgrid__row">
-          <span className="kvgrid__key mono">Event</span>
-          <span className="kvgrid__val mono">{result.webhook_id ?? 'pending confirmation'}</span>
+          <span className="kvgrid__key mono">{t('integrationsWebhookTester.receiverInboxEventDrawerBody.event')}</span>
+          <span className="kvgrid__val mono">{result.webhook_id ?? t('integrationsWebhookTester.receiverInboxEventDrawerBody.pendingConfirmation')}</span>
         </div>
         <div className="kvgrid__row">
-          <span className="kvgrid__key mono">Status</span>
+          <span className="kvgrid__key mono">{t('integrationsWebhookTester.receiverInboxEventDrawerBody.status')}</span>
           <span className="kvgrid__val mono">
-            {result.webhook_processing_status ?? 'pending confirmation'}
+            {result.webhook_processing_status ?? t('integrationsWebhookTester.receiverInboxEventDrawerBody.pendingConfirmation')}
             {typeof result.is_terminal === 'boolean' ? (
               <span style={{ color: 'var(--ink-3)' }}>
                 {' '}
-                {result.is_terminal ? 'terminal' : 'not terminal'}
+                {result.is_terminal ? t('integrationsWebhookTester.receiverInboxEventDrawerBody.terminal') : t('integrationsWebhookTester.receiverInboxEventDrawerBody.notTerminal')}
               </span>
             ) : null}
           </span>
         </div>
         <div className="kvgrid__row">
-          <span className="kvgrid__key mono">Receiver outcome</span>
+          <span className="kvgrid__key mono">{t('integrationsWebhookTester.receiverInboxEventDrawerBody.receiverOutcome')}</span>
           <span className="kvgrid__val mono">
-            <Chip kind={receiverOutcomeTone(result)} label={receiverOutcomeValue(result) ?? 'pending confirmation'} />
+            <Chip kind={receiverOutcomeTone(result)} label={receiverOutcomeValue(result) ?? t('integrationsWebhookTester.receiverInboxEventDrawerBody.pendingConfirmation')} />
             {result.ack_status_code != null ? (
-              <span style={{ color: 'var(--ink-3)' }}> HTTP {result.ack_status_code}</span>
+              <span style={{ color: 'var(--ink-3)' }}> {fill(t('integrationsWebhookTester.receiverInboxEventDrawerBody.http'), { ack_status_code: String(result.ack_status_code) })}</span>
             ) : null}
             {result.idempotency_key ? (
-              <span style={{ color: 'var(--ink-3)' }}> · Idempotency {result.idempotency_key}</span>
+              <span style={{ color: 'var(--ink-3)' }}> {fill(t('integrationsWebhookTester.receiverInboxEventDrawerBody.idempotency'), { idempotency_key: String(result.idempotency_key) })}</span>
             ) : null}
           </span>
         </div>
         <div className="kvgrid__row">
-          <span className="kvgrid__key mono">Workflow</span>
-          <span className="kvgrid__val mono">{result.workflow_run_id ?? 'pending confirmation'}</span>
+          <span className="kvgrid__key mono">{t('integrationsWebhookTester.receiverInboxEventDrawerBody.workflow')}</span>
+          <span className="kvgrid__val mono">{result.workflow_run_id ?? t('integrationsWebhookTester.receiverInboxEventDrawerBody.pendingConfirmation')}</span>
         </div>
         <div className="kvgrid__row">
-          <span className="kvgrid__key mono">Source</span>
+          <span className="kvgrid__key mono">{t('integrationsWebhookTester.receiverInboxEventDrawerBody.source')}</span>
           <span className="kvgrid__val mono">
-            {result.source_label ?? result.source_identifier ?? 'pending confirmation'}
+            {result.source_label ?? result.source_identifier ?? t('integrationsWebhookTester.receiverInboxEventDrawerBody.pendingConfirmation')}
           </span>
         </div>
         <div className="kvgrid__row">
-          <span className="kvgrid__key mono">Mapping</span>
+          <span className="kvgrid__key mono">{t('integrationsWebhookTester.receiverInboxEventDrawerBody.mapping')}</span>
           <span className="kvgrid__val mono">
-            {result.mapping_label ?? result.mapping_config_id ?? 'pending confirmation'}
+            {result.mapping_label ?? result.mapping_config_id ?? t('integrationsWebhookTester.receiverInboxEventDrawerBody.pendingConfirmation')}
           </span>
         </div>
         <div className="kvgrid__row">
-          <span className="kvgrid__key mono">Shipment</span>
+          <span className="kvgrid__key mono">{t('integrationsWebhookTester.receiverInboxEventDrawerBody.shipment')}</span>
           <span className="kvgrid__val mono">
             {hasReceiverShipmentReadback(result)
               ? result.tracking_number ?? result.shipment_id
               : isReceiverAuthRejectionResult(result)
-              ? 'not created - authentication rejected'
+              ? t('integrationsWebhookTester.receiverInboxEventDrawerBody.notCreatedAuthenticationRejected')
               : isReceiverFailedStatus(result.webhook_processing_status)
-              ? 'not created - failed'
-              : 'not created yet'}
+              ? t('integrationsWebhookTester.receiverInboxEventDrawerBody.notCreatedFailed')
+              : t('integrationsWebhookTester.receiverInboxEventDrawerBody.notCreatedYet')}
           </span>
         </div>
         {result.error_message ? (
           <div className="kvgrid__row">
-            <span className="kvgrid__key mono">Error</span>
+            <span className="kvgrid__key mono">{t('integrationsWebhookTester.receiverInboxEventDrawerBody.error')}</span>
             <span className="kvgrid__val mono">{redactSensitiveText(result.error_message)}</span>
           </div>
         ) : null}
@@ -540,6 +542,7 @@ async function waitForReceiverAuthRejectionReadback(
 function mergeReceiverDirectoryReadback(
   current: ReceiverResult,
   row: ReceiverDirectoryReadbackRow,
+  missingShipmentMessage: string,
 ): ReceiverResult {
   return guardReceiverShipmentReadback({
     ...current,
@@ -567,12 +570,13 @@ function mergeReceiverDirectoryReadback(
       typeof row.is_actionable === 'boolean' ? row.is_actionable : current.is_actionable ?? null,
     shipment_id: receiverString(row.shipment_id) ?? current.shipment_id ?? null,
     tracking_number: receiverString(row.tracking_number) ?? current.tracking_number ?? null,
-  });
+  }, missingShipmentMessage);
 }
 
 async function refreshReceiverDirectoryReadback(
   current: ReceiverResult,
   idempotencyKey: string,
+  missingShipmentMessage: string,
 ): Promise<ReceiverResult | null> {
   const filters = [
     current.webhook_id ? { id: current.webhook_id } : null,
@@ -593,7 +597,7 @@ async function refreshReceiverDirectoryReadback(
       },
     );
     const row = readback.rows[0];
-    if (row) return mergeReceiverDirectoryReadback(current, row);
+    if (row) return mergeReceiverDirectoryReadback(current, row, missingShipmentMessage);
   }
   return null;
 }
@@ -685,6 +689,7 @@ function _legacyBuildResponseEnvelope(
 // ---------- module ----------
 
 export function WebhookTesterModule() {
+  const { t } = useI18n();
   const identity = useIdentity();
   const canReadWebhooks = useCapability(CAP.WEBHOOKS_READ);
   const canReadPluginDiagnostics = useCapability(CAP.INTEGRATION_PLUGINS_READ);
@@ -816,11 +821,11 @@ export function WebhookTesterModule() {
     clearExternalIntakeSourceToken('webhook-tester');
     pushToast(
       handoff.source_name
-        ? `Loaded one-time token for ${handoff.source_name}`
-        : 'Loaded one-time source token',
+        ? fill(t('integrationsWebhookTester.webhookTesterModule.loadedOneTimeToken'), { source_name: String(handoff.source_name) })
+        : t('integrationsWebhookTester.webhookTesterModule.loadedOneTimeSource'),
       'good',
     );
-  }, []);
+  }, [t]);
 
   // Phase C5: when an operator opens the tester with a real `inbox_id`
   // (deep-link from /integrations/intake or Mapping remediation), Replay
@@ -828,9 +833,9 @@ export function WebhookTesterModule() {
   // synthetic plugin trace, and the linked backend row remains visible before
   // another mutation is attempted.
   const headerPills = [
-    <span key="src" className="chip chip--xs">Webhook receiver - mapping profiles</span>,
+    <span key="src" className="chip chip--xs">{t('integrationsWebhookTester.webhookTesterModule.webhookReceiverMappingProfiles')}</span>,
     <span key="mode" className="chip chip--xs mono">
-      {seedDiagnosticsEnabled ? 'Review checks' : 'Hosted confirmation'}
+      {seedDiagnosticsEnabled ? t('integrationsWebhookTester.webhookTesterModule.reviewChecks') : t('integrationsWebhookTester.webhookTesterModule.hostedConfirmation')}
     </span>,
   ];
 
@@ -886,7 +891,7 @@ export function WebhookTesterModule() {
       if (cancelled) return;
       setReceiverReadbackRefreshing(true);
       try {
-        const next = await refreshReceiverDirectoryReadback(receiverResult, receiverIdempotencyKey);
+        const next = await refreshReceiverDirectoryReadback(receiverResult, receiverIdempotencyKey, t('integrationsWebhookTester.webhookTesterModule.missingShipmentConfirmation'));
         if (cancelled) return;
         if (next) {
           setReceiverResult(next);
@@ -894,7 +899,7 @@ export function WebhookTesterModule() {
             setReceiverReadbackRefreshing(false);
             if (hasReceiverShipmentReadback(next)) {
               pushToast(
-                `Receiver shipment confirmed - ${next.tracking_number ?? next.shipment_id}`,
+                fill(t('integrationsWebhookTester.webhookTesterModule.receiverShipmentConfirmed'), { value: String(next.tracking_number ?? next.shipment_id) }),
                 'good',
               );
             }
@@ -923,6 +928,7 @@ export function WebhookTesterModule() {
     receiverIdempotencyKey,
     receiverResult,
     receiverRunning,
+    t,
   ]);
 
   const activePlugin = useMemo(
@@ -977,18 +983,18 @@ export function WebhookTesterModule() {
 
   function openReceiverInboxEvent() {
     if (!receiverResult?.webhook_id) {
-      pushToast('No inbox event confirmation yet.', 'warn');
+      pushToast(t('integrationsWebhookTester.webhookTesterModule.noInboxEventConfirmation'), 'warn');
       return;
     }
     const inboxPath = `/integrations/intake?inbox_id=${encodeURIComponent(receiverResult.webhook_id)}`;
     drawer.open({
-      title: `Inbox event · ${receiverEventReference(receiverResult.webhook_id)}`,
+      title: fill(t('integrationsWebhookTester.webhookTesterModule.inboxEvent'), { value: String(receiverEventReference(receiverResult.webhook_id)) }),
       size: 'md',
       body: <ReceiverInboxEventDrawerBody result={receiverResult} />,
       footer: (
         <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
           <Button
-            label="Open Intake module"
+            label={t('integrationsWebhookTester.webhookTesterModule.openIntakeModule')}
             iconName="inbox"
             kind="ghost"
             onClick={() => go(inboxPath)}
@@ -996,7 +1002,7 @@ export function WebhookTesterModule() {
           <div style={{ flex: 1 }} />
           {hasReceiverShipmentReadback(receiverResult) ? (
             <Button
-              label="Open shipment drawer"
+              label={t('integrationsWebhookTester.webhookTesterModule.openShipmentDrawer')}
               iconName="package"
               kind="primary"
               onClick={openReceiverShipmentContext}
@@ -1009,7 +1015,7 @@ export function WebhookTesterModule() {
 
   function openReceiverShipmentContext() {
     if (!hasReceiverShipmentReadback(receiverResult)) {
-      pushToast('No successful shipment confirmation yet.', 'warn');
+      pushToast(t('integrationsWebhookTester.webhookTesterModule.noSuccessfulShipmentConfirmation'), 'warn');
       return;
     }
     openShipmentContextDrawer(drawer, receiverResult.shipment_id, {
@@ -1052,7 +1058,7 @@ export function WebhookTesterModule() {
         occurred_at: new Date().toISOString(),
       });
       setTab('response');
-      pushToast(`Invalid JSON - ${(err as Error).message}`, 'danger');
+      pushToast(fill(t('integrationsWebhookTester.webhookTesterModule.invalidJson'), { message: String((err as Error).message) }), 'danger');
       return;
     }
     const token = options.replayLastToken ? receiverReplayToken?.trim() ?? '' : receiverToken.trim();
@@ -1077,7 +1083,7 @@ export function WebhookTesterModule() {
         occurred_at: new Date().toISOString(),
       });
       setTab('response');
-      pushToast('Receiver request blocked - hosted intake is not configured', 'danger');
+      pushToast(t('integrationsWebhookTester.webhookTesterModule.receiverRequestBlockedHosted'), 'danger');
       return;
     }
     setReceiverRunning(true);
@@ -1091,7 +1097,7 @@ export function WebhookTesterModule() {
         payload: parsedPayload,
         idempotency_key: idempotencyForSubmit,
         signature: receiverSignature.trim() || undefined,
-      }).then((result) => guardReceiverShipmentReadback(result));
+      }).then((result) => guardReceiverShipmentReadback(result, t('integrationsWebhookTester.webhookTesterModule.missingShipmentConfirmation')));
       receiverPostPromise.catch(() => undefined);
       authRejectionReadbackAbort = new AbortController();
       const authRejectionReadbackPromise = waitForReceiverAuthRejectionReadback(
@@ -1115,7 +1121,7 @@ export function WebhookTesterModule() {
         occurred_at: new Date().toISOString(),
       });
       setTab('response');
-      pushToast(`Receiver request failed - ${(err as Error)?.message ?? ''}`, 'danger');
+      pushToast(fill(t('integrationsWebhookTester.webhookTesterModule.receiverRequestFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
     } finally {
       authRejectionReadbackAbort?.abort();
       if (!options.replayLastToken) {
@@ -1129,26 +1135,26 @@ export function WebhookTesterModule() {
   async function executeRun(isReplay: boolean) {
     if (running) return;
     if (isReplay && linkedInboxId && !canWriteWebhooks) {
-      pushToast('Replay requires webhook update permission', 'danger');
+      pushToast(t('integrationsWebhookTester.webhookTesterModule.replayRequiresWebhookUpdate'), 'danger');
       return;
     }
     if ((!isReplay || !linkedInboxId) && !canRunPluginDiagnostics) {
-      pushToast('Plugin check requires integration plugin test permission', 'danger');
+      pushToast(t('integrationsWebhookTester.webhookTesterModule.pluginCheckRequiresIntegration'), 'danger');
       return;
     }
     let parsedPayload: unknown = {};
     try {
       parsedPayload = JSON.parse(payload);
     } catch (err) {
-      pushToast(`Invalid input · ${(err as Error).message}`, 'danger');
+      pushToast(fill(t('integrationsWebhookTester.webhookTesterModule.invalidInput'), { message: String((err as Error).message) }), 'danger');
       return;
     }
     if (!activePlugin) {
-      pushToast('Pick a plugin first', 'warn');
+      pushToast(t('integrationsWebhookTester.webhookTesterModule.pickAPluginFirst'), 'warn');
       return;
     }
     if (liveBackendUnavailable) {
-      pushToast('Run blocked - live intake connection is not configured', 'danger');
+      pushToast(t('integrationsWebhookTester.webhookTesterModule.runBlockedLiveIntake'), 'danger');
       return;
     }
     setRunning(true);
@@ -1180,13 +1186,13 @@ export function WebhookTesterModule() {
       setLastDuration(res.duration_ms ?? 0);
       if (isReplay) {
         setReplayCount((n) => n + 1);
-        pushToast(`Replay #${replayCount + 1} · ${res.duration_ms}ms`, 'good');
+        pushToast(fill(t('integrationsWebhookTester.webhookTesterModule.replayMs'), { value: String(replayCount + 1), duration_ms: String(res.duration_ms) }), 'good');
       } else {
         setReplayCount(0);
-        pushToast(`Plugin check completed · ${res.duration_ms}ms`, 'good');
+        pushToast(fill(t('integrationsWebhookTester.webhookTesterModule.pluginCheckCompletedMs'), { duration_ms: String(res.duration_ms) }), 'good');
       }
     } catch (err) {
-      pushToast(`Plugin check failed · ${(err as Error)?.message ?? ''}`, 'danger');
+      pushToast(fill(t('integrationsWebhookTester.webhookTesterModule.pluginCheckFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
     } finally {
       setRunning(false);
     }
@@ -1203,9 +1209,9 @@ export function WebhookTesterModule() {
     if (next === 'auto') return;
     if (!linkedInboxId) {
       if (seedDiagnosticsEnabled) {
-        pushToast(`Outcome set · ${next}`, 'info');
+        pushToast(fill(t('integrationsWebhookTester.webhookTesterModule.outcomeSet'), { next: String(next) }), 'info');
       } else {
-        pushToast('Changing outcome requires a linked webhook inbox.', 'danger');
+        pushToast(t('integrationsWebhookTester.webhookTesterModule.changingOutcomeRequiresA'), 'danger');
       }
       return;
     }
@@ -1215,7 +1221,7 @@ export function WebhookTesterModule() {
         | null;
       const status = canonicalRow?.metadata?.target_status;
       if (!status) {
-        pushToast('Outcome option is missing; update webhook outcome lookups.', 'danger');
+        pushToast(t('integrationsWebhookTester.webhookTesterModule.outcomeOptionIsMissing'), 'danger');
         return;
       }
       // Wave 8 RE-AUDIT (INTEGRATIONS.md P0 #2): canonical Phase B6 RPC
@@ -1228,18 +1234,18 @@ export function WebhookTesterModule() {
       });
       pushToast(
         seedDiagnosticsEnabled
-          ? `Outcome set · ${next}`
-          : `Outcome change requested · ${next}`,
+          ? fill(t('integrationsWebhookTester.webhookTesterModule.outcomeSet'), { next: String(next) })
+          : fill(t('integrationsWebhookTester.webhookTesterModule.outcomeChangeRequested'), { next: String(next) }),
         'info',
       );
     } catch (err) {
-      pushToast(`Outcome change failed · ${(err as Error)?.message ?? ''}`, 'danger');
+      pushToast(fill(t('integrationsWebhookTester.webhookTesterModule.outcomeChangeFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
     }
   }
 
   function loadSample() {
     if (!samplePayload) {
-      pushToast('Webhook sample payload lookup is missing', 'danger');
+      pushToast(t('integrationsWebhookTester.webhookTesterModule.webhookSamplePayloadLookup'), 'danger');
       return;
     }
     clearWebhookExecutionEvidence();
@@ -1249,7 +1255,7 @@ export function WebhookTesterModule() {
         buildWebhookSampleTemplateContext(receiverIdempotencyKey),
       ),
     );
-    pushToast('Sample payload loaded', 'info');
+    pushToast(t('integrationsWebhookTester.webhookTesterModule.samplePayloadLoaded'), 'info');
   }
 
   function refreshReceiverIdempotencyKey() {
@@ -1271,7 +1277,7 @@ export function WebhookTesterModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-webhook"
-          eyebrow="External intake"
+          eyebrow={t('integrationsWebhookTester.webhookTesterModule.externalIntake')}
           titleAccent="Webhook"
           titlePlain="test requests"
           pills={headerPills}
@@ -1279,7 +1285,7 @@ export function WebhookTesterModule() {
         <StateView
           kind="denied"
           capability={CAP.INTEGRATION_PLUGINS_READ}
-          hint="You do not have permission to view webhook testing or plugin checks."
+          hint={t('integrationsWebhookTester.webhookTesterModule.youDoNotHave')}
         />
       </div>
     );
@@ -1290,7 +1296,7 @@ export function WebhookTesterModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-webhook"
-          eyebrow="External intake"
+          eyebrow={t('integrationsWebhookTester.webhookTesterModule.externalIntake')}
           titleAccent="Webhook"
           titlePlain="test requests"
           pills={headerPills}
@@ -1306,7 +1312,7 @@ export function WebhookTesterModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-webhook"
-          eyebrow="External intake"
+          eyebrow={t('integrationsWebhookTester.webhookTesterModule.externalIntake')}
           titleAccent="Webhook"
           titlePlain="test requests"
           pills={headerPills}
@@ -1314,10 +1320,10 @@ export function WebhookTesterModule() {
         <StateView
           kind={pluginPermissionDenied ? 'denied' : 'error'}
           capability={pluginPermissionDenied ? CAP.INTEGRATION_PLUGINS_READ : undefined}
-          title={pluginPermissionDenied ? 'Webhook plugin access required' : 'Webhook plugins unavailable'}
+          title={pluginPermissionDenied ? t('integrationsWebhookTester.webhookTesterModule.webhookPluginAccessRequired') : t('integrationsWebhookTester.webhookTesterModule.webhookPluginsUnavailable')}
           hint={
             pluginPermissionDenied
-              ? 'You do not have permission to read webhook test plugins.'
+              ? t('integrationsWebhookTester.webhookTesterModule.youDoNotHave2')
               : (pluginsQuery.error as Error).message
           }
         />
@@ -1330,15 +1336,15 @@ export function WebhookTesterModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-webhook"
-          eyebrow="External intake"
+          eyebrow={t('integrationsWebhookTester.webhookTesterModule.externalIntake')}
           titleAccent="Webhook"
           titlePlain="test requests"
           pills={headerPills}
         />
         <StateView
           kind="empty"
-          title="No webhook test plugins"
-          hint="Add an integration plugin before running provider intake tests."
+          title={t('integrationsWebhookTester.webhookTesterModule.noWebhookTestPlugins')}
+          hint={t('integrationsWebhookTester.webhookTesterModule.addAnIntegrationPlugin')}
         />
       </div>
     );
@@ -1375,7 +1381,7 @@ export function WebhookTesterModule() {
     <div className="page">
       <PageHeader
         moduleKey="int-webhook"
-        eyebrow="External intake"
+        eyebrow={t('integrationsWebhookTester.webhookTesterModule.externalIntake')}
         titleAccent="Test webhook"
         titlePlain="intake"
         pills={headerPills}
@@ -1385,8 +1391,8 @@ export function WebhookTesterModule() {
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
           <StateView
             kind="error"
-            title="Live intake setup required"
-            hint="Live webhook testing is unavailable until the hosted intake connection is configured."
+            title={t('integrationsWebhookTester.webhookTesterModule.liveIntakeSetupRequired')}
+            hint={t('integrationsWebhookTester.webhookTesterModule.liveWebhookTestingIs')}
           />
         </div>
       ) : null}
@@ -1410,7 +1416,7 @@ export function WebhookTesterModule() {
             overflow: 'auto',
           }}
         >
-          <label className="eyebrow" htmlFor="webhook-tester-plugin">Plugin</label>
+          <label className="eyebrow" htmlFor="webhook-tester-plugin">{t('integrationsWebhookTester.webhookTesterModule.plugin')}</label>
           {(requestedPluginId || requestedSourceId) ? (
             <div
               className="card"
@@ -1418,21 +1424,21 @@ export function WebhookTesterModule() {
               style={{ background: 'var(--paper-2)', display: 'grid', gap: '6px' }}
             >
               <div className="dt-toolbar" style={{ margin: 0 }}>
-                <span className="eyebrow">Catalog handoff</span>
+                <span className="eyebrow">{t('integrationsWebhookTester.webhookTesterModule.catalogHandoff')}</span>
                 <Chip
                   label={
                     requestedPluginMissing
-                      ? `plugin unavailable - ${requestedPluginId}`
+                      ? fill(t('integrationsWebhookTester.webhookTesterModule.pluginUnavailable'), { requestedPluginId: String(requestedPluginId) })
                       : activePlugin
-                        ? `plugin - ${activePlugin.name}`
-                        : `plugin - ${requestedPluginId ?? 'pending'}`
+                        ? fill(t('integrationsWebhookTester.webhookTesterModule.plugin2'), { name: String(activePlugin.name) })
+                        : fill(t('integrationsWebhookTester.webhookTesterModule.plugin3'), { value: String(requestedPluginId ?? 'pending') })
                   }
                   size="xs"
                   kind={requestedPluginMissing ? 'danger' : activePlugin ? 'good' : 'warn'}
                 />
                 {requestedSourceId ? (
                   <Chip
-                    label={`source - ${requestedSourceLabel ?? requestedSourceId}`}
+                    label={fill(t('integrationsWebhookTester.webhookTesterModule.source'), { value: String(requestedSourceLabel ?? requestedSourceId) })}
                     size="xs"
                     kind={requestedSource ? 'good' : 'warn'}
                   />
@@ -1440,7 +1446,7 @@ export function WebhookTesterModule() {
               </div>
               {requestedPluginMissing ? (
                 <p className="state__hint" style={{ margin: 0 }}>
-                  The selected catalog plugin is no longer visible in this tester scope. Choose another visible plugin before running checks.
+                  {t('integrationsWebhookTester.webhookTesterModule.theSelectedCatalogPlugin')}
                 </p>
               ) : null}
             </div>
@@ -1449,18 +1455,18 @@ export function WebhookTesterModule() {
             <div
               className="card"
               data-testid="webhook-tester-linked-inbox-context"
-              aria-label="Linked inbox remediation context"
+              aria-label={t('integrationsWebhookTester.webhookTesterModule.linkedInboxRemediationContext')}
               style={{ background: 'var(--paper-2)', display: 'grid', gap: '8px' }}
             >
               <div className="dt-toolbar" style={{ margin: 0 }}>
-                <span className="eyebrow">Linked inbox remediation</span>
+                <span className="eyebrow">{t('integrationsWebhookTester.webhookTesterModule.linkedInboxRemediation')}</span>
                 <Chip
                   label={
                     linkedInboxQuery.isLoading
-                      ? 'loading confirmation'
+                      ? t('integrationsWebhookTester.webhookTesterModule.loadingConfirmation')
                       : linkedInboxContext
                         ? String(linkedInboxContext.processing_status ?? 'status pending')
-                        : 'not visible'
+                        : t('integrationsWebhookTester.webhookTesterModule.notVisible')
                   }
                   size="xs"
                   kind={
@@ -1477,26 +1483,26 @@ export function WebhookTesterModule() {
               </div>
               <div className="kvgrid">
                 <div className="kvgrid__row">
-                  <span className="kvgrid__key mono">Event</span>
+                  <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.event')}</span>
                   <span className="kvgrid__val mono">{linkedInboxId}</span>
                 </div>
                 <div className="kvgrid__row">
-                  <span className="kvgrid__key mono">Mapping</span>
+                  <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.mapping')}</span>
                   <span className="kvgrid__val mono">
-                    {linkedInboxMappingLabel ?? 'pending confirmation'}
+                    {linkedInboxMappingLabel ?? t('integrationsWebhookTester.webhookTesterModule.pendingConfirmation')}
                     {linkedInboxContext?.mapping_target ? (
                       <span style={{ color: 'var(--ink-3)' }}> - {linkedInboxContext.mapping_target}</span>
                     ) : null}
                   </span>
                 </div>
                 <div className="kvgrid__row">
-                  <span className="kvgrid__key mono">Replay</span>
+                  <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.replay')}</span>
                   <span className="kvgrid__val mono">
-                    {linkedInboxContext?.replay_count != null ? `${linkedInboxContext.replay_count} attempts` : 'pending confirmation'}
+                    {linkedInboxContext?.replay_count != null ? fill(t('integrationsWebhookTester.webhookTesterModule.attempts'), { replay_count: String(linkedInboxContext.replay_count) }) : t('integrationsWebhookTester.webhookTesterModule.pendingConfirmation')}
                   </span>
                 </div>
                 <div className="kvgrid__row">
-                  <span className="kvgrid__key mono">Last error</span>
+                  <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.lastError')}</span>
                   <span className="kvgrid__val mono">
                     {redactSensitiveText(receiverString(linkedInboxContext?.error_message) ?? 'none projected')}
                   </span>
@@ -1505,7 +1511,7 @@ export function WebhookTesterModule() {
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                 {linkedInboxContext?.mapping_config_id ? (
                   <Button
-                    label="Open mapping remediation"
+                    label={t('integrationsWebhookTester.webhookTesterModule.openMappingRemediation')}
                     iconName="edit"
                     kind="ghost"
                     capability={CAP.MAPPINGS_READ}
@@ -1517,7 +1523,7 @@ export function WebhookTesterModule() {
                   />
                 ) : null}
                 <Button
-                  label="Open linked inbox event"
+                  label={t('integrationsWebhookTester.webhookTesterModule.openLinkedInboxEvent')}
                   iconName="eye"
                   kind="ghost"
                   capability={CAP.WEBHOOKS_READ}
@@ -1536,7 +1542,7 @@ export function WebhookTesterModule() {
             }}
           >
             {requestedPluginMissing ? (
-              <option value="">Catalog plugin unavailable</option>
+              <option value="">{t('integrationsWebhookTester.webhookTesterModule.catalogPluginUnavailable')}</option>
             ) : null}
             {plugins.map((p) => (
               <option key={p.id} value={p.id}>
@@ -1544,7 +1550,7 @@ export function WebhookTesterModule() {
               </option>
             ))}
           </select>
-          <label className="eyebrow" htmlFor="webhook-tester-payload">Sample payload</label>
+          <label className="eyebrow" htmlFor="webhook-tester-payload">{t('integrationsWebhookTester.webhookTesterModule.samplePayload')}</label>
           <textarea
             id="webhook-tester-payload"
             rows={16}
@@ -1562,7 +1568,7 @@ export function WebhookTesterModule() {
           />
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
             <Button
-              label={running ? 'Running…' : 'Run plugin check'}
+              label={running ? t('integrationsWebhookTester.webhookTesterModule.running') : t('integrationsWebhookTester.webhookTesterModule.runPluginCheck')}
               iconName="play"
               kind="primary"
               capability={CAP.INTEGRATION_PLUGINS_TEST}
@@ -1577,14 +1583,14 @@ export function WebhookTesterModule() {
               onClick={() => void executeRun(true)}
               disabled={running || !activePlugin || !hasRun || liveBackendUnavailable || replayDenied}
             />
-            <Button label="Load sample" iconName="copy" kind="ghost" onClick={loadSample} />
+            <Button label={t('integrationsWebhookTester.webhookTesterModule.loadSample')} iconName="copy" kind="ghost" onClick={loadSample} />
             <div style={{ flex: 1 }} />
             <label
               className="mono"
               style={{ fontSize: '10.5px', color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: '6px' }}
               htmlFor="webhook-tester-force-status"
             >
-              {seedDiagnosticsEnabled ? 'Set expected outcome' : 'Set inbox outcome'}
+              {seedDiagnosticsEnabled ? t('integrationsWebhookTester.webhookTesterModule.setExpectedOutcome') : t('integrationsWebhookTester.webhookTesterModule.setInboxOutcome')}
               <select
                 id="webhook-tester-force-status"
                 className="field"
@@ -1594,11 +1600,11 @@ export function WebhookTesterModule() {
                 disabled={forceStatusDisabled}
                 title={
                   !canWriteWebhooks
-                    ? 'Requires webhook update permission'
+                    ? t('integrationsWebhookTester.webhookTesterModule.requiresWebhookUpdatePermission')
                     : liveBackendUnavailable
-                      ? 'Configure hosted intake before changing the outcome'
+                      ? t('integrationsWebhookTester.webhookTesterModule.configureHostedIntakeBefore')
                       : !seedDiagnosticsEnabled && !linkedInboxId
-                      ? 'Open from an inbox row to change the outcome'
+                      ? t('integrationsWebhookTester.webhookTesterModule.openFromAnInbox')
                       : undefined
                 }
               >
@@ -1612,13 +1618,13 @@ export function WebhookTesterModule() {
           </div>
           <div className="card" style={{ background: 'var(--paper-2)', display: 'grid', gap: '8px' }}>
             <div>
-              <div className="eyebrow">Receiver request</div>
+              <div className="eyebrow">{t('integrationsWebhookTester.webhookTesterModule.receiverRequest')}</div>
               <p className="state__hint" style={{ margin: '4px 0 0' }}>
-                Sends this test data through the webhook receiver using a one-time source token from Sources & tokens.
+                {t('integrationsWebhookTester.webhookTesterModule.sendsThisTestData')}
               </p>
             </div>
             <label className="field" htmlFor="webhook-receiver-token">
-              <span className="field__label">Source token</span>
+              <span className="field__label">{t('integrationsWebhookTester.webhookTesterModule.sourceToken')}</span>
               <input
                 id="webhook-receiver-token"
                 type="password"
@@ -1629,15 +1635,15 @@ export function WebhookTesterModule() {
                   clearExternalIntakeSourceToken('webhook-tester');
                   setReceiverToken(event.target.value);
                 }}
-                placeholder="Paste source token returned on create/rotate"
+                placeholder={t('integrationsWebhookTester.webhookTesterModule.pasteSourceTokenReturned')}
               />
               {!receiverTokenReady ? (
-                <span className="field__hint">Rotate or create a source token before sending a receiver POST.</span>
+                <span className="field__hint">{t('integrationsWebhookTester.webhookTesterModule.rotateOrCreateA')}</span>
               ) : null}
             </label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
               <label className="field" htmlFor="webhook-receiver-idempotency">
-                <span className="field__label">Idempotency key</span>
+                <span className="field__label">{t('integrationsWebhookTester.webhookTesterModule.idempotencyKey')}</span>
                 <input
                   id="webhook-receiver-idempotency"
                   value={receiverIdempotencyKey}
@@ -1652,11 +1658,11 @@ export function WebhookTesterModule() {
                   }}
                 />
                 {receiverIdempotencyKey.trim() !== '' && !isReceiverIdempotencyKeyValid(receiverIdempotencyKey) ? (
-                  <span className="field__hint">Use a UUID idempotency key for receiver backend readback.</span>
+                  <span className="field__hint">{t('integrationsWebhookTester.webhookTesterModule.useAUuidIdempotency')}</span>
                 ) : null}
               </label>
               <label className="field" htmlFor="webhook-receiver-signature">
-                <span className="field__label">HMAC signature</span>
+                <span className="field__label">{t('integrationsWebhookTester.webhookTesterModule.hmacSignature')}</span>
                 <input
                   id="webhook-receiver-signature"
                   value={receiverSignature}
@@ -1664,29 +1670,29 @@ export function WebhookTesterModule() {
                     clearReceiverPostEvidence();
                     setReceiverSignature(event.target.value);
                   }}
-                  placeholder="Optional x-signature"
+                  placeholder={t('integrationsWebhookTester.webhookTesterModule.optionalXSignature')}
                 />
               </label>
             </div>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
               <Button
-                label={receiverRunning ? 'Sending' : 'Send receiver request'}
+                label={receiverRunning ? t('integrationsWebhookTester.webhookTesterModule.sending') : t('integrationsWebhookTester.webhookTesterModule.sendReceiverRequest')}
                 iconName="send"
                 kind="primary"
                 capability={CAP.WEBHOOKS_WRITE}
                 onClick={() => void executeReceiverPost()}
                 disabled={receiverRunning || liveBackendUnavailable || !receiverTokenReady}
-                title={!receiverTokenReady ? 'Paste a source token before sending a receiver POST' : undefined}
+                title={!receiverTokenReady ? t('integrationsWebhookTester.webhookTesterModule.pasteASourceToken') : undefined}
               />
               <Button
-                label="New idempotency key"
+                label={t('integrationsWebhookTester.webhookTesterModule.newIdempotencyKey')}
                 iconName="refresh"
                 kind="ghost"
                 onClick={refreshReceiverIdempotencyKey}
                 disabled={receiverRunning}
               />
               <Button
-                label="Replay receiver POST"
+                label={t('integrationsWebhookTester.webhookTesterModule.replayReceiverPost')}
                 iconName="rotate-cw"
                 kind="ghost"
                 capability={CAP.WEBHOOKS_WRITE}
@@ -1694,59 +1700,59 @@ export function WebhookTesterModule() {
                 disabled={receiverRunning || liveBackendUnavailable || !receiverReplayToken}
                 title={
                   receiverReplayToken
-                    ? 'Replay the last receiver POST with the same idempotency key'
-                    : 'Send a receiver POST before replaying'
+                    ? t('integrationsWebhookTester.webhookTesterModule.replayTheLastReceiver')
+                    : t('integrationsWebhookTester.webhookTesterModule.sendAReceiverPost')
                 }
               />
             </div>
             {receiverRunning ? (
               <div
                 className="state state--info"
-                aria-label="Receiver request progress"
+                aria-label={t('integrationsWebhookTester.webhookTesterModule.receiverRequestProgress')}
                 style={{ padding: '10px 12px', borderRadius: '8px' }}
               >
-                <div className="state__title">Receiver request in progress</div>
+                <div className="state__title">{t('integrationsWebhookTester.webhookTesterModule.receiverRequestInProgress')}</div>
                 <div className="state__hint">
-                  Waiting for webhook receiver and backend readback for idempotency {receiverIdempotencyKey.trim() || '-'}.
+                  {fill(t('integrationsWebhookTester.webhookTesterModule.waitingForWebhookReceiver'), { value: String(receiverIdempotencyKey.trim() || '-') })}
                 </div>
               </div>
             ) : null}
             {receiverResult ? (
               <div style={{ display: 'grid', gap: '8px' }}>
-                <div className="kvgrid" aria-label="Receiver request evidence">
+                <div className="kvgrid" aria-label={t('integrationsWebhookTester.webhookTesterModule.receiverRequestEvidence')}>
                   <div className="kvgrid__row">
-                    <span className="kvgrid__key mono">Workflow</span>
+                    <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.workflow')}</span>
                     <span className="kvgrid__val mono">{receiverResult.workflow_run_id ?? '-'}</span>
                   </div>
                   <div className="kvgrid__row">
-                    <span className="kvgrid__key mono">Webhook</span>
-                    <span className="kvgrid__val mono">{receiverResult.webhook_id ?? 'pending confirmation'}</span>
+                    <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.webhook')}</span>
+                    <span className="kvgrid__val mono">{receiverResult.webhook_id ?? t('integrationsWebhookTester.webhookTesterModule.pendingConfirmation')}</span>
                   </div>
                   <div className="kvgrid__row">
-                    <span className="kvgrid__key mono">Correlation</span>
+                    <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.correlation')}</span>
                     <span className="kvgrid__val mono">{receiverResult.correlation_id ?? '-'}</span>
                   </div>
                   <div className="kvgrid__row">
-                    <span className="kvgrid__key mono">Status</span>
+                    <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.status')}</span>
                     <span className="kvgrid__val mono">
-                      {humanizeReceiverOutcome(receiverResult.webhook_processing_status) ?? 'pending confirmation'}
+                      {humanizeReceiverOutcome(receiverResult.webhook_processing_status) ?? t('integrationsWebhookTester.webhookTesterModule.pendingConfirmation')}
                       {typeof receiverResult.is_terminal === 'boolean' ? (
                         <span style={{ color: 'var(--ink-3)' }}>
                           {' '}
-                          {receiverResult.is_terminal ? 'terminal' : 'not terminal'}
+                          {receiverResult.is_terminal ? t('integrationsWebhookTester.webhookTesterModule.terminal') : t('integrationsWebhookTester.webhookTesterModule.notTerminal')}
                         </span>
                       ) : null}
                     </span>
                   </div>
                   <div className="kvgrid__row">
-                    <span className="kvgrid__key mono">Receiver outcome</span>
+                    <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.receiverOutcome')}</span>
                     <span className="kvgrid__val mono">
-                      <Chip kind={receiverOutcomeTone(receiverResult)} label={receiverOutcomeValue(receiverResult) ?? 'pending confirmation'} />
+                      <Chip kind={receiverOutcomeTone(receiverResult)} label={receiverOutcomeValue(receiverResult) ?? t('integrationsWebhookTester.webhookTesterModule.pendingConfirmation')} />
                       {receiverResult.ack_status_code != null ? (
-                        <span style={{ color: 'var(--ink-3)' }}> HTTP {receiverResult.ack_status_code}</span>
+                        <span style={{ color: 'var(--ink-3)' }}> {fill(t('integrationsWebhookTester.webhookTesterModule.http'), { ack_status_code: String(receiverResult.ack_status_code) })}</span>
                       ) : null}
                       {receiverResult.idempotency_key ? (
-                        <span style={{ color: 'var(--ink-3)' }}> · Idempotency {receiverResult.idempotency_key}</span>
+                        <span style={{ color: 'var(--ink-3)' }}> {fill(t('integrationsWebhookTester.webhookTesterModule.idempotency'), { idempotency_key: String(receiverResult.idempotency_key) })}</span>
                       ) : null}
                       {receiverResult.ack_reason && !isReceiverAuthRejectionResult(receiverResult) ? (
                         <span style={{ color: 'var(--ink-3)' }}> · {receiverResult.ack_reason}</span>
@@ -1754,22 +1760,22 @@ export function WebhookTesterModule() {
                     </span>
                   </div>
                   <div className="kvgrid__row">
-                    <span className="kvgrid__key mono">Source</span>
+                    <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.source2')}</span>
                     <span className="kvgrid__val mono">
                       {receiverResult.source_label ??
                         receiverResult.auth_rejection_source_label ??
                         receiverResult.source_identifier ??
                         receiverResult.auth_rejection_source_identifier ??
-                        'pending confirmation'}
+                        t('integrationsWebhookTester.webhookTesterModule.pendingConfirmation')}
                       {receiverResult.provider_type_label ? (
                         <span style={{ color: 'var(--ink-3)' }}> · {receiverResult.provider_type_label}</span>
                       ) : null}
                     </span>
                   </div>
                   <div className="kvgrid__row">
-                    <span className="kvgrid__key mono">Mapping</span>
+                    <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.mapping')}</span>
                     <span className="kvgrid__val mono">
-                      {receiverResult.mapping_label ?? receiverResult.mapping_config_id ?? 'pending confirmation'}
+                      {receiverResult.mapping_label ?? receiverResult.mapping_config_id ?? t('integrationsWebhookTester.webhookTesterModule.pendingConfirmation')}
                       {receiverResult.mapping_target ? (
                         <span style={{ color: 'var(--ink-3)' }}> · {receiverResult.mapping_target}</span>
                       ) : null}
@@ -1779,44 +1785,44 @@ export function WebhookTesterModule() {
                     </span>
                   </div>
                   <div className="kvgrid__row">
-                    <span className="kvgrid__key mono">Shipment</span>
+                    <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.shipment')}</span>
                     <span className="kvgrid__val mono">
                       {hasReceiverShipmentReadback(receiverResult)
                         ? receiverResult.tracking_number ?? receiverResult.shipment_id
                         : isReceiverAuthRejectionResult(receiverResult)
-                        ? 'not created - authentication rejected'
+                        ? t('integrationsWebhookTester.webhookTesterModule.notCreatedAuthenticationRejected')
                         : isReceiverFailedStatus(receiverResult.webhook_processing_status)
-                        ? 'not created - failed'
+                        ? t('integrationsWebhookTester.webhookTesterModule.notCreatedFailed')
                         : receiverResult.tracking_number
-                        ? `${receiverResult.tracking_number} (pending shipment confirmation)`
-                        : 'not created yet'}
+                        ? fill(t('integrationsWebhookTester.webhookTesterModule.pendingShipmentConfirmation'), { tracking_number: String(receiverResult.tracking_number) })
+                        : t('integrationsWebhookTester.webhookTesterModule.notCreatedYet')}
                     </span>
                   </div>
                   <div className="kvgrid__row">
-                    <span className="kvgrid__key mono">Intent</span>
+                    <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.intent')}</span>
                     <span className="kvgrid__val mono">{receiverResult.canonical_intent ?? '-'}</span>
                   </div>
                   {receiverResult.error_message ? (
                     <div className="kvgrid__row">
-                      <span className="kvgrid__key mono">Error</span>
+                      <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.error')}</span>
                       <span className="kvgrid__val mono">{redactSensitiveText(receiverResult.error_message)}</span>
                     </div>
                   ) : null}
                   {isReceiverAuthRejectionResult(receiverResult) ? (
                     <>
                       <div className="kvgrid__row">
-                        <span className="kvgrid__key mono">Authentication check</span>
+                        <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.authenticationCheck')}</span>
                         <span className="kvgrid__val mono">
-                          Rejected
+                          {t('integrationsWebhookTester.webhookTesterModule.rejected')}
                           {receiverResult.auth_rejection_http_status != null ? (
-                            <span style={{ color: 'var(--ink-3)' }}> · HTTP {receiverResult.auth_rejection_http_status}</span>
+                            <span style={{ color: 'var(--ink-3)' }}> {fill(t('integrationsWebhookTester.webhookTesterModule.http2'), { auth_rejection_http_status: String(receiverResult.auth_rejection_http_status) })}</span>
                           ) : null}
                         </span>
                       </div>
                       <div className="kvgrid__row">
-                        <span className="kvgrid__key mono">Source match</span>
+                        <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.sourceMatch')}</span>
                         <span className="kvgrid__val mono">
-                          {receiverResult.auth_rejection_source_resolved === true ? 'Matched source' : 'Source could not be matched'}
+                          {receiverResult.auth_rejection_source_resolved === true ? t('integrationsWebhookTester.webhookTesterModule.matchedSource') : t('integrationsWebhookTester.webhookTesterModule.sourceCouldNotBe')}
                         </span>
                       </div>
                     </>
@@ -1824,30 +1830,30 @@ export function WebhookTesterModule() {
                 </div>
                 {isDiagnosticReceiverResult(receiverResult) ? (
                   <div className="state state--warn" style={{ padding: '10px 12px', borderRadius: '8px' }}>
-                    <div className="state__title">Check only</div>
+                    <div className="state__title">{t('integrationsWebhookTester.webhookTesterModule.checkOnly')}</div>
                     <div className="state__hint">
-                      This receiver result is for review only.
+                      {t('integrationsWebhookTester.webhookTesterModule.thisReceiverResultIs')}
                     </div>
                   </div>
                 ) : null}
                 {receiverPendingMaterialization || receiverReadbackRefreshing ? (
                   <div className="state state--info" style={{ padding: '10px 12px', borderRadius: '8px' }}>
-                    <div className="state__title">Shipment confirmation pending</div>
+                    <div className="state__title">{t('integrationsWebhookTester.webhookTesterModule.shipmentConfirmationPending')}</div>
                     <div className="state__hint">
-                      Shipment confirmation is still being completed.
+                      {t('integrationsWebhookTester.webhookTesterModule.shipmentConfirmationIsStill')}
                     </div>
                   </div>
                 ) : null}
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }} aria-label="Receiver request actions">
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }} aria-label={t('integrationsWebhookTester.webhookTesterModule.receiverRequestActions')}>
                   <Button
-                    label="Open receiver inbox event"
+                    label={t('integrationsWebhookTester.webhookTesterModule.openReceiverInboxEvent')}
                     iconName="inbox"
                     kind="ghost"
                     onClick={openReceiverInboxEvent}
                     disabled={!receiverResult.webhook_id}
                   />
                   <Button
-                    label="Open shipment drawer"
+                    label={t('integrationsWebhookTester.webhookTesterModule.openShipmentDrawer')}
                     iconName="package"
                     kind="primary"
                     onClick={openReceiverShipmentContext}
@@ -1859,18 +1865,18 @@ export function WebhookTesterModule() {
             {receiverFailure ? (
               <div
                 className="state state--error"
-                aria-label="Receiver request failure"
+                aria-label={t('integrationsWebhookTester.webhookTesterModule.receiverRequestFailure')}
                 style={{ padding: '10px 12px', borderRadius: '8px' }}
               >
-                <div className="state__title">Receiver request failed</div>
+                <div className="state__title">{t('integrationsWebhookTester.webhookTesterModule.receiverRequestFailed2')}</div>
                 <div className="state__hint">{redactSensitiveText(receiverFailure.message)}</div>
                 <div className="kvgrid" style={{ marginTop: '8px' }}>
                   <div className="kvgrid__row">
-                    <span className="kvgrid__key mono">Idempotency</span>
+                    <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.idempotency2')}</span>
                     <span className="kvgrid__val mono">{receiverFailure.idempotency_key}</span>
                   </div>
                   <div className="kvgrid__row">
-                    <span className="kvgrid__key mono">Time</span>
+                    <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.time')}</span>
                     <span className="kvgrid__val mono">{receiverFailure.occurred_at}</span>
                   </div>
                 </div>
@@ -1880,10 +1886,10 @@ export function WebhookTesterModule() {
           {lastDuration != null ? (
             <div className="card" style={{ background: 'var(--paper-2)', minHeight: '40px' }}>
               <div className="mono" style={{ fontSize: '11px' }}>
-                <span style={{ color: 'var(--ink-3)' }}>Last run · </span>
-                <span style={{ fontWeight: 600 }}>{lastDuration}ms</span>
+                <span style={{ color: 'var(--ink-3)' }}>{t('integrationsWebhookTester.webhookTesterModule.lastRun')} </span>
+                <span style={{ fontWeight: 600 }}>{fill(t('integrationsWebhookTester.webhookTesterModule.ms'), { lastDuration: String(lastDuration) })}</span>
                 <span style={{ color: 'var(--ink-3)', marginLeft: '6px' }}>
-                  ({trace.length} step{trace.length === 1 ? '' : 's'})
+                  {fill(t(trace.length === 1 ? 'integrationsWebhookTester.webhookTesterModule.stepOne' : 'integrationsWebhookTester.webhookTesterModule.stepOther'), { length: String(trace.length) })}
                 </span>
               </div>
             </div>
@@ -1892,14 +1898,14 @@ export function WebhookTesterModule() {
 
         {/* RIGHT — run review + request/response summary */}
         <div style={{ padding: '16px', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <section aria-label="Run review">
-            <div className="eyebrow">Run steps</div>
+          <section aria-label={t('integrationsWebhookTester.webhookTesterModule.runReview')}>
+            <div className="eyebrow">{t('integrationsWebhookTester.webhookTesterModule.runSteps')}</div>
             <div className="timeline" style={{ padding: '8px 0', minHeight: '120px' }}>
               {trace.length === 0 ? (
                 <StateView
                   kind="empty"
-                  title="No run yet"
-                  hint="Run a plugin check, or use Receiver request for webhook intake and shipment confirmation."
+                  title={t('integrationsWebhookTester.webhookTesterModule.noRunYet')}
+                  hint={t('integrationsWebhookTester.webhookTesterModule.runAPluginCheck')}
                 />
               ) : (
                 trace.map((s, i) => (
@@ -1908,11 +1914,11 @@ export function WebhookTesterModule() {
                     className={`timeline__row ${s.ok ? '' : 'is-failed'}`}
                   >
                     <span className="timeline__node" />
-                    <span className="timeline__time mono">{s.ms}ms</span>
+                    <span className="timeline__time mono">{fill(t('integrationsWebhookTester.webhookTesterModule.ms2'), { ms: String(s.ms) })}</span>
                     <div className="timeline__body">
                       <div className="timeline__action">{formatTraceStepLabel(s.name)}</div>
                       <div className="timeline__detail mono">
-                        {s.ok ? 'Completed' : 'Needs attention'}
+                        {s.ok ? t('integrationsWebhookTester.webhookTesterModule.completed') : t('integrationsWebhookTester.webhookTesterModule.needsAttention')}
                       </div>
                     </div>
                   </div>
@@ -1921,21 +1927,21 @@ export function WebhookTesterModule() {
             </div>
           </section>
 
-          <section aria-label="Request and response summary" data-testid="inspector">
+          <section aria-label={t('integrationsWebhookTester.webhookTesterModule.requestAndResponseSummary')} data-testid="inspector">
             <div
               role="tablist"
-              aria-label="Summary tabs"
+              aria-label={t('integrationsWebhookTester.webhookTesterModule.summaryTabs')}
               style={{ display: 'flex', gap: '4px', borderBottom: '1px solid var(--line)' }}
             >
               <InspectorTabButton id="request" active={tab === 'request'} onSelect={setTab}>
-                Request
+                {t('integrationsWebhookTester.webhookTesterModule.request')}
               </InspectorTabButton>
               <InspectorTabButton id="response" active={tab === 'response'} onSelect={setTab}>
-                Response
+                {t('integrationsWebhookTester.webhookTesterModule.response')}
                 {hasRun ? (
                   <span style={{ marginInlineStart: '6px' }}>
                     <Chip
-                      label={responseEnvelope.ok ? 'Completed' : 'Needs attention'}
+                      label={responseEnvelope.ok ? t('integrationsWebhookTester.webhookTesterModule.completed') : t('integrationsWebhookTester.webhookTesterModule.needsAttention')}
                       kind={statusTone}
                       size="xs"
                     />
@@ -1958,28 +1964,28 @@ export function WebhookTesterModule() {
                   </span>
                 ) : receiverFailure ? (
                   <span style={{ marginInlineStart: '6px' }}>
-                    <Chip label="Receiver failed" kind="danger" size="xs" />
+                    <Chip label={t('integrationsWebhookTester.webhookTesterModule.receiverFailed')} kind="danger" size="xs" />
                   </span>
                 ) : null}
               </InspectorTabButton>
             </div>
 
             {tab === 'request' ? (
-              <div id="inspector-request" role="tabpanel" aria-label="Request summary" data-testid="inspector-request">
+              <div id="inspector-request" role="tabpanel" aria-label={t('integrationsWebhookTester.webhookTesterModule.requestSummary')} data-testid="inspector-request">
                 <StateView
                   kind="empty"
-                  title="Request prepared"
-                  hint="The receiver request is ready. Sensitive headers and request content stay hidden in this summary."
+                  title={t('integrationsWebhookTester.webhookTesterModule.requestPrepared')}
+                  hint={t('integrationsWebhookTester.webhookTesterModule.theReceiverRequestIs')}
                 />
               </div>
             ) : (
-              <div id="inspector-response" role="tabpanel" aria-label="Response summary" data-testid="inspector-response">
+              <div id="inspector-response" role="tabpanel" aria-label={t('integrationsWebhookTester.webhookTesterModule.responseSummary')} data-testid="inspector-response">
                 {receiverResult ? (
                   <>
-                    <h4 className="eyebrow">Receiver request confirmation</h4>
-                    <div className="kvgrid" aria-label="Receiver request confirmation">
+                    <h4 className="eyebrow">{t('integrationsWebhookTester.webhookTesterModule.receiverRequestConfirmation')}</h4>
+                    <div className="kvgrid" aria-label={t('integrationsWebhookTester.webhookTesterModule.receiverRequestConfirmation')}>
                       <div className="kvgrid__row">
-                        <span className="kvgrid__key mono">Status</span>
+                        <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.status')}</span>
                         <span className="kvgrid__val mono">
                           <Chip
                             label={receiverStatusLabel(receiverResult)}
@@ -1989,11 +1995,11 @@ export function WebhookTesterModule() {
                         </span>
                       </div>
                       <div className="kvgrid__row">
-                        <span className="kvgrid__key mono">Outcome</span>
+                        <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.outcome')}</span>
                         <span className="kvgrid__val mono">
                           <Chip
                             kind={receiverOutcomeTone(receiverResult)}
-                            label={receiverOutcomeValue(receiverResult) ?? 'Accepted'}
+                            label={receiverOutcomeValue(receiverResult) ?? t('integrationsWebhookTester.webhookTesterModule.accepted')}
                           />
                           {receiverResult.ack_reason && !isReceiverAuthRejectionResult(receiverResult) ? (
                             <span style={{ color: 'var(--ink-3)' }}> - {receiverResult.ack_reason}</span>
@@ -2001,43 +2007,43 @@ export function WebhookTesterModule() {
                         </span>
                       </div>
                       <div className="kvgrid__row">
-                        <span className="kvgrid__key mono">Idempotency</span>
+                        <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.idempotency2')}</span>
                         <span className="kvgrid__val mono">{receiverResult.idempotency_key ?? '-'}</span>
                       </div>
                       <div className="kvgrid__row">
-                        <span className="kvgrid__key mono">Webhook</span>
+                        <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.webhook')}</span>
                         <span className="kvgrid__val mono">
                           {receiverResult.webhook_id ??
-                            (isReceiverAuthRejectionResult(receiverResult) ? 'not created - auth rejected' : 'pending confirmation')}
+                            (isReceiverAuthRejectionResult(receiverResult) ? t('integrationsWebhookTester.webhookTesterModule.notCreatedAuthRejected') : t('integrationsWebhookTester.webhookTesterModule.pendingConfirmation'))}
                         </span>
                       </div>
                       <div className="kvgrid__row">
-                        <span className="kvgrid__key mono">Correlation</span>
+                        <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.correlation')}</span>
                         <span className="kvgrid__val mono">{receiverResult.correlation_id ?? '-'}</span>
                       </div>
                       <div className="kvgrid__row">
-                        <span className="kvgrid__key mono">Shipment</span>
+                        <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.shipment')}</span>
                         <span className="kvgrid__val mono">
                           {hasReceiverShipmentReadback(receiverResult)
                             ? receiverResult.tracking_number ?? receiverResult.shipment_id
                             : isReceiverAuthRejectionResult(receiverResult)
-                            ? 'not created - authentication rejected'
+                            ? t('integrationsWebhookTester.webhookTesterModule.notCreatedAuthenticationRejected')
                             : isReceiverFailedStatus(receiverResult.webhook_processing_status)
-                            ? 'not created - failed'
-                            : 'not created yet'}
+                            ? t('integrationsWebhookTester.webhookTesterModule.notCreatedFailed')
+                            : t('integrationsWebhookTester.webhookTesterModule.notCreatedYet')}
                         </span>
                       </div>
                       {isReceiverAuthRejectionResult(receiverResult) ? (
                         <div className="kvgrid__row">
-                          <span className="kvgrid__key mono">Authentication check</span>
+                          <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.authenticationCheck')}</span>
                           <span className="kvgrid__val mono">
-                            Rejected
+                            {t('integrationsWebhookTester.webhookTesterModule.rejected')}
                           </span>
                         </div>
                       ) : null}
                     </div>
-                    <div className="eyebrow" style={{ marginTop: '10px' }}>Body</div>
-                    <pre className="wf-code-block" tabIndex={0} aria-label="Receiver response body">
+                    <div className="eyebrow" style={{ marginTop: '10px' }}>{t('integrationsWebhookTester.webhookTesterModule.body')}</div>
+                    <pre className="wf-code-block" tabIndex={0} aria-label={t('integrationsWebhookTester.webhookTesterModule.receiverResponseBody')}>
 {JSON.stringify(redactJsonForOperator(receiverResult.response ?? {}), null, 2)}
                     </pre>
                   </>
@@ -2045,59 +2051,59 @@ export function WebhookTesterModule() {
                   <>
                     <StateView
                       kind="error"
-                      title="Receiver request failed"
+                      title={t('integrationsWebhookTester.webhookTesterModule.receiverRequestFailed2')}
                       hint={redactSensitiveText(receiverFailure.message)}
                     />
-                    <div className="kvgrid" aria-label="Receiver request failure details" style={{ marginTop: '10px' }}>
+                    <div className="kvgrid" aria-label={t('integrationsWebhookTester.webhookTesterModule.receiverRequestFailureDetails')} style={{ marginTop: '10px' }}>
                       <div className="kvgrid__row">
-                        <span className="kvgrid__key mono">Idempotency</span>
+                        <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.idempotency2')}</span>
                         <span className="kvgrid__val mono">{receiverFailure.idempotency_key}</span>
                       </div>
                       <div className="kvgrid__row">
-                        <span className="kvgrid__key mono">Occurred</span>
+                        <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.occurred')}</span>
                         <span className="kvgrid__val mono">{receiverFailure.occurred_at}</span>
                       </div>
                     </div>
                   </>
                 ) : hasLinkedReplayReadback ? (
                   <>
-                    <h4 className="eyebrow">Linked inbox replay confirmation</h4>
-                    <div className="kvgrid" aria-label="Linked inbox replay confirmation">
+                    <h4 className="eyebrow">{t('integrationsWebhookTester.webhookTesterModule.linkedInboxReplayConfirmation')}</h4>
+                    <div className="kvgrid" aria-label={t('integrationsWebhookTester.webhookTesterModule.linkedInboxReplayConfirmation')}>
                       <div className="kvgrid__row">
-                        <span className="kvgrid__key mono">Event</span>
+                        <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.event')}</span>
                         <span className="kvgrid__val mono">
                           {String(linkedReplayResult?.webhook_inbox_id ?? linkedInboxId ?? 'pending confirmation')}
                         </span>
                       </div>
                       <div className="kvgrid__row">
-                        <span className="kvgrid__key mono">Outcome</span>
+                        <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.outcome')}</span>
                         <span className="kvgrid__val mono">{linkedReplayOutcomeLabel(linkedReplayResult)}</span>
                       </div>
                       <div className="kvgrid__row">
-                        <span className="kvgrid__key mono">Prior status</span>
+                        <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.priorStatus')}</span>
                         <span className="kvgrid__val mono">
                           {String(linkedReplayResult?.prior_status ?? linkedReplayResult?.preserved_status ?? '-')}
                         </span>
                       </div>
                       <div className="kvgrid__row">
-                        <span className="kvgrid__key mono">Confirmation</span>
-                        <span className="kvgrid__val mono">Inbox and directory updated</span>
+                        <span className="kvgrid__key mono">{t('integrationsWebhookTester.webhookTesterModule.confirmation')}</span>
+                        <span className="kvgrid__val mono">{t('integrationsWebhookTester.webhookTesterModule.inboxAndDirectoryUpdated')}</span>
                       </div>
                     </div>
                     <div className="state__hint" style={{ marginTop: '8px' }}>
-                      Linked inbox replay uses the saved inbox event; plugin checks are not rerun.
+                      {t('integrationsWebhookTester.webhookTesterModule.linkedInboxReplayUses')}
                     </div>
                   </>
                 ) : hasRun ? (
                   <>
                     <div className="state__hint" style={{ marginBottom: '8px' }}>
-                      Plugin checks validate the plugin contract only. Use Receiver request for webhook intake and shipment confirmation.
+                      {t('integrationsWebhookTester.webhookTesterModule.pluginChecksValidateThe')}
                     </div>
                     <KvLine
-                      label="Outcome"
+                      label={t('integrationsWebhookTester.webhookTesterModule.outcome')}
                       value={
                         <Chip
-                          label={responseEnvelope.ok ? 'Completed' : 'Needs attention'}
+                          label={responseEnvelope.ok ? t('integrationsWebhookTester.webhookTesterModule.completed') : t('integrationsWebhookTester.webhookTesterModule.needsAttention')}
                           kind={statusTone}
                           size="xs"
                         />
@@ -2106,24 +2112,24 @@ export function WebhookTesterModule() {
                     {forcedStatus !== 'auto' ? (
                       <div className="state__hint" style={{ marginTop: '4px' }}>
                         {seedDiagnosticsEnabled
-                          ? 'Showing the selected test response.'
-                          : 'Inbox outcome change requested. The last actual response is preserved.'}
+                          ? t('integrationsWebhookTester.webhookTesterModule.showingTheSelectedTest')
+                          : t('integrationsWebhookTester.webhookTesterModule.inboxOutcomeChangeRequested')}
                       </div>
                     ) : null}
                     <StateView
                       kind={responseEnvelope.ok ? 'empty' : 'error'}
-                      title="Plugin check completed"
-                      hint="Sensitive response headers and body content stay hidden in this summary."
+                      title={t('integrationsWebhookTester.webhookTesterModule.pluginCheckCompleted')}
+                      hint={t('integrationsWebhookTester.webhookTesterModule.sensitiveResponseHeadersAnd')}
                     />
                   </>
                 ) : (
                   <StateView
                     kind="empty"
-                    title="No response yet"
+                    title={t('integrationsWebhookTester.webhookTesterModule.noResponseYet')}
                     hint={
                       seedDiagnosticsEnabled
-                        ? 'Run a test to see the webhook response.'
-                        : 'Run a test to see the webhook response.'
+                        ? t('integrationsWebhookTester.webhookTesterModule.runATestTo')
+                        : t('integrationsWebhookTester.webhookTesterModule.runATestTo')
                     }
                   />
                 )}

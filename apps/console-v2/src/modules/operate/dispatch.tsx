@@ -27,6 +27,16 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/Button';
 import { Chip, type ChipKind } from '@/components/Chip';
+import {
+  ConflictProvider,
+  ConflictSlot,
+  ConflictToast,
+  LiveChip,
+  NewRowsStrip,
+  StaleBanner,
+  StaleLabel,
+  useWritePause,
+} from '@/components/LiveStatus';
 import { ScopePill } from '@/components/ScopePill';
 import { LadderViz } from '@/components/LadderViz';
 import { PageHeader } from '@/components/PageHeader';
@@ -71,7 +81,9 @@ import {
 import { useDrawer, useModal } from '@/hooks/useOverlay';
 import { pushToast } from '@/components/toastStore';
 import { useCapability, useIdentity } from '@/lib/identity';
-import { useI18n } from '@/lib/i18n';
+import { englishT, fill, useI18n, type Translate } from '@/lib/i18n';
+import { useLiveConnection } from '@/lib/live-connection';
+import { useEditConflict, useHeldRows } from './live-rows';
 import {
   getCommandRegistry,
   getLookups,
@@ -203,6 +215,7 @@ interface DispatchRefreshSnapshot {
 
 export function routeStopLoadScanStatus(
   stop: Pick<RouteStopRow, 'load_scan_count' | 'load_scan_status' | 'last_load_scanned_at'>,
+  t: Translate = englishT,
 ): { label: string; tone: ChipKind; detail: string | null } {
   const count = Number(stop.load_scan_count ?? 0);
   const rawStatus = String(stop.load_scan_status ?? '').trim().toLowerCase();
@@ -211,15 +224,32 @@ export function routeStopLoadScanStatus(
     : null;
 
   if (rawStatus.includes('duplicate')) {
-    return { label: count > 1 ? `Duplicate x${count}` : 'Duplicate', tone: 'warn', detail: last };
+    return { label: count > 1 ? fill(t('dispatch.loadScan.duplicateCount'), { n: count }) : t('dispatch.loadScan.duplicate'), tone: 'warn', detail: last };
   }
   if (rawStatus.includes('scanned') || rawStatus.includes('clear') || count > 0) {
-    return { label: count > 1 ? `Scanned x${count}` : 'Scanned', tone: 'good', detail: last };
+    return { label: count > 1 ? fill(t('dispatch.loadScan.scannedCount'), { n: count }) : t('dispatch.loadScan.scanned'), tone: 'good', detail: last };
   }
   if (rawStatus.includes('unexpected')) {
-    return { label: 'Unexpected', tone: 'danger', detail: last };
+    return { label: t('dispatch.loadScan.unexpected'), tone: 'danger', detail: last };
   }
-  return { label: 'Missing', tone: 'neutral', detail: null };
+  return { label: t('dispatch.loadScan.missing'), tone: 'neutral', detail: null };
+}
+
+export function routeStopDeliveryOption(
+  stop: Pick<RouteStopRow, 'metadata'>,
+  t: (path: string, fallback?: string) => string,
+): { label: string; tone: ChipKind; instruction: string | null } | null {
+  const option = objectRecord(stop.metadata?.recipient_delivery_option);
+  if (option?.option === 'branch_pickup') {
+    return { label: t('deliveryOption.branchPickup', 'Branch pickup'), tone: 'warn', instruction: null };
+  }
+  if (option?.option !== 'safe_place') return null;
+  const place = nonBlankText(option.place) ?? 'other';
+  return {
+    label: t('deliveryOption.safePlace', 'Safe place: {place}').replace('{place}', t(`deliveryOption.place.${place}`, place)),
+    tone: 'info',
+    instruction: place === 'other' ? nonBlankText(option.instruction) ?? null : null,
+  };
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
@@ -269,7 +299,7 @@ function numberValue(value: unknown): number {
   return 0;
 }
 
-export function routeStopPodProofRequirements(policyValue: unknown): {
+export function routeStopPodProofRequirements(policyValue: unknown, t: Translate = englishT): {
   photoRequired: boolean;
   signatureRequired: boolean;
   otpRequired: boolean;
@@ -285,11 +315,13 @@ export function routeStopPodProofRequirements(policyValue: unknown): {
   const identityRequired = booleanValue(requirements?.identity_confirmation_required) ?? false;
   const minArtifactCount = numberValue(requirements?.min_artifact_count);
   const labels = [
-    photoRequired ? 'photo proof' : null,
-    signatureRequired ? 'signature proof' : null,
-    otpRequired ? 'OTP' : null,
-    identityRequired ? 'recipient identity' : null,
-    minArtifactCount > 0 ? `${minArtifactCount} proof artifact${minArtifactCount === 1 ? '' : 's'}` : null,
+    photoRequired ? t('dispatch.pod.photo') : null,
+    signatureRequired ? t('dispatch.pod.signature') : null,
+    otpRequired ? t('dispatch.pod.otp') : null,
+    identityRequired ? t('dispatch.pod.identity') : null,
+    minArtifactCount > 0
+      ? fill(t(minArtifactCount === 1 ? 'dispatch.pod.artifactOne' : 'dispatch.pod.artifactOther'), { n: minArtifactCount })
+      : null,
   ].filter(Boolean);
   return {
     photoRequired,
@@ -298,8 +330,8 @@ export function routeStopPodProofRequirements(policyValue: unknown): {
     identityRequired,
     minArtifactCount,
     label: labels.length
-      ? `POD policy requires ${labels.join(', ')} for full delivery.`
-      : 'POD policy does not require extra proof files for full delivery.',
+      ? fill(t('dispatch.pod.requires'), { list: labels.join(t('dispatch.listSeparator')) })
+      : t('dispatch.pod.none'),
   };
 }
 
@@ -421,14 +453,14 @@ function commandLabel(key: string, fallback: string): string {
   return rows.find((row) => row.key === key)?.label ?? fallback;
 }
 
-function routeAssignmentResponseActionLabel(action: RouteAssignmentResponseAction): string {
+function routeAssignmentResponseActionLabel(action: RouteAssignmentResponseAction, t: Translate = englishT): string {
   switch (action) {
     case 'route_runs.acknowledge_assignment':
-      return commandLabel(action, 'Acknowledge assignment');
+      return commandLabel(action, t('dispatch.responseAction.acknowledge'));
     case 'route_runs.accept_assignment':
-      return commandLabel(action, 'Accept assignment');
+      return commandLabel(action, t('dispatch.responseAction.accept'));
     case 'route_runs.refuse_assignment':
-      return commandLabel(action, 'Refuse assignment');
+      return commandLabel(action, t('dispatch.responseAction.refuse'));
     default:
       return action;
   }
@@ -885,12 +917,13 @@ export function routeStopCodPreview(
   paymentOutcome?: string,
   paymentAmount?: string,
   receiptContext?: string,
+  t: Translate = englishT,
 ): { label: string; tone: ChipKind; varianceAmount: number; discrepancyKind: string; hasDiscrepancy: boolean } {
   const expected = Number(expectedCod ?? 0);
-  const iso = String(currency ?? '').trim() || 'COD';
+  const iso = String(currency ?? '').trim() || 'COD'; // i18n-literal-ok: currency code placeholder
   if (!Number.isFinite(expected) || expected <= 0) {
     return {
-      label: 'No COD expected for this stop.',
+      label: t('dispatch.cod.none'),
       tone: 'neutral',
       varianceAmount: 0,
       discrepancyKind: 'not_required',
@@ -905,7 +938,7 @@ export function routeStopCodPreview(
   const hasDiscrepancy = outcome === 'refused' || varianceAmount !== 0;
   if (!outcome) {
     return {
-      label: `Expected COD ${iso} ${expected}. Select payment outcome before closeout.`,
+      label: fill(t('dispatch.cod.selectOutcome'), { iso, amount: expected }),
       tone: 'warn',
       varianceAmount: expected,
       discrepancyKind,
@@ -914,7 +947,7 @@ export function routeStopCodPreview(
   }
   if (outcome === 'refused') {
     return {
-      label: `COD refused. Variance ${iso} ${expected}.`,
+      label: fill(t('dispatch.cod.refused'), { iso, amount: expected }),
       tone: 'danger',
       varianceAmount: expected,
       discrepancyKind,
@@ -923,7 +956,7 @@ export function routeStopCodPreview(
   }
   if (!amountText) {
     return {
-      label: `Expected COD ${iso} ${expected}. Enter collected amount and receipt.`,
+      label: fill(t('dispatch.cod.enterAmount'), { iso, amount: expected }),
       tone: 'warn',
       varianceAmount: expected,
       discrepancyKind,
@@ -932,7 +965,7 @@ export function routeStopCodPreview(
   }
   if (!cleanOptionalText(receiptContext)) {
     return {
-      label: `Expected COD ${iso} ${expected}. Add receipt context before closeout.`,
+      label: fill(t('dispatch.cod.addReceipt'), { iso, amount: expected }),
       tone: 'warn',
       varianceAmount,
       discrepancyKind,
@@ -941,7 +974,7 @@ export function routeStopCodPreview(
   }
   if (varianceAmount === 0) {
     return {
-      label: `COD matched at ${iso} ${expected}.`,
+      label: fill(t('dispatch.cod.matched'), { iso, amount: expected }),
       tone: 'good',
       varianceAmount,
       discrepancyKind,
@@ -949,7 +982,10 @@ export function routeStopCodPreview(
     };
   }
   return {
-    label: `${discrepancyKind === 'shortfall' ? 'Shortfall' : 'Over-collection'} ${iso} ${Math.abs(varianceAmount)}.`,
+    label: fill(t(discrepancyKind === 'shortfall' ? 'dispatch.cod.shortfall' : 'dispatch.cod.overCollection'), {
+      iso,
+      amount: Math.abs(varianceAmount),
+    }),
     tone: 'danger',
     varianceAmount,
     discrepancyKind,
@@ -1158,13 +1194,13 @@ export function routeStopCloseoutDisabledReason(args: {
   task: unknown | null | undefined;
   departureConfirmedAt: string | null | undefined;
   pending?: boolean;
-}): string | null {
-  if (!args.task) return 'Stop closeout task is not ready';
+}, t: Translate = englishT): string | null {
+  if (!args.task) return t('dispatch.closeoutReason.notReady');
   const status = String((args.task as Record<string, unknown>).status ?? '').trim().toLowerCase();
-  if (['completed', 'closed', 'resolved', 'done'].includes(status)) return 'Stop is already closed';
-  if (['cancelled', 'canceled', 'void', 'rejected'].includes(status)) return 'Stop closeout task is no longer actionable';
-  if (!args.departureConfirmedAt) return 'Confirm route departure before closing stops';
-  if (args.pending) return 'Stop closeout is saving';
+  if (['completed', 'closed', 'resolved', 'done'].includes(status)) return t('dispatch.closeoutReason.alreadyClosed');
+  if (['cancelled', 'canceled', 'void', 'rejected'].includes(status)) return t('dispatch.closeoutReason.notActionable');
+  if (!args.departureConfirmedAt) return t('dispatch.closeoutReason.confirmDeparture');
+  if (args.pending) return t('dispatch.closeoutReason.saving');
   return null;
 }
 
@@ -1194,37 +1230,37 @@ function operatorEventLabel(value: string | null | undefined): string {
     .join(' ');
 }
 
-function shipmentShortLabel(id: string | null | undefined): string {
+function shipmentShortLabel(id: string | null | undefined, t: Translate = englishT): string {
   const suffix = String(id ?? '').slice(-6).toUpperCase();
-  return suffix ? `shipment ${suffix}` : 'shipment';
+  return suffix ? fill(t('dispatch.shipmentShort'), { suffix }) : t('dispatch.shipmentBare');
 }
 
-function dispatchReadErrorMessage(reason: unknown): string {
+function dispatchReadErrorMessage(reason: unknown, t: Translate = englishT): string {
   return reason instanceof Error && reason.message
     ? reason.message
-    : 'Dispatch data did not load.';
+    : t('dispatch.readError');
 }
 
-function dispatchMutationErrorMessage(reason: unknown, fallback: string): string {
+function dispatchMutationErrorMessage(reason: unknown, fallback: string, t: Translate = englishT): string {
   const message = reason instanceof Error ? reason.message : String(reason ?? '');
-  const departureScanOutMessage = dispatchDepartureScanOutErrorMessage(message);
+  const departureScanOutMessage = dispatchDepartureScanOutErrorMessage(message, t);
   if (departureScanOutMessage) return departureScanOutMessage;
   return reason instanceof Error && reason.message
     ? reason.message
     : fallback;
 }
 
-function dispatchDepartureScanOutErrorMessage(message: string): string | null {
+function dispatchDepartureScanOutErrorMessage(message: string, t: Translate = englishT): string | null {
   const missing = dispatchBracketedValues(message, 'missing_route_stop_ids');
   const duplicate = dispatchBracketedValues(message, 'duplicate_route_stop_ids');
   const unexpected = dispatchBracketedValues(message, 'unexpected_barcodes');
   if (!missing.length && !duplicate.length && !unexpected.length) return null;
   const details = [
-    missing.length ? `missing stops ${missing.join(', ')}` : null,
-    duplicate.length ? `duplicate stops ${duplicate.join(', ')}` : null,
-    unexpected.length ? `unexpected barcodes ${unexpected.join(', ')}` : null,
+    missing.length ? fill(t('dispatch.departureBlocked.missingStops'), { ids: missing.join(', ') }) : null,
+    duplicate.length ? fill(t('dispatch.departureBlocked.duplicateStops'), { ids: duplicate.join(', ') }) : null,
+    unexpected.length ? fill(t('dispatch.departureBlocked.unexpectedBarcodes'), { ids: unexpected.join(', ') }) : null,
   ].filter(Boolean);
-  return `Departure blocked by scan-out: ${details.join('; ')}.`;
+  return fill(t('dispatch.departureBlocked.message'), { details: details.join(t('dispatch.departureBlocked.separator')) });
 }
 
 function dispatchBracketedValues(message: string, key: string): string[] {
@@ -1249,11 +1285,12 @@ function dispatchText(value: unknown): string | null {
 function routeRunTenantActionDisabledReason(
   run: Pick<RouteRunRow, 'organization_id'> | null | undefined,
   activeTenantId: string | null | undefined,
+  t: Translate = englishT,
 ): string | undefined {
   const runOrgId = dispatchText(run?.organization_id);
   const activeId = dispatchText(activeTenantId);
   if (runOrgId && activeId && runOrgId !== activeId) {
-    return "Switch to this route run's tenant before changing dispatch lifecycle.";
+    return t('dispatch.tenant.run');
   }
   return undefined;
 }
@@ -1262,11 +1299,12 @@ function routeStopTenantActionDisabledReason(
   stop: Pick<RouteStopRow, 'organization_id'> | null | undefined,
   run: Pick<RouteRunRow, 'organization_id'> | null | undefined,
   activeTenantId: string | null | undefined,
+  t: Translate = englishT,
 ): string | undefined {
   const stopOrgId = dispatchText(run?.organization_id) ?? dispatchText(stop?.organization_id);
   const activeId = dispatchText(activeTenantId);
   if (stopOrgId && activeId && stopOrgId !== activeId) {
-    return "Switch to this route stop's tenant before changing dispatch lifecycle.";
+    return t('dispatch.tenant.stop');
   }
   return undefined;
 }
@@ -1287,6 +1325,18 @@ export function DispatchModule() {
   const stopsQuery = useCompleteResourceList<RouteStopRow>('route_stops', undefined, readQueryOptions);
   const { data: runsData, isLoading: runsLoading } = runsQuery;
   const { data: stopsData, isLoading: stopsLoading } = stopsQuery;
+  const live = useLiveConnection({
+    topic: 'routes',
+    enabled: canRead,
+    dataUpdatedAt: Math.min(runsQuery.dataUpdatedAt, stopsQuery.dataUpdatedAt),
+  });
+  const writePause = useWritePause(live);
+  // Stop closeout edit: the stop row as it was when the form opened (#405 conflict toast).
+  const [closeoutBaseline, setCloseoutBaseline] = useState<RouteStopRow | null>(null);
+  const closeoutCurrent = closeoutBaseline
+    ? (stopsData?.rows.find((row) => row.id === closeoutBaseline.id) ?? null)
+    : null;
+  const closeoutConflict = useEditConflict(closeoutBaseline, closeoutCurrent, live.state);
   // W24 — additive directory projection. The canonical SSOT remains the
   // `route_runs` + `route_stops` reads above; this read enriches the
   // surface with branch/driver/vehicle labels, derived counters, and the
@@ -1434,6 +1484,7 @@ export function DispatchModule() {
   // without a full refetch round-trip. Rollback handlers come from the
   // mutation flow (optimistic move + revert on error).
   const [runs, setRuns] = useState<RouteRunRow[]>([]);
+  const heldRuns = useHeldRows(runs, (run) => run.id);
   const [stops, setStops] = useState<RouteStopRow[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [dndOver, setDndOver] = useState<string | null>(null);
@@ -1472,12 +1523,12 @@ export function DispatchModule() {
   }, []);
 
   function dispatchLifecycleDisabledReasonForRun(run: RouteRunRow | null | undefined): string | undefined {
-    return routeRunTenantActionDisabledReason(run, activeTenantId);
+    return routeRunTenantActionDisabledReason(run, activeTenantId, t);
   }
 
   function dispatchLifecycleDisabledReasonForStop(stop: RouteStopRow | null | undefined): string | undefined {
     const run = stop ? runs.find((row) => row.id === stop.route_run_id) : null;
-    return routeStopTenantActionDisabledReason(stop, run, activeTenantId);
+    return routeStopTenantActionDisabledReason(stop, run, activeTenantId, t);
   }
 
   function dispatchLifecycleDisabledReasonForSelectedStops(
@@ -1487,12 +1538,12 @@ export function DispatchModule() {
     const selectedByRun = new Map<string, number>();
     if (targetRun) {
       const targetReason = dispatchLifecycleDisabledReasonForRun(targetRun);
-      if (targetReason) return "Switch to each selected route stop's tenant before changing dispatch lifecycle.";
+      if (targetReason) return t('dispatch.tenant.selected');
     }
     for (const stopId of selectedIds) {
       const stop = stops.find((row) => row.id === stopId);
       if (dispatchLifecycleDisabledReasonForStop(stop)) {
-        return "Switch to each selected route stop's tenant before changing dispatch lifecycle.";
+        return t('dispatch.tenant.selected');
       }
       if (stop?.route_run_id) {
         selectedByRun.set(stop.route_run_id, (selectedByRun.get(stop.route_run_id) ?? 0) + 1);
@@ -1501,7 +1552,7 @@ export function DispatchModule() {
     for (const [runId, selectedCount] of selectedByRun) {
       const sourceStopCount = stops.filter((stop) => stop.route_run_id === runId).length;
       if (sourceStopCount > 0 && selectedCount >= sourceStopCount) {
-        return 'Use route takeover for whole-route reassignment; stop reassignment requires leaving at least one stop on the source run.';
+        return t('dispatch.tenant.wholeRoute');
       }
     }
     return undefined;
@@ -1609,17 +1660,17 @@ export function DispatchModule() {
     (vid: string | null | undefined): string => {
       if (!vid) return '—';
       const v = vehicleById.get(vid);
-      return v?.plate_number ?? v?.plate ?? v?.code ?? `Vehicle ${vid}`;
+      return v?.plate_number ?? v?.plate ?? v?.code ?? fill(t('dispatch.vehicleFallback'), { id: vid });
     },
-    [vehicleById],
+    [vehicleById, t],
   );
   const basketDisplayLabel = useCallback((basket: BasketLookupRow | null | undefined): string => {
-    if (!basket) return 'Basket';
-    const type = basket.basket_type ? statusLabel('basket_type', basket.basket_type) : 'Basket';
+    if (!basket) return t('dispatch.basketFallback');
+    const type = basket.basket_type ? statusLabel('basket_type', basket.basket_type) : t('dispatch.basketFallback');
     const current = basket.current_count ?? 0;
     const capacity = basket.capacity_count ?? '—';
     return `${type} · ${current}/${capacity}`;
-  }, []);
+  }, [t]);
   const isPartnerRun = useCallback(
     (runId: string): boolean => {
       // W71-Operate (Cycle F-R-11) closure — partner-fleet gate resolves
@@ -1670,8 +1721,8 @@ export function DispatchModule() {
   );
   const podPolicyQuery = useResolveMobilePolicy('pod_policy', podPolicyScope);
   const podProofRequirements = useMemo(
-    () => routeStopPodProofRequirements(podPolicyQuery.data?.value),
-    [podPolicyQuery.data?.value],
+    () => routeStopPodProofRequirements(podPolicyQuery.data?.value, t),
+    [podPolicyQuery.data?.value, t],
   );
   const activeStops = useMemo(
     () => stops.filter((stop) => stop.route_run_id === activeRunId),
@@ -1713,7 +1764,7 @@ export function DispatchModule() {
   const activeStopsRestricted =
     Boolean(activeRun) && activeRunVisibleStopCount > 0 && activeStops.length === 0;
   const activeStopsRestrictedReason = activeStopsRestricted
-    ? 'Stop details are restricted for this route context.'
+    ? t('dispatch.restrictedReason')
     : undefined;
   const activeShipmentIds = useMemo(
     () => Array.from(new Set(activeStops.map((stop) => stop.shipment_id).filter(Boolean))).sort(),
@@ -1771,15 +1822,20 @@ export function DispatchModule() {
       return {
         id: stop.id,
         kind: 'shipment',
-        kindLabel: 'Shipment',
+        kindLabel: t('dispatch.scanner.kindShipment'),
         label: ship?.tracking_number ?? String(stop.shipment_id).slice(0, 14),
-        description: `Stop #${stop.sequence_order} · ${stop.stop_kind ?? 'stop'}`,
+        description: fill(t('dispatch.scanner.stopDescription'), {
+          seq: stop.sequence_order,
+          kind: stop.stop_kind ?? t('dispatch.scanner.stopKindFallback'),
+        }),
         barcodes: [ship?.tracking_number, stop.shipment_id, stop.id],
-        actionLabel: 'Record load scan',
-        actionDescription: activeRun ? `${routeRunLabel(activeRun.id)} route load scan` : 'Route load scan',
+        actionLabel: t('dispatch.scanner.recordLoadScan'),
+        actionDescription: activeRun
+          ? fill(t('dispatch.scanner.routeLoadScan'), { route: routeRunLabel(activeRun.id) })
+          : t('dispatch.scanner.routeLoadScanBare'),
         disabled: missingShipmentReadback,
         disabledReason: missingShipmentReadback
-          ? 'Shipment details must load before this route-stop scan can be recorded.'
+          ? t('dispatch.scanner.shipmentNotLoaded')
           : undefined,
         payload: { route_stop_id: stop.id, shipment_id: stop.shipment_id },
       };
@@ -1797,23 +1853,26 @@ export function DispatchModule() {
         ? basket.organization_id === activeRouteOrgId
         : false;
       if (activeRouteOrgId && !sameRouteOrg && shipmentCount === 0) continue;
-      const basketTypeLabel = basket?.basket_type ? statusLabel('basket_type', basket.basket_type) : 'Basket';
+      const basketTypeLabel = basket?.basket_type ? statusLabel('basket_type', basket.basket_type) : t('dispatch.basketFallback');
       const basketStateLabel = basket?.state ? statusLabel('basket_state', basket.state) : undefined;
       const basketLabel = basket?.label ?? basket?.code ?? basketDisplayLabel(basket);
       candidates.push({
         id: `basket:${basketId}`,
         kind: 'basket',
-        kindLabel: 'Basket',
+        kindLabel: t('dispatch.scanner.kindBasket'),
         label: String(basketLabel),
         description: shipmentCount
-          ? `${basketTypeLabel} · ${shipmentCount} active run shipment${shipmentCount === 1 ? '' : 's'}`
-          : `${basketTypeLabel} · no shipments on the active route`,
+          ? fill(t(shipmentCount === 1 ? 'dispatch.scanner.basketActiveOne' : 'dispatch.scanner.basketActiveOther'), {
+            type: basketTypeLabel,
+            n: shipmentCount,
+          })
+          : fill(t('dispatch.scanner.basketNone'), { type: basketTypeLabel }),
         barcodes: [basketId, basket?.barcode, basket?.code, basket?.label],
-        actionLabel: 'Open basket',
+        actionLabel: t('dispatch.scanner.openBasket'),
         actionDescription: shipmentCount
-          ? 'Open the basket context linked to this active route'
-          : 'Open the basket context',
-        resultLabel: 'Basket context opened',
+          ? t('dispatch.scanner.openBasketLinked')
+          : t('dispatch.scanner.openBasketPlain'),
+        resultLabel: t('dispatch.scanner.basketOpened'),
         statusLabel: basketStateLabel,
         statusTone: basket?.state ? statusTone('basket_state', basket.state) as ChipKind : 'neutral',
         payload: { basket_id: basketId },
@@ -1830,13 +1889,15 @@ export function DispatchModule() {
       candidates.push({
         id: `driver:${assignedDriver.id}`,
         kind: 'driver',
-        kindLabel: 'Driver',
+        kindLabel: t('dispatch.scanner.kindDriver'),
         label: assignedDriver.name ?? assignedDriver.id,
-        description: runForDriver ? `Assigned to ${routeRunLabel(runForDriver.id)}` : 'Driver profile',
+        description: runForDriver
+          ? fill(t('dispatch.scanner.assignedTo'), { route: routeRunLabel(runForDriver.id) })
+          : t('dispatch.scanner.driverProfile'),
         barcodes: [assignedDriver.id, assignedDriver.driver_code, assignedDriver.name, assignedDriver.phone],
-        actionLabel: 'Open driver',
-        actionDescription: 'Open the driver profile',
-        resultLabel: 'Driver context opened',
+        actionLabel: t('dispatch.scanner.openDriver'),
+        actionDescription: t('dispatch.scanner.openDriverProfile'),
+        resultLabel: t('dispatch.scanner.driverOpened'),
         statusLabel: assignedDriver.status ? statusLabel('driver_status', assignedDriver.status) : undefined,
         statusTone: assignedDriver.status ? statusTone('driver_status', assignedDriver.status) as ChipKind : 'neutral',
         payload: { driver_id: assignedDriver.id },
@@ -1853,13 +1914,15 @@ export function DispatchModule() {
       candidates.push({
         id: `vehicle:${assignedVehicle.id}`,
         kind: 'vehicle',
-        kindLabel: 'Vehicle',
+        kindLabel: t('dispatch.scanner.kindVehicle'),
         label: vehicleDisplayLabel(assignedVehicle.id),
-        description: runForVehicle ? `Vehicle on ${routeRunLabel(runForVehicle.id)}` : 'Vehicle profile',
+        description: runForVehicle
+          ? fill(t('dispatch.scanner.vehicleOn'), { route: routeRunLabel(runForVehicle.id) })
+          : t('dispatch.scanner.vehicleProfile'),
         barcodes: [assignedVehicle.id, assignedVehicle.plate_number, assignedVehicle.plate, assignedVehicle.code],
-        actionLabel: 'Open vehicle',
-        actionDescription: 'Open the vehicle profile',
-        resultLabel: 'Vehicle context opened',
+        actionLabel: t('dispatch.scanner.openVehicle'),
+        actionDescription: t('dispatch.scanner.openVehicleProfile'),
+        resultLabel: t('dispatch.scanner.vehicleOpened'),
         statusLabel: assignedVehicle.status ? statusLabel('vehicle_status', assignedVehicle.status) : undefined,
         statusTone: assignedVehicle.status ? statusTone('vehicle_status', assignedVehicle.status) as ChipKind : 'neutral',
         payload: { vehicle_id: assignedVehicle.id },
@@ -1872,13 +1935,16 @@ export function DispatchModule() {
       candidates.push({
         id: `route:${activeRun.id}`,
         kind: 'route',
-        kindLabel: 'Route',
+        kindLabel: t('dispatch.scanner.kindRoute'),
         label: routeLabel,
-        description: `${activeRunVisibleStopCount} active stop${activeRunVisibleStopCount === 1 ? '' : 's'} · ${driverDisplayName(activeRun.driver_user_id)}`,
+        description: fill(t(activeRunVisibleStopCount === 1 ? 'dispatch.scanner.routeActiveOne' : 'dispatch.scanner.routeActiveOther'), {
+          n: activeRunVisibleStopCount,
+          driver: driverDisplayName(activeRun.driver_user_id),
+        }),
         barcodes: [activeRun.id, routeLabel],
-        actionLabel: 'Open route',
-        actionDescription: 'Open the active route dispatch context',
-        resultLabel: 'Route context opened',
+        actionLabel: t('dispatch.scanner.openRoute'),
+        actionDescription: t('dispatch.scanner.openRouteDispatch'),
+        resultLabel: t('dispatch.scanner.routeOpened'),
         statusLabel: activeRun.status ? statusLabel('route_run_status', activeRun.status) : assignment?.assignment_status,
         statusTone: activeRun.status ? statusTone('route_run_status', activeRun.status) as ChipKind : 'neutral',
         payload: { route_run_id: activeRun.id },
@@ -1900,6 +1966,7 @@ export function DispatchModule() {
     routeRunLabel,
     runDirectoryById,
     runs,
+    t,
     vehicleDisplayLabel,
     vehicles,
   ]);
@@ -1937,24 +2004,26 @@ export function DispatchModule() {
             : 'required';
   const departureGateLabel =
     departureGateStatus === 'confirmed'
-      ? 'Departure confirmed'
+      ? t('dispatch.gate.confirmed')
       : departureGateStatus === 'clear'
-      ? 'Scan-out clear'
+      ? t('dispatch.gate.clear')
       : departureGateStatus === 'blocked'
-        ? 'Scan-out blocked'
+        ? t('dispatch.gate.blocked')
         : departureGateStatus === 'stale'
-          ? 'Scan-out stale'
-          : 'Scan-out required';
+          ? t('dispatch.gate.stale')
+          : t('dispatch.gate.required');
   const departureGateHint =
     departureGateStatus === 'confirmed'
-      ? `Departure confirmed at ${new Date(activeDepartureConfirmedAt ?? '').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`
+      ? fill(t('dispatch.gate.confirmedAt'), {
+        time: new Date(activeDepartureConfirmedAt ?? '').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      })
       : departureGateStatus === 'clear'
-      ? `Latest scan-out matched ${activeScanOutGate?.scanned ?? 0}/${activeScanOutGate?.expected ?? 0}.`
+      ? fill(t('dispatch.gate.matched'), { scanned: activeScanOutGate?.scanned ?? 0, expected: activeScanOutGate?.expected ?? 0 })
       : departureGateStatus === 'blocked'
-        ? `Resolve scan-out discrepancies before departure (${activeScanOutGate?.scanned ?? 0}/${activeScanOutGate?.expected ?? 0} scanned).`
+        ? fill(t('dispatch.gate.blockedHint'), { scanned: activeScanOutGate?.scanned ?? 0, expected: activeScanOutGate?.expected ?? 0 })
         : departureGateStatus === 'stale'
-          ? 'Run data changed after the last scan-out. Reconcile scan-out again before departure.'
-          : 'Run scan-out reconciliation first; departure is locked until the latest result is clear.';
+          ? t('dispatch.gate.staleHint')
+          : t('dispatch.gate.requiredHint');
   const activeRunLifecycleDisabledReason = dispatchLifecycleDisabledReasonForRun(activeRun);
   const activeRunAssignment = activeRun ? assignmentByRunId.get(activeRun.id) : undefined;
   const activeRunAssignmentSelfDriver = Boolean(user.id && activeRunAssignment?.driver_user_id === user.id);
@@ -1963,24 +2032,24 @@ export function DispatchModule() {
     activeRunLifecycleDisabledReason ??
     (activeRunAssignmentCanRespond
       ? undefined
-      : 'Route write permission or assigned-driver ownership is required to respond.');
+      : t('dispatch.perm.respond'));
   const scanOutReconciliationDisabledReason =
-    (!activeRun ? 'Select a run first' : undefined) ??
+    (!activeRun ? t('dispatch.selectRunFirst') : undefined) ??
     activeRunLifecycleDisabledReason ??
     activeStopsRestrictedReason ??
-    (!canWriteRoutes ? 'Route update permission required to reconcile scan-out.' : undefined);
+    (!canWriteRoutes ? t('dispatch.perm.reconcile') : undefined);
   const scanOutReconciliationDisabled =
     Boolean(scanOutReconciliationDisabledReason) || reconcileMutation.isPending;
   const reconcileScanOutLabel = activeStopsRestricted ? (
     <>
-      <span>Reconcile scan-out</span>
+      <span>{t('dispatch.actions.reconcile')}</span>
       <span className="cap-lock" title={activeStopsRestrictedReason}>
         <Icon name="lock" size={9} />
-        <span>Stop details restricted</span>
+        <span>{t('dispatch.actions.stopDetailsRestricted')}</span>
       </span>
     </>
   ) : (
-    'Reconcile scan-out'
+    t('dispatch.actions.reconcile')
   );
   const confirmDepartureDisabled =
     !activeRun ||
@@ -2026,7 +2095,7 @@ export function DispatchModule() {
       if (error) throw error;
       if (runsResult.data?.rows) applyCanonicalRuns(runsResult.data.rows);
       if (stopsResult.data?.rows) applyCanonicalStops(stopsResult.data.rows);
-      if (options?.toast) pushToast('Dispatch refreshed', 'good');
+      if (options?.toast) pushToast(t('dispatch.toast.refreshed'), 'good');
       return {
         runs: runsResult.data?.rows ?? [],
         stops: stopsResult.data?.rows ?? [],
@@ -2037,7 +2106,7 @@ export function DispatchModule() {
         activeRouteStopTasks: activeRouteStopTasksResult.data?.rows ?? [],
       } satisfies DispatchRefreshSnapshot;
     } catch (err) {
-      pushToast('Dispatch data could not be refreshed. Try again.', 'danger');
+      pushToast(t('dispatch.toast.refreshFailed'), 'danger');
       if (options?.throwOnError) throw err;
       return null;
     }
@@ -2053,6 +2122,7 @@ export function DispatchModule() {
     runsQuery,
     stopReassignEventsQuery,
     stopsQuery,
+    t,
   ]);
 
   const assertCanonicalReadback = useCallback(async (resource: string, id: string, label: string) => {
@@ -2115,7 +2185,7 @@ export function DispatchModule() {
         return;
       }
       if (!canWriteRoutes) {
-        pushToast('Route update permission required to reassign stops', 'warn');
+        pushToast(t('dispatch.perm.reassign'), 'warn');
         return;
       }
       const target = routeStopReassignOwnerTargetForRun(
@@ -2124,7 +2194,7 @@ export function DispatchModule() {
         targetRun ? runDirectoryById.get(targetRun.id) : null,
       );
       if (!target) {
-        pushToast('Assign a driver or partner to the target run before reassigning stops', 'warn');
+        pushToast(t('dispatch.toast.needOwner'), 'warn');
         return;
       }
       try {
@@ -2134,17 +2204,17 @@ export function DispatchModule() {
         });
         await refreshDispatchFromCanonical({ throwOnError: true });
         setActiveRunId(routeStopReassignResultTargetRunId(result) ?? targetRunId);
-        pushToast(`Reassigned · stop ${stop.sequence_order} → ${routeRunLabel(targetRunId)}`, 'good');
+        pushToast(fill(t('dispatch.toast.reassignedOne'), { seq: stop.sequence_order, run: routeRunLabel(targetRunId) }), 'good');
       } catch {
-        pushToast('Stop reassignment could not be completed. Try again.', 'danger');
+        pushToast(t('dispatch.toast.reassignFailed'), 'danger');
       }
     },
-    [assignmentByRunId, runDirectoryById, stops, reassignMutation, canWriteRoutes, refreshDispatchFromCanonical],
+    [assignmentByRunId, runDirectoryById, stops, reassignMutation, canWriteRoutes, refreshDispatchFromCanonical, t],
   );
 
   function openBulkReassignPicker() {
     if (selectedStops.size === 0) {
-      pushToast('Select one or more stops first', 'info');
+      pushToast(t('dispatch.toast.selectStops'), 'info');
       return;
     }
     const disabledReason = dispatchLifecycleDisabledReasonForSelectedStops(selectedStops);
@@ -2158,7 +2228,7 @@ export function DispatchModule() {
   async function handleBulkReassign(targetRunId: string) {
     const ids = Array.from(selectedStops);
     if (!ids.length) {
-      pushToast('Select one or more stops first', 'info');
+      pushToast(t('dispatch.toast.selectStops'), 'info');
       return;
     }
     const targetRun = runs.find((run) => run.id === targetRunId) ?? null;
@@ -2173,7 +2243,7 @@ export function DispatchModule() {
       targetRun ? runDirectoryById.get(targetRun.id) : null,
     );
     if (!target) {
-      pushToast('Assign a driver or partner to the target run before reassigning stops', 'warn');
+      pushToast(t('dispatch.toast.needOwner'), 'warn');
       return;
     }
     try {
@@ -2183,10 +2253,10 @@ export function DispatchModule() {
       });
       await refreshDispatchFromCanonical({ throwOnError: true });
       setActiveRunId(routeStopReassignResultTargetRunId(result) ?? targetRunId);
-      pushToast(`Reassigned · ${ids.length} stops`, 'good');
+      pushToast(fill(t('dispatch.toast.reassignedMany'), { n: ids.length }), 'good');
       setSelectedStops(new Set());
     } catch {
-      pushToast('Bulk reassignment could not be completed. Try again.', 'danger');
+      pushToast(t('dispatch.toast.bulkFailed'), 'danger');
     }
   }
 
@@ -2201,7 +2271,7 @@ export function DispatchModule() {
 
   async function handleConfirmDeparture() {
     if (!activeRun) {
-      pushToast('Select a run first', 'info');
+      pushToast(t('dispatch.selectRunFirst'), 'info');
       return;
     }
     const tenantReason = dispatchLifecycleDisabledReasonForRun(activeRun);
@@ -2210,7 +2280,7 @@ export function DispatchModule() {
       return;
     }
     if (!canWriteRoutes || !canCompleteTasks) {
-      pushToast('Route update and task completion permission required to confirm departure', 'warn');
+      pushToast(t('dispatch.perm.departure'), 'warn');
       return;
     }
     if (departureGateStatus !== 'clear') {
@@ -2221,11 +2291,14 @@ export function DispatchModule() {
       const res = await confirmDepartureMutation.mutateAsync(activeRun.id);
       await refreshDispatchFromCanonical({ throwOnError: true });
       pushToast(
-        `Departure confirmed · ${routeRunLabel(activeRun.id)} · ${new Date(res.departure_confirmed_at).toLocaleTimeString()}`,
+        fill(t('dispatch.toast.departureConfirmed'), {
+          run: routeRunLabel(activeRun.id),
+          time: new Date(res.departure_confirmed_at).toLocaleTimeString(),
+        }),
         'good',
       );
     } catch (err) {
-      pushToast(dispatchMutationErrorMessage(err, 'Departure could not be confirmed. Try again.'), 'danger');
+      pushToast(dispatchMutationErrorMessage(err, t('dispatch.toast.departureFailed'), t), 'danger');
     }
   }
 
@@ -2338,7 +2411,7 @@ export function DispatchModule() {
     }
     const selfDriver = Boolean(user.id && assignment?.driver_user_id === user.id);
     if (!canWriteRoutes && !selfDriver) {
-      pushToast('Route write permission or assigned-driver ownership is required to respond to this assignment', 'warn');
+      pushToast(t('dispatch.perm.respondToast'), 'warn');
       return;
     }
     try {
@@ -2362,17 +2435,20 @@ export function DispatchModule() {
       });
       await waitForRunAssignmentResponseVisibleInDispatch(runId, expectedStatus);
       pushToast(
-        `${routeAssignmentResponseActionLabel(actionKey)} recorded - ${routeRunLabel(runId)}`,
+        fill(t('dispatch.toast.responseRecorded'), {
+          action: routeAssignmentResponseActionLabel(actionKey, t),
+          run: routeRunLabel(runId),
+        }),
         'good',
       );
     } catch {
-      pushToast('Assignment response could not be recorded. Try again.', 'danger');
+      pushToast(t('dispatch.toast.responseFailed'), 'danger');
     }
   }
 
   function openRouteAssignmentRefusal(runId: string) {
     modal.open({
-      title: `Refuse assignment - ${routeRunLabel(runId)}`,
+      title: fill(t('dispatch.assignment.refuseTitle'), { run: routeRunLabel(runId) }),
       body: (
         <AssignmentRefusalForm
           onCancel={() => modal.close()}
@@ -2406,14 +2482,17 @@ export function DispatchModule() {
         target,
       });
       pushToast(
-        `Driver assigned - ${routeRunLabel(runId)} - ${selectedDriver?.name ?? driverId.slice(0, 8)}`,
+        fill(t('dispatch.toast.driverAssigned'), {
+          run: routeRunLabel(runId),
+          driver: selectedDriver?.name ?? driverId.slice(0, 8),
+        }),
         'good',
       );
       void waitForRunAssignmentVisibleInDispatch(runId, driverId).catch(() => {
         void refreshDispatchFromCanonical({ throwOnError: false });
       });
     } catch (err) {
-      pushToast(dispatchMutationErrorMessage(err, 'Driver assignment could not be completed. Try again.'), 'danger');
+      pushToast(dispatchMutationErrorMessage(err, t('dispatch.toast.driverAssignFailed'), t), 'danger');
     }
   }
 
@@ -2426,7 +2505,7 @@ export function DispatchModule() {
     }
     const request = routeRunAlternateCapacityRequest(run);
     if (!request) {
-      pushToast('Alternate capacity request missing for this run', 'warn');
+      pushToast(t('dispatch.toast.capacityMissing'), 'warn');
       return;
     }
     try {
@@ -2441,17 +2520,20 @@ export function DispatchModule() {
       await runAssignMutation.mutateAsync({ runId, target });
       await waitForAlternateCapacityVisibleInDispatch(runId);
       pushToast(
-        `Capacity assigned - ${routeRunLabel(runId)} - ${request.demandClass ?? 'alternate capacity'}`,
+        fill(t('dispatch.toast.capacityAssigned'), {
+          run: routeRunLabel(runId),
+          demand: request.demandClass ?? t('dispatch.toast.alternateCapacity'),
+        }),
         'good',
       );
     } catch {
-      pushToast('Capacity assignment could not be completed. Try again.', 'danger');
+      pushToast(t('dispatch.toast.capacityFailed'), 'danger');
     }
   }
 
   async function handleReconcileScanOut() {
     if (!activeRun) {
-      pushToast('Select a run first', 'info');
+      pushToast(t('dispatch.selectRunFirst'), 'info');
       return;
     }
     const tenantReason = dispatchLifecycleDisabledReasonForRun(activeRun);
@@ -2464,7 +2546,7 @@ export function DispatchModule() {
       return;
     }
     if (!canWriteRoutes) {
-      pushToast('Route update permission required to reconcile scan-out.', 'warn');
+      pushToast(t('dispatch.perm.reconcile'), 'warn');
       return;
     }
     try {
@@ -2495,24 +2577,24 @@ export function DispatchModule() {
         },
       }));
       drawer.open({
-        title: `Scan-out reconciliation · ${routeRunLabel(activeRun.id)}`,
+        title: fill(t('dispatch.reconcile.title'), { run: routeRunLabel(activeRun.id) }),
         size: 'sm',
         body: (
           <div>
             <div className="card" style={{ marginBottom: '8px' }}>
-              <div className="eyebrow">Expected</div>
+              <div className="eyebrow">{t('dispatch.reconcile.expected')}</div>
               <div style={{ fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 600 }}>{res.expected}</div>
             </div>
             <div className="card" style={{ marginBottom: '8px' }}>
-              <div className="eyebrow">Scanned</div>
+              <div className="eyebrow">{t('dispatch.reconcile.scanned')}</div>
               <div style={{ fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 600 }}>{res.scanned}</div>
             </div>
             <div className="card">
-              <div className="eyebrow">Discrepancies</div>
+              <div className="eyebrow">{t('dispatch.reconcile.discrepancies')}</div>
               {res.discrepancies.length === 0 ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Dot kind="good" />
-                  <span>None — gate cleared for departure.</span>
+                  <span>{t('dispatch.reconcile.none')}</span>
                 </div>
               ) : (
                 <ul style={{ margin: 0, paddingLeft: '18px' }}>
@@ -2526,7 +2608,7 @@ export function DispatchModule() {
         ),
       });
     } catch {
-      pushToast('Scan-out reconciliation could not be completed. Try again.', 'danger');
+      pushToast(t('dispatch.toast.reconcileFailed'), 'danger');
     }
   }
 
@@ -2542,7 +2624,7 @@ export function DispatchModule() {
     }
     const barcode = String(barcodeOverride || ship?.tracking_number || stop.shipment_id).trim();
     if (!barcode) {
-      pushToast('Scan barcode is required', 'warn');
+      pushToast(t('dispatch.toast.barcodeRequired'), 'warn');
       return;
     }
 
@@ -2565,17 +2647,17 @@ export function DispatchModule() {
     await assertRouteStopLoadScanProjection(stop);
     await assertCanonicalReadback('route_runs', stop.route_run_id, 'Route run');
     await refreshDispatchFromCanonical({ throwOnError: true });
-    pushToast(`Load scan recorded - ${barcode}`, 'good');
+    pushToast(fill(t('dispatch.toast.loadScanRecorded'), { barcode }), 'good');
   }
 
   async function recordUnexpectedLoadScan(scan: OpsScannerNoMatch) {
     const barcode = String(scan.normalizedCode || scan.code || '').trim();
     if (!barcode) {
-      pushToast('Scan barcode is required', 'warn');
+      pushToast(t('dispatch.toast.barcodeRequired'), 'warn');
       return;
     }
     if (!activeRun) {
-      pushToast('Select a route run before recording an unexpected load scan', 'warn');
+      pushToast(t('dispatch.toast.selectRunUnexpected'), 'warn');
       return;
     }
     const tenantReason = dispatchLifecycleDisabledReasonForRun(activeRun);
@@ -2600,7 +2682,7 @@ export function DispatchModule() {
     await assertScanEventReadback(scanResult.scan_event_id);
     await assertCanonicalReadback('route_runs', activeRun.id, 'Route run');
     await refreshDispatchFromCanonical({ throwOnError: true });
-    pushToast(`Unexpected load scan recorded - ${barcode}`, 'warn');
+    pushToast(fill(t('dispatch.toast.unexpectedRecorded'), { barcode }), 'warn');
   }
 
   function shipmentContextFallback(shipmentId: string): Partial<Shipment> {
@@ -2639,7 +2721,7 @@ export function DispatchModule() {
           .sort((a, b) => a.sequence_order - b.sequence_order)
           .map((stop) => {
             const shipment = activeShipmentCodById.get(stop.shipment_id);
-            const scan = routeStopLoadScanStatus(stop);
+            const scan = routeStopLoadScanStatus(stop, t);
             return (
               <div
                 key={stop.id}
@@ -2655,11 +2737,15 @@ export function DispatchModule() {
               >
                 <div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <strong>{shipment?.tracking_number ?? shipmentShortLabel(stop.shipment_id)}</strong>
+                    <strong>{shipment?.tracking_number ?? shipmentShortLabel(stop.shipment_id, t)}</strong>
                     <Chip size="xs" kind={scan.tone} label={scan.label} />
                   </div>
                   <div className="state__hint">
-                    Stop #{stop.sequence_order} · {stop.stop_kind ?? 'stop'} · {formatContextDate(stop.planned_window_start_at)}
+                    {fill(t('dispatch.context.stopLine'), {
+                      seq: stop.sequence_order,
+                      kind: stop.stop_kind ?? t('dispatch.scanner.stopKindFallback'),
+                      window: formatContextDate(stop.planned_window_start_at),
+                    })}
                   </div>
                 </div>
                 <Button
@@ -2667,7 +2753,7 @@ export function DispatchModule() {
                   size="sm"
                   kind="ghost"
                   iconName="eye"
-                  label="Open shipment"
+                  label={t('dispatch.context.openShipment')}
                   capability={CAP.SHIPMENTS_READ}
                   onClick={() => openShipmentContext(stop.shipment_id)}
                 />
@@ -2681,126 +2767,128 @@ export function DispatchModule() {
   function openRouteContext(routeRunId: string) {
     const run = runs.find((row) => row.id === routeRunId)!;
     if (!run) {
-      pushToast('Route context is not available in the active Dispatch data', 'warn');
+      pushToast(t('dispatch.toast.routeUnavailable'), 'warn');
       return;
     }
     drawer.open({
-      title: `Route - ${routeRunLabel(routeRunId)}`,
-      body: <RouteContextDrawerBody routeRunId={routeRunId} fallbackRun={run} />,
+      title: fill(t('dispatch.context.routeTitle'), { label: routeRunLabel(routeRunId) }),
+      body: <ContextDrawerBody area="route" resource="route_runs" id={routeRunId} fallback={run} capability={CAP.ROUTES_READ} details={(row) => routeContextDetails(routeRunId, row)} />,
     });
   }
 
   function openBasketContext(basketId: string) {
     const basket = basketById.get(basketId)!;
     if (!basket) {
-      pushToast('Basket context is not available in the active Dispatch data', 'warn');
+      pushToast(t('dispatch.toast.basketUnavailable'), 'warn');
       return;
     }
     drawer.open({
-      title: `Basket - ${basket.label ?? basket.code ?? basket.id}`,
-      body: <BasketContextDrawerBody basketId={basketId} fallbackBasket={basket} />,
+      title: fill(t('dispatch.context.basketTitle'), { label: basket.label ?? basket.code ?? basket.id }),
+      body: <ContextDrawerBody area="basket" resource="baskets" id={basketId} fallback={basket} capability={CAP.BASKETS_READ} details={(row) => basketContextDetails(basketId, row)} />,
     });
   }
 
   function openDriverContext(driverId: string) {
     const driver = driverByUserId.get(driverId)!;
     if (!driver) {
-      pushToast('Driver context is not available in the active Dispatch data', 'warn');
+      pushToast(t('dispatch.toast.driverUnavailable'), 'warn');
       return;
     }
     drawer.open({
-      title: `Driver - ${driver.name ?? driver.id}`,
-      body: <DriverContextDrawerBody driverId={driverId} fallbackDriver={driver} />,
+      title: fill(t('dispatch.context.driverTitle'), { label: driver.name ?? driver.id }),
+      body: <ContextDrawerBody area="driver" resource="drivers" id={driverId} fallback={driver} capability={CAP.FLEET_READ} details={(row) => driverContextDetails(driverId, row)} />,
     });
   }
 
   function openVehicleContext(vehicleId: string) {
     const vehicle = vehicleById.get(vehicleId)!;
     if (!vehicle) {
-      pushToast('Vehicle context is not available in the active Dispatch data', 'warn');
+      pushToast(t('dispatch.toast.vehicleUnavailable'), 'warn');
       return;
     }
     drawer.open({
-      title: `Vehicle - ${vehicleDisplayLabel(vehicle.id)}`,
-      body: <VehicleContextDrawerBody vehicleId={vehicleId} fallbackVehicle={vehicle} />,
+      title: fill(t('dispatch.context.vehicleTitle'), { label: vehicleDisplayLabel(vehicle.id) }),
+      body: <ContextDrawerBody area="vehicle" resource="vehicle_directory" id={vehicleId} fallback={vehicle} capability={CAP.FLEET_READ} details={(row) => vehicleContextDetails(vehicleId, row)} />,
     });
   }
 
-  function RouteContextDrawerBody({
-    routeRunId,
-    fallbackRun,
+  // One body for the route, basket, driver and vehicle drawers: each reads its record, then lists its facts and stops.
+  function ContextDrawerBody<T>({
+    area,
+    resource,
+    id,
+    fallback,
+    capability,
+    details,
   }: {
-    routeRunId: string;
-    fallbackRun: RouteRunRow;
+    area: 'route' | 'basket' | 'driver' | 'vehicle';
+    resource: string;
+    id: string;
+    fallback: T;
+    capability: string;
+    details: (row: T) => { rows: KvRow[]; linkedStops: RouteStopRow[]; routeRunId?: string };
   }) {
-    const routeQuery = useResource<RouteRunRow>('route_runs', routeRunId);
-    if (routeQuery.error) {
+    const query = useResource<T>(resource, id);
+    if (query.error) {
+      const denied = isDispatchPermissionDeniedError(query.error);
       return (
         <StateView
-          kind={isDispatchPermissionDeniedError(routeQuery.error) ? 'denied' : 'error'}
-          title="Route context unavailable"
-          hint={dispatchReadErrorMessage(routeQuery.error)}
-          capability={isDispatchPermissionDeniedError(routeQuery.error) ? CAP.ROUTES_READ : undefined}
+          kind={denied ? 'denied' : 'error'}
+          title={t(`dispatch.context.${area}.unavailable`)}
+          hint={dispatchReadErrorMessage(query.error, t)}
+          capability={denied ? capability : undefined}
         />
       );
     }
-    const run = routeQuery.data ?? (routeQuery.isLoading ? fallbackRun : null);
-    if (!run && routeQuery.isLoading) return <StateView kind="loading" />;
-    if (!run) {
-      return <StateView kind="empty" title="Route not found" hint="The selected route run is not visible in this scope." />;
+    const row = query.data ?? (query.isLoading ? fallback : null);
+    if (!row && query.isLoading) return <StateView kind="loading" />;
+    if (!row) {
+      return <StateView kind="empty" title={t(`dispatch.context.${area}.notFound`)} hint={t(`dispatch.context.${area}.notFoundHint`)} />;
     }
-    const assignment = assignmentByRunId.get(routeRunId);
-    const runStops = stops.filter((stop) => stop.route_run_id === routeRunId);
-    const routeLabel = routeRunLabel(routeRunId);
-    const rows: KvRow[] = [
-      { key: 'route', label: 'Route', value: routeLabel, mono: true },
-      { key: 'status', label: 'Status', value: run.status, lookup: 'route_run_status' },
-      { key: 'planned_date', label: 'Planned date', value: run.planned_date ?? '—', mono: true },
-      { key: 'driver', label: 'Driver', value: driverDisplayName(run.driver_user_id) },
-      { key: 'vehicle', label: 'Vehicle', value: vehicleDisplayLabel(run.vehicle_id) },
-      { key: 'stops', label: 'Stops', value: runStops.length, mono: true },
-      { key: 'cod_total', label: 'COD on run', value: `${tenantCurrencyIso ?? '—'} ${codTotalByRunId.get(routeRunId) ?? 0}`, mono: true },
-      { key: 'assignment_mode', label: 'Assignment mode', value: assignment?.assignment_mode ?? '—', lookup: assignment?.assignment_mode ? 'route_assignment_mode' : undefined },
-      { key: 'assignment_status', label: 'Assignment status', value: assignment?.assignment_status ?? '—' },
-      { key: 'departure', label: 'Departure', value: routeRunDepartureConfirmedAt(run) ? `Confirmed ${formatContextDate(routeRunDepartureConfirmedAt(run))}` : 'Not confirmed' },
-    ];
+    const { rows, linkedStops, routeRunId } = details(row);
     return (
-      <div data-testid="dispatch-route-context-drawer" style={{ display: 'grid', gap: 14 }}>
+      <div data-testid={`dispatch-${area}-context-drawer`} style={{ display: 'grid', gap: 14 }}>
         <p className="state__hint" style={{ margin: 0 }}>
-          Inspect the run, assignment, load-scan state, and linked shipments without leaving the dispatch workflow.
+          {t(`dispatch.context.${area}.intro`)}
         </p>
         <KvGrid rows={rows} />
+        {routeRunId ? (
+          <Button
+            type="button"
+            kind="ghost"
+            iconName="route"
+            label={t('dispatch.context.inspectRoute')}
+            capability={CAP.ROUTES_READ}
+            onClick={() => openRouteContext(routeRunId)}
+          />
+        ) : null}
         <div>
-          <h3 className="state__title" style={{ margin: '0 0 8px' }}>Run shipments</h3>
-          {linkedShipmentButtons(runStops, 'No shipments are attached to this route run.')}
+          <h3 className="state__title" style={{ margin: '0 0 8px' }}>{t(`dispatch.context.${area}.shipments`)}</h3>
+          {linkedShipmentButtons(linkedStops, t(`dispatch.context.${area}.empty`))}
         </div>
       </div>
     );
   }
 
-  function BasketContextDrawerBody({
-    basketId,
-    fallbackBasket,
-  }: {
-    basketId: string;
-    fallbackBasket: BasketLookupRow;
-  }) {
-    const basketQuery = useResource<BasketLookupRow>('baskets', basketId);
-    if (basketQuery.error) {
-      return (
-        <StateView
-          kind={isDispatchPermissionDeniedError(basketQuery.error) ? 'denied' : 'error'}
-          title="Basket context unavailable"
-          hint={dispatchReadErrorMessage(basketQuery.error)}
-          capability={isDispatchPermissionDeniedError(basketQuery.error) ? CAP.BASKETS_READ : undefined}
-        />
-      );
-    }
-    const basket = basketQuery.data ?? (basketQuery.isLoading ? fallbackBasket : null);
-    if (!basket && basketQuery.isLoading) return <StateView kind="loading" />;
-    if (!basket) {
-      return <StateView kind="empty" title="Basket not found" hint="The selected basket is not visible in this scope." />;
-    }
+  function routeContextDetails(routeRunId: string, run: RouteRunRow) {
+    const assignment = assignmentByRunId.get(routeRunId);
+    const linkedStops = stops.filter((stop) => stop.route_run_id === routeRunId);
+    const rows: KvRow[] = [
+      { key: 'route', label: t('dispatch.kv.route'), value: routeRunLabel(routeRunId), mono: true },
+      { key: 'status', label: t('dispatch.kv.status'), value: run.status, lookup: 'route_run_status' },
+      { key: 'planned_date', label: t('dispatch.kv.plannedDate'), value: run.planned_date ?? '—', mono: true },
+      { key: 'driver', label: t('dispatch.kv.driver'), value: driverDisplayName(run.driver_user_id) },
+      { key: 'vehicle', label: t('dispatch.kv.vehicle'), value: vehicleDisplayLabel(run.vehicle_id) },
+      { key: 'stops', label: t('dispatch.kv.stops'), value: linkedStops.length, mono: true },
+      { key: 'cod_total', label: t('dispatch.kv.codOnRun'), value: `${tenantCurrencyIso ?? '—'} ${codTotalByRunId.get(routeRunId) ?? 0}`, mono: true },
+      { key: 'assignment_mode', label: t('dispatch.kv.assignmentMode'), value: assignment?.assignment_mode ?? '—', lookup: assignment?.assignment_mode ? 'route_assignment_mode' : undefined },
+      { key: 'assignment_status', label: t('dispatch.kv.assignmentStatus'), value: assignment?.assignment_status ?? '—' },
+      { key: 'departure', label: t('dispatch.kv.departure'), value: routeRunDepartureConfirmedAt(run) ? fill(t('dispatch.context.confirmedAt'), { date: formatContextDate(routeRunDepartureConfirmedAt(run)) }) : t('dispatch.context.notConfirmed') },
+    ];
+    return { rows, linkedStops };
+  }
+
+  function basketContextDetails(basketId: string, basket: BasketLookupRow) {
     const shipmentIdsInBasket = new Set(
       activeBasketItems
         .filter((item) => item.basket_id === basketId)
@@ -2808,143 +2896,46 @@ export function DispatchModule() {
     );
     const linkedStops = activeStops.filter((stop) => shipmentIdsInBasket.has(stop.shipment_id));
     const rows: KvRow[] = [
-      { key: 'label', label: 'Basket', value: basket.label ?? basket.code ?? basket.id },
-      { key: 'code', label: 'Code', value: basket.code ?? basket.barcode ?? basket.id, mono: true },
-      { key: 'type', label: 'Type', value: basket.basket_type ?? '—', lookup: basket.basket_type ? 'basket_type' : undefined },
-      { key: 'state', label: 'State', value: basket.state ?? '—', lookup: basket.state ? 'basket_state' : undefined },
-      { key: 'capacity', label: 'Capacity', value: `${basket.current_count ?? linkedStops.length} / ${basket.capacity_count ?? '—'}`, mono: true },
-      { key: 'active_route_shipments', label: 'On active route', value: linkedStops.length, mono: true },
+      { key: 'label', label: t('dispatch.kv.basket'), value: basket.label ?? basket.code ?? basket.id },
+      { key: 'code', label: t('dispatch.kv.code'), value: basket.code ?? basket.barcode ?? basket.id, mono: true },
+      { key: 'type', label: t('dispatch.kv.type'), value: basket.basket_type ?? '—', lookup: basket.basket_type ? 'basket_type' : undefined },
+      { key: 'state', label: t('dispatch.kv.state'), value: basket.state ?? '—', lookup: basket.state ? 'basket_state' : undefined },
+      { key: 'capacity', label: t('dispatch.kv.capacity'), value: `${basket.current_count ?? linkedStops.length} / ${basket.capacity_count ?? '—'}`, mono: true },
+      { key: 'active_route_shipments', label: t('dispatch.kv.onActiveRoute'), value: linkedStops.length, mono: true },
     ];
-    return (
-      <div data-testid="dispatch-basket-context-drawer" style={{ display: 'grid', gap: 14 }}>
-        <p className="state__hint" style={{ margin: 0 }}>
-          Basket relationship for the selected route. Shipment actions stay in this Dispatch context so the operator can reconcile load scans without switching modules.
-        </p>
-        <KvGrid rows={rows} />
-        <div>
-          <h3 className="state__title" style={{ margin: '0 0 8px' }}>Shipments in this basket on the active route</h3>
-          {linkedShipmentButtons(linkedStops, 'This basket has no shipments on the active route run.')}
-        </div>
-      </div>
-    );
+    return { rows, linkedStops };
   }
 
-  function DriverContextDrawerBody({
-    driverId,
-    fallbackDriver,
-  }: {
-    driverId: string;
-    fallbackDriver: DriverLookupRow;
-  }) {
-    const driverQuery = useResource<DriverLookupRow>('drivers', driverId);
-    if (driverQuery.error) {
-      return (
-        <StateView
-          kind={isDispatchPermissionDeniedError(driverQuery.error) ? 'denied' : 'error'}
-          title="Driver context unavailable"
-          hint={dispatchReadErrorMessage(driverQuery.error)}
-          capability={isDispatchPermissionDeniedError(driverQuery.error) ? CAP.FLEET_READ : undefined}
-        />
-      );
-    }
-    const driver = driverQuery.data ?? (driverQuery.isLoading ? fallbackDriver : null);
-    if (!driver && driverQuery.isLoading) return <StateView kind="loading" />;
-    if (!driver) {
-      return <StateView kind="empty" title="Driver not found" hint="The selected driver is not visible in this scope." />;
-    }
+  function driverContextDetails(driverId: string, driver: DriverLookupRow) {
     const runForDriver = activeRun?.driver_user_id === driverId ? activeRun : runs.find((run) => run.driver_user_id === driverId);
-    const runStops = runForDriver ? stops.filter((stop) => stop.route_run_id === runForDriver.id) : [];
+    const linkedStops = runForDriver ? stops.filter((stop) => stop.route_run_id === runForDriver.id) : [];
     const rows: KvRow[] = [
-      { key: 'name', label: 'Driver', value: driver.name ?? driver.id },
-      { key: 'driver_code', label: 'Driver code', value: driver.driver_code ?? '—', mono: true },
-      { key: 'status', label: 'Status', value: driver.status ?? '—', lookup: driver.status ? 'driver_status' : undefined },
-      { key: 'phone', label: 'Phone', value: driver.phone ?? '—', mono: true },
-      { key: 'email', label: 'Email', value: driver.user_email ?? '—', mono: true },
-      { key: 'route', label: 'Route', value: runForDriver ? routeRunLabel(runForDriver.id) : 'No assigned route' },
-      { key: 'vehicle', label: 'Vehicle', value: runForDriver ? vehicleDisplayLabel(runForDriver.vehicle_id) : '—' },
-      { key: 'stops', label: 'Assigned stops', value: runStops.length, mono: true },
+      { key: 'name', label: t('dispatch.kv.driver'), value: driver.name ?? driver.id },
+      { key: 'driver_code', label: t('dispatch.kv.driverCode'), value: driver.driver_code ?? '—', mono: true },
+      { key: 'status', label: t('dispatch.kv.status'), value: driver.status ?? '—', lookup: driver.status ? 'driver_status' : undefined },
+      { key: 'phone', label: t('dispatch.kv.phone'), value: driver.phone ?? '—', mono: true },
+      { key: 'email', label: t('dispatch.kv.email'), value: driver.user_email ?? '—', mono: true },
+      { key: 'route', label: t('dispatch.kv.route'), value: runForDriver ? routeRunLabel(runForDriver.id) : t('dispatch.context.noRoute') },
+      { key: 'vehicle', label: t('dispatch.kv.vehicle'), value: runForDriver ? vehicleDisplayLabel(runForDriver.vehicle_id) : '—' },
+      { key: 'stops', label: t('dispatch.kv.assignedStops'), value: linkedStops.length, mono: true },
     ];
-    return (
-      <div data-testid="dispatch-driver-context-drawer" style={{ display: 'grid', gap: 14 }}>
-        <p className="state__hint" style={{ margin: 0 }}>
-          Driver assignment and shipment references stay visible inside Dispatch so the route team can inspect work without switching modules.
-        </p>
-        <KvGrid rows={rows} />
-        {runForDriver ? (
-          <Button
-            type="button"
-            kind="ghost"
-            iconName="route"
-            label="Inspect route context"
-            capability={CAP.ROUTES_READ}
-            onClick={() => openRouteContext(runForDriver.id)}
-          />
-        ) : null}
-        <div>
-          <h3 className="state__title" style={{ margin: '0 0 8px' }}>Driver shipments</h3>
-          {linkedShipmentButtons(runStops, 'This driver has no route shipments in the active dispatch data.')}
-        </div>
-      </div>
-    );
+    return { rows, linkedStops, routeRunId: runForDriver?.id };
   }
 
-  function VehicleContextDrawerBody({
-    vehicleId,
-    fallbackVehicle,
-  }: {
-    vehicleId: string;
-    fallbackVehicle: VehicleLookupRow;
-  }) {
-    const vehicleQuery = useResource<VehicleLookupRow>('vehicle_directory', vehicleId);
-    if (vehicleQuery.error) {
-      return (
-        <StateView
-          kind={isDispatchPermissionDeniedError(vehicleQuery.error) ? 'denied' : 'error'}
-          title="Vehicle context unavailable"
-          hint={dispatchReadErrorMessage(vehicleQuery.error)}
-          capability={isDispatchPermissionDeniedError(vehicleQuery.error) ? CAP.FLEET_READ : undefined}
-        />
-      );
-    }
-    const vehicle = vehicleQuery.data ?? (vehicleQuery.isLoading ? fallbackVehicle : null);
-    if (!vehicle && vehicleQuery.isLoading) return <StateView kind="loading" />;
-    if (!vehicle) {
-      return <StateView kind="empty" title="Vehicle not found" hint="The selected vehicle is not visible in this scope." />;
-    }
+  function vehicleContextDetails(vehicleId: string, vehicle: VehicleLookupRow) {
     const runForVehicle = activeRun?.vehicle_id === vehicleId ? activeRun : runs.find((run) => run.vehicle_id === vehicleId);
-    const runStops = runForVehicle ? stops.filter((stop) => stop.route_run_id === runForVehicle.id) : [];
+    const linkedStops = runForVehicle ? stops.filter((stop) => stop.route_run_id === runForVehicle.id) : [];
     const rows: KvRow[] = [
-      { key: 'vehicle', label: 'Vehicle', value: vehicleDisplayLabel(vehicle.id) },
-      { key: 'plate', label: 'Plate', value: vehicle.plate_number ?? vehicle.plate ?? '—', mono: true },
-      { key: 'code', label: 'Code', value: vehicle.code ?? '—', mono: true },
-      { key: 'type', label: 'Type', value: vehicle.vehicle_type_label ?? vehicle.type_name ?? '—' },
-      { key: 'status', label: 'Status', value: vehicle.status ?? '—', lookup: vehicle.status ? 'vehicle_status' : undefined },
-      { key: 'route', label: 'Route', value: runForVehicle ? routeRunLabel(runForVehicle.id) : 'No assigned route' },
-      { key: 'driver', label: 'Driver', value: runForVehicle ? driverDisplayName(runForVehicle.driver_user_id) : '—' },
-      { key: 'stops', label: 'Route stops', value: runStops.length, mono: true },
+      { key: 'vehicle', label: t('dispatch.kv.vehicle'), value: vehicleDisplayLabel(vehicle.id) },
+      { key: 'plate', label: t('dispatch.kv.plate'), value: vehicle.plate_number ?? vehicle.plate ?? '—', mono: true },
+      { key: 'code', label: t('dispatch.kv.code'), value: vehicle.code ?? '—', mono: true },
+      { key: 'type', label: t('dispatch.kv.type'), value: vehicle.vehicle_type_label ?? vehicle.type_name ?? '—' },
+      { key: 'status', label: t('dispatch.kv.status'), value: vehicle.status ?? '—', lookup: vehicle.status ? 'vehicle_status' : undefined },
+      { key: 'route', label: t('dispatch.kv.route'), value: runForVehicle ? routeRunLabel(runForVehicle.id) : t('dispatch.context.noRoute') },
+      { key: 'driver', label: t('dispatch.kv.driver'), value: runForVehicle ? driverDisplayName(runForVehicle.driver_user_id) : '—' },
+      { key: 'stops', label: t('dispatch.kv.routeStops'), value: linkedStops.length, mono: true },
     ];
-    return (
-      <div data-testid="dispatch-vehicle-context-drawer" style={{ display: 'grid', gap: 14 }}>
-        <p className="state__hint" style={{ margin: 0 }}>
-          Vehicle assignment and linked shipments stay visible inside Dispatch while the route team reconciles departure.
-        </p>
-        <KvGrid rows={rows} />
-        {runForVehicle ? (
-          <Button
-            type="button"
-            kind="ghost"
-            iconName="route"
-            label="Inspect route context"
-            capability={CAP.ROUTES_READ}
-            onClick={() => openRouteContext(runForVehicle.id)}
-          />
-        ) : null}
-        <div>
-          <h3 className="state__title" style={{ margin: '0 0 8px' }}>Vehicle shipments</h3>
-          {linkedShipmentButtons(runStops, 'This vehicle has no route shipments in the active dispatch data.')}
-        </div>
-      </div>
-    );
+    return { rows, linkedStops, routeRunId: runForVehicle?.id };
   }
 
   function scannerOpenCapability(match: OpsScannerMatch): string | undefined {
@@ -2990,7 +2981,7 @@ export function DispatchModule() {
       openRouteContext(routeRunId);
       return;
     }
-    pushToast('Scanner context is not available for this match', 'warn');
+    pushToast(t('dispatch.toast.scannerUnavailable'), 'warn');
   }
 
   function openStopCloseout(stop: RouteStopRow, task: RouteStopTaskRow, expectedCod: number | null, currency: string | null) {
@@ -3033,7 +3024,7 @@ export function DispatchModule() {
     let codPreviewNode: HTMLDivElement | null = null;
     const updateCodPreview = () => {
       if (!codPreviewNode) return;
-      const preview = routeStopCodPreview(expectedCod, currency, paymentOutcome, paymentAmount, receiptContext);
+      const preview = routeStopCodPreview(expectedCod, currency, paymentOutcome, paymentAmount, receiptContext, t);
       codPreviewNode.textContent = preview.label;
       codPreviewNode.dataset.tone = preview.tone;
     };
@@ -3044,8 +3035,8 @@ export function DispatchModule() {
         signatureFile = file;
         if (signatureFileNameNode) {
           signatureFileNameNode.textContent = file
-            ? `${file.name} selected`
-            : 'Choose, paste, or drop signature proof.';
+            ? fill(t('dispatch.closeout.fileSelected'), { name: file.name })
+            : t('dispatch.closeout.signatureHint');
           signatureFileNameNode.dataset.ready = file ? 'true' : 'false';
         }
         signatureArtifactId = '';
@@ -3054,7 +3045,9 @@ export function DispatchModule() {
       photoFile = file;
       photoArtifactId = '';
       if (photoFileNameNode) {
-        photoFileNameNode.textContent = file ? `${file.name} selected` : 'Choose, paste, or drop photo proof.';
+        photoFileNameNode.textContent = file
+          ? fill(t('dispatch.closeout.fileSelected'), { name: file.name })
+          : t('dispatch.closeout.photoHint');
         photoFileNameNode.dataset.ready = file ? 'true' : 'false';
       }
     };
@@ -3068,27 +3061,30 @@ export function DispatchModule() {
       event.preventDefault();
       const file = proofFileFromTransfer(event.dataTransfer.files);
       if (!file) {
-        pushToast('Drop an image or PDF proof file', 'warn');
+        pushToast(t('dispatch.toast.dropProof'), 'warn');
         return;
       }
       applyProofFile(kind, file);
     };
+    setCloseoutBaseline(stopsData?.rows.find((row) => row.id === stop.id) ?? null);
     modal.open({
-      title: `Close stop - stop ${stop.sequence_order}`,
+      title: fill(t('dispatch.closeout.title'), { seq: stop.sequence_order }),
+      onClose: () => setCloseoutBaseline(null),
       body: (
         <div data-testid="route-stop-closeout-modal">
+          <ConflictSlot />
           <p className="state__hint" style={{ margin: '0 0 10px' }}>
-            Complete the stop with proof, delivery outcome, and COD collection details.
+            {t('dispatch.closeout.intro')}
           </p>
           <p
             className="state__hint"
             data-testid="route-stop-pod-policy-requirements"
             style={{ margin: '0 0 10px' }}
           >
-            {podPolicyQuery.isLoading ? 'Loading POD proof policy...' : podProofRequirements.label}
+            {podPolicyQuery.isLoading ? t('dispatch.pod.loading') : podProofRequirements.label}
           </p>
           <div className="field">
-            <label className="field__label">Completion kind</label>
+            <label className="field__label">{t('dispatch.closeout.completionKind')}</label>
             <select
               data-testid="route-stop-completion-kind"
               defaultValue={completionKind}
@@ -3102,7 +3098,7 @@ export function DispatchModule() {
             </select>
           </div>
           <div className="field">
-            <label className="field__label">Failed attempt reason</label>
+            <label className="field__label">{t('dispatch.closeout.failureReason')}</label>
             <select
               data-testid="route-stop-failure-reason"
               defaultValue=""
@@ -3111,7 +3107,7 @@ export function DispatchModule() {
                 closeoutDraft.failureReason = e.target.value;
               }}
             >
-              <option value="">None - delivery completed</option>
+              <option value="">{t('dispatch.closeout.noneCompleted')}</option>
               {failureReasonOptions.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
@@ -3145,7 +3141,7 @@ export function DispatchModule() {
           </div>
           {handoverModeOptions.length ? (
             <div className="field">
-              <label className="field__label">Handover mode</label>
+              <label className="field__label">{t('dispatch.closeout.handoverMode')}</label>
               <select
                 data-testid="route-stop-handover-mode"
                 defaultValue={handoverMode}
@@ -3161,12 +3157,12 @@ export function DispatchModule() {
           ) : (
             <StateView
               kind="error"
-              title="Delivery handover options are missing"
-              hint="Stop closeout is locked until handover options are configured."
+              title={t('dispatch.closeout.handoverMissingTitle')}
+              hint={t('dispatch.closeout.handoverMissingHint')}
             />
           )}
           <div className="field">
-            <label className="field__label">Delivered box numbers</label>
+            <label className="field__label">{t('dispatch.closeout.deliveredBoxes')}</label>
             <input
               data-testid="route-stop-delivered-boxes"
               placeholder="1 2"
@@ -3184,12 +3180,12 @@ export function DispatchModule() {
             }}
             style={{ margin: '8px 0' }}
           >
-            {routeStopCodPreview(expectedCod, currency, paymentOutcome, paymentAmount, receiptContext).label}
+            {routeStopCodPreview(expectedCod, currency, paymentOutcome, paymentAmount, receiptContext, t).label}
           </div>
           {hasExpectedCod ? (
             <>
               <div className="field">
-                <label className="field__label">Payment outcome</label>
+                <label className="field__label">{t('dispatch.closeout.paymentOutcome')}</label>
                 <select
                   data-testid="route-stop-payment-outcome"
                   defaultValue={paymentOutcome}
@@ -3198,14 +3194,14 @@ export function DispatchModule() {
                     updateCodPreview();
                   }}
                 >
-                  <option value="">Select outcome</option>
+                  <option value="">{t('dispatch.closeout.selectOutcome')}</option>
                   {paymentOutcomeOptions.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
               </div>
               <div className="field">
-                <label className="field__label">Payment method</label>
+                <label className="field__label">{t('dispatch.closeout.paymentMethod')}</label>
                 <select
                   data-testid="route-stop-payment-method"
                   defaultValue={paymentMethod}
@@ -3219,7 +3215,7 @@ export function DispatchModule() {
                 </select>
               </div>
               <div className="field">
-                <label className="field__label">Collected amount</label>
+                <label className="field__label">{t('dispatch.closeout.collectedAmount')}</label>
                 <input
                   data-testid="route-stop-payment-amount"
                   inputMode="decimal"
@@ -3232,10 +3228,10 @@ export function DispatchModule() {
                 />
               </div>
               <div className="field">
-                <label className="field__label">Receipt context</label>
+                <label className="field__label">{t('dispatch.closeout.receiptContext')}</label>
                 <input
                   data-testid="route-stop-payment-receipt"
-                  placeholder="Receipt, POS, or cashier reference"
+                  placeholder={t('dispatch.closeout.receiptPlaceholder')}
                   onChange={(e) => {
                     receiptContext = e.target.value;
                     updateCodPreview();
@@ -3245,20 +3241,20 @@ export function DispatchModule() {
             </>
           ) : null}
           <div className="field">
-            <label className="field__label">Recipient name</label>
+            <label className="field__label">{t('dispatch.closeout.recipientName')}</label>
             <input
               data-testid="route-stop-recipient-name"
-              placeholder="Name on handover"
+              placeholder={t('dispatch.closeout.recipientNamePlaceholder')}
               onChange={(e) => {
                 recipientName = e.target.value;
               }}
             />
           </div>
           <div className="field">
-            <label className="field__label">Recipient class</label>
+            <label className="field__label">{t('dispatch.closeout.recipientClass')}</label>
             <input
               data-testid="route-stop-recipient-class"
-              placeholder="Front desk, concierge, mailroom"
+              placeholder={t('dispatch.closeout.recipientClassPlaceholder')}
               onChange={(e) => {
                 recipientClass = e.target.value;
               }}
@@ -3266,17 +3262,17 @@ export function DispatchModule() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8 }}>
             <div className="field">
-              <label className="field__label">Identity type</label>
+              <label className="field__label">{t('dispatch.closeout.identityType')}</label>
               <input
                 data-testid="route-stop-identity-kind"
-                placeholder="national_id"
+                placeholder={'national_id' /* i18n-literal-ok: identity kind token */}
                 onChange={(e) => {
                   recipientIdentityKind = e.target.value;
                 }}
               />
             </div>
             <div className="field">
-              <label className="field__label">Identity last 4</label>
+              <label className="field__label">{t('dispatch.closeout.identityLast4')}</label>
               <input
                 data-testid="route-stop-identity-last4"
                 inputMode="text"
@@ -3290,7 +3286,7 @@ export function DispatchModule() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8 }}>
             <div className="field">
-              <label className="field__label">OTP last 4</label>
+              <label className="field__label">{t('dispatch.closeout.otpLast4')}</label>
               <input
                 data-testid="route-stop-otp-last4"
                 inputMode="text"
@@ -3302,7 +3298,7 @@ export function DispatchModule() {
               />
             </div>
             <div className="field">
-              <label className="field__label">Signature proof</label>
+              <label className="field__label">{t('dispatch.closeout.signatureProof')}</label>
               <div
                 data-testid="route-stop-signature-proof-dropzone"
                 role="button"
@@ -3335,13 +3331,13 @@ export function DispatchModule() {
                     signatureFileNameNode = node;
                   }}
                 >
-                  Choose, paste, or drop signature proof.
+                  {t('dispatch.closeout.signatureHint')}
                 </span>
               </div>
             </div>
           </div>
           <div className="field">
-            <label className="field__label">Photo proof</label>
+            <label className="field__label">{t('dispatch.closeout.photoProof')}</label>
             <div
               data-testid="route-stop-photo-proof-dropzone"
               role="button"
@@ -3374,13 +3370,13 @@ export function DispatchModule() {
                   photoFileNameNode = node;
                 }}
               >
-                Choose, paste, or drop photo proof.
+                {t('dispatch.closeout.photoHint')}
               </span>
             </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
             <div className="field">
-              <label className="field__label">Latitude</label>
+              <label className="field__label">{t('dispatch.closeout.latitude')}</label>
               <input
                 data-testid="route-stop-proof-latitude"
                 type="number"
@@ -3392,7 +3388,7 @@ export function DispatchModule() {
               />
             </div>
             <div className="field">
-              <label className="field__label">Longitude</label>
+              <label className="field__label">{t('dispatch.closeout.longitude')}</label>
               <input
                 data-testid="route-stop-proof-longitude"
                 type="number"
@@ -3404,7 +3400,7 @@ export function DispatchModule() {
               />
             </div>
             <div className="field">
-              <label className="field__label">Accuracy m</label>
+              <label className="field__label">{t('dispatch.closeout.accuracy')}</label>
               <input
                 data-testid="route-stop-proof-accuracy"
                 type="number"
@@ -3418,7 +3414,7 @@ export function DispatchModule() {
             </div>
           </div>
           <div className="field">
-            <label className="field__label">Closeout notes</label>
+            <label className="field__label">{t('dispatch.closeout.notes')}</label>
             <textarea
               rows={3}
               data-testid="route-stop-closeout-notes"
@@ -3432,9 +3428,9 @@ export function DispatchModule() {
       ),
       footer: (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="View shipment proof"
+            label={t('dispatch.closeout.viewProof')}
             iconName="eye"
             kind="ghost"
             capability={CAP.SHIPMENTS_READ}
@@ -3444,21 +3440,21 @@ export function DispatchModule() {
             }}
           />
           <Button
-            label="Close stop"
+            label={t('dispatch.closeout.submit')}
             iconName="check"
             kind="primary"
             capability={CAP.TASKS_COMPLETE}
             disabled={transitionTaskMutation.isPending || !handoverModeOptions.length || podPolicyQuery.isLoading}
             title={
               !handoverModeOptions.length
-                ? 'delivery_handover_mode lookup is required'
+                ? t('dispatch.closeout.handoverLookupRequired')
                 : podPolicyQuery.isLoading
-                  ? 'POD proof policy is still loading'
+                  ? t('dispatch.closeout.policyLoading')
                   : undefined
             }
             onClick={async () => {
               if (closeoutSubmitInFlight) {
-                pushToast('Stop closeout is already saving', 'warn');
+                pushToast(t('dispatch.toast.closeoutSaving'), 'warn');
                 return;
               }
               const stopTenantReason = dispatchLifecycleDisabledReasonForStop(stop);
@@ -3468,7 +3464,7 @@ export function DispatchModule() {
               }
               const nextStatus = taskActionNextStatus('resolve');
               if (!nextStatus) {
-                pushToast('task_action_kind.resolve next_status missing', 'danger');
+                pushToast(t('dispatch.toast.nextStatusMissing'), 'danger');
                 return;
               }
               try {
@@ -3483,18 +3479,23 @@ export function DispatchModule() {
                 const isFailedAttempt = Boolean(selectedFailureReason);
                 const isFullDelivery = !isFailedAttempt && completionKind === 'full';
                 if (isFullDelivery && podProofRequirements.photoRequired && !photoFile) {
-                  pushToast('Photo proof is required by POD policy', 'danger');
+                  pushToast(t('dispatch.toast.photoRequired'), 'danger');
                   return;
                 }
                 if (isFullDelivery && podProofRequirements.signatureRequired && !signatureFile) {
-                  pushToast('Signature proof is required by POD policy', 'danger');
+                  pushToast(t('dispatch.toast.signatureRequired'), 'danger');
                   return;
                 }
                 const handoverModeRow =
                   handoverModeOptions.find((option) => option.value === handoverMode) ?? null;
                 const requiresHandoverSignature = Boolean(handoverModeRow?.metadata?.requires_signature);
                 if (!isFailedAttempt && requiresHandoverSignature && !signatureFile && !signatureArtifactId) {
-                  pushToast(`${handoverModeRow?.label ?? handoverMode ?? 'Selected handover mode'} requires signature proof`, 'danger');
+                  pushToast(
+                    fill(t('dispatch.toast.handoverSignature'), {
+                      mode: handoverModeRow?.label ?? handoverMode ?? t('dispatch.toast.selectedHandover'),
+                    }),
+                    'danger',
+                  );
                   return;
                 }
                 if (
@@ -3502,11 +3503,19 @@ export function DispatchModule() {
                   podProofRequirements.minArtifactCount > 0 &&
                   [photoFile, signatureFile].filter(Boolean).length < podProofRequirements.minArtifactCount
                 ) {
-                  pushToast(`POD policy requires ${podProofRequirements.minArtifactCount} proof artifact${podProofRequirements.minArtifactCount === 1 ? '' : 's'}`, 'danger');
+                  pushToast(
+                    fill(
+                      t(podProofRequirements.minArtifactCount === 1
+                        ? 'dispatch.toast.artifactsRequiredOne'
+                        : 'dispatch.toast.artifactsRequiredOther'),
+                      { n: podProofRequirements.minArtifactCount },
+                    ),
+                    'danger',
+                  );
                   return;
                 }
                 if (isFailedAttempt && !failureReasonOptions.some((option) => option.value === selectedFailureReason)) {
-                  pushToast('Select a valid failed attempt reason', 'danger');
+                  pushToast(t('dispatch.toast.invalidFailure'), 'danger');
                   return;
                 }
                 const organizationId = activeRun?.organization_id ?? stop.organization_id ?? scope.tenant?.id ?? '';
@@ -3571,11 +3580,12 @@ export function DispatchModule() {
                   },
                 });
                 await assertRouteStopCloseoutReadback(stop, task);
+                setCloseoutBaseline(null);
                 await refreshDispatchFromCanonical({ throwOnError: true });
-                pushToast(`Stop closeout saved - ${task.task_id ?? task.id} - ${nextStatus}`, 'good');
+                pushToast(fill(t('dispatch.toast.closeoutSaved'), { task: task.task_id ?? task.id, status: nextStatus }), 'good');
                 modal.close();
               } catch {
-                pushToast('Stop closeout could not be saved. Try again.', 'danger');
+                pushToast(t('dispatch.toast.closeoutFailed'), 'danger');
               } finally {
                 closeoutSubmitInFlight = false;
               }
@@ -3591,6 +3601,7 @@ export function DispatchModule() {
     // for dispatch (route runs scope at tenant via current_user_org_id()).
     // `scopeId` is identity-derived. See shipments.tsx top-of-file ScopePill SSOT
     // note. The dynamic policy-resolved pill below uses `routePolicy.resolved_from`.
+    <LiveChip key="live" live={live} />,
     <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
     activeRun ? (
       <Chip key="run" size="xs" kind="info" label={<span className="mono">{routeRunLabel(activeRun.id)}</span>} />
@@ -3633,9 +3644,9 @@ export function DispatchModule() {
     sub: (r) => {
       const row = r as unknown as RouteRunRow;
       const stopCount = stopsCountByRunId.get(row.id) ?? 0;
-      return `${vehicleDisplayLabel(row.vehicle_id ?? null)} · ${stopCount} stops`;
+      return fill(t('dispatch.runs.pickerSub'), { vehicle: vehicleDisplayLabel(row.vehicle_id ?? null), n: stopCount });
     },
-    section: 'Runs',
+    section: t('dispatch.runs.section'),
   };
   const resolvedBulkMoveTargetRunId = bulkReassignTargetRuns.some((run) => run.id === bulkMoveTargetRunId)
     ? bulkMoveTargetRunId
@@ -3644,16 +3655,11 @@ export function DispatchModule() {
   if (!canRead) {
     return (
       <div className="page">
-        <PageHeader
-          moduleKey="dispatch"
-          eyebrow="Operate"
-          titleAccent="Dispatch"
-          titlePlain="canvas"
-        />
+        <PageHeader moduleKey="dispatch" />
         <StateView
           kind="denied"
           capability={CAP.ROUTES_READ}
-          hint="You do not have permission to view dispatch."
+          hint={t('dispatch.denied')}
         />
       </div>
     );
@@ -3662,16 +3668,11 @@ export function DispatchModule() {
   if (dispatchCriticalReadError) {
     return (
       <div className="page">
-        <PageHeader
-          moduleKey="dispatch"
-          eyebrow="Operate"
-          titleAccent="Dispatch"
-          titlePlain="canvas"
-        />
+        <PageHeader moduleKey="dispatch" />
         <StateView
           kind="error"
-          title="Dispatch data did not load"
-          hint={dispatchReadErrorMessage(dispatchCriticalReadError)}
+          title={t('dispatch.loadErrorTitle')}
+          hint={dispatchReadErrorMessage(dispatchCriticalReadError, t)}
         />
       </div>
     );
@@ -3681,9 +3682,6 @@ export function DispatchModule() {
     <div className="page">
       <PageHeader
         moduleKey="dispatch"
-        eyebrow="Operate"
-        titleAccent="Dispatch"
-        titlePlain="canvas"
         pills={pills}
         actions={[
           <Button
@@ -3694,20 +3692,24 @@ export function DispatchModule() {
             capability={CAP.ROUTES_WRITE}
             disabled={scanOutReconciliationDisabled}
             title={scanOutReconciliationDisabledReason}
+            pausedReasonId={writePause.reasonId}
             onClick={handleReconcileScanOut}
           />,
           <Button
             key="confirm"
-            label="Confirm departure"
+            label={t('dispatch.actions.confirmDeparture')}
             iconName="check"
             kind="primary"
             capabilities={[CAP.ROUTES_WRITE, CAP.TASKS_COMPLETE]}
             disabled={confirmDepartureDisabled}
             title={activeRunLifecycleDisabledReason ?? departureGateHint}
+            pausedReasonId={writePause.reasonId}
             onClick={handleConfirmDeparture}
           />,
-        ]}
+          writePause.reason,
+        ].filter(Boolean)}
       />
+      <StaleBanner live={live} />
 
       {/* KPI strip — driven by useDashboardKpis */}
       <div className="kpi-strip">
@@ -3730,7 +3732,7 @@ export function DispatchModule() {
       ) : null}
       {dispatchEnrichmentReadError ? (
         <div className="state__hint" data-testid="dispatch-enrichment-read-warning" style={{ marginTop: '8px' }}>
-          Some Dispatch details could not load. Route context is still available.
+          {t('dispatch.enrichmentWarning')}
         </div>
       ) : null}
 
@@ -3741,21 +3743,23 @@ export function DispatchModule() {
           {/* Pane 1 — runs list */}
           <div className="pane">
             <div className="pane__header">
-              <span className="pane__title" id="dispatch-pane-runs-title">{t('dispatch.runs', `Runs · ${runs.length} · internal + partner`)}</span>
+              <span className="pane__title" id="dispatch-pane-runs-title">{fill(t('dispatch.runs.title'), { n: runs.length })}</span>
               <div style={{ flex: 1 }} />
               <button
                 className="icon-btn"
-                title="Refresh"
+                title={t('common.refresh')}
                 type="button"
-                aria-label="Refresh"
+                aria-label={t('common.refresh')}
                 disabled={dispatchRefreshPending}
                 onClick={() => void handleRefreshDispatch()}
               >
                 <Icon name="refresh" size={12} />
               </button>
             </div>
+            <StaleLabel live={live} />
+            <NewRowsStrip count={heldRuns.newCount} path="live.newRuns" onShow={heldRuns.show} />
             <div className="pane__body" role="region" aria-labelledby="dispatch-pane-runs-title" tabIndex={0}>
-              {runs.map((r) => {
+              {heldRuns.visible.map((r) => {
                 const tone = statusTone('route_run_status', r.status) as
                   | 'good' | 'warn' | 'danger' | 'info' | 'neutral';
                 // W24 — Resolve through `v_route_run_directory` projection
@@ -3768,11 +3772,13 @@ export function DispatchModule() {
                   ? (directory?.partner_name ?? partnerNameForRun(r.id) ?? '—')
                   : dispatchRunDriverLabel(directory, r, driverDisplayName);
                 const vehicleLabel = partnerOwned
-                  ? (t('dispatch.partnerVehicle', 'partner') as string)
+                  ? t('dispatch.partnerVehicle')
                   : (directory?.vehicle_label ?? vehicleDisplayLabel(r.vehicle_id ?? null));
                 const cls = ['run-row'];
                 if (r.id === activeRunId) cls.push('is-active');
                 if (dndOver === r.id) cls.push('dnd-over');
+                const runUpdated = heldRuns.updated.has(r.id);
+                if (runUpdated) cls.push('is-updated');
                 const runLifecycleDisabledReason = dispatchLifecycleDisabledReasonForRun(r);
                 const activeAssignment = assignmentByRunId.get(r.id);
                 const alternateCapacity = routeRunAlternateCapacityRequest(r);
@@ -3787,7 +3793,7 @@ export function DispatchModule() {
                 const alternateCapacityDisabledReason =
                   runLifecycleDisabledReason ??
                   (alternateCapacityBlockedByCurrentOwner
-                    ? 'Clear the current route owner before assigning alternate capacity.'
+                    ? t('dispatch.runs.clearOwner')
                     : undefined);
                 const canMoveSelectedHere =
                   selectedStops.size > 0 &&
@@ -3823,11 +3829,12 @@ export function DispatchModule() {
                       <span className="run-row__id mono">{routeRunLabel(r.id)}</span>
                       <span className="run-row__driver">{driverLabel}</span>
                       <div style={{ flex: 1 }} />
-                      {partnerOwned ? <Chip size="xs" kind="info" label="partner" /> : null}
+                      {partnerOwned ? <Chip size="xs" kind="info" label={t('dispatch.partnerVehicle')} /> : null}
+                      {runUpdated ? <Chip size="xs" kind="info" label={t('live.updated')} /> : null}
                       <Chip size="xs" kind={tone} label={statusLabel('route_run_status', r.status)} />
                       {canMoveSelectedHere ? (
                         <Button
-                          label="Move to this owner"
+                          label={t('dispatch.runs.moveHere')}
                           kind="ghost"
                           size="sm"
                           capability={CAP.ROUTES_WRITE}
@@ -3842,7 +3849,7 @@ export function DispatchModule() {
                           assign / reassign a driver per run through the
                           assignment action path (was unwired). */}
                       <Button
-                        label="Assign driver…"
+                        label={t('dispatch.runs.assignDriver')}
                         iconName="user"
                         kind="ghost"
                         size="sm"
@@ -3860,7 +3867,7 @@ export function DispatchModule() {
                       />
                       {alternateCapacity ? (
                         <Button
-                          label={alternateCapacityAlreadyAssigned ? 'Capacity assigned' : 'Assign capacity'}
+                          label={alternateCapacityAlreadyAssigned ? t('dispatch.runs.capacityAssigned') : t('dispatch.runs.assignCapacity')}
                           iconName="shuffle"
                           kind="ghost"
                           size="sm"
@@ -3872,7 +3879,10 @@ export function DispatchModule() {
                           }
                           title={
                             alternateCapacityDisabledReason ??
-                            `${alternateCapacity.demandClass ?? 'alternate'} capacity request ${alternateCapacity.marketplaceRequestId}`
+                            fill(t('dispatch.runs.capacityRequest'), {
+                              demand: alternateCapacity.demandClass ?? t('dispatch.runs.alternate'),
+                              id: alternateCapacity.marketplaceRequestId,
+                            })
                           }
                           onClick={(e?: React.MouseEvent) => {
                             e?.stopPropagation?.();
@@ -3889,9 +3899,13 @@ export function DispatchModule() {
                     </div>
                     <div className="run-row__meta">
                       <span>{vehicleLabel}</span>
-                      <span>{`${stopCount} stops`}</span>
+                      <span>{fill(t('dispatch.runs.stopCount'), { n: stopCount })}</span>
                       {r.planned_start_at ? (
-                        <span className="mono">{`start ${new Date(r.planned_start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}</span>
+                        <span className="mono">
+                          {fill(t('dispatch.runs.start'), {
+                            time: new Date(r.planned_start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                          })}
+                        </span>
                       ) : null}
                     </div>
                   </div>
@@ -3903,10 +3917,10 @@ export function DispatchModule() {
           {/* Pane 2 — stop sequence with multi-select bulk reassign */}
           <div className="pane">
             <div className="pane__header">
-              <span className="pane__title" id="dispatch-pane-stops-title">Stop sequence</span>
+              <span className="pane__title" id="dispatch-pane-stops-title">{t('dispatch.stops.title')}</span>
               <div style={{ flex: 1 }} />
               <Button
-                label={selectedStops.size ? `↻ Reassign · ${selectedStops.size}` : '↻ Reassign…'}
+                label={selectedStops.size ? fill(t('dispatch.stops.reassignCount'), { n: selectedStops.size }) : t('dispatch.stops.reassignIdle')}
                 kind="ghost"
                 size="sm"
                 capability={CAP.ROUTES_WRITE}
@@ -3933,14 +3947,14 @@ export function DispatchModule() {
                   }}
                 >
                   <label className="field">
-                    <span className="field__label">Target owner</span>
+                    <span className="field__label">{t('dispatch.stops.targetOwner')}</span>
                     <select
                       value={resolvedBulkMoveTargetRunId}
                       onChange={(event) => setBulkMoveTargetRunId(event.target.value)}
                       disabled={reassignMutation.isPending || bulkReassignTargetRuns.length === 0}
                     >
                       {bulkReassignTargetRuns.length === 0 ? (
-                        <option value="">No eligible owner</option>
+                        <option value="">{t('dispatch.stops.noOwner')}</option>
                       ) : null}
                       {bulkReassignTargetRuns.map((run) => (
                         <option key={run.id} value={run.id}>
@@ -3949,7 +3963,7 @@ export function DispatchModule() {
                               runDirectoryById.get(run.id),
                               run,
                               driverDisplayName,
-                            ) || 'Unassigned'
+                            ) || t('dispatch.stops.unassigned')
                           }`}
                         </option>
                       ))}
@@ -3973,7 +3987,7 @@ export function DispatchModule() {
                     }
                     title={
                       !canWriteRoutes
-                        ? 'Routes Write permission required'
+                        ? t('dispatch.perm.routesWrite')
                         : selectedStopsDisabledReason
                     }
                     onKeyDown={(event) => {
@@ -3987,29 +4001,31 @@ export function DispatchModule() {
                       if (resolvedBulkMoveTargetRunId) void handleBulkReassign(resolvedBulkMoveTargetRunId);
                     }}
                   >
-                    Move selected
+                    {t('dispatch.stops.moveSelected')}
                   </button>
                 </div>
               ) : null}
               {!activeStops.length ? (
                 <div className="state__hint" style={{ padding: '20px', textAlign: 'center' }}>
                   {activeStopsRestricted
-                    ? `${activeRunVisibleStopCount} ${activeRunVisibleStopCount === 1 ? 'stop is' : 'stops are'} listed for this run; stop details are restricted for this route context.`
-                    : 'No stops on this run.'}
+                    ? fill(t(activeRunVisibleStopCount === 1 ? 'dispatch.stops.restrictedOne' : 'dispatch.stops.restrictedOther'), {
+                      n: activeRunVisibleStopCount,
+                    })
+                    : t('dispatch.stops.empty')}
                 </div>
               ) : (
                 <>
                   <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--line)' }}>
                     <OpsScannerPanel
-                      title="Route scanner"
-                      contextLabel="Dispatch scan intake"
+                      title={t('dispatch.scanner.panelTitle')}
+                      contextLabel={t('dispatch.scanner.panelContext')}
                       candidates={activeScannerCandidates}
                       capability={CAP.TASKS_COMPLETE}
                       actionDisabled={(match, actionableNoMatch) =>
                         Boolean(activeDepartureConfirmedAt) &&
                         (actionableNoMatch || !match || match.candidate.kind === 'shipment')
                       }
-                      actionDisabledReason="Departure is already confirmed for this route; load scan actions are locked, but scanned references can still be inspected."
+                      actionDisabledReason={t('dispatch.scanner.lockedReason')}
                       actionCapability={(match) => {
                         if (!match) return CAP.TASKS_COMPLETE;
                         return ['basket', 'driver', 'vehicle', 'route'].includes(match.candidate.kind)
@@ -4017,8 +4033,8 @@ export function DispatchModule() {
                           : CAP.TASKS_COMPLETE;
                       }}
                       busy={scanEventMutation.isPending}
-                      noMatchActionLabel="Record unexpected load scan"
-                      noMatchDescription="No active route stop matches this code. Record it as an unexpected load scan for reconciliation."
+                      noMatchActionLabel={t('dispatch.scanner.noMatchAction')}
+                      noMatchDescription={t('dispatch.scanner.noMatchDescription')}
                       canOpenCandidate={(match) =>
                         !match.candidate.disabled &&
                         ['shipment', 'basket', 'driver', 'vehicle', 'route'].includes(match.candidate.kind)
@@ -4032,13 +4048,13 @@ export function DispatchModule() {
                         }
                         const stop = activeStops.find((row) => row.id === match.candidate.id);
                         if (!stop) {
-                          pushToast('Scanner match is not actionable from this dispatch context', 'warn');
+                          pushToast(t('dispatch.toast.scannerNotActionable'), 'warn');
                           return;
                         }
                         try {
                           await recordLoadScan(stop, match.code);
                         } catch (err) {
-                          pushToast('Load scan could not be recorded. Try again.', 'danger');
+                          pushToast(t('dispatch.toast.loadScanFailed'), 'danger');
                           throw err;
                         }
                       }}
@@ -4046,7 +4062,7 @@ export function DispatchModule() {
                         try {
                           await recordUnexpectedLoadScan(scan);
                         } catch (err) {
-                          pushToast('Unexpected scan could not be recorded. Try again.', 'danger');
+                          pushToast(t('dispatch.toast.unexpectedFailed'), 'danger');
                           throw err;
                         }
                       }}
@@ -4061,25 +4077,25 @@ export function DispatchModule() {
                       tileProvider={mapTileProvider}
                       bounds={mapDefaultViewport}
                       height={220}
-                      title="Active run stop map"
-                      emptyLabel="No geocoded stops for this run yet."
+                      title={t('dispatch.map.title')}
+                      emptyLabel={t('dispatch.map.empty')}
                     />
                   </div>
                   <div className="state__hint" style={{ padding: '8px 14px', fontSize: '10.5px', borderBottom: '1px solid var(--line)' }}>
-                    Tip: drag a stop row onto a driver in the Runs pane, or multi-select and use Reassign for bulk moves.
+                    {t('dispatch.stops.tip')}
                   </div>
                   <div className="dt">
                     <table className="dt__table" style={{ width: '100%' }}>
                       <thead>
                         <tr>
-                          <th aria-label="Select">{}</th>
+                          <th aria-label={t('dispatch.stops.colSelect')}>{}</th>
                           <th>#</th>
-                          <th>Shipment</th>
-                          <th>Kind</th>
-                          <th>Window</th>
-                          <th className="cell-num">COD</th>
-                          <th>Load scan</th>
-                          <th>Closeout</th>
+                          <th>{t('dispatch.stops.colShipment')}</th>
+                          <th>{t('dispatch.stops.colKind')}</th>
+                          <th>{t('dispatch.stops.colWindow')}</th>
+                          <th className="cell-num">{t('dispatch.stops.colCod')}</th>
+                          <th>{t('dispatch.stops.colLoadScan')}</th>
+                          <th>{t('dispatch.stops.colCloseout')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -4094,8 +4110,9 @@ export function DispatchModule() {
                             task: stopTask,
                             departureConfirmedAt: activeDepartureConfirmedAt,
                             pending: transitionTaskMutation.isPending,
-                          });
-                          const loadScan = routeStopLoadScanStatus(s);
+                          }, t);
+                          const loadScan = routeStopLoadScanStatus(s, t);
+                          const deliveryOption = routeStopDeliveryOption(s, t);
                           const start = s.planned_window_start_at
                             ? new Date(s.planned_window_start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                             : '—';
@@ -4107,7 +4124,7 @@ export function DispatchModule() {
                               key={s.id}
                               className={`dnd-stop ${checked ? 'is-selected' : ''}`}
                               draggable
-                              title="Drag to a driver row in the Runs pane to reassign"
+                              title={t('dispatch.stops.dragHint')}
                               onDragStart={(e) => {
                                 e.dataTransfer.effectAllowed = 'move';
                                 e.dataTransfer.setData('text/x-stop-id', s.id);
@@ -4117,7 +4134,7 @@ export function DispatchModule() {
                               <td className="dt-checkbox">
                                 <input
                                   type="checkbox"
-                                  aria-label={`Select stop ${s.sequence_order}`}
+                                  aria-label={fill(t('dispatch.stops.selectStop'), { seq: s.sequence_order })}
                                   checked={checked}
                                   onChange={() => toggleStopSelection(s.id)}
                                 />
@@ -4137,7 +4154,7 @@ export function DispatchModule() {
                                     }}
                                   />
                                   <Button
-                                    label="Evidence"
+                                    label={t('dispatch.stops.evidence')}
                                     iconName="file"
                                     kind="ghost"
                                     size="sm"
@@ -4149,7 +4166,17 @@ export function DispatchModule() {
                                   />
                                 </div>
                               </td>
-                              <td>{s.stop_kind ?? '—'}</td>
+                              <td>
+                                {s.stop_kind ?? '—'}
+                                {deliveryOption ? (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginBlockStart: 4 }}>
+                                    <Chip size="xs" kind={deliveryOption.tone} label={deliveryOption.label} />
+                                    {deliveryOption.instruction ? (
+                                      <span className="state__hint"><bdi>{deliveryOption.instruction}</bdi></span>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </td>
                               <td className="mono">{`${start}–${end}`}</td>
                               <td className="cell-num mono">{stopCod != null ? String(stopCod) : '—'}</td>
                               <td>
@@ -4157,7 +4184,7 @@ export function DispatchModule() {
                                   <Chip size="xs" kind={loadScan.tone} label={loadScan.label} />
                                   {loadScan.detail ? <span className="mono state__hint">{loadScan.detail}</span> : null}
                                   <Button
-                                    label="Scan load"
+                                    label={t('dispatch.stops.scanLoad')}
                                     iconName="scan"
                                     kind="ghost"
                                     size="sm"
@@ -4170,7 +4197,7 @@ export function DispatchModule() {
                                     title={
                                       stopLifecycleDisabledReason ??
                                       (activeDepartureConfirmedAt
-                                        ? 'Departure is already confirmed for this route.'
+                                        ? t('dispatch.stops.departureConfirmed')
                                         : undefined)
                                     }
                                     onClick={async (e?: React.MouseEvent) => {
@@ -4182,7 +4209,7 @@ export function DispatchModule() {
                                       try {
                                         await recordLoadScan(s);
                                       } catch {
-                                        pushToast('Load scan could not be recorded. Try again.', 'danger');
+                                        pushToast(t('dispatch.toast.loadScanFailed'), 'danger');
                                       }
                                     }}
                                   />
@@ -4190,7 +4217,7 @@ export function DispatchModule() {
                               </td>
                               <td>
                                 <Button
-                                  label="Close stop"
+                                  label={t('dispatch.stops.closeStop')}
                                   iconName="check"
                                   kind="ghost"
                                   size="sm"
@@ -4218,13 +4245,13 @@ export function DispatchModule() {
           {/* Pane 3 — insight rail with LadderViz */}
           <div className="pane">
             <div className="pane__header">
-              <span className="pane__title" id="dispatch-pane-insights-title">Insight rail</span>
+              <span className="pane__title" id="dispatch-pane-insights-title">{t('dispatch.insight.title')}</span>
             </div>
             <div className="pane__body" role="region" aria-labelledby="dispatch-pane-insights-title" tabIndex={0}>
               {activeRun ? (
                 <>
                   <InsightCard
-                    label="Active run"
+                    label={t('dispatch.insight.activeRun')}
                     value={routeRunLabel(activeRun.id)}
                     meta={`${
                       isPartnerRun(activeRun.id)
@@ -4232,38 +4259,40 @@ export function DispatchModule() {
                         : driverDisplayName(activeRun.driver_user_id ?? null)
                     } · ${
                       isPartnerRun(activeRun.id)
-                        ? 'partner'
+                        ? t('dispatch.partnerVehicle')
                         : vehicleDisplayLabel(activeRun.vehicle_id ?? null)
                     }`}
                   />
                   <InsightCard
-                    label="Stops"
+                    label={t('dispatch.insight.stops')}
                     value={String(activeRunVisibleStopCount)}
                     meta={
                       activeRun.planned_start_at
-                        ? `start ${new Date(activeRun.planned_start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                        ? fill(t('dispatch.runs.start'), {
+                          time: new Date(activeRun.planned_start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        })
                         : undefined
                     }
                   />
                   {codFloatLoading ? (
                     <StateView
                       kind="loading"
-                      hint="Resolving COD float limit..."
+                      hint={t('dispatch.insight.codLoading')}
                     />
                   ) : codFloatLimit == null ? (
                     <StateView
                       kind="error"
-                      title="COD float limit is not configured"
-                      hint="Seed the COD float policy before rendering the dispatch insight rail."
+                      title={t('dispatch.insight.codMissingTitle')}
+                      hint={t('dispatch.insight.codMissingHint')}
                     />
                   ) : (
                     <InsightCard
-                      label="COD float"
+                      label={t('dispatch.insight.codFloat')}
                       value={`${tenantCurrencyIso ?? '—'} ${codTotalByRunId.get(activeRun.id) ?? 0}`}
                       meta={
                         codFloatPolicy
-                          ? `COD float limit - ${codFloatLimit} - scope: ${codFloatPolicy.resolved_from}`
-                          : `COD float limit - ${codFloatLimit}`
+                          ? fill(t('dispatch.insight.codLimitScope'), { limit: codFloatLimit, scope: codFloatPolicy.resolved_from })
+                          : fill(t('dispatch.insight.codLimit'), { limit: codFloatLimit })
                       }
                       tone={(codTotalByRunId.get(activeRun.id) ?? 0) > codFloatLimit ? 'warn' : undefined}
                     />
@@ -4271,10 +4300,10 @@ export function DispatchModule() {
 
                   {routePolicy ? (
                     <div className="insight-card">
-                      <div className="insight-card__label">Route assignment policy</div>
+                      <div className="insight-card__label">{t('dispatch.insight.policy')}</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <ScopePill scopeType={routePolicy.resolved_from} />
-                        <span style={{ fontSize: '10.5px', color: 'var(--ink-3)' }}>Resolution confirmed</span>
+                        <span style={{ fontSize: '10.5px', color: 'var(--ink-3)' }}>{t('dispatch.insight.resolved')}</span>
                       </div>
                       <LadderViz resolution={routePolicy} />
                     </div>
@@ -4325,7 +4354,7 @@ export function DispatchModule() {
                   />
                 </>
               ) : (
-                <StateView kind="empty" hint="Select a run to view insights." />
+                <StateView kind="empty" hint={t('dispatch.insight.selectRun')} />
               )}
             </div>
           </div>
@@ -4333,11 +4362,26 @@ export function DispatchModule() {
       )}
 
       {drawer.node}
-      {modal.node}
+      <ConflictProvider
+        value={
+          closeoutConflict.conflict ? (
+            <ConflictToast
+              title={t('live.conflict.stopTitle')}
+              onReview={() => {
+                closeoutConflict.dismiss();
+                modal.close();
+              }}
+              onKeep={closeoutConflict.dismiss}
+            />
+          ) : null
+        }
+      >
+        {modal.node}
+      </ConflictProvider>
       {picker?.kind === 'bulk' ? (
         <ReferencePicker
           open
-          title="Target run"
+          title={t('dispatch.insight.targetRun')}
           source={{ kind: 'reference', ...bulkPickerSource }}
           onClose={() => setPicker(null)}
           onPick={(val) => {
@@ -4349,14 +4393,14 @@ export function DispatchModule() {
       {picker?.kind === 'assign-driver' ? (
         <ReferencePicker
           open
-          title="Assign driver"
+          title={t('dispatch.insight.assignDriver')}
           source={{
             kind: 'reference',
             items: assignableDrivers as unknown as Array<Record<string, unknown>>,
             display: (d) => (d as { name: string }).name,
             value: (d) => (d as { id: string }).id,
             sub: (d) => (d as { id: string }).id,
-            section: 'Drivers',
+            section: t('dispatch.insight.driversSection'),
           }}
           onClose={() => setPicker(null)}
           onPick={(val) => {
@@ -4405,15 +4449,16 @@ function RouteAssignmentInsight({
   isResponding?: boolean;
   onRespond?: (action: RouteAssignmentResponseAction) => void;
 }) {
+  const { t } = useI18n();
   const match = rows.find((r) => r.route_run_id === runId);
   if (!match) {
     return (
       <div className="insight-card" data-testid="route_run_assignments-card">
         <div className="insight-card__label">
-          <span>Active route assignment</span>
+          <span>{t('dispatch.assignment.title')}</span>
         </div>
         <div className="insight-card__value" style={{ fontSize: '11px', color: 'var(--ink-3)' }}>
-          No active assignment row.
+          {t('dispatch.assignment.none')}
         </div>
       </div>
     );
@@ -4427,11 +4472,13 @@ function RouteAssignmentInsight({
     | 'good' | 'warn' | 'danger' | 'info' | 'neutral';
   const actions = routeAssignmentResponseActions(match.assignment_status);
   const responseRows = [
-    match.acknowledged_at ? `Acknowledged ${new Date(match.acknowledged_at).toLocaleString()}` : null,
-    match.accepted_at ? `Accepted ${new Date(match.accepted_at).toLocaleString()}` : null,
-    match.refused_at ? `Refused ${new Date(match.refused_at).toLocaleString()}` : null,
-    match.refusal_reason ? `Reason: ${match.refusal_reason}` : null,
-    match.response_notes ? `Notes: ${match.response_notes}` : null,
+    match.acknowledged_at
+      ? fill(t('dispatch.assignment.acknowledged'), { time: new Date(match.acknowledged_at).toLocaleString() })
+      : null,
+    match.accepted_at ? fill(t('dispatch.assignment.accepted'), { time: new Date(match.accepted_at).toLocaleString() }) : null,
+    match.refused_at ? fill(t('dispatch.assignment.refused'), { time: new Date(match.refused_at).toLocaleString() }) : null,
+    match.refusal_reason ? fill(t('dispatch.assignment.reason'), { reason: match.refusal_reason }) : null,
+    match.response_notes ? fill(t('dispatch.assignment.notes'), { notes: match.response_notes }) : null,
   ].filter((row): row is string => Boolean(row));
   // W71-Operate (Cycle F-R-11) closure — chip labels resolve through the
   // canonical lookup row label instead of rendering the raw enum value
@@ -4440,7 +4487,7 @@ function RouteAssignmentInsight({
   return (
     <div className="insight-card" data-testid="route_run_assignments-card">
       <div className="insight-card__label">
-        <span>Active route assignment</span>
+        <span>{t('dispatch.assignment.title')}</span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -4450,11 +4497,13 @@ function RouteAssignmentInsight({
         </div>
         {match.partner ? (
           <div className="mono" style={{ color: 'var(--ink-3)' }}>
-            {`Partner: ${match.partner.partner_name ?? (match.partner.partner_id ? 'Partner fleet' : '—')}`}
+            {fill(t('dispatch.assignment.partner'), {
+              name: match.partner.partner_name ?? (match.partner.partner_id ? t('dispatch.assignment.partnerFleet') : '—'),
+            })}
           </div>
         ) : null}
         {match.driver_user_id ? (
-          <div className="mono" style={{ color: 'var(--ink-3)' }}>{`Driver: ${driverLabelForId(match.driver_user_id)}`}</div>
+          <div className="mono" style={{ color: 'var(--ink-3)' }}>{fill(t('dispatch.assignment.driver'), { name: driverLabelForId(match.driver_user_id) })}</div>
         ) : null}
         {responseRows.length > 0 ? (
           <div className="mono" style={{ color: 'var(--ink-3)' }}>
@@ -4468,7 +4517,7 @@ function RouteAssignmentInsight({
                 key={action}
                 size="sm"
                 kind={action === 'route_runs.refuse_assignment' ? 'danger' : action === 'route_runs.accept_assignment' ? 'primary' : 'ghost'}
-                label={routeAssignmentResponseActionLabel(action)}
+                label={routeAssignmentResponseActionLabel(action, t)}
                 disabled={!canRespond || isResponding}
                 title={!canRespond ? respondDisabledReason : undefined}
                 onClick={() => onRespond?.(action)}
@@ -4477,7 +4526,7 @@ function RouteAssignmentInsight({
           </div>
         ) : (
           <div className="state__hint" style={{ fontSize: '11px' }}>
-            Assignment response is complete.
+            {t('dispatch.assignment.complete')}
           </div>
         )}
       </div>
@@ -4492,6 +4541,7 @@ function AssignmentRefusalForm({
   onCancel: () => void;
   onSubmit: (payload: RouteRunAssignmentResponseParams) => void;
 }) {
+  const { t } = useI18n();
   const [reason, setReason] = useState('');
   const [notes, setNotes] = useState('');
   const trimmedReason = reason.trim();
@@ -4506,27 +4556,27 @@ function AssignmentRefusalForm({
   return (
     <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '10px' }}>
       <label className="field">
-        <span>Refusal reason</span>
+        <span>{t('dispatch.assignment.refusalReason')}</span>
         <textarea
           value={reason}
           onChange={(event) => setReason(event.target.value)}
           rows={3}
-          placeholder="Enter the operational reason"
+          placeholder={t('dispatch.assignment.refusalPlaceholder')}
           required
         />
       </label>
       <label className="field">
-        <span>Response notes</span>
+        <span>{t('dispatch.assignment.responseNotes')}</span>
         <textarea
           value={notes}
           onChange={(event) => setNotes(event.target.value)}
           rows={3}
-          placeholder="Optional dispatcher notes"
+          placeholder={t('dispatch.assignment.notesPlaceholder')}
         />
       </label>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-        <Button type="button" kind="ghost" label="Cancel" onClick={onCancel} />
-        <Button type="submit" kind="danger" label="Record refusal" disabled={!trimmedReason} />
+        <Button type="button" kind="ghost" label={t('common.cancel')} onClick={onCancel} />
+        <Button type="submit" kind="danger" label={t('dispatch.assignment.recordRefusal')} disabled={!trimmedReason} />
       </div>
     </form>
   );
@@ -4539,25 +4589,26 @@ function RouteAssignmentEventsInsight({
   runId: string;
   rows: RouteRunAssignmentEventRow[];
 }) {
+  const { t } = useI18n();
   const filteredAll = rows.filter((r) => r.route_run_id === runId);
   const filtered = filteredAll.slice(-3);
   return (
     <div className="insight-card" data-testid="route_run_assignment_events-card">
       <div className="insight-card__label">
-        <span>Assignment history</span>
+        <span>{t('dispatch.assignment.history')}</span>
         <span style={{ marginLeft: '6px', fontSize: '10px', color: 'var(--ink-3)' }}>
           {`${filtered.length}/${filteredAll.length}`}
         </span>
       </div>
       {filtered.length === 0 ? (
         <div className="insight-card__value" style={{ fontSize: '11px', color: 'var(--ink-3)' }}>
-          No lifecycle events recorded.
+          {t('dispatch.assignment.noEvents')}
         </div>
       ) : (
         <ul style={{ margin: 0, paddingLeft: '14px', fontSize: '11px' }}>
           {filtered.map((ev) => (
             <li key={ev.id} className="mono" style={{ color: 'var(--ink-3)' }}>
-              {`${operatorEventLabel(ev.event_type)} · ${ev.from_status ? statusLabel('route_run_assignment_status', ev.from_status) : 'Start'}→${statusLabel('route_run_assignment_status', ev.to_status)} · v${ev.assignment_version}`}
+              {`${operatorEventLabel(ev.event_type)} · ${ev.from_status ? statusLabel('route_run_assignment_status', ev.from_status) : t('dispatch.assignment.start')}→${statusLabel('route_run_assignment_status', ev.to_status)} · v${ev.assignment_version}`}
             </li>
           ))}
         </ul>
@@ -4573,28 +4624,29 @@ function StopReassignmentInsight({
   runId: string;
   rows: RouteStopReassignEventRow[];
 }) {
+  const { t } = useI18n();
   const filtered = rows.filter(
     (r) => r.source_route_run_id === runId || r.target_route_run_id === runId,
   );
   return (
     <div className="insight-card" data-testid="route_stop_reassignment_events-card">
       <div className="insight-card__label">
-        <span>Stop reassignment history</span>
+        <span>{t('dispatch.assignment.reassignHistory')}</span>
         <span style={{ marginLeft: '6px', fontSize: '10px', color: 'var(--ink-3)' }}>
           {String(filtered.length)}
         </span>
       </div>
       {filtered.length === 0 ? (
         <div className="insight-card__value" style={{ fontSize: '11px', color: 'var(--ink-3)' }}>
-          No mid-execution reassigns on this run.
+          {t('dispatch.assignment.noReassigns')}
         </div>
       ) : (
         <ul style={{ margin: 0, paddingLeft: '14px', fontSize: '11px' }}>
           {filtered.slice(-3).map((ev) => {
-            const dir = ev.source_route_run_id === runId ? 'Moved out' : 'Moved in';
+            const dir = ev.source_route_run_id === runId ? t('dispatch.assignment.movedOut') : t('dispatch.assignment.movedIn');
             return (
               <li key={ev.id} className="mono" style={{ color: 'var(--ink-3)' }}>
-                {`${dir} · ${operatorEventLabel(ev.event_type)} · ${shipmentShortLabel(ev.shipment_id)}`}
+                {`${dir} · ${operatorEventLabel(ev.event_type)} · ${shipmentShortLabel(ev.shipment_id, t)}`}
               </li>
             );
           })}
@@ -4613,18 +4665,19 @@ function FieldopsReassignRequestsInsight({
   tasks: RouteStopTaskRow[];
   driverLabelForId: (id: string | null | undefined) => string;
 }) {
+  const { t } = useI18n();
   const requests = fieldopsReassignRequestsForRun(runId, tasks);
   return (
     <div className="insight-card" data-testid="fieldops-reassign-requests-card">
       <div className="insight-card__label">
-        <span>Mobile V2 reassignment requests</span>
+        <span>{t('dispatch.assignment.mobileRequests')}</span>
         <span style={{ marginLeft: '6px', fontSize: '10px', color: 'var(--ink-3)' }}>
           {String(requests.length)}
         </span>
       </div>
       {requests.length === 0 ? (
         <div className="insight-card__value" style={{ fontSize: '11px', color: 'var(--ink-3)' }}>
-          No driver requests pending.
+          {t('dispatch.assignment.noRequests')}
         </div>
       ) : (
         <ul style={{ margin: 0, paddingLeft: '14px', fontSize: '11px' }}>
@@ -4636,9 +4689,9 @@ function FieldopsReassignRequestsInsight({
             return (
               <li key={task.id} className="mono" style={{ color: 'var(--ink-3)' }}>
                 {[
-                  tracking ?? shipmentShortLabel(nonBlankText(metadata.shipment_id) ?? task.shipment_id ?? task.resource_id ?? task.id),
-                  targetDriverId ? `to ${driverLabelForId(targetDriverId)}` : null,
-                  reason ? `Reason: ${reason}` : null,
+                  tracking ?? shipmentShortLabel(nonBlankText(metadata.shipment_id) ?? task.shipment_id ?? task.resource_id ?? task.id, t),
+                  targetDriverId ? fill(t('dispatch.assignment.toDriver'), { driver: driverLabelForId(targetDriverId) }) : null,
+                  reason ? fill(t('dispatch.assignment.reason'), { reason }) : null,
                 ].filter(Boolean).join(' - ')}
               </li>
             );

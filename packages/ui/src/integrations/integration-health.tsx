@@ -5,6 +5,7 @@ import { Badge } from "../badge";
 import { KpiCard } from "../charts/kpi-card";
 import { cn } from "../utils";
 import { createUiTranslator } from "../i18n";
+import { formatResourceValue } from "../resource-utils";
 
 export type IntegrationHealthEntry = {
   id: string;
@@ -63,12 +64,12 @@ export function IntegrationHealth({
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-ui-border/30 bg-ui-highlight/30">
-              <th className="px-3 py-2 text-left text-xs font-medium tracking-wide text-ui-muted">{t("integration")}</th>
+              <th className="px-3 py-2 text-start text-xs font-medium tracking-wide text-ui-muted">{t("integration")}</th>
               <th className="px-3 py-2 text-center text-xs font-medium tracking-wide text-ui-muted">{t("type")}</th>
               <th className="px-3 py-2 text-center text-xs font-medium tracking-wide text-ui-muted">{t("status")}</th>
-              <th className="px-3 py-2 text-right text-xs font-medium tracking-wide text-ui-muted">{t("successPercent")}</th>
-              <th className="px-3 py-2 text-right text-xs font-medium tracking-wide text-ui-muted">{t("calls")}</th>
-              <th className="px-3 py-2 text-right text-xs font-medium tracking-wide text-ui-muted">{t("avgResponse")}</th>
+              <th className="px-3 py-2 text-end text-xs font-medium tracking-wide text-ui-muted">{t("successPercent")}</th>
+              <th className="px-3 py-2 text-end text-xs font-medium tracking-wide text-ui-muted">{t("calls")}</th>
+              <th className="px-3 py-2 text-end text-xs font-medium tracking-wide text-ui-muted">{t("avgResponse")}</th>
             </tr>
           </thead>
           <tbody>
@@ -87,15 +88,15 @@ export function IntegrationHealth({
                   </Badge>
                 </td>
                 <td className={cn(
-                  "px-3 py-2 text-right font-mono text-xs",
+                  "px-3 py-2 text-end font-mono text-xs",
                   (entry.successRate ?? 100) < 95 ? "text-[rgb(var(--ui-danger))]" : "text-ui-ink"
                 )}>
                   {entry.successRate != null ? `${entry.successRate}%` : "-"}
                 </td>
-                <td className="px-3 py-2 text-right text-xs text-ui-muted">
-                  {entry.totalCalls?.toLocaleString() ?? "-"}
+                <td className="px-3 py-2 text-end text-xs text-ui-muted">
+                  {formatResourceValue(entry.totalCalls, { renderType: "number" })}
                 </td>
-                <td className="px-3 py-2 text-right text-xs text-ui-muted">
+                <td className="px-3 py-2 text-end text-xs text-ui-muted">
                   {entry.avgResponseMs != null ? `${entry.avgResponseMs}ms` : "-"}
                 </td>
               </tr>

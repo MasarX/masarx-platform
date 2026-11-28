@@ -2,12 +2,9 @@
 // reprint composer (reason capture → useReprintLabel). Adds a status filter on
 // the print queue and presents reprint targets as a chip list.
 
-import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type ReactNode } from 'react';
-import { DraftWorkflow } from '@masarx/ui/label-designer/draft-workflow';
-import { PreviewPanel } from '@masarx/ui/label-designer/preview-panel';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { LabelCanvas } from '@masarx/ui/label-designer/canvas';
 import type { PageConfig, TemplateBlock } from '@masarx/ui/label-designer/canvas-types';
-import type { DraftRow, ShipmentBoxOption, ShipmentOption } from '@masarx/ui/label-designer/types';
 import { Button } from '@/components/Button';
 import { Chip } from '@/components/Chip';
 import { PageHeader } from '@/components/PageHeader';
@@ -16,23 +13,12 @@ import { StateView } from '@/components/StateView';
 import { useDrawer, useModal } from '@/hooks/useOverlay';
 import {
   useArchiveLabelDesignDraft,
-  useCreateLabelDesignDraft,
-  useDeleteLabelDesignerAsset,
   useLabelDesignDrafts,
-  useLabelDesignerAssets,
-  useLabelDesignerEffectiveConfig,
-  useLabelDesignerFieldCatalog,
   useLabelRendererReadiness,
-  useLabelDesignerSamplePayload,
-  usePreviewLabelDesignDraft,
   useRecordLabelPrinterCertification,
   useResourceList,
-  usePublishLabelDesignDraft,
   useRequestTargetLabel,
   useReprintLabel,
-  useUpdateLabelDesignDraft,
-  useUploadLabelDesignerAsset,
-  useValidateLabelDesignDraft,
 } from '@/lib/queries';
 import { useCapability, useIdentity } from '@/lib/identity';
 import { CAP } from '@/lib/capabilities';
@@ -40,6 +26,25 @@ import { pushToast } from '@/components/toastStore';
 import { getLookups, lookupRow, resolve_resource_download_url_v1 } from '@/lib/api';
 import type { LabelDesignDraft, LabelDesignScopeType } from '@/lib/api';
 import { labelReprintReasonOptions } from '@/lib/label-reprint';
+import { fill, useI18n } from '@/lib/i18n';
+import {
+  type LabelSpec,
+  type LabelTypeOption,
+  nonEmptyString,
+  objectRecord,
+  operatorTokenLabel,
+  specDisplayName,
+  pageFromSpec,
+  blocksFromSpec,
+  formatJson,
+  type LabelDesignTemplateSummary,
+  labelDesignTemplateSummary,
+  describeDraftError,
+} from './label-design-template';
+
+const LabelDesignComposer = lazy(() =>
+  import('./label-design-composer').then((module) => ({ default: module.LabelDesignComposer })),
+);
 
 const LABEL_JOB_LIVE_REFRESH_MS = 2000;
 const ACTIVE_LABEL_JOB_STATUSES = new Set(['pending', 'queued', 'in_progress', 'rendering']);
@@ -63,24 +68,6 @@ const ACTIVE_LABEL_JOB_STATUSES = new Set(['pending', 'queued', 'in_progress', '
 //     `targetTypeOf(job)` derives the polymorphic descriptor from the
 //     canonical fields (`shipment_box_id ? 'shipment' (boxed)` etc.) so the
 //     DataTable column UX is preserved without a fictional column.
-interface LabelSpec extends Record<string, unknown> {
-  id: string;                          // SSOT: label_template_specs.id
-  name?: string;                       // Legacy alias for label_template_specs.template_key
-  template_key?: string;               // SSOT: label_template_specs.template_key (canonical)
-  version?: number;                    // SSOT: label_template_specs.version
-  organization_id?: string;            // SSOT: label_template_specs.organization_id
-  template_scope_type?: string;        // SSOT: label_template_specs.template_scope_type
-  template_scope_id?: string | null;   // SSOT: label_template_specs.template_scope_id
-  dimensions?: string;                 // SSOT: projection (renderer_config->>'dimensions')
-  dpi?: number;                        // SSOT: projection (renderer_config->>'dpi')
-  barcode_format?: string;             // SSOT: projection (renderer_config->>'barcode_format')
-  /** Canonical jsonb column from `public.label_template_specs.renderer_config`
-   *  — projection source for FE-derived fields like `active_version_id`. */
-  renderer_config?: Record<string, unknown> | null;  // SSOT: label_template_specs.renderer_config (canonical)
-  asset_refs?: unknown[] | null;       // SSOT: label_template_specs.asset_refs
-  active_version_id?: string | null;   // Directory projection: renderer_config.active_version_id
-}
-
 // W28 — `LabelTemplateDirectoryRow` mirrors the SQL view
 // `public.v_label_template_directory` (supabase/migrations/202604302610_v_label_template_directory.sql).
 // Read-only projection; pairs with `LabelSpec` (canonical SSOT row interface)
@@ -106,14 +93,6 @@ interface LabelTemplateDirectoryRow extends Record<string, unknown> {
   version_count: number;
   is_active_version: boolean;
   asset_count: number;
-}
-
-interface LabelTypeOption {
-  value: string;
-  label: string;
-  rank?: number;
-  is_default?: boolean;
-  metadata?: Record<string, unknown> | null;
 }
 
 interface LookupValueRegistryRow extends Record<string, unknown> {
@@ -251,24 +230,6 @@ interface LabelDownloadHandoff {
   message?: string;
 }
 
-interface LabelDesignerShipmentRow extends Record<string, unknown> {
-  id: string;
-  tracking_number?: string | null;
-  shipment_display_id?: string | null;
-  recipient_label?: string | null;
-  destination_city?: string | null;
-  status?: string | null;
-  organization_id?: string | null;
-}
-
-interface LabelDesignerShipmentBoxRow extends Record<string, unknown> {
-  id: string;
-  shipment_id?: string | null;
-  box_number?: number | string | null;
-  barcode_value?: string | null;
-  weight_kg?: number | null;
-}
-
 interface ReprintTarget {
   labelId: string;
   sourceJobId: string;
@@ -315,11 +276,6 @@ function targetTypeOf(job: LabelJob): string {
   return 'unknown';
 }
 
-function nonEmptyString(value: unknown): string | null {
-  const text = String(value ?? '').trim();
-  return text.length ? text : null;
-}
-
 function labelDesignClientLabel(row: LabelDesignClientScopeRow): string {
   return nonEmptyString(row.name) ?? nonEmptyString(row.slug) ?? row.id;
 }
@@ -336,30 +292,6 @@ function labelDesignScopeDisplay(scopeType: LabelDesignScopeType, scopeId: strin
   const resolvedLabel = nonEmptyString(label);
   if (resolvedLabel) return `${scopeType}: ${resolvedLabel}`;
   return scopeId ? `${scopeType}: ${scopeId}` : `${scopeType}: scope required`;
-}
-
-function labelDesignerShipmentLabel(row: LabelDesignerShipmentRow): string {
-  return (
-    nonEmptyString(row.tracking_number) ??
-    nonEmptyString(row.shipment_display_id) ??
-    row.id
-  );
-}
-
-function labelDesignerShipmentSub(row: LabelDesignerShipmentRow): string {
-  return [
-    nonEmptyString(row.recipient_label),
-    nonEmptyString(row.destination_city),
-    nonEmptyString(row.status),
-  ].filter(Boolean).join(' - ');
-}
-
-function labelDesignerShipmentBoxLabel(row: LabelDesignerShipmentBoxRow): string {
-  const boxNumber = nonEmptyString(row.box_number);
-  const barcode = nonEmptyString(row.barcode_value);
-  if (boxNumber && barcode) return `Box ${boxNumber} - ${barcode}`;
-  if (boxNumber) return `Box ${boxNumber}`;
-  return barcode ?? row.id;
 }
 
 function routeRunTargetLabel(row: RouteRunDirectoryRow | null | undefined): string {
@@ -410,11 +342,6 @@ function defaultLabelTypeForTarget(value: TargetLabelTargetType): string {
   return 'route';
 }
 
-function objectRecord(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  return value as Record<string, unknown>;
-}
-
 function arrayOfStrings(value: unknown): string[] {
   return Array.isArray(value)
     ? value.map((item) => nonEmptyString(item)).filter((item): item is string => Boolean(item))
@@ -423,17 +350,6 @@ function arrayOfStrings(value: unknown): string[] {
 
 function readinessStatus(value: unknown): string {
   return nonEmptyString(objectRecord(value).status) ?? 'missing';
-}
-
-function operatorTokenLabel(value: string | null | undefined): string {
-  const normalized = nonEmptyString(value);
-  if (!normalized) return '-';
-  return normalized
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\b\w/g, (match) => match.toUpperCase())
-    .replace(/\b(Dpi|Url|Id|Api|Rpc|Sql|Rls)\b/g, (match) => match.toUpperCase());
 }
 
 function readinessValue(value: unknown): Record<string, unknown> {
@@ -716,52 +632,6 @@ function resolveLabelReprintTargets(
 // with an `'all'` sentinel prepended for the "show all" chip. No hardcoded
 // status array; if the lookup is empty the chip toolbar surfaces a
 // `<StateView kind="error" />` instead of degrading silently.
-function specDisplayName(spec: LabelSpec): string {
-  return nonEmptyString(spec.template_key) ?? nonEmptyString(spec.name) ?? spec.id;
-}
-
-function pageFromSpec(spec?: LabelSpec): Record<string, unknown> {
-  const renderer = spec?.renderer_config ?? {};
-  const page = renderer.page;
-  if (page && typeof page === 'object' && !Array.isArray(page)) {
-    return page as Record<string, unknown>;
-  }
-  if (spec?.dimensions?.toLowerCase().includes('a4')) {
-    return { width_mm: 210, height_mm: 297, dpi: spec.dpi ?? 300, margin_mm: 5 };
-  }
-  if (spec?.dimensions?.toLowerCase().includes('a6')) {
-    return { width_mm: 105, height_mm: 148, dpi: spec.dpi ?? 300, margin_mm: 4 };
-  }
-  return { width_inch: 4, height_inch: 6, dpi: spec?.dpi ?? 203, margin_inch: 0.12 };
-}
-
-function blocksFromSpec(spec?: LabelSpec): Array<Record<string, unknown>> {
-  const renderer = spec?.renderer_config ?? {};
-  if (Array.isArray(renderer.blocks)) {
-    return renderer.blocks.filter((block): block is Record<string, unknown> =>
-      !!block && typeof block === 'object' && !Array.isArray(block),
-    );
-  }
-  if (Array.isArray(renderer.zones)) {
-    return renderer.zones
-      .filter((zone): zone is Record<string, unknown> =>
-        !!zone && typeof zone === 'object' && !Array.isArray(zone),
-      )
-      .map((zone, index) => ({
-        type: String(zone.type ?? 'text'),
-        binding: zone.binding ?? zone.value_path ?? zone.text ?? null,
-        value_path: zone.value_path ?? zone.binding ?? null,
-        x: Number(zone.x ?? 24),
-        y: Number(zone.y ?? 24 + index * 28),
-        width: Number(zone.width ?? zone.max_width ?? 240),
-        height: Number(zone.height ?? zone.max_height ?? Math.max(Number(zone.size ?? 12) + 6, 18)),
-        font: zone.font ?? null,
-        font_size: Number(zone.size ?? zone.font_size ?? 12),
-      }));
-  }
-  return [];
-}
-
 function normalizeLabelTypeOptions(rows: LabelTypeOption[]): LabelTypeOption[] {
   return rows
     .filter((row) => row.value)
@@ -785,95 +655,11 @@ function labelTypeOptionsFromLookupFallback() {
   return normalizeLabelTypeOptions([...(getLookups('label_type') ?? [])]);
 }
 
-function defaultLabelTypeValue(options: LabelTypeOption[]): string {
-  return options.find((option) => option.is_default)?.value ?? options[0]?.value ?? '';
-}
-
 function labelTypeSupportsTarget(option: LabelTypeOption, targetType: TargetLabelTargetType): boolean {
   const configured = option.metadata?.compatible_target_types ?? option.metadata?.target_types ?? option.metadata?.target_type;
   const values = Array.isArray(configured) ? configured : configured ? [configured] : [];
   if (values.length === 0) return option.value === defaultLabelTypeForTarget(targetType);
   return values.some((value) => String(value).trim() === targetType);
-}
-
-function labelDesignValueFromSpec(spec: LabelSpec | undefined, labelType: string): Record<string, unknown> {
-  const renderer = spec?.renderer_config ?? {};
-  const normalizedLabelType = labelType.trim();
-  const templateKey = spec ? specDisplayName(spec) : normalizedLabelType;
-  const nextVersion = Number(spec?.version ?? 0) + 1;
-  const assets = Array.isArray(renderer.assets)
-    ? renderer.assets
-    : Array.isArray(spec?.asset_refs)
-      ? spec.asset_refs
-      : [];
-  const rendererBarcode = renderer.barcode && typeof renderer.barcode === 'object'
-    ? renderer.barcode as Record<string, unknown>
-    : {};
-  return {
-    templates: {
-      [normalizedLabelType]: {
-        template_key: templateKey,
-        label_type: normalizedLabelType,
-        version: `v${nextVersion}`,
-        page: pageFromSpec(spec),
-        blocks: blocksFromSpec(spec),
-        assets,
-        barcode: {
-          type: spec?.barcode_format ?? rendererBarcode.type ?? 'CODE128',
-          value_path: 'shipment.tracking_number',
-        },
-      },
-    },
-  };
-}
-
-function formatJson(value: unknown): string {
-  return JSON.stringify(value, null, 2);
-}
-
-interface LabelDesignTemplateSummary {
-  templateKey: string;
-  labelType: string;
-  blocks: Array<Record<string, unknown>>;
-  page: Partial<PageConfig>;
-  assets: Array<Record<string, unknown>>;
-  assetsCount: number;
-  firstBinding?: string | null;
-}
-
-function labelDesignTemplateSummary(
-  value: unknown,
-  preferredLabelType?: string | null,
-): LabelDesignTemplateSummary | null {
-  const root = objectRecord(value);
-  const templates = objectRecord(root.templates);
-  const preferred = nonEmptyString(preferredLabelType);
-  const templateEntry =
-    preferred && templates[preferred] && typeof templates[preferred] === 'object' && !Array.isArray(templates[preferred])
-      ? [preferred, templates[preferred]] as const
-      : Object.entries(templates).find(([, template]) => !!template && typeof template === 'object' && !Array.isArray(template));
-  if (!templateEntry) return null;
-  const [labelType, templateValue] = templateEntry;
-  const template = templateValue as Record<string, unknown>;
-  const blocks = Array.isArray(template.blocks)
-    ? template.blocks.filter((block): block is Record<string, unknown> =>
-      !!block && typeof block === 'object' && !Array.isArray(block),
-    )
-    : [];
-  const assets = Array.isArray(template.assets) ? template.assets : [];
-  const page = objectRecord(template.page);
-  const first = blocks[0];
-  return {
-    templateKey: nonEmptyString(template.template_key) ?? labelType,
-    labelType,
-    blocks,
-    page,
-    assets,
-    assetsCount: assets.length,
-    firstBinding: first
-      ? nonEmptyString(first.value_path) ?? nonEmptyString(first.binding) ?? nonEmptyString(first.text)
-      : null,
-  };
 }
 
 function labelDesignSummaryText(summary: LabelDesignTemplateSummary): string {
@@ -893,6 +679,7 @@ function LabelDesignReadOnlyCanvas({
   compact?: boolean;
   ariaLabel?: string;
 }) {
+  const { t } = useI18n();
   if (!summary) {
     return (
       <div
@@ -901,7 +688,7 @@ function LabelDesignReadOnlyCanvas({
         data-testid="label-design-readonly-canvas-empty"
         style={{ marginTop: '10px', padding: compact ? '10px' : '16px', border: '1px solid var(--line)' }}
       >
-        Design JSON needs a valid template
+        {t('platformLabels.labelDesignReadOnlyCanvas.designJsonNeedsA')}
       </div>
     );
   }
@@ -927,119 +714,6 @@ function LabelDesignReadOnlyCanvas({
       />
     </div>
   );
-}
-
-function withLabelDesignTemplate(
-  value: Record<string, unknown>,
-  labelType: string,
-  update: (template: Record<string, unknown>) => Record<string, unknown>,
-): Record<string, unknown> {
-  const templates = objectRecord(value.templates);
-  const current = objectRecord(templates[labelType]);
-  return {
-    ...value,
-    templates: {
-      ...templates,
-      [labelType]: update({
-        template_key: current.template_key ?? labelType,
-        label_type: current.label_type ?? labelType,
-        page: objectRecord(current.page).width_inch || objectRecord(current.page).width_mm
-          ? objectRecord(current.page)
-          : { width_inch: 4, height_inch: 6, dpi: 203, margin_inch: 0.12 },
-        blocks: Array.isArray(current.blocks) ? current.blocks : [],
-        assets: Array.isArray(current.assets) ? current.assets : [],
-        barcode: objectRecord(current.barcode).type
-          ? objectRecord(current.barcode)
-          : { type: 'CODE128', value_path: 'shipment.tracking_number' },
-        ...current,
-      }),
-    },
-  };
-}
-
-function assetNameFromPath(path: string): string {
-  const leaf = path.split('/').filter(Boolean).pop() ?? path;
-  return leaf.replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '_').slice(0, 80) || 'label_asset';
-}
-
-function addLabelDesignAsset(
-  value: Record<string, unknown>,
-  labelType: string,
-  asset: { name?: string | null; path: string; content_type?: string | null },
-): Record<string, unknown> {
-  const assetPath = asset.path.trim();
-  const assetName = (asset.name?.trim() || assetNameFromPath(assetPath)).slice(0, 80);
-  return withLabelDesignTemplate(value, labelType, (template) => {
-    const assets = Array.isArray(template.assets)
-      ? [...template.assets.filter((item) => {
-        const rec = objectRecord(item);
-        return nonEmptyString(rec.path) !== assetPath && nonEmptyString(rec.name) !== assetName;
-      })]
-      : [];
-    assets.push({
-      name: assetName,
-      path: assetPath,
-      content_type: asset.content_type ?? 'image/png',
-    });
-    const blocks = Array.isArray(template.blocks) ? [...template.blocks] : [];
-    blocks.push({
-      type: 'image',
-      section_key: `asset_${assets.length}`,
-      asset_ref: assetName,
-      value_path: assetName,
-      x: 218,
-      y: 84 + (assets.length - 1) * 50,
-      width: 70,
-      height: 42,
-      align: 'left',
-    });
-    return { ...template, assets, blocks };
-  });
-}
-
-function removeLabelDesignAsset(
-  value: Record<string, unknown>,
-  labelType: string,
-  path: string,
-): Record<string, unknown> {
-  const assetPath = path.trim();
-  return withLabelDesignTemplate(value, labelType, (template) => {
-    const currentAssets = Array.isArray(template.assets) ? template.assets : [];
-    const removedNames = new Set(
-      currentAssets
-        .map((item) => objectRecord(item))
-        .filter((item) => nonEmptyString(item.path) === assetPath)
-        .map((item) => nonEmptyString(item.name))
-        .filter((name): name is string => Boolean(name)),
-    );
-    const assets = currentAssets.filter((item) => nonEmptyString(objectRecord(item).path) !== assetPath);
-    const blocks = Array.isArray(template.blocks)
-      ? template.blocks.filter((item) => !removedNames.has(nonEmptyString(objectRecord(item).asset_ref) ?? ''))
-      : [];
-    return { ...template, assets, blocks };
-  });
-}
-
-function parseJsonObject(text: string, label: string): Record<string, unknown> {
-  const parsed = JSON.parse(text) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${label} must be a JSON object`);
-  }
-  return parsed as Record<string, unknown>;
-}
-
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ''));
-    reader.onerror = () => reject(reader.error ?? new Error('Unable to read selected file'));
-    reader.readAsDataURL(file);
-  });
-}
-
-function describeDraftError(error?: Record<string, unknown> | null): string {
-  if (!error) return 'Unknown label designer error';
-  return String(error.message ?? error.code ?? 'Unknown label designer error');
 }
 
 type StatusFilter = string;
@@ -1119,25 +793,26 @@ function LabelTemplateSpecDesignerPreview({
   canWrite: boolean;
   onOpenDesigner: () => void;
 }) {
+  const { t } = useI18n();
   const summary = useMemo(() => labelTemplateSpecPreviewSummary(spec), [spec]);
   return (
     <div data-testid="label-template-spec-shared-preview">
       <p className="state__hint">
-        Template rows preview through the shared Label Designer canvas, so the row drawer matches the full authoring surface.
+        {t('platformLabels.labelTemplateSpecDesignerPreview.templateRowsPreviewThrough')}
       </p>
       <LabelDesignReadOnlyCanvas
         summary={summary}
-        ariaLabel={`Label template shared canvas preview ${specDisplayName(spec)}`}
+        ariaLabel={fill(t('platformLabels.labelTemplateSpecDesignerPreview.labelTemplateSharedCanvas'), { value: String(specDisplayName(spec)) })}
       />
       <div className="card mono" style={{ fontSize: '11px', marginTop: '12px' }}>
-        {`Template reference ${spec.id} | DPI ${spec.dpi ?? '-'} | Barcode ${spec.barcode_format ?? '-'} | Active version ${activeVersionIdOf(spec) ?? '-'}`}
+        {fill(t('platformLabels.labelTemplateSpecDesignerPreview.templateReferenceDpiBarcode'), { id: String(spec.id), value: String(spec.dpi ?? '-'), value2: String(spec.barcode_format ?? '-'), value3: String(activeVersionIdOf(spec) ?? '-') })}
       </div>
       <div className="dt-toolbar" style={{ marginTop: '12px' }}>
-        <Chip label={`Blocks ${summary.blocks.length}`} size="xs" />
-        <Chip label={`Assets ${summary.assetsCount}`} size="xs" />
+        <Chip label={fill(t('platformLabels.labelTemplateSpecDesignerPreview.blocks'), { length: String(summary.blocks.length) })} size="xs" />
+        <Chip label={fill(t('platformLabels.labelTemplateSpecDesignerPreview.assets'), { assetsCount: String(summary.assetsCount) })} size="xs" />
         <span className="dt-tb-spacer" />
         <Button
-          label="Edit in full designer"
+          label={t('platformLabels.labelTemplateSpecDesignerPreview.editInFullDesigner')}
           iconName="edit"
           kind="primary"
           capability={CAP.LABEL_DESIGN_WRITE}
@@ -1160,6 +835,7 @@ function ReprintComposer({
   onClose: () => void;
   onQueued?: (result: { label_job_id?: string | null }, target: ReprintTarget) => void;
 }) {
+  const { t } = useI18n();
   const reprint = useReprintLabel();
   const reasonOptions = useMemo(() => labelReprintReasonOptions(), []);
   const [reason, setReason] = useState<string>(() => reasonOptions.find((option) => option.isDefault)?.value ?? reasonOptions[0]?.value ?? '');
@@ -1168,7 +844,7 @@ function ReprintComposer({
 
   const submit = async () => {
     if (!reason) {
-      pushToast('No label reprint reason is configured.', 'danger');
+      pushToast(t('platformLabels.reprintComposer.noLabelReprintReason'), 'danger');
       return;
     }
     try {
@@ -1185,37 +861,37 @@ function ReprintComposer({
       const firstQueuedJobId = (results[0] as { label_job_id?: string | null } | undefined)?.label_job_id ?? null;
       void firstQueuedJobId;
       pushToast(
-        `Reprint queued for ${jobIds.length} ${jobIds.length === 1 ? 'label' : 'labels'}.`,
+        fill(t(jobIds.length === 1 ? 'platformLabels.reprintComposer.reprintQueuedForOne' : 'platformLabels.reprintComposer.reprintQueuedForOther'), { length: String(jobIds.length) }),
         'good'
       );
       onClose();
     } catch (err) {
       void err;
-      pushToast('Reprint could not be queued. Check access or try again.', 'danger');
+      pushToast(t('platformLabels.reprintComposer.reprintCouldNotBe'), 'danger');
     }
   };
 
   return (
     <div data-testid="reprint-composer">
       <p className="state__hint">
-        Choose a reason for the reprint. Version history appears after rendering finishes.
+        {t('platformLabels.reprintComposer.chooseAReasonFor')}
       </p>
       {targets.length === 0 ? (
         <StateView
           kind="error"
-          title="No label or artifact selected"
-          hint="This row could not be resolved through the label catalog."
+          title={t('platformLabels.reprintComposer.noLabelOrArtifact')}
+          hint={t('platformLabels.reprintComposer.thisRowCouldNot')}
         />
       ) : null}
       {skippedCount > 0 ? (
         <StateView
           kind="empty"
-          title={`${skippedCount} print-queue row${skippedCount === 1 ? '' : 's'} skipped`}
-          hint="Only shipment labels or target-neutral label artifacts that are available in the label catalog can be reprinted."
+          title={fill(t(skippedCount === 1 ? 'platformLabels.reprintComposer.printQueueRowSkippedOne' : 'platformLabels.reprintComposer.printQueueRowSkippedOther'), { skippedCount: String(skippedCount) })}
+          hint={t('platformLabels.reprintComposer.onlyShipmentLabelsOr')}
         />
       ) : null}
       <div className="field">
-        <label className="field__label">Reason</label>
+        <label className="field__label">{t('platformLabels.reprintComposer.reason')}</label>
         <select
           className="field"
           value={reason}
@@ -1229,27 +905,27 @@ function ReprintComposer({
         </select>
       </div>
       <div className="field">
-        <label className="field__label">Notes (optional)</label>
+        <label className="field__label">{t('platformLabels.reprintComposer.notesOptional')}</label>
         <input
           type="text"
-          placeholder="Customer reported damage during transit"
+          placeholder={t('platformLabels.reprintComposer.customerReportedDamageDuring')}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
         />
       </div>
       <div style={{ marginTop: '8px' }}>
-        <div className="eyebrow" style={{ fontSize: '10.5px' }}>{`Targets · ${jobIds.length}`}</div>
+        <div className="eyebrow" style={{ fontSize: '10.5px' }}>{fill(t('platformLabels.reprintComposer.targets'), { length: String(jobIds.length) })}</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
           {jobIds.slice(0, 24).map((id) => (
             <Chip key={id} label={id} size="xs" />
           ))}
-          {jobIds.length > 24 ? <Chip label={`+${jobIds.length - 24} more`} size="xs" /> : null}
+          {jobIds.length > 24 ? <Chip label={fill(t('platformLabels.reprintComposer.more'), { value: String(jobIds.length - 24) })} size="xs" /> : null}
         </div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
-        <Button label="Cancel" kind="ghost" onClick={onClose} />
+        <Button label={t('platformLabels.reprintComposer.cancel')} kind="ghost" onClick={onClose} />
         <Button
-          label="Reprint"
+          label={t('platformLabels.reprintComposer.reprint')}
           iconName="refresh"
           kind="primary"
           capability={CAP.LABELS_REPRINT}
@@ -1272,6 +948,7 @@ function LabelDesignDraftsPanel({
   canWrite: boolean;
   onEditDraft: (draft: LabelDesignDraft) => void;
 }) {
+  const { t } = useI18n();
   const draftsQuery = useLabelDesignDrafts(scopeType, scopeId);
   const archiveDraft = useArchiveLabelDesignDraft();
   const [archiveError, setArchiveError] = useState<string | null>(null);
@@ -1292,7 +969,7 @@ function LabelDesignDraftsPanel({
         pushToast(message, 'danger', { durationMs: 12000 });
         return;
       }
-      pushToast(`Label design draft archived - ${result.draft.id}`, 'good');
+      pushToast(fill(t('platformLabels.labelDesignDraftsPanel.labelDesignDraftArchived'), { id: String(result.draft.id) }), 'good');
     } catch (err) {
       const message = (err as Error).message || 'Label design draft archive failed';
       setArchiveError(message);
@@ -1303,8 +980,8 @@ function LabelDesignDraftsPanel({
     return (
       <StateView
         kind="empty"
-        title="Select a tenant scope"
-        hint="Label design authoring needs a tenant, client, or sender scope before drafts can be listed."
+        title={t('platformLabels.labelDesignDraftsPanel.selectATenantScope')}
+        hint={t('platformLabels.labelDesignDraftsPanel.labelDesignAuthoringNeeds')}
       />
     );
   }
@@ -1313,20 +990,20 @@ function LabelDesignDraftsPanel({
     return (
       <StateView
         kind="empty"
-        title="No label design drafts"
-        hint="Create and publish a design from a template row to activate this scoped label layout."
+        title={t('platformLabels.labelDesignDraftsPanel.noLabelDesignDrafts')}
+        hint={t('platformLabels.labelDesignDraftsPanel.createAndPublishA')}
       />
     );
   }
   return (
     <div className="stack" data-testid="label-design-drafts-panel" style={{ gap: '8px' }}>
       <div className="dt-toolbar">
-        <span className="eyebrow">Recent designs</span>
+        <span className="eyebrow">{t('platformLabels.labelDesignDraftsPanel.recentDesigns')}</span>
         <span className="dt-tb-spacer" />
-        <span className="dt-tb-count mono">{`${drafts.length} draft${drafts.length === 1 ? '' : 's'}`}</span>
+        <span className="dt-tb-count mono">{fill(t(drafts.length === 1 ? 'platformLabels.labelDesignDraftsPanel.draftOne' : 'platformLabels.labelDesignDraftsPanel.draftOther'), { length: String(drafts.length) })}</span>
       </div>
       {archiveError ? (
-        <StateView kind="error" title="Draft archive failed" hint={archiveError} />
+        <StateView kind="error" title={t('platformLabels.labelDesignDraftsPanel.draftArchiveFailed')} hint={archiveError} />
       ) : null}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '8px' }}>
         {visibleDrafts.map((draft: LabelDesignDraft) => {
@@ -1356,7 +1033,7 @@ function LabelDesignDraftsPanel({
                 {draft.draft_name ?? draft.label_type}
               </div>
               <div className="state__hint mono" style={{ marginTop: '6px', fontSize: 11, overflowWrap: 'anywhere' }}>
-                {settingsVersionId ? `Settings ${settingsVersionId}` : 'Settings not published'}
+                {settingsVersionId ? fill(t('platformLabels.labelDesignDraftsPanel.settings'), { settingsVersionId: String(settingsVersionId) }) : t('platformLabels.labelDesignDraftsPanel.settingsNotPublished')}
               </div>
               {designSummary ? (
                 <div className="state__hint mono" style={{ marginTop: '4px', fontSize: 11, overflowWrap: 'anywhere' }}>
@@ -1366,24 +1043,22 @@ function LabelDesignDraftsPanel({
               <LabelDesignReadOnlyCanvas
                 summary={designSummary}
                 compact
-                ariaLabel={`Label design draft preview ${draft.draft_name ?? draft.label_type}`}
+                ariaLabel={fill(t('platformLabels.labelDesignDraftsPanel.labelDesignDraftPreview'), { value: String(draft.draft_name ?? draft.label_type) })}
               />
               {publishedAt ? (
                 <div className="state__hint" style={{ marginTop: '4px', fontSize: 11 }}>
-                  {`Published ${new Date(publishedAt).toLocaleString()}`}
+                  {fill(t('platformLabels.labelDesignDraftsPanel.published'), { value: String(new Date(publishedAt).toLocaleString()) })}
                 </div>
               ) : null}
               {archivedAt ? (
                 <div className="state__hint" style={{ marginTop: '4px', fontSize: 11 }}>
-                  {`Archived ${new Date(archivedAt).toLocaleString()}${
-                    draft.archive_reason ? ` - ${draft.archive_reason}` : ''
-                  }`}
+                  {fill(t('platformLabels.labelDesignDraftsPanel.archived'), { value: String(new Date(archivedAt).toLocaleString()), value2: String(draft.archive_reason ? ` - ${draft.archive_reason}` : '') })}
                 </div>
               ) : null}
               {canWrite && draft.status === 'draft' ? (
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', flexWrap: 'wrap', marginTop: '8px' }}>
                   <Button
-                    label="Edit draft"
+                    label={t('platformLabels.labelDesignDraftsPanel.editDraft')}
                     iconName="edit"
                     kind="ghost"
                     size="sm"
@@ -1391,7 +1066,7 @@ function LabelDesignDraftsPanel({
                     onClick={() => onEditDraft(draft)}
                   />
                   <Button
-                    label="Archive draft"
+                    label={t('platformLabels.labelDesignDraftsPanel.archiveDraft')}
                     iconName="trash"
                     kind="danger"
                     size="sm"
@@ -1405,818 +1080,6 @@ function LabelDesignDraftsPanel({
             </div>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-function LabelDesignComposer({
-  baseSpec,
-  initialDraft,
-  scopeType,
-  scopeId,
-  scopeLabel,
-  labelTypes,
-  canWrite,
-  onClose,
-}: {
-  baseSpec?: LabelSpec;
-  initialDraft?: LabelDesignDraft;
-  scopeType: LabelDesignScopeType;
-  scopeId: string;
-  scopeLabel: string;
-  labelTypes: LabelTypeOption[];
-  canWrite: boolean;
-  onClose: () => void;
-}) {
-  const createDraft = useCreateLabelDesignDraft();
-  const updateDraft = useUpdateLabelDesignDraft();
-  const validateDraft = useValidateLabelDesignDraft();
-  const publishDraft = usePublishLabelDesignDraft();
-  const fieldCatalogQuery = useLabelDesignerFieldCatalog(scopeType, scopeId);
-  const effectiveConfigQuery = useLabelDesignerEffectiveConfig(scopeType, scopeId);
-  const assetsQuery = useLabelDesignerAssets(scopeType, scopeId);
-  const uploadAsset = useUploadLabelDesignerAsset();
-  const deleteAsset = useDeleteLabelDesignerAsset();
-  const samplePayload = useLabelDesignerSamplePayload();
-  const previewDraft = usePreviewLabelDesignDraft();
-  const shipmentQuery = useResourceList<LabelDesignerShipmentRow>('shipment_directory', {
-    sort: { key: 'created_at', dir: 'desc' },
-    page_size: 50,
-  });
-  const availableLabelTypes = labelTypes;
-  const initialLabelType = defaultLabelTypeValue(availableLabelTypes);
-  const initialDraftLabelType = initialDraft?.label_type ?? initialLabelType;
-  const [draftName, setDraftName] = useState(
-    initialDraft?.draft_name ?? `${baseSpec ? specDisplayName(baseSpec) : (initialDraftLabelType || 'label')} active design`,
-  );
-  const [labelType, setLabelType] = useState(initialDraftLabelType);
-  const [currentDraft, setCurrentDraft] = useState<LabelDesignDraft | null>(initialDraft ?? null);
-  const [lastSavedDraftId, setLastSavedDraftId] = useState<string | null>(initialDraft?.id ?? null);
-  const [publishedReadback, setPublishedReadback] = useState<{
-    settingsVersionId?: string | null;
-    scopeType?: string | null;
-    scopeId?: string | null;
-    version?: number | null;
-  } | null>(null);
-  const [changeReason, setChangeReason] = useState(`Activate ${scopeType} label design from Console V2`);
-  const [draftText, setDraftText] = useState(() => (
-    initialDraft
-      ? formatJson(initialDraft.draft_value)
-      : initialDraftLabelType
-        ? formatJson(labelDesignValueFromSpec(baseSpec, initialDraftLabelType))
-        : '{}'
-  ));
-  const [error, setError] = useState<string | null>(null);
-  const [pastedAssetName, setPastedAssetName] = useState(() => `label-designer-asset-${Date.now()}.png`);
-  const [pastedAssetDataUrl, setPastedAssetDataUrl] = useState('');
-  const [isAssetDropActive, setIsAssetDropActive] = useState(false);
-  const [assetReadback, setAssetReadback] = useState<{
-    action: 'uploaded' | 'deleted';
-    path: string;
-    source: string;
-    contentType?: string | null;
-  } | null>(null);
-  const [selectedPreviewShipmentId, setSelectedPreviewShipmentId] = useState('');
-  const [selectedPreviewShipmentBoxId, setSelectedPreviewShipmentBoxId] = useState('');
-  const [samplePayloadText, setSamplePayloadText] = useState('');
-  const [previewResponseText, setPreviewResponseText] = useState('');
-  const boxQuery = useResourceList<LabelDesignerShipmentBoxRow>(
-    'shipment_boxes',
-    selectedPreviewShipmentId
-      ? {
-        filter: { shipment_id: selectedPreviewShipmentId },
-        sort: { key: 'box_number', dir: 'asc' },
-        page_size: 50,
-      }
-      : undefined,
-    { enabled: Boolean(selectedPreviewShipmentId) },
-  );
-  const isBusy = createDraft.isPending || updateDraft.isPending || validateDraft.isPending || publishDraft.isPending || uploadAsset.isPending || deleteAsset.isPending || samplePayload.isPending || previewDraft.isPending;
-  const hasLabelTypes = availableLabelTypes.length > 0;
-  const canMutateDesign = canWrite && hasLabelTypes;
-  const writeDeniedMessage = 'Label design write access is required.';
-  const availableAssets = assetsQuery.data?.assets ?? [];
-  const assetReadbackConfirmed = assetReadback
-    ? assetReadback.action === 'deleted'
-      ? !availableAssets.some((asset) => asset.path === assetReadback.path)
-      : availableAssets.some((asset) => asset.path === assetReadback.path)
-    : false;
-  const visualSummary = useMemo(() => {
-    try {
-      return labelDesignTemplateSummary(parseJsonObject(draftText, 'Label design'), labelType);
-    } catch {
-      return null;
-    }
-  }, [draftText, labelType]);
-  useEffect(() => {
-    if (selectedPreviewShipmentId) return;
-    const firstShipmentId = nonEmptyString(shipmentQuery.data?.rows?.[0]?.id);
-    if (firstShipmentId) setSelectedPreviewShipmentId(firstShipmentId);
-  }, [selectedPreviewShipmentId, shipmentQuery.data?.rows]);
-
-  useEffect(() => {
-    const boxes = boxQuery.data?.rows ?? [];
-    if (selectedPreviewShipmentBoxId && boxes.some((box) => box.id === selectedPreviewShipmentBoxId)) return;
-    setSelectedPreviewShipmentBoxId(nonEmptyString(boxes[0]?.id) ?? '');
-  }, [boxQuery.data?.rows, selectedPreviewShipmentBoxId]);
-
-  const updateDraftDesign = (update: (value: Record<string, unknown>) => Record<string, unknown>) => {
-    if (!canWrite) return;
-    try {
-      const next = update(parseJsonObject(draftText, 'Label design'));
-      setDraftText(formatJson(next));
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  const changeLabelType = (nextLabelType: string) => {
-    if (!canWrite) return;
-    setLabelType(nextLabelType);
-    if (!baseSpec && nextLabelType) {
-      setDraftText(formatJson(labelDesignValueFromSpec(undefined, nextLabelType)));
-      setDraftName((current) => (
-        current.trim() === '' || current === `${labelType || 'label'} active design`
-          ? `${nextLabelType} active design`
-          : current
-      ));
-    }
-  };
-
-  const uploadAssetPayload = async ({
-    fileName,
-    contentType,
-    fileBase64,
-  }: {
-    fileName: string;
-    contentType: string;
-    fileBase64: string;
-  }): Promise<boolean> => {
-    setError(null);
-    if (!canWrite) {
-      setError(writeDeniedMessage);
-      return false;
-    }
-    try {
-      const uploaded = await uploadAsset.mutateAsync({
-        scopeType,
-        scopeId,
-        file_name: fileName,
-        content_type: contentType || 'image/png',
-        file_base64: fileBase64,
-      });
-      const path = nonEmptyString(uploaded.path);
-      if (!path) throw new Error('Asset upload returned no storage path');
-      updateDraftDesign((value) => addLabelDesignAsset(value, labelType, {
-        name: assetNameFromPath(path),
-        path,
-        content_type: contentType || 'image/png',
-      }));
-      setAssetReadback({
-        action: 'uploaded',
-        path,
-        source: fileName,
-        contentType: contentType || 'image/png',
-      });
-      pushToast(`Label asset uploaded - ${path}`, 'good');
-      return true;
-    } catch (err) {
-      setError((err as Error).message);
-      return false;
-    }
-  };
-
-  const uploadAssetFile = async (file: File | null | undefined) => {
-    if (!canWrite) {
-      setError(writeDeniedMessage);
-      return;
-    }
-    if (!file) return;
-    setError(null);
-    try {
-      const fileBase64 = await readFileAsDataUrl(file);
-      await uploadAssetPayload({
-        fileName: file.name,
-        contentType: file.type || 'image/png',
-        fileBase64,
-      });
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  const uploadDroppedAsset = (event: ReactDragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setIsAssetDropActive(false);
-    if (!canWrite || isBusy || !labelType) return;
-    void uploadAssetFile(event.dataTransfer.files?.[0] ?? null);
-  };
-
-  const uploadPastedAsset = async () => {
-    if (!canWrite) {
-      setError(writeDeniedMessage);
-      return;
-    }
-    const fileName = pastedAssetName.trim();
-    const fileBase64 = pastedAssetDataUrl.trim();
-    if (!fileName) {
-      setError('Asset file name is required');
-      return;
-    }
-    if (!fileBase64) {
-      setError('Image data is required');
-      return;
-    }
-    const contentType = fileBase64.match(/^data:([^;,]+)[;,]/i)?.[1] ?? 'image/png';
-    const uploaded = await uploadAssetPayload({ fileName, contentType, fileBase64 });
-    if (uploaded) {
-      setPastedAssetName('');
-      setPastedAssetDataUrl('');
-    }
-  };
-
-  const selectAsset = (asset: { name?: string | null; path?: string | null; content_type?: string | null }) => {
-    if (!canWrite) return;
-    const path = nonEmptyString(asset.path);
-    if (!path) return;
-    updateDraftDesign((value) => addLabelDesignAsset(value, labelType, {
-      name: nonEmptyString(asset.name) ?? assetNameFromPath(path),
-      path,
-      content_type: nonEmptyString(asset.content_type) ?? 'image/png',
-    }));
-  };
-
-  const deleteAssetPath = async (path: string) => {
-    if (!canWrite) {
-      setError(writeDeniedMessage);
-      return;
-    }
-    try {
-      await deleteAsset.mutateAsync({ path, scopeType, scopeId });
-      updateDraftDesign((value) => removeLabelDesignAsset(value, labelType, path));
-      setAssetReadback({
-        action: 'deleted',
-        path,
-        source: assetNameFromPath(path),
-      });
-      pushToast(`Label asset deleted - ${path}`, 'good');
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  const saveDraft = async (): Promise<LabelDesignDraft | null> => {
-    setError(null);
-    if (!canWrite) {
-      setError(writeDeniedMessage);
-      return null;
-    }
-    if (!labelType) {
-      setError('Label type options are not configured; label design saving is disabled until setup is complete.');
-      return null;
-    }
-    let draftValue: Record<string, unknown>;
-    try {
-      draftValue = parseJsonObject(draftText, 'Label design');
-    } catch (err) {
-      setError((err as Error).message);
-      return null;
-    }
-
-    const result = currentDraft?.status === 'draft'
-      ? await updateDraft.mutateAsync({
-        draft_id: currentDraft.id,
-        label_type: labelType,
-        draft_name: draftName.trim() || null,
-        draft_value: draftValue,
-        scopeType,
-        scopeId,
-      })
-      : await createDraft.mutateAsync({
-        scope_type: scopeType,
-        scope_id: scopeId,
-        label_type: labelType,
-        draft_name: draftName.trim() || null,
-        draft_value: draftValue,
-      });
-
-    if (!result.ok || !result.draft?.id) {
-      setError(describeDraftError(result.error));
-      return null;
-    }
-
-    setCurrentDraft(result.draft);
-    setLastSavedDraftId(result.draft.id);
-    setPublishedReadback(null);
-    pushToast(`Label design draft saved - ${result.draft.id}`, 'good');
-    return result.draft;
-  };
-
-  const submit = async () => {
-    setError(null);
-    const savedDraft = await saveDraft();
-    if (!savedDraft?.id) return;
-
-    const validation = await validateDraft.mutateAsync(savedDraft.id);
-    if (!validation.ok) {
-      const detail = validation.errors.length
-        ? validation.errors.map((item) => item.message ?? item.code).join('; ')
-        : describeDraftError(validation.error);
-      setError(`Validation failed: ${detail}`);
-      return;
-    }
-
-    const published = await publishDraft.mutateAsync({
-      draftId: savedDraft.id,
-      changeReason,
-      scopeType,
-      scopeId,
-    });
-    if (!published.ok) {
-      const detail = published.validation_errors?.length
-        ? published.validation_errors.map((item) => item.message ?? item.code).join('; ')
-        : describeDraftError(published.error);
-      setError(`Publish failed: ${detail}`);
-      return;
-    }
-
-    setCurrentDraft({
-      ...savedDraft,
-      status: 'published',
-      published_settings_version_id: published.settings_version_id ?? savedDraft.published_settings_version_id ?? null,
-      published_at: new Date().toISOString(),
-    });
-    setPublishedReadback({
-      settingsVersionId: published.settings_version_id ?? null,
-      scopeType: published.scope_type ?? scopeType,
-      scopeId: published.scope_id ?? scopeId,
-      version: typeof published.version === 'number' ? published.version : null,
-    });
-    pushToast(
-      `Label design activated. Settings ${published.settings_version_id ?? '-'}`,
-      'good',
-    );
-  };
-
-  const loadPreviewSamplePayload = async () => {
-    setError(null);
-    if (!selectedPreviewShipmentId) {
-      setError('Select a shipment before loading sample payload.');
-      return;
-    }
-    try {
-      const result = await samplePayload.mutateAsync({
-        shipment_id: selectedPreviewShipmentId,
-        shipment_box_id: selectedPreviewShipmentBoxId || null,
-      });
-      if (!result.ok || !result.payload) {
-        setError(`Sample payload failed: ${describeDraftError(result.error)}`);
-        return;
-      }
-      setSamplePayloadText(formatJson(result.payload));
-      pushToast(`Label sample payload loaded - ${selectedPreviewShipmentId}`, 'good');
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  const renderPreview = async () => {
-    setError(null);
-    if (!selectedPreviewShipmentId) {
-      setError('Select a shipment before rendering preview.');
-      return;
-    }
-    const savedDraft = await saveDraft();
-    if (!savedDraft?.id) return;
-    try {
-      const result = await previewDraft.mutateAsync({
-        draft_id: savedDraft.id,
-        label_type: labelType,
-        shipment_id: selectedPreviewShipmentId,
-        shipment_box_id: selectedPreviewShipmentBoxId || null,
-      });
-      setPreviewResponseText(formatJson(result));
-      if (!result.ok) {
-        setError(`Preview failed: ${describeDraftError(result.error)}`);
-        return;
-      }
-      pushToast(`Label preview rendered for draft ${savedDraft.id}`, 'good');
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  const designerBusyAction = createDraft.isPending
-    ? 'create-draft'
-    : updateDraft.isPending
-      ? 'save-draft'
-      : validateDraft.isPending
-        ? 'validate-draft'
-        : publishDraft.isPending
-          ? 'publish-draft'
-          : null;
-  const fieldCatalogJson = useMemo(() => formatJson(fieldCatalogQuery.data?.value ?? { fields: [] }), [fieldCatalogQuery.data?.value]);
-  const fieldCatalogCount = Array.isArray(fieldCatalogQuery.data?.value?.fields)
-    ? fieldCatalogQuery.data.value.fields.length
-    : 0;
-  const previewShipmentOptions = useMemo<ShipmentOption[]>(() => (
-    (shipmentQuery.data?.rows ?? []).map((shipment) => ({
-      id: shipment.id,
-      label: [
-        labelDesignerShipmentLabel(shipment),
-        labelDesignerShipmentSub(shipment),
-      ].filter(Boolean).join(' - '),
-    }))
-  ), [shipmentQuery.data?.rows]);
-  const previewShipmentBoxOptions = useMemo<ShipmentBoxOption[]>(() => (
-    (boxQuery.data?.rows ?? []).map((box) => ({
-      id: box.id,
-      label: labelDesignerShipmentBoxLabel(box),
-    }))
-  ), [boxQuery.data?.rows]);
-  const previewBusyAction = samplePayload.isPending
-    ? 'sample-payload'
-    : previewDraft.isPending
-      ? 'preview-draft'
-      : null;
-  const sharedDesignerDrafts = useMemo<DraftRow[]>(() => (currentDraft ? [currentDraft as DraftRow] : []), [currentDraft]);
-  const sharedSelectedScope = useMemo(() => (
-    scopeId ? { scopeType, scopeId } : null
-  ), [scopeId, scopeType]);
-
-  const changeDraftEditor = (value: string) => {
-    setDraftText(value);
-    try {
-      parseJsonObject(value, 'Label design');
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  const selectSharedDraft = (draftId: string) => {
-    const draft = sharedDesignerDrafts.find((item) => item.id === draftId) as LabelDesignDraft | undefined;
-    if (!draft) {
-      setCurrentDraft(null);
-      setLastSavedDraftId(null);
-      return;
-    }
-    setCurrentDraft(draft);
-    setLastSavedDraftId(draft.id);
-    setDraftName(draft.draft_name ?? draft.label_type);
-    setLabelType(draft.label_type);
-    setDraftText(formatJson(draft.draft_value));
-    setError(null);
-  };
-
-  const createSharedDraft = async () => {
-    const saved = await saveDraft();
-    if (saved?.id) {
-      setCurrentDraft(saved);
-      setLastSavedDraftId(saved.id);
-    }
-  };
-
-  const validateSharedDraft = async () => {
-    setError(null);
-    const savedDraft = currentDraft?.id ? currentDraft : await saveDraft();
-    if (!savedDraft?.id) return;
-    const validation = await validateDraft.mutateAsync(savedDraft.id);
-    if (!validation.ok) {
-      const detail = validation.errors.length
-        ? validation.errors.map((item) => item.message ?? item.code).join('; ')
-        : describeDraftError(validation.error);
-      setError(`Validation failed: ${detail}`);
-      return;
-    }
-    pushToast(`Label design validated for draft ${savedDraft.id}`, 'good');
-  };
-
-  return (
-    <div data-testid="label-design-composer">
-      <p className="state__hint">
-        Publish writes the active label design settings version for {scopeLabel}. The renderer materializes immutable template specs from this active design during label generation.
-      </p>
-      {lastSavedDraftId ? (
-        <div className="dt-toolbar" data-testid="label-design-save-readback" style={{ marginBottom: '8px' }}>
-          <span className="eyebrow">Draft confirmation</span>
-          <Chip label={`Draft ${lastSavedDraftId}`} size="xs" kind="good" />
-          <Chip label={`Status ${currentDraft?.status ?? 'draft'}`} size="xs" />
-          {publishedReadback ? (
-            <>
-              <Chip label={`Settings ${publishedReadback.settingsVersionId ?? '-'}`} size="xs" kind="good" />
-              <Chip
-                label={`Scope ${operatorTokenLabel(publishedReadback.scopeType ?? scopeType)} ${publishedReadback.scopeId ?? scopeId}`}
-                size="xs"
-              />
-              {publishedReadback.version ? (
-                <Chip label={`Version ${publishedReadback.version}`} size="xs" />
-              ) : null}
-            </>
-          ) : null}
-        </div>
-      ) : null}
-      {!hasLabelTypes ? (
-        <StateView
-          kind="error"
-          title="Label types are not configured"
-          hint="Label type options are not configured. Finish label setup before publishing designs."
-        />
-      ) : null}
-      <div className="field">
-        <label className="field__label">Change reason</label>
-        <input
-          aria-label="Change reason"
-          type="text"
-          value={changeReason}
-          disabled={!canWrite || isBusy}
-          onChange={(event) => {
-            if (!canWrite || isBusy) return;
-            setChangeReason(event.target.value);
-          }}
-        />
-      </div>
-      <div className="card label-designer-studio" data-testid="label-design-visual-editor" style={{ padding: '10px', marginBottom: '10px' }}>
-        <div className="dt-toolbar" style={{ marginBottom: '8px' }}>
-          <span className="eyebrow">Shared visual label designer</span>
-          {visualSummary ? (
-            <>
-              <Chip label={`Template ${visualSummary.templateKey}`} size="xs" />
-              <Chip label={`Blocks ${visualSummary.blocks.length}`} size="xs" />
-              <Chip label={`Assets ${visualSummary.assetsCount}`} size="xs" />
-            </>
-          ) : null}
-        </div>
-        {!fieldCatalogQuery.isLoading && fieldCatalogCount === 0 ? (
-          <StateView
-            kind="error"
-            title="No label field catalog"
-            hint="Add label field options before operators can add visual bindings."
-          />
-        ) : null}
-        <DraftWorkflow
-          prefix="label-design-shared"
-          canWrite={canMutateDesign}
-          isBusy={isBusy}
-          busyAction={designerBusyAction}
-          selectedScope={sharedSelectedScope}
-          drafts={sharedDesignerDrafts}
-          selectedDraftId={currentDraft?.id ?? ''}
-          draftName={draftName}
-          labelType={labelType}
-          labelTypeOptions={availableLabelTypes.map((option) => ({
-            value: option.value,
-            label: option.label,
-          }))}
-          draftEditor={draftText}
-          draftEditorError={error}
-          fieldCatalogJson={fieldCatalogJson}
-          assets={availableAssets}
-          onDraftSelection={selectSharedDraft}
-          onDraftNameChange={setDraftName}
-          onLabelTypeChange={changeLabelType}
-          onDraftEditorChange={changeDraftEditor}
-          onCreateDraft={() => { void createSharedDraft(); }}
-          onSaveDraft={() => { void saveDraft(); }}
-          onValidateDraft={() => { void validateSharedDraft(); }}
-          onPublishDraft={() => { void submit(); }}
-        />
-        <div data-testid="label-designer-asset-workbench" style={{ marginTop: '10px' }}>
-          <div
-            role="button"
-            tabIndex={0}
-            aria-label="Drop label image asset"
-            data-testid="label-designer-asset-dropzone"
-            onDragEnter={(event) => {
-              event.preventDefault();
-              if (canWrite && !isBusy && labelType) setIsAssetDropActive(true);
-            }}
-            onDragOver={(event) => {
-              event.preventDefault();
-              if (canWrite && !isBusy && labelType) event.dataTransfer.dropEffect = 'copy';
-            }}
-            onDragLeave={(event) => {
-              if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-              setIsAssetDropActive(false);
-            }}
-            onDrop={uploadDroppedAsset}
-            style={{
-              border: `1px dashed ${isAssetDropActive ? 'var(--accent)' : 'var(--line-strong)'}`,
-              background: isAssetDropActive ? 'rgba(20, 120, 90, 0.08)' : 'var(--paper)',
-              borderRadius: 8,
-              padding: '10px',
-              marginBottom: '8px',
-            }}
-          >
-            <div className="dt-toolbar" style={{ marginBottom: 0 }}>
-              <span className="eyebrow">Drop image asset</span>
-              <Chip label={!canWrite ? 'read-only' : isBusy ? 'uploading' : 'PNG / JPEG / WebP'} size="xs" />
-            </div>
-          </div>
-          <div className="form-grid form-grid--2">
-            <div className="field">
-              <label className="field__label">Image asset upload</label>
-              <input
-                aria-label="Upload label asset"
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                disabled={!canWrite || isBusy || !labelType}
-                onChange={(event) => {
-                  void uploadAssetFile(event.target.files?.[0] ?? null);
-                  event.target.value = '';
-                }}
-              />
-            </div>
-            <div className="field">
-              <label className="field__label">Designer asset catalog</label>
-              <div className="state__hint mono" style={{ fontSize: 11, overflowWrap: 'anywhere' }}>
-                {assetsQuery.isLoading
-                  ? 'Loading designer assets'
-                  : `${availableAssets.length} designer asset${availableAssets.length === 1 ? '' : 's'} available`}
-              </div>
-            </div>
-          </div>
-          <div className="form-grid form-grid--2" style={{ marginTop: '8px' }}>
-            <div className="field">
-              <label className="field__label">Pasted image file name</label>
-              <input
-                aria-label="Pasted image file name"
-                type="text"
-                value={pastedAssetName}
-                onChange={(event) => setPastedAssetName(event.target.value)}
-                disabled={!canWrite || isBusy || !labelType}
-              />
-            </div>
-            <div className="field">
-              <label className="field__label">Pasted image data URL</label>
-              <textarea
-                aria-label="Pasted image data URL"
-                rows={3}
-                value={pastedAssetDataUrl}
-                onChange={(event) => setPastedAssetDataUrl(event.target.value)}
-                disabled={!canWrite || isBusy || !labelType}
-              />
-            </div>
-          </div>
-          <div className="dt-toolbar" style={{ marginTop: '6px' }}>
-            <Button
-              label="Import pasted asset"
-              iconName="upload"
-              kind="ghost"
-              disabled={!canWrite || isBusy || !labelType || !pastedAssetDataUrl.trim()}
-              onClick={() => { void uploadPastedAsset(); }}
-            />
-          </div>
-          {availableAssets.length > 0 ? (
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
-              {availableAssets.slice(0, 8).map((asset) => {
-                const assetLabel = asset.name || assetNameFromPath(asset.path);
-                return (
-                  <span
-                    key={asset.path}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', minWidth: 0 }}
-                  >
-                    <Button
-                      label={assetLabel}
-                      iconName="file"
-                      kind="ghost"
-                      disabled={!canWrite}
-                      onClick={() => selectAsset(asset)}
-                    />
-                    <Button
-                      label="Delete"
-                      iconName="trash"
-                      kind="ghost"
-                      ariaLabel={`Delete ${assetLabel}`}
-                      title={`Delete ${assetLabel}`}
-                      disabled={!canWrite || deleteAsset.isPending}
-                      onClick={() => { void deleteAssetPath(asset.path); }}
-                    />
-                  </span>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="state__hint" style={{ marginTop: '6px' }}>
-              Upload a logo or select an existing designer asset to add an image block to this label design.
-            </div>
-          )}
-          {assetReadback ? (
-            <div
-              className="card"
-              data-testid="label-designer-asset-readback"
-              data-readback-action={assetReadback.action}
-              data-readback-status={assetReadbackConfirmed ? 'confirmed' : 'pending'}
-              data-asset-path={assetReadback.path}
-              style={{ padding: '10px', marginTop: '8px' }}
-            >
-              <div className="dt-toolbar">
-                <span className="eyebrow">Asset confirmation</span>
-                <Chip
-                  label={assetReadback.action === 'deleted' ? 'Storage removed' : 'Storage uploaded'}
-                  size="xs"
-                  kind={assetReadbackConfirmed ? 'good' : 'warn'}
-                />
-                <Chip
-                  label={`Catalog ${assetReadbackConfirmed ? 'confirmed' : 'refreshing'}`}
-                  size="xs"
-                  kind={assetReadbackConfirmed ? 'good' : undefined}
-                />
-                {assetReadback.contentType ? (
-                  <Chip label={assetReadback.contentType} size="xs" />
-                ) : null}
-              </div>
-              <div className="mono" style={{ marginTop: 6, overflowWrap: 'anywhere' }}>
-                {assetReadback.path}
-              </div>
-              <p className="state__hint" style={{ marginTop: 6 }}>
-                {assetReadback.action === 'deleted'
-                  ? 'The storage catalog no longer includes this designer asset.'
-                  : `The storage catalog includes this designer asset from ${assetReadback.source}.`}
-              </p>
-            </div>
-          ) : null}
-        </div>
-      </div>
-      <div data-testid="label-design-preview-workbench" style={{ marginBottom: '10px' }}>
-        <PreviewPanel
-          prefix="label-design-shared-preview"
-          isBusy={isBusy}
-          busyAction={previewBusyAction}
-          shipments={previewShipmentOptions}
-          selectedShipmentId={selectedPreviewShipmentId}
-          shipmentBoxes={previewShipmentBoxOptions}
-          selectedShipmentBoxId={selectedPreviewShipmentBoxId}
-          selectedDraftId={canWrite ? currentDraft?.id ?? (draftText.trim() ? 'unsaved-draft' : '') : ''}
-          samplePayloadJson={samplePayloadText || '{}'}
-          previewResponseJson={previewResponseText}
-          onShipmentChange={(id) => {
-            setSelectedPreviewShipmentId(id);
-            setSelectedPreviewShipmentBoxId('');
-            setSamplePayloadText('');
-            setPreviewResponseText('');
-          }}
-          onShipmentBoxChange={setSelectedPreviewShipmentBoxId}
-          onLoadSamplePayload={() => { void loadPreviewSamplePayload(); }}
-          onPreviewDraft={() => { void renderPreview(); }}
-        />
-        <div className="card" data-testid="label-design-effective-config-readback" style={{ padding: '10px', marginTop: '10px' }}>
-          <div className="dt-toolbar">
-            <span className="eyebrow">Effective configuration</span>
-            <Chip label={currentDraft?.id ? `Draft ${currentDraft.id}` : 'Save before preview'} size="xs" kind={currentDraft?.id ? 'good' : 'warn'} />
-            <Chip label={selectedPreviewShipmentId ? `Shipment ${selectedPreviewShipmentId}` : 'Shipment required'} size="xs" kind={selectedPreviewShipmentId ? 'good' : 'warn'} />
-          </div>
-          <div className="form-grid form-grid--2" style={{ marginTop: '8px' }}>
-            <div className="field">
-              <label className="field__label">Effective label design</label>
-              <textarea
-                aria-label="Effective label design"
-                className="mono"
-                rows={8}
-                readOnly
-                value={formatJson(effectiveConfigQuery.data?.design?.value ?? {})}
-              />
-            </div>
-            <div className="field">
-              <label className="field__label">Effective render policy</label>
-              <textarea
-                aria-label="Effective render policy"
-                className="mono"
-                rows={8}
-                readOnly
-                value={formatJson(effectiveConfigQuery.data?.renderPolicy?.value ?? {})}
-              />
-            </div>
-            <div className="field">
-              <label className="field__label">Effective print profile</label>
-              <textarea
-                aria-label="Effective print profile"
-                className="mono"
-                rows={8}
-                readOnly
-                value={formatJson(effectiveConfigQuery.data?.printProfile?.value ?? {})}
-              />
-            </div>
-            <div className="field">
-              <label className="field__label">Effective media catalog</label>
-              <textarea
-                aria-label="Effective media catalog"
-                className="mono"
-                rows={8}
-                readOnly
-                value={formatJson(effectiveConfigQuery.data?.mediaCatalog?.value ?? {})}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-      {error ? (
-        <StateView kind="error" title="Label design action failed" hint={error} />
-      ) : null}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
-        <Button label="Cancel" kind="ghost" onClick={onClose} />
       </div>
     </div>
   );
@@ -2243,6 +1106,7 @@ function LabelRendererReadinessCard({
     testArtifactRef?: string | null;
   }) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [evidenceReference, setEvidenceReference] = useState('');
   const [printerModel, setPrinterModel] = useState('');
   const [testArtifactRef, setTestArtifactRef] = useState('');
@@ -2260,8 +1124,8 @@ function LabelRendererReadinessCard({
       <div className="card" data-testid="label-renderer-readiness-card" style={{ padding: '12px', marginTop: '10px' }}>
         <StateView
           kind="error"
-          title="Renderer readiness did not load"
-          hint="The label renderer status could not be checked. Try again or contact support if it continues."
+          title={t('platformLabels.labelRendererReadinessCard.rendererReadinessDidNot')}
+          hint={t('platformLabels.labelRendererReadinessCard.theLabelRendererStatus')}
         />
       </div>
     );
@@ -2292,57 +1156,57 @@ function LabelRendererReadinessCard({
       style={{ padding: '12px', marginTop: '10px' }}
     >
       <div className="dt-toolbar">
-        <span className="eyebrow">Renderer and printer readiness</span>
-        <Chip label={`Provider ${operatorTokenLabel(providerStatus)}`} size="xs" kind={providerStatus === 'ready' ? 'good' : 'warn'} />
-        <Chip label={`Policy ${operatorTokenLabel(renderPolicyStatus)}`} size="xs" kind={renderPolicyStatus === 'ready' ? 'good' : 'warn'} />
-        <Chip label={`Profile ${operatorTokenLabel(printProfileStatus)}`} size="xs" kind={printProfileStatus === 'ready' ? 'good' : 'warn'} />
-        <Chip label={`Printer certification ${operatorTokenLabel(certificationStatus)}`} size="xs" kind={certificationStatus === 'ready' ? 'good' : 'warn'} />
+        <span className="eyebrow">{t('platformLabels.labelRendererReadinessCard.rendererAndPrinterReadiness')}</span>
+        <Chip label={fill(t('platformLabels.labelRendererReadinessCard.provider'), { value: String(operatorTokenLabel(providerStatus)) })} size="xs" kind={providerStatus === 'ready' ? 'good' : 'warn'} />
+        <Chip label={fill(t('platformLabels.labelRendererReadinessCard.policy'), { value: String(operatorTokenLabel(renderPolicyStatus)) })} size="xs" kind={renderPolicyStatus === 'ready' ? 'good' : 'warn'} />
+        <Chip label={fill(t('platformLabels.labelRendererReadinessCard.profile'), { value: String(operatorTokenLabel(printProfileStatus)) })} size="xs" kind={printProfileStatus === 'ready' ? 'good' : 'warn'} />
+        <Chip label={fill(t('platformLabels.labelRendererReadinessCard.printerCertification'), { value: String(operatorTokenLabel(certificationStatus)) })} size="xs" kind={certificationStatus === 'ready' ? 'good' : 'warn'} />
       </div>
       <div className="form-grid form-grid--2" style={{ marginTop: '8px' }}>
         <div className="field">
-          <label className="field__label">Active renderer provider</label>
+          <label className="field__label">{t('platformLabels.labelRendererReadinessCard.activeRendererProvider')}</label>
           <div className="mono" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px', minHeight: 74, overflowWrap: 'anywhere' }}>
             {providerStatus === 'ready' ? (
               <>
-                <div>{`Provider ${operatorTokenLabel(nonEmptyString(provider.provider_name) ?? 'default')}`}</div>
-                <div>{nonEmptyString(provider.invoke_url) ? 'Endpoint configured' : 'Endpoint missing'}</div>
-                <div>{nonEmptyString(provider.invoke_secret) ? 'Secret redacted' : 'Secret missing'}</div>
-                <div>{`Timeout ${nonEmptyString(provider.timeout_ms) ?? 'default'} ms`}</div>
+                <div>{fill(t('platformLabels.labelRendererReadinessCard.provider'), { value: String(operatorTokenLabel(nonEmptyString(provider.provider_name) ?? 'default')) })}</div>
+                <div>{nonEmptyString(provider.invoke_url) ? t('platformLabels.labelRendererReadinessCard.endpointConfigured') : t('platformLabels.labelRendererReadinessCard.endpointMissing')}</div>
+                <div>{nonEmptyString(provider.invoke_secret) ? t('platformLabels.labelRendererReadinessCard.secretRedacted') : t('platformLabels.labelRendererReadinessCard.secretMissing')}</div>
+                <div>{fill(t('platformLabels.labelRendererReadinessCard.timeoutMs'), { value: String(nonEmptyString(provider.timeout_ms) ?? 'default') })}</div>
               </>
             ) : (
-              <div>{providerError ? 'Label renderer provider needs attention' : 'Label renderer provider is missing or not active'}</div>
+              <div>{providerError ? t('platformLabels.labelRendererReadinessCard.labelRendererProviderNeeds') : t('platformLabels.labelRendererReadinessCard.labelRendererProviderIs')}</div>
             )}
           </div>
         </div>
         <div className="field">
-          <label className="field__label">Effective label print profile</label>
+          <label className="field__label">{t('platformLabels.labelRendererReadinessCard.effectiveLabelPrintProfile')}</label>
           <div className="mono" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px', minHeight: 74, overflowWrap: 'anywhere' }}>
             <div>{labelPrintProfileSummary(printProfile)}</div>
             <div>{friendlyMissingList(printProfile)}</div>
           </div>
         </div>
         <div className="field">
-          <label className="field__label">Effective label render policy</label>
+          <label className="field__label">{t('platformLabels.labelRendererReadinessCard.effectiveLabelRenderPolicy')}</label>
           <div className="mono" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px', minHeight: 74, overflowWrap: 'anywhere' }}>
             <div>{labelRenderPolicySummary(renderPolicy)}</div>
             <div>{friendlyMissingList(renderPolicy)}</div>
           </div>
         </div>
         <div className="field">
-          <label className="field__label">Printer certification readiness</label>
+          <label className="field__label">{t('platformLabels.labelRendererReadinessCard.printerCertificationReadiness')}</label>
           <div className="mono" style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px', minHeight: 74, overflowWrap: 'anywhere' }}>
-            <div>{`Status ${operatorTokenLabel(certificationStatus)}`}</div>
+            <div>{fill(t('platformLabels.labelRendererReadinessCard.status'), { value: String(operatorTokenLabel(certificationStatus)) })}</div>
             <div>{friendlyMissingList(certification)}</div>
             {certificationStatus === 'ready' ? (
               <textarea
-                aria-label="Printer certification evidence"
+                aria-label={t('platformLabels.labelRendererReadinessCard.printerCertificationEvidence')}
                 className="mono"
                 rows={3}
                 readOnly
                 value={formatJson(objectRecord(certification.evidence))}
               />
             ) : (
-              <div>Certification pack evidence has not been recorded in the effective print profile.</div>
+              <div>{t('platformLabels.labelRendererReadinessCard.certificationPackEvidenceHas')}</div>
             )}
           </div>
         </div>
@@ -2354,44 +1218,44 @@ function LabelRendererReadinessCard({
           style={{ marginTop: '10px' }}
         >
           <div className="field">
-            <label className="field__label" htmlFor="label-printer-certification-model">Printer model</label>
+            <label className="field__label" htmlFor="label-printer-certification-model">{t('platformLabels.labelRendererReadinessCard.printerModel')}</label>
             <input
               id="label-printer-certification-model"
-              aria-label="Printer model"
+              aria-label={t('platformLabels.labelRendererReadinessCard.printerModel')}
               className="field"
               value={printerModel}
               onChange={(event) => setPrinterModel(event.target.value)}
               disabled={!canRecordCertification || isRecordingCertification}
-              placeholder="Zebra ZD421"
+              placeholder={t('platformLabels.labelRendererReadinessCard.zebraZd421')}
             />
           </div>
           <div className="field">
-            <label className="field__label" htmlFor="label-printer-certification-reference">Evidence reference</label>
+            <label className="field__label" htmlFor="label-printer-certification-reference">{t('platformLabels.labelRendererReadinessCard.evidenceReference')}</label>
             <input
               id="label-printer-certification-reference"
-              aria-label="Printer certification evidence reference"
+              aria-label={t('platformLabels.labelRendererReadinessCard.printerCertificationEvidenceReference')}
               className="field"
               value={evidenceReference}
               onChange={(event) => setEvidenceReference(event.target.value)}
               disabled={!canRecordCertification || isRecordingCertification}
-              placeholder="certification pack or artifact reference"
+              placeholder={t('platformLabels.labelRendererReadinessCard.certificationPackOrArtifact')}
             />
           </div>
           <div className="field">
-            <label className="field__label" htmlFor="label-printer-certification-artifact">Test label reference</label>
+            <label className="field__label" htmlFor="label-printer-certification-artifact">{t('platformLabels.labelRendererReadinessCard.testLabelReference')}</label>
             <input
               id="label-printer-certification-artifact"
-              aria-label="Printer certification test label reference"
+              aria-label={t('platformLabels.labelRendererReadinessCard.printerCertificationTestLabel')}
               className="field"
               value={testArtifactRef}
               onChange={(event) => setTestArtifactRef(event.target.value)}
               disabled={!canRecordCertification || isRecordingCertification}
-              placeholder="optional"
+              placeholder={t('platformLabels.labelRendererReadinessCard.optional')}
             />
           </div>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
             <Button
-              label={isRecordingCertification ? 'Recording...' : 'Record certification'}
+              label={isRecordingCertification ? t('platformLabels.labelRendererReadinessCard.recording') : t('platformLabels.labelRendererReadinessCard.recordCertification')}
               iconName="check"
               kind="primary"
               capability={CAP.LABEL_DESIGN_WRITE}
@@ -2400,7 +1264,7 @@ function LabelRendererReadinessCard({
                 const reference = nonEmptyString(evidenceReference);
                 const model = nonEmptyString(printerModel);
                 if (!reference || !model) {
-                  setCertificationError('Printer model and evidence reference are required.');
+                  setCertificationError(t('platformLabels.labelRendererReadinessCard.printerModelAndEvidence'));
                   return;
                 }
                 setCertificationError(null);
@@ -2413,9 +1277,9 @@ function LabelRendererReadinessCard({
             />
           </div>
           {certificationError ? (
-            <StateView kind="error" title="Certification evidence is incomplete" hint={certificationError} />
+            <StateView kind="error" title={t('platformLabels.labelRendererReadinessCard.certificationEvidenceIsIncomplete')} hint={certificationError} />
           ) : !canRecordCertification ? (
-            <StateView kind="denied" capability={CAP.LABEL_DESIGN_WRITE} hint="Recording printer certification requires label design write access." />
+            <StateView kind="denied" capability={CAP.LABEL_DESIGN_WRITE} hint={t('platformLabels.labelRendererReadinessCard.recordingPrinterCertificationRequires')} />
           ) : null}
         </div>
       ) : null}
@@ -2424,6 +1288,7 @@ function LabelRendererReadinessCard({
 }
 
 export function LabelsModule() {
+  const { t } = useI18n();
   const canRead = useCapability(CAP.LABELS_READ);
   const identity = useIdentity();
   const drawer = useDrawer();
@@ -2764,23 +1629,23 @@ export function LabelsModule() {
   const SPEC_COLUMNS: DataTableColumn<LabelSpec>[] = [
     {
       key: 'template_key',
-      label: 'Spec',
+      label: t('platformLabels.labelsModule.spec'),
       sortable: true,
       filterable: true,
       render: (_raw, row) => specDisplayName(row),
     },
-    { key: 'dimensions', label: 'Dimensions', sortable: true, filterable: true },
+    { key: 'dimensions', label: t('platformLabels.labelsModule.dimensions'), sortable: true, filterable: true },
     { key: 'dpi', label: 'DPI', align: 'right', sortable: true, type: 'number' },
-    { key: 'barcode_format', label: 'Barcode', sortable: true, filterable: true },
+    { key: 'barcode_format', label: t('platformLabels.labelsModule.barcode'), sortable: true, filterable: true },
     {
       key: 'renderer_config.active_version_id',
-      label: 'Active version',
+      label: t('platformLabels.labelsModule.activeVersion'),
       mono: true,
       render: (_raw, row) => activeVersionIdOf(row) ?? '—',
     },
     {
       key: 'render_count',
-      label: 'Renders',
+      label: t('platformLabels.labelsModule.renders'),
       mono: true,
       align: 'right',
       sortable: true,
@@ -2802,7 +1667,7 @@ export function LabelsModule() {
     },
     {
       key: 'last_used_at',
-      label: 'Last used',
+      label: t('platformLabels.labelsModule.lastUsed'),
       sortable: true,
       render: (_raw, row) => {
         const dir = directoryById.get(row.id);
@@ -2822,17 +1687,17 @@ export function LabelsModule() {
   // `shipment_box_id` plus `renderer_metadata.manifest_kind` for non-shipment
   // jobs; the polymorphic descriptor is derived through `targetTypeOf`.
   const JOB_COLUMNS: DataTableColumn<LabelJob>[] = [
-    { key: 'id', label: 'Job', mono: true, sortable: true },
+    { key: 'id', label: t('platformLabels.labelsModule.job'), mono: true, sortable: true },
     {
       key: 'renderer_metadata.manifest_kind',
-      label: 'Target type',
+      label: t('platformLabels.labelsModule.targetType'),
       sortable: true,
       filterable: true,
       render: (_raw, row) => labelJobTargetTypeLabel(targetTypeOf(row)),
     },
     {
       key: 'target_id',
-      label: 'Target',
+      label: t('platformLabels.labelsModule.target'),
       mono: true,
       sortable: true,
       filterable: true,
@@ -2840,7 +1705,7 @@ export function LabelsModule() {
     },
     {
       key: 'spec_id',
-      label: 'Spec',
+      label: t('platformLabels.labelsModule.spec'),
       mono: true,
       sortable: true,
       filterable: true,
@@ -2853,7 +1718,7 @@ export function LabelsModule() {
     },
     {
       key: 'target_box_id',
-      label: 'Box',
+      label: t('platformLabels.labelsModule.box'),
       mono: true,
       sortable: true,
       filterable: true,
@@ -2861,21 +1726,21 @@ export function LabelsModule() {
     },
     {
       key: 'target_metadata',
-      label: 'Lineage',
+      label: t('platformLabels.labelsModule.lineage'),
       mono: true,
       filterable: true,
       render: (_raw, row) => labelJobLineageSummary(row),
     },
     {
       key: 'status',
-      label: 'Status',
+      label: t('platformLabels.labelsModule.status'),
       sortable: true,
       filterable: true,
       render: (_raw, row) => renderStatusOptionForJob(row.status, statusOptions)?.label ?? row.status ?? '—',
     },
     {
       key: 'error_reason',
-      label: 'Failure',
+      label: t('platformLabels.labelsModule.failure'),
       filterable: true,
       render: (_raw, row) => {
         const reason = labelJobFailureReason(row);
@@ -2887,8 +1752,8 @@ export function LabelsModule() {
         );
       },
     },
-    { key: 'queued_at', label: 'Queued', format: 'datetime', sortable: true },
-    { key: 'completed_at', label: 'Completed', format: 'datetime', sortable: true },
+    { key: 'queued_at', label: t('platformLabels.labelsModule.queued'), format: 'datetime', sortable: true },
+    { key: 'completed_at', label: t('platformLabels.labelsModule.completed'), format: 'datetime', sortable: true },
   ];
 
   const openSpecDrawer = (spec: LabelSpec) => {
@@ -2911,7 +1776,7 @@ export function LabelsModule() {
   const openReprint = (selectedJobs: LabelJob[]) => {
     const { targets, skipped } = resolveLabelReprintTargets(selectedJobs, labels);
     modal.open({
-      title: selectedJobs.length === 1 ? 'Reprint label' : `Reprint ${selectedJobs.length} labels`,
+      title: selectedJobs.length === 1 ? t('platformLabels.labelsModule.reprintLabel') : fill(t('platformLabels.labelsModule.reprintLabels'), { length: String(selectedJobs.length) }),
       body: <ReprintComposer targets={targets} skippedCount={skipped.length} onClose={() => modal.close()} />,
     });
   };
@@ -2919,13 +1784,13 @@ export function LabelsModule() {
   const openTargetArtifactReprint = (artifact: LabelArtifactRow) => {
     const artifactId = nonEmptyString(artifact.id);
     if (!artifactId) {
-      pushToast('This saved label is missing its reference.', 'danger');
+      pushToast(t('platformLabels.labelsModule.thisSavedLabelIs'), 'danger');
       return;
     }
     const targetType = nonEmptyString(artifact.target_type) ?? 'target';
     const targetId = nonEmptyString(artifact.target_id) ?? artifactId;
     modal.open({
-      title: 'Reprint saved label',
+      title: t('platformLabels.labelsModule.reprintSavedLabel'),
       body: (
         <ReprintComposer
           targets={[{
@@ -2949,11 +1814,11 @@ export function LabelsModule() {
 
   const openDesignComposer = (spec?: LabelSpec) => {
     if (!designScopeId) {
-      pushToast('Select a tenant, client, or sender scope before authoring label design', 'warn');
+      pushToast(t('platformLabels.labelsModule.selectATenantClient'), 'warn');
       return;
     }
     if (labelTypesQuery.isLoading) {
-      pushToast('Label type lookup is still loading', 'warn');
+      pushToast(t('platformLabels.labelsModule.labelTypeLookupIs'), 'warn');
       return;
     }
     setDesignerComposer({ spec });
@@ -2961,7 +1826,7 @@ export function LabelsModule() {
 
   const openDraftComposer = (draft: LabelDesignDraft) => {
     if (!designScopeId) {
-      pushToast('Select a tenant, client, or sender scope before editing label design drafts', 'warn');
+      pushToast(t('platformLabels.labelsModule.selectATenantClient2'), 'warn');
       return;
     }
     setDesignerComposer({ draft });
@@ -2970,11 +1835,11 @@ export function LabelsModule() {
   const requestRouteRunLabel = async () => {
     const targetId = selectedTarget?.id;
     if (!activeTenantId) {
-      pushToast('Select an active tenant before requesting target labels', 'warn');
+      pushToast(t('platformLabels.labelsModule.selectAnActiveTenant'), 'warn');
       return;
     }
     if (!targetId) {
-      pushToast(`No ${targetLabelTargetTypeLabel(targetLabelType).toLowerCase()} is visible for label generation`, 'warn');
+      pushToast(fill(t('platformLabels.labelsModule.noIsVisibleFor'), { value: String(targetLabelTargetTypeLabel(targetLabelType).toLowerCase()) }), 'warn');
       return;
     }
     const labelType = targetLabelLabelType || targetLabelTypeOptions[0]?.value || targetLabelDefaultType;
@@ -2990,7 +1855,7 @@ export function LabelsModule() {
       });
       setTargetLabelJobId(result.label_job_id);
       setStatusFilter('all');
-      pushToast(`${targetLabelTargetTypeLabel(targetLabelType)} label queued and confirmed`, 'good');
+      pushToast(fill(t('platformLabels.labelsModule.labelQueuedAndConfirmed'), { value: String(targetLabelTargetTypeLabel(targetLabelType)) }), 'good');
     } catch (err) {
       void err;
       const message = 'Target label request could not be completed. Check access or setup and try again.';
@@ -3007,9 +1872,9 @@ export function LabelsModule() {
       id: args.id,
       label: args.label,
       status: 'pending',
-      message: 'Preparing secure label download.',
+      message: t('platformLabels.labelsModule.preparingSecureLabelDownload'),
     });
-    pushToast('Preparing label artifact download', 'info', { durationMs: 8000 });
+    pushToast(t('platformLabels.labelsModule.preparingLabelArtifactDownload'), 'info', { durationMs: 8000 });
     try {
       const result = await resolve_resource_download_url_v1({
         resource: args.resource,
@@ -3025,14 +1890,14 @@ export function LabelsModule() {
         expiresAt: result.expires_at,
         opened: Boolean(opened),
         message: opened
-          ? 'Secure download opened in a new tab.'
-          : 'Secure download is ready; your browser blocked the new tab.',
+          ? t('platformLabels.labelsModule.secureDownloadOpenedIn')
+          : t('platformLabels.labelsModule.secureDownloadIsReady'),
       });
       if (opened) {
-        pushToast('Opening label artifact', 'good', { durationMs: 15000 });
+        pushToast(t('platformLabels.labelsModule.openingLabelArtifact'), 'good', { durationMs: 15000 });
         return;
       }
-      pushToast('Secure download ready; browser blocked the new tab', 'warn', { durationMs: 15000 });
+      pushToast(t('platformLabels.labelsModule.secureDownloadReadyBrowser'), 'warn', { durationMs: 15000 });
     } catch (err) {
       void err;
       const message = 'Secure download could not be prepared. Check access or try again.';
@@ -3049,13 +1914,13 @@ export function LabelsModule() {
 
   const openPrintArtifact = async (job: LabelJob) => {
     if (!hasOpenablePrintArtifact(job)) {
-      pushToast('The label is not ready for secure download yet.', 'warn');
+      pushToast(t('platformLabels.labelsModule.theLabelIsNot'), 'warn');
       return;
     }
     await openLabelDownloadHandoff({
       resource: 'label_jobs',
       id: job.id,
-      label: `Print request ${job.id}`,
+      label: fill(t('platformLabels.labelsModule.printRequest'), { id: String(job.id) }),
     });
   };
 
@@ -3070,24 +1935,24 @@ export function LabelsModule() {
         style={{ padding: '12px', marginBottom: '10px' }}
       >
         <div className="dt-toolbar">
-          <span className="eyebrow">Download request</span>
+          <span className="eyebrow">{t('platformLabels.labelsModule.downloadRequest')}</span>
           <Chip
-            label={`Status ${downloadHandoff.status}`}
+            label={fill(t('platformLabels.labelsModule.status2'), { status: String(downloadHandoff.status) })}
             size="xs"
             kind={downloadHandoff.status === 'ready' ? 'good' : downloadHandoff.status === 'failed' ? 'danger' : 'warn'}
           />
-          <Chip label={downloadHandoff.resource === 'label_artifacts' ? 'Saved label' : 'Print request'} size="xs" />
-          <Chip label={`Reference ${downloadHandoff.id}`} size="xs" />
+          <Chip label={downloadHandoff.resource === 'label_artifacts' ? t('platformLabels.labelsModule.savedLabel') : t('platformLabels.labelsModule.printRequest2')} size="xs" />
+          <Chip label={fill(t('platformLabels.labelsModule.reference'), { id: String(downloadHandoff.id) })} size="xs" />
           <Chip
-            label={downloadHandoff.status === 'ready' ? 'Secure link ready' : 'Secure link pending'}
+            label={downloadHandoff.status === 'ready' ? t('platformLabels.labelsModule.secureLinkReady') : t('platformLabels.labelsModule.secureLinkPending')}
             size="xs"
             kind={downloadHandoff.status === 'ready' ? 'good' : undefined}
           />
           {downloadHandoff.expiresAt ? (
-            <Chip label={`Expires ${new Date(downloadHandoff.expiresAt).toLocaleString()}`} size="xs" />
+            <Chip label={fill(t('platformLabels.labelsModule.expires'), { value: String(new Date(downloadHandoff.expiresAt).toLocaleString()) })} size="xs" />
           ) : null}
           {typeof downloadHandoff.opened === 'boolean' ? (
-            <Chip label={downloadHandoff.opened ? 'Opened' : 'Pop-up blocked'} size="xs" />
+            <Chip label={downloadHandoff.opened ? t('platformLabels.labelsModule.opened') : t('platformLabels.labelsModule.popUpBlocked')} size="xs" />
           ) : null}
         </div>
         <div className="mono" style={{ marginTop: 6, overflowWrap: 'anywhere' }}>
@@ -3107,24 +1972,24 @@ export function LabelsModule() {
       <div className="page">
         <PageHeader
           moduleKey="labels"
-          eyebrow="Platform"
-          titleAccent="Label Designer"
-          titlePlain="& templates"
+          eyebrow={t('platformLabels.labelsModule.platform')}
+          titleAccent={t('platformLabels.labelsModule.titleAccent')}
+          titlePlain={t('platformLabels.labelsModule.titlePlain')}
           pills={[
-            <span key="reg" className="chip chip--xs mono">Target-neutral print queue</span>,
+            <span key="reg" className="chip chip--xs mono">{t('platformLabels.labelsModule.targetNeutralPrintQueue')}</span>,
             <span
               key="dir"
               className="chip chip--xs mono"
-              title="Shows template usage, latest activity, and active version details from the template directory."
+              title={t('platformLabels.labelsModule.showsTemplateUsageLatest')}
             >
-              Template directory
+              {t('platformLabels.labelsModule.templateDirectory')}
             </span>,
           ] as ReactNode[]}
         />
         <StateView
           kind="denied"
           capability={CAP.LABELS_READ}
-          hint="You do not have permission to view labels & templates."
+          hint={t('platformLabels.labelsModule.youDoNotHave')}
         />
       </div>
     );
@@ -3134,17 +1999,17 @@ export function LabelsModule() {
     <div className="page">
       <PageHeader
         moduleKey="labels"
-        eyebrow="Platform"
-        titleAccent="Label Designer"
-        titlePlain="& templates"
+        eyebrow={t('platformLabels.labelsModule.platform')}
+        titleAccent={t('platformLabels.labelsModule.titleAccent')}
+        titlePlain={t('platformLabels.labelsModule.titlePlain')}
         pills={[
-          <span key="reg" className="chip chip--xs mono">Target-neutral print queue</span>,
+          <span key="reg" className="chip chip--xs mono">{t('platformLabels.labelsModule.targetNeutralPrintQueue')}</span>,
           <span
             key="dir"
             className="chip chip--xs mono"
-            title="Shows template usage, latest activity, and active version details from the template directory."
+            title={t('platformLabels.labelsModule.showsTemplateUsageLatest')}
           >
-            Template directory
+            {t('platformLabels.labelsModule.templateDirectory')}
           </span>,
         ] as ReactNode[]}
         // W38/W50 closure: header-level "Reprint (synthetic)" CTA stays
@@ -3154,7 +2019,7 @@ export function LabelsModule() {
         actions={[
           <Button
             key="new-design"
-            label="New active label design"
+            label={t('platformLabels.labelsModule.newActiveLabelDesign')}
             iconName="plus"
             kind="primary"
             capability={CAP.LABEL_DESIGN_WRITE}
@@ -3164,19 +2029,19 @@ export function LabelsModule() {
         ]}
       />
 
-      <div className="section-eyebrow">Label Designer</div>
+      <div className="section-eyebrow">{t('platformLabels.labelsModule.labelDesigner')}</div>
       <div className="card" data-testid="label-designer-workbench" style={{ padding: '12px', marginBottom: '10px' }}>
         <div className="dt-toolbar">
-          <span className="eyebrow">Visual label designer</span>
-          <Chip label={activeTenantId ? 'tenant scoped' : 'scope required'} size="xs" kind={activeTenantId ? 'good' : 'warn'} />
+          <span className="eyebrow">{t('platformLabels.labelsModule.visualLabelDesigner')}</span>
+          <Chip label={activeTenantId ? t('platformLabels.labelsModule.tenantScoped') : t('platformLabels.labelsModule.scopeRequired')} size="xs" kind={activeTenantId ? 'good' : 'warn'} />
           <Chip label={designScopeLabel} size="xs" kind={designScopeReady ? 'good' : 'warn'} />
-          <Chip label={labelTypesQuery.isLoading ? 'loading label types' : `${labelTypes.length} label types`} size="xs" />
+          <Chip label={labelTypesQuery.isLoading ? t('platformLabels.labelsModule.loadingLabelTypes') : fill(t('platformLabels.labelsModule.labelTypes'), { length: String(labelTypes.length) })} size="xs" />
           <span className="dt-tb-spacer" />
           {designerComposer ? (
-            <Chip label="designer open" size="xs" kind="good" />
+            <Chip label={t('platformLabels.labelsModule.designerOpen')} size="xs" kind="good" />
           ) : (
             <Button
-              label="Open Label Designer"
+              label={t('platformLabels.labelsModule.openLabelDesigner')}
               iconName="file"
               kind="primary"
               capability={CAP.LABEL_DESIGN_READ}
@@ -3187,30 +2052,30 @@ export function LabelsModule() {
         </div>
         <div className="form-grid form-grid--3" style={{ marginTop: '10px' }}>
           <div className="field">
-            <label className="field__label">Publish scope</label>
+            <label className="field__label">{t('platformLabels.labelsModule.publishScope')}</label>
             <select
-              aria-label="Design publish scope"
+              aria-label={t('platformLabels.labelsModule.designPublishScope')}
               className="field"
               value={designScopeType}
               onChange={(event) => setDesignScopeType(event.target.value as LabelDesignScopeType)}
               disabled={!activeTenantId}
             >
-              <option value="tenant">Tenant</option>
-              <option value="client">Client</option>
-              <option value="sender">Sender</option>
+              <option value="tenant">{t('platformLabels.labelsModule.tenant')}</option>
+              <option value="client">{t('platformLabels.labelsModule.client')}</option>
+              <option value="sender">{t('platformLabels.labelsModule.sender')}</option>
             </select>
           </div>
           <div className="field">
-            <label className="field__label">Client scope</label>
+            <label className="field__label">{t('platformLabels.labelsModule.clientScope')}</label>
             <select
-              aria-label="Client label design scope"
+              aria-label={t('platformLabels.labelsModule.clientLabelDesignScope')}
               className="field"
               value={selectedClientScopeId}
               onChange={(event) => setDesignClientScopeId(event.target.value)}
               disabled={!activeTenantId || designScopeType !== 'client' || clientScopeOptions.length === 0}
             >
               {clientScopeOptions.length === 0 ? (
-                <option value="">No clients visible</option>
+                <option value="">{t('platformLabels.labelsModule.noClientsVisible')}</option>
               ) : clientScopeOptions.map((option) => (
                 <option key={option.id} value={option.id}>
                   {option.sub ? `${option.label} - ${option.sub}` : option.label}
@@ -3219,16 +2084,16 @@ export function LabelsModule() {
             </select>
           </div>
           <div className="field">
-            <label className="field__label">Sender scope</label>
+            <label className="field__label">{t('platformLabels.labelsModule.senderScope')}</label>
             <select
-              aria-label="Sender label design scope"
+              aria-label={t('platformLabels.labelsModule.senderLabelDesignScope')}
               className="field"
               value={selectedSenderScopeId}
               onChange={(event) => setDesignSenderScopeId(event.target.value)}
               disabled={!activeTenantId || designScopeType !== 'sender' || senderScopeOptions.length === 0}
             >
               {senderScopeOptions.length === 0 ? (
-                <option value="">No senders visible</option>
+                <option value="">{t('platformLabels.labelsModule.noSendersVisible')}</option>
               ) : senderScopeOptions.map((option) => (
                 <option key={option.id} value={option.id}>
                   {option.sub ? `${option.label} - ${option.sub}` : option.label}
@@ -3259,13 +2124,13 @@ export function LabelsModule() {
                 });
                 pushToast(
                   result.settings_version_id
-                    ? `Printer certification recorded - ${result.settings_version_id}`
-                    : 'Printer certification recorded',
+                    ? fill(t('platformLabels.labelsModule.printerCertificationRecorded'), { settings_version_id: String(result.settings_version_id) })
+                    : t('platformLabels.labelsModule.printerCertificationRecorded2'),
                   'good',
                   { durationMs: 15000 },
                 );
               } catch (err) {
-                pushToast((err as Error).message || 'Printer certification recording failed', 'danger', { durationMs: 15000 });
+                pushToast((err as Error).message || t('platformLabels.labelsModule.printerCertificationRecordingFailed'), 'danger', { durationMs: 15000 });
               }
             }}
           />
@@ -3278,31 +2143,33 @@ export function LabelsModule() {
             <div className="dt-toolbar">
               <span className="eyebrow">
                 {designerComposer.draft
-                  ? `Designer studio - ${designerComposer.draft.draft_name ?? designerComposer.draft.label_type}`
+                  ? fill(t('platformLabels.labelsModule.designerStudio'), { value: String(designerComposer.draft.draft_name ?? designerComposer.draft.label_type) })
                   : designerComposer.spec
-                  ? `Designer studio - ${specDisplayName(designerComposer.spec)}`
-                  : 'Designer studio - active design'}
+                  ? fill(t('platformLabels.labelsModule.designerStudio'), { value: String(specDisplayName(designerComposer.spec)) })
+                  : t('platformLabels.labelsModule.designerStudioActiveDesign')}
               </span>
               <Chip label={designScopeLabel} size="xs" kind="good" />
               <span className="dt-tb-spacer" />
               <Button
-                label="Close designer"
+                label={t('platformLabels.labelsModule.closeDesigner')}
                 iconName="x"
                 kind="ghost"
                 onClick={() => setDesignerComposer(null)}
               />
             </div>
-            <LabelDesignComposer
-              key={`${designScopeType}:${designScopeId}:${designerComposer.draft?.id ?? designerComposer.spec?.id ?? 'active'}`}
-              baseSpec={designerComposer.spec}
-              initialDraft={designerComposer.draft}
-              scopeType={designScopeType}
-              scopeId={designScopeId}
-              scopeLabel={designScopeLabel}
-              labelTypes={labelTypes}
-              canWrite={canWriteDesign}
-              onClose={() => setDesignerComposer(null)}
-            />
+            <Suspense fallback={<StateView kind="loading" />}>
+              <LabelDesignComposer
+                key={`${designScopeType}:${designScopeId}:${designerComposer.draft?.id ?? designerComposer.spec?.id ?? 'active'}`}
+                baseSpec={designerComposer.spec}
+                initialDraft={designerComposer.draft}
+                scopeType={designScopeType}
+                scopeId={designScopeId}
+                scopeLabel={designScopeLabel}
+                labelTypes={labelTypes}
+                canWrite={canWriteDesign}
+                onClose={() => setDesignerComposer(null)}
+              />
+            </Suspense>
           </div>
         ) : null}
       </div>
@@ -3313,19 +2180,19 @@ export function LabelsModule() {
         onEditDraft={openDraftComposer}
       />
 
-      <div className="section-eyebrow">Target labels</div>
+      <div className="section-eyebrow">{t('platformLabels.labelsModule.targetLabels')}</div>
       <div className="card" data-testid="route-run-label-workbench" style={{ padding: '12px', marginBottom: '10px' }}>
         <div className="dt-toolbar">
-          <span className="eyebrow">Target label request</span>
-          <Chip label={`${operatorTokenLabel(targetLabelType)} target`} size="xs" />
+          <span className="eyebrow">{t('platformLabels.labelsModule.targetLabelRequest')}</span>
+          <Chip label={fill(t('platformLabels.labelsModule.target2'), { value: String(operatorTokenLabel(targetLabelType)) })} size="xs" />
           <Chip
-            label={targetLabelArtifact ? 'Label ready' : targetLabelJob ? 'Print request queued' : 'Ready'}
+            label={targetLabelArtifact ? t('platformLabels.labelsModule.labelReady') : targetLabelJob ? t('platformLabels.labelsModule.printRequestQueued') : t('platformLabels.labelsModule.ready')}
             size="xs"
             kind={targetLabelArtifact ? 'good' : targetLabelJob ? 'warn' : undefined}
           />
           <span className="dt-tb-spacer" />
           <Button
-            label="Generate target label"
+            label={t('platformLabels.labelsModule.generateTargetLabel')}
             iconName="plus"
             kind="primary"
             capability={CAP.LABELS_REPRINT}
@@ -3335,9 +2202,9 @@ export function LabelsModule() {
         </div>
         <div className="form-grid form-grid--3" style={{ marginTop: '10px' }}>
           <div className="field">
-            <label className="field__label">Target type</label>
+            <label className="field__label">{t('platformLabels.labelsModule.targetType')}</label>
             <select
-              aria-label="Label target type"
+              aria-label={t('platformLabels.labelsModule.labelTargetType')}
               className="field"
               value={targetLabelType}
               onChange={(event) => {
@@ -3349,15 +2216,15 @@ export function LabelsModule() {
               }}
               disabled={!activeTenantId || requestTargetLabel.isPending}
             >
-              <option value="route_run">Route run</option>
-              <option value="warehouse_transfer">Warehouse transfer</option>
-              <option value="handling_unit">Container / handling unit</option>
+              <option value="route_run">{t('platformLabels.labelsModule.routeRun')}</option>
+              <option value="warehouse_transfer">{t('platformLabels.labelsModule.warehouseTransfer')}</option>
+              <option value="handling_unit">{t('platformLabels.labelsModule.containerHandlingUnit')}</option>
             </select>
           </div>
           <div className="field">
             <label className="field__label">{targetLabelTargetTypeLabel(targetLabelType)}</label>
             <select
-              aria-label="Label target"
+              aria-label={t('platformLabels.labelsModule.labelTarget')}
               className="field"
               value={selectedTarget?.id ?? ''}
               onChange={(event) => {
@@ -3370,7 +2237,7 @@ export function LabelsModule() {
               disabled={!activeTenantId || targetLabelOptions.length === 0 || requestTargetLabel.isPending}
             >
               {targetLabelOptions.length === 0 ? (
-                <option value="">{`No ${targetLabelTargetTypeLabel(targetLabelType).toLowerCase()} targets visible`}</option>
+                <option value="">{fill(t('platformLabels.labelsModule.noTargetsVisible'), { value: String(targetLabelTargetTypeLabel(targetLabelType).toLowerCase()) })}</option>
               ) : targetLabelOptions.map((option) => (
                 <option key={`${option.type}:${option.id}`} value={option.id}>
                   {option.label}
@@ -3379,9 +2246,9 @@ export function LabelsModule() {
             </select>
           </div>
           <div className="field">
-            <label className="field__label">Label type</label>
+            <label className="field__label">{t('platformLabels.labelsModule.labelType')}</label>
             <select
-              aria-label="Target label type"
+              aria-label={t('platformLabels.labelsModule.targetLabelType')}
               className="field"
               value={targetLabelLabelType}
               onChange={(event) => setTargetLabelLabelType(event.target.value)}
@@ -3395,49 +2262,49 @@ export function LabelsModule() {
             </select>
           </div>
           <div className="field">
-            <label className="field__label">Request details</label>
+            <label className="field__label">{t('platformLabels.labelsModule.requestDetails')}</label>
             <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px', minHeight: '68px' }}>
               {targetLabelJob ? (
                 <div style={{ display: 'grid', gap: 4 }}>
-                  <span className="mono">{`Print request ${targetLabelJob.id}`}</span>
-                  <span className="mono">{`Target ${labelJobTargetId(targetLabelJob) ?? 'pending'}`}</span>
-                  <span className="mono">{`Status ${targetLabelJob.status ?? 'pending'}`}</span>
-                  <span className="mono">{`Saved label ${targetLabelArtifact?.id ?? 'pending'}`}</span>
+                  <span className="mono">{fill(t('platformLabels.labelsModule.printRequest'), { id: String(targetLabelJob.id) })}</span>
+                  <span className="mono">{fill(t('platformLabels.labelsModule.target3'), { value: String(labelJobTargetId(targetLabelJob) ?? 'pending') })}</span>
+                  <span className="mono">{fill(t('platformLabels.labelsModule.status3'), { value: String(targetLabelJob.status ?? 'pending') })}</span>
+                  <span className="mono">{fill(t('platformLabels.labelsModule.savedLabel2'), { value: String(targetLabelArtifact?.id ?? 'pending') })}</span>
                   {nonEmptyString(labelJobMetadata(targetLabelJob).source_label_artifact_id) ? (
-                    <span className="mono">{`Previous saved label ${nonEmptyString(labelJobMetadata(targetLabelJob).source_label_artifact_id)}`}</span>
+                    <span className="mono">{fill(t('platformLabels.labelsModule.previousSavedLabel'), { value: String(nonEmptyString(labelJobMetadata(targetLabelJob).source_label_artifact_id)) })}</span>
                   ) : null}
                 </div>
               ) : (
                 <span className="mono">
                   {routeRunsQuery.isLoading || warehouseTransfersQuery.isLoading || handlingUnitsQuery.isLoading
-                    ? 'loading targets'
-                    : 'no request queued'}
+                    ? t('platformLabels.labelsModule.loadingTargets')
+                    : t('platformLabels.labelsModule.noRequestQueued')}
                 </span>
               )}
             </div>
           </div>
         </div>
         {targetLabelError ? (
-          <StateView kind="error" title="Target label request failed" hint={targetLabelError} />
+          <StateView kind="error" title={t('platformLabels.labelsModule.targetLabelRequestFailed')} hint={targetLabelError} />
         ) : null}
         {artifactsQuery.isError ? (
           <StateView
             kind="error"
-            title="Target label files did not load"
-            hint="The label file list could not be loaded. Try again or contact support if it continues."
+            title={t('platformLabels.labelsModule.targetLabelFilesDid')}
+            hint={t('platformLabels.labelsModule.theLabelFileList')}
           />
         ) : null}
       </div>
 
-      <div className="section-eyebrow">Target label artifacts</div>
+      <div className="section-eyebrow">{t('platformLabels.labelsModule.targetLabelArtifacts')}</div>
       {renderDownloadHandoffReadback('label_artifacts')}
       {artifactsQuery.isLoading ? (
         <StateView kind="loading" />
       ) : artifactsQuery.isError ? null : recentTargetArtifacts.length === 0 ? (
         <StateView
           kind="empty"
-          title="No target label artifacts"
-          hint="Awaiting renderer completion."
+          title={t('platformLabels.labelsModule.noTargetLabelArtifacts')}
+          hint={t('platformLabels.labelsModule.awaitingRendererCompletion')}
         />
       ) : (
         <div
@@ -3461,23 +2328,23 @@ export function LabelsModule() {
               }}
             >
               <div style={{ minWidth: 0 }}>
-                <div className="field__label">Saved label</div>
+                <div className="field__label">{t('platformLabels.labelsModule.savedLabel')}</div>
                 <div className="mono" style={{ overflowWrap: 'anywhere' }}>{artifact.id}</div>
               </div>
               <div style={{ minWidth: 0 }}>
-                <div className="field__label">Target</div>
+                <div className="field__label">{t('platformLabels.labelsModule.target')}</div>
                 <div className="mono" style={{ overflowWrap: 'anywhere' }}>
                   {`${operatorTokenLabel(nonEmptyString(artifact.target_type) ?? 'target')} ${nonEmptyString(artifact.target_id) ?? 'pending'}`}
                 </div>
               </div>
               <div style={{ minWidth: 0 }}>
-                <div className="field__label">Source print request</div>
+                <div className="field__label">{t('platformLabels.labelsModule.sourcePrintRequest')}</div>
                 <div className="mono" style={{ overflowWrap: 'anywhere' }}>
-                  {nonEmptyString(artifact.source_label_job_id) ?? 'pending'}
+                  {nonEmptyString(artifact.source_label_job_id) ?? t('platformLabels.labelsModule.pending')}
                 </div>
               </div>
               <Button
-                label="Open label"
+                label={t('platformLabels.labelsModule.openLabel')}
                 iconName="external-link"
                 kind="ghost"
                 capability={CAP.LABELS_DOWNLOAD}
@@ -3486,12 +2353,12 @@ export function LabelsModule() {
                   void openLabelDownloadHandoff({
                     resource: 'label_artifacts',
                     id: artifact.id,
-                    label: `Target ${nonEmptyString(artifact.target_id) ?? 'pending'}`,
+                    label: fill(t('platformLabels.labelsModule.target3'), { value: String(nonEmptyString(artifact.target_id) ?? 'pending') }),
                   });
                 }}
               />
               <Button
-                label="Reprint label"
+                label={t('platformLabels.labelsModule.reprintLabel')}
                 iconName="refresh"
                 kind="primary"
                 capability={CAP.LABELS_REPRINT}
@@ -3503,14 +2370,14 @@ export function LabelsModule() {
         </div>
       )}
 
-      <div className="section-eyebrow">Template directory</div>
+      <div className="section-eyebrow">{t('platformLabels.labelsModule.templateDirectory')}</div>
       {directoryQuery.isLoading ? (
         <StateView kind="loading" />
       ) : directoryQuery.isError ? (
         <StateView
           kind="error"
-          title="Label template directory did not load"
-          hint="The template directory could not be loaded. Try again or contact support if it continues."
+          title={t('platformLabels.labelsModule.labelTemplateDirectoryDid')}
+          hint={t('platformLabels.labelsModule.theTemplateDirectoryCould')}
         />
       ) : (
         <DataTable<LabelSpec>
@@ -3521,7 +2388,7 @@ export function LabelsModule() {
           onRowClick={openSpecDrawer}
           rowActions={[
             {
-              label: 'Publish new active design',
+              label: t('platformLabels.labelsModule.publishNewActiveDesign'),
               icon: 'plus',
               kind: 'primary',
               capability: CAP.LABEL_DESIGN_WRITE,
@@ -3531,16 +2398,16 @@ export function LabelsModule() {
         />
       )}
 
-      <div className="section-eyebrow">Print queue - target-neutral labels</div>
+      <div className="section-eyebrow">{t('platformLabels.labelsModule.printQueueTargetNeutral')}</div>
       {renderDownloadHandoffReadback('label_jobs')}
       {statusFilters.length <= 1 ? (
         <StateView
           kind="error"
-          hint="Print status options are not configured. Finish label setup before using this queue."
+          hint={t('platformLabels.labelsModule.printStatusOptionsAre')}
         />
       ) : (
         <div className="dt-toolbar">
-          <span className="eyebrow">Status</span>
+          <span className="eyebrow">{t('platformLabels.labelsModule.status')}</span>
           {statusFilters.map((f) => (
             <button
               key={f}
@@ -3561,16 +2428,16 @@ export function LabelsModule() {
       ) : jobsQuery.isError ? (
         <StateView
           kind="error"
-          title="Print queue did not load"
-          hint="The print queue could not be loaded. Try again or contact support if it continues."
+          title={t('platformLabels.labelsModule.printQueueDidNot')}
+          hint={t('platformLabels.labelsModule.thePrintQueueCould')}
         />
       ) : (
         <>
         {labelsQuery.isError ? (
           <StateView
             kind="error"
-            title="Shipment labels did not load"
-            hint="Reprint actions require active shipment labels before they can run."
+            title={t('platformLabels.labelsModule.shipmentLabelsDidNot')}
+            hint={t('platformLabels.labelsModule.reprintActionsRequireActive')}
           />
         ) : null}
         {latestOpenablePrintJob ? (
@@ -3580,13 +2447,13 @@ export function LabelsModule() {
             style={{ padding: '12px', marginBottom: '10px' }}
           >
             <div className="dt-toolbar">
-              <span className="eyebrow">Latest completed label</span>
-              <Chip label={`Print request ${latestOpenablePrintJob.id}`} size="xs" kind="good" />
-              <Chip label={`Status ${latestOpenablePrintJob.status ?? 'completed'}`} size="xs" />
+              <span className="eyebrow">{t('platformLabels.labelsModule.latestCompletedLabel')}</span>
+              <Chip label={fill(t('platformLabels.labelsModule.printRequest'), { id: String(latestOpenablePrintJob.id) })} size="xs" kind="good" />
+              <Chip label={fill(t('platformLabels.labelsModule.status3'), { value: String(latestOpenablePrintJob.status ?? 'completed') })} size="xs" />
               <Chip label={labelJobTargetSummary(latestOpenablePrintJob)} size="xs" />
               <span className="dt-tb-spacer" />
               <Button
-                label="Open label"
+                label={t('platformLabels.labelsModule.openLabel')}
                 iconName="external-link"
                 kind="ghost"
                 capability={CAP.LABELS_DOWNLOAD}
@@ -3606,11 +2473,11 @@ export function LabelsModule() {
             style={{ padding: '12px', marginBottom: '10px' }}
           >
             <div className="dt-toolbar">
-              <span className="eyebrow">Latest label failure</span>
-              <Chip label={`Print request ${latestFailedPrintJob.id}`} size="xs" kind="danger" />
-              <Chip label={`Status ${latestFailedPrintJob.status ?? 'unknown'}`} size="xs" />
+              <span className="eyebrow">{t('platformLabels.labelsModule.latestLabelFailure')}</span>
+              <Chip label={fill(t('platformLabels.labelsModule.printRequest'), { id: String(latestFailedPrintJob.id) })} size="xs" kind="danger" />
+              <Chip label={fill(t('platformLabels.labelsModule.status3'), { value: String(latestFailedPrintJob.status ?? 'unknown') })} size="xs" />
               {labelJobAttemptsLabel(latestFailedPrintJob) ? (
-                <Chip label={`Attempts ${labelJobAttemptsLabel(latestFailedPrintJob)}`} size="xs" kind="warn" />
+                <Chip label={fill(t('platformLabels.labelsModule.attempts'), { value: String(labelJobAttemptsLabel(latestFailedPrintJob)) })} size="xs" kind="warn" />
               ) : null}
               <Chip label={labelJobTargetSummary(latestFailedPrintJob)} size="xs" />
             </div>
@@ -3619,7 +2486,7 @@ export function LabelsModule() {
             </div>
             {latestFailedPrintJob.scheduled_at ? (
               <p className="state__hint" style={{ marginTop: 6 }}>
-                {`Next retry is scheduled for ${new Date(latestFailedPrintJob.scheduled_at).toLocaleString()}.`}
+                {fill(t('platformLabels.labelsModule.nextRetryIsScheduled'), { value: String(new Date(latestFailedPrintJob.scheduled_at).toLocaleString()) })}
               </p>
             ) : null}
           </div>
@@ -3634,16 +2501,16 @@ export function LabelsModule() {
             style={{ padding: '12px', marginBottom: '10px' }}
           >
             <div className="dt-toolbar">
-              <span className="eyebrow">Latest blocked reprint</span>
-              <Chip label={`Print request ${latestReprintBlockedJob.id}`} size="xs" kind="warn" />
-              <Chip label={`Status ${latestReprintBlockedJob.status ?? 'unknown'}`} size="xs" />
+              <span className="eyebrow">{t('platformLabels.labelsModule.latestBlockedReprint')}</span>
+              <Chip label={fill(t('platformLabels.labelsModule.printRequest'), { id: String(latestReprintBlockedJob.id) })} size="xs" kind="warn" />
+              <Chip label={fill(t('platformLabels.labelsModule.status3'), { value: String(latestReprintBlockedJob.status ?? 'unknown') })} size="xs" />
               <Chip label={labelJobTargetSummary(latestReprintBlockedJob)} size="xs" />
             </div>
             <div className="mono" style={{ marginTop: 6, overflowWrap: 'anywhere' }}>
               {labelReprintDisabledReason(latestReprintBlockedJob, labels)}
             </div>
             <p className="state__hint" style={{ marginTop: 6 }}>
-              Reprint stays disabled until the shipment label list shows an active label version for this job.
+              {t('platformLabels.labelsModule.reprintStaysDisabledUntil')}
             </p>
           </div>
         ) : null}
@@ -3654,7 +2521,7 @@ export function LabelsModule() {
           entityKind="label_jobs"
           rowActions={[
             {
-              label: 'Open label',
+              label: t('platformLabels.labelsModule.openLabel'),
               icon: 'external-link',
               kind: 'ghost',
               capability: CAP.LABELS_DOWNLOAD,
@@ -3663,7 +2530,7 @@ export function LabelsModule() {
               onClick: (row) => { void openPrintArtifact(row); },
             },
             {
-              label: 'Reprint',
+              label: t('platformLabels.labelsModule.reprint'),
               icon: 'refresh',
               kind: 'primary',
               capability: CAP.LABELS_REPRINT,
@@ -3674,7 +2541,7 @@ export function LabelsModule() {
           ]}
           bulkActions={[
             {
-              label: 'Reprint',
+              label: t('platformLabels.labelsModule.reprint'),
               icon: 'refresh',
               kind: 'primary',
               capability: CAP.LABELS_REPRINT,

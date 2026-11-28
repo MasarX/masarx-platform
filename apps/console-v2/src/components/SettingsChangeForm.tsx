@@ -5,6 +5,7 @@ import { useResourceList } from '@/lib/queries';
 import * as api from '@/lib/api';
 import { CAP } from '@/lib/capabilities';
 import type { ScopeType } from '@/types/domain';
+import { fill, useT } from '@/lib/i18n';
 
 export interface SettingsScopeTypeRegistryRow {
   id: string;
@@ -57,9 +58,9 @@ function safeJsonStringify(value: unknown): string {
   }
 }
 
-function formatSettingsLabel(value: string | null | undefined): string {
+function formatSettingsLabel(value: string | null | undefined, notConfigured: string): string {
   const normalized = value?.trim();
-  if (!normalized) return 'Not configured';
+  if (!normalized) return notConfigured;
   return normalized
     .split(/[_\s-]+/)
     .filter(Boolean)
@@ -68,8 +69,9 @@ function formatSettingsLabel(value: string | null | undefined): string {
 }
 
 function DiffPreview({ from, to }: { from: unknown; to: unknown }) {
+  const t = useT();
   const renderJson = (value: unknown) => {
-    if (value == null || value === 'previous') return '-- previous --';
+    if (value == null || value === 'previous') return t('shell.settingsForm.previousPlaceholder');
     try {
       return JSON.stringify(value, null, 2);
     } catch {
@@ -79,11 +81,11 @@ function DiffPreview({ from, to }: { from: unknown; to: unknown }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
       <div className="card" style={{ padding: '8px', borderColor: 'var(--line)' }}>
-        <div className="eyebrow" style={{ fontSize: '10.5px' }}>Previous</div>
+        <div className="eyebrow" style={{ fontSize: '10.5px' }}>{t('shell.settingsForm.previous')}</div>
         <pre className="mono" style={{ margin: 0, fontSize: '11px', whiteSpace: 'pre-wrap' }}>{renderJson(from)}</pre>
       </div>
       <div className="card" style={{ padding: '8px', borderColor: 'var(--accent-soft)', background: 'var(--accent-soft)' }}>
-        <div className="eyebrow" style={{ fontSize: '10.5px' }}>Proposed</div>
+        <div className="eyebrow" style={{ fontSize: '10.5px' }}>{t('shell.settingsForm.proposed')}</div>
         <pre className="mono" style={{ margin: 0, fontSize: '11px', whiteSpace: 'pre-wrap' }}>{renderJson(to)}</pre>
       </div>
     </div>
@@ -100,6 +102,7 @@ export function SettingsChangeForm({
   onSubmit,
   onApply,
 }: SettingsChangeFormProps) {
+  const t = useT();
   const scopeTypes = (api.getLookups('scope_type') as LookupRow[] | undefined) || [];
   const scopeRegistryQuery = useResourceList<SettingsScopeTypeRegistryRow>('scope_type_registry');
   const scopeLabelByType = (scopeRegistryQuery.data?.rows ?? []).reduce<Record<string, string>>((acc, row) => {
@@ -131,9 +134,9 @@ export function SettingsChangeForm({
         setPreview(result);
         return;
       }
-      setSubmitError('Settings change was not submitted. Review the policy error and try again.');
+      setSubmitError(t('shell.settingsForm.notSubmittedReview'));
     } catch (err) {
-      setSubmitError((err as Error).message || 'Settings change was not submitted.');
+      setSubmitError((err as Error).message || t('shell.settingsForm.notSubmitted'));
     }
   };
 
@@ -144,9 +147,9 @@ export function SettingsChangeForm({
         ? await onApply({ scopeType, value, justification })
         : await onSubmit({ scopeType, value, justification, dryRun: false });
       if (result) return;
-      setSubmitError('Settings change was not submitted. Review the policy error and try again.');
+      setSubmitError(t('shell.settingsForm.notSubmittedReview'));
     } catch (err) {
-      setSubmitError((err as Error).message || 'Settings change was not submitted.');
+      setSubmitError((err as Error).message || t('shell.settingsForm.notSubmitted'));
     }
   };
 
@@ -154,11 +157,11 @@ export function SettingsChangeForm({
     <div data-testid="change-request-form">
       <p className="state__hint">
         {canAutoApply
-          ? 'Saves approved categories immediately. Changes that need approval stay in the review queue.'
-          : 'Sends the change for review. Approval-required categories stay in the review queue with the expected impact.'}
+          ? t('shell.settingsForm.autoApplyHint')
+          : t('shell.settingsForm.reviewHint')}
       </p>
       <div className="field">
-        <label className="field__label">Scope (allowed by this category)</label>
+        <label className="field__label">{t('shell.settingsForm.scope')}</label>
         <select className="field" value={scopeType} onChange={(event) => setScopeType(event.target.value as ScopeType)}>
           {filtered.map((scope) => (
             <option key={scope.value} value={scope.value}>
@@ -168,7 +171,7 @@ export function SettingsChangeForm({
         </select>
       </div>
       <div className="field">
-        <label className="field__label">Proposed settings</label>
+        <label className="field__label">{t('shell.settingsForm.proposedSettings')}</label>
         <textarea
           rows={4}
           style={{ fontFamily: 'var(--font-mono)', fontSize: '11.5px', width: '100%' }}
@@ -177,10 +180,10 @@ export function SettingsChangeForm({
         />
       </div>
       <div className="field">
-        <label className="field__label">Reason for this change</label>
+        <label className="field__label">{t('shell.settingsForm.reason')}</label>
         <input
           type="text"
-          placeholder="Required by Exampleparcel KSA contract amendment"
+          placeholder={t('shell.settingsForm.reasonPlaceholder')}
           value={justification}
           onChange={(event) => setJustification(event.target.value)}
         />
@@ -188,17 +191,17 @@ export function SettingsChangeForm({
 
       {preview ? (
         <div style={{ marginTop: '10px' }}>
-          <div className="eyebrow">Impact preview</div>
+          <div className="eyebrow">{t('shell.settingsForm.impactPreview')}</div>
           <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
-            <Chip label={`Estimated impact - ${formatSettingsLabel(preview.blast_radius)}`} kind="warn" size="xs" />
+            <Chip label={fill(t('shell.settingsForm.estimatedImpact'), { impact: formatSettingsLabel(preview.blast_radius, t('shell.settingsForm.notConfigured')) })} kind="warn" size="xs" />
             <Chip
-              label={preview.approval_required ? 'Approval needed' : 'Ready to apply'}
+              label={preview.approval_required ? t('shell.settingsForm.approvalNeeded') : t('shell.settingsForm.readyToApply')}
               kind={preview.approval_required ? 'warn' : 'good'}
               size="xs"
             />
-            <Chip label="Settings checked" kind="info" size="xs" />
+            <Chip label={t('shell.settingsForm.checked')} kind="info" size="xs" />
             {preview.justification ? (
-              <Chip label={`Reason - ${preview.justification.slice(0, 32)}`} size="xs" />
+              <Chip label={fill(t('shell.settingsForm.reasonChip'), { reason: preview.justification.slice(0, 32) })} size="xs" />
             ) : null}
           </div>
           <div style={{ marginTop: '8px' }}>
@@ -213,16 +216,16 @@ export function SettingsChangeForm({
       ) : null}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
-        <Button label="Cancel" kind="ghost" onClick={onClose} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onClose} />
         <Button
-          label="Preview impact"
+          label={t('shell.settingsForm.preview')}
           iconName="search"
           kind="primary"
           anyCapabilities={[CAP.SETTINGS_WRITE, CAP.SYSTEM_WRITE]}
           onClick={runPreview}
         />
         <Button
-          label={canAutoApply ? 'Apply active' : 'Submit request'}
+          label={canAutoApply ? t('shell.settingsForm.apply') : t('shell.settingsForm.submit')}
           iconName="check"
           kind="primary"
           anyCapabilities={[CAP.SETTINGS_WRITE, CAP.SYSTEM_WRITE]}
@@ -230,7 +233,7 @@ export function SettingsChangeForm({
         />
       </div>
       <p className="state__hint" style={{ marginTop: '8px' }}>
-        {`Category - ${category}`}
+        {t('shell.settingsForm.category')} <bdi className="mono">{category}</bdi>
       </p>
     </div>
   );

@@ -67,7 +67,7 @@ import {
   useRefreshMarketplaceReputation,
 } from '@/lib/queries';
 import { useIdentity, useCapability } from '@/lib/identity';
-import { useI18n } from '@/lib/i18n';
+import { englishT, fill, useI18n, useT, type Translate } from '@/lib/i18n';
 import { CAP } from '@/lib/capabilities';
 import { useDrawer, useModal } from '@/hooks/useOverlay';
 import { pushToast } from '@/components/toastStore';
@@ -461,13 +461,17 @@ function marketplaceDetailLabel(key: string): string {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-function marketplaceDetailValue(value: unknown): string {
-  if (value == null || value === '') return 'Not provided';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+function marketplaceDetailValue(value: unknown, t: Translate = englishT): string {
+  if (value == null || value === '') return t('marketplace.detail.notProvided');
+  if (typeof value === 'boolean') return value ? t('common.yes') : t('common.no');
   if (typeof value === 'number') return String(value);
   if (typeof value === 'string') return value.replace(/[_-]+/g, ' ');
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
-  if (typeof value === 'object') return `${Object.keys(value as Record<string, unknown>).length} details`;
+  if (Array.isArray(value)) {
+    return fill(t(value.length === 1 ? 'marketplace.detail.itemOne' : 'marketplace.detail.itemOther'), { n: value.length });
+  }
+  if (typeof value === 'object') {
+    return fill(t('marketplace.detail.details'), { n: Object.keys(value as Record<string, unknown>).length });
+  }
   return String(value);
 }
 
@@ -729,11 +733,12 @@ function CanonicalChip({
   className?: string;
   labelOverride?: string;
 }) {
+  const t = useT();
   const row = lookupRow(category, value);
   if (!row) {
     return (
       <Chip
-        label={`${category}/${value} (missing)`}
+        label={fill(t('marketplace.chip.missing'), { category, value })}
         kind="danger"
         size="xs"
         className={className}
@@ -804,13 +809,14 @@ function daysUntil(iso: string | undefined, now: Date = new Date()): number | nu
 const TABS = ['offers', 'awards', 'contracts', 'requests', 'reputation', 'events'] as const;
 type TabId = (typeof TABS)[number];
 
-const TAB_LABELS: Record<TabId, string> = {
-  offers: 'Offers',
-  awards: 'Awards',
-  contracts: 'Contracts',
-  requests: 'Requests',
-  reputation: 'Reputation',
-  events: 'Events',
+// Catalog keys for the tab labels; resolved with `t` at render.
+const TAB_LABEL_KEYS: Record<TabId, string> = {
+  offers: 'marketplace.tabs.offers',
+  awards: 'marketplace.tabs.awards',
+  contracts: 'marketplace.tabs.contracts',
+  requests: 'marketplace.tabs.requests',
+  reputation: 'marketplace.tabs.reputation',
+  events: 'marketplace.tabs.events',
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -819,7 +825,7 @@ const TAB_LABELS: Record<TabId, string> = {
 export function MarketplaceModule() {
   const { scope } = useIdentity();
   const go = useConsoleNavigator();
-  const { fmtNumber, fmtCurrency, fmtDateTime } = useI18n();
+  const { t, fmtNumber, fmtCurrency, fmtDateTime } = useI18n();
   const drawer = useDrawer();
   const modal = useModal();
   const canRead = useCapability(CAP.MARKETPLACE_READ);
@@ -1219,10 +1225,10 @@ export function MarketplaceModule() {
     (offer: OfferRow) => {
       awardMut
         .mutateAsync({ offer_id: offer.id })
-        .then(() => pushToast(`Awarded offer ${offer.id} to ${offerParticipantIdOf(offer)}`, 'good'))
-        .catch(() => pushToast('Award failed — see audit log.', 'danger'));
+        .then(() => pushToast(fill(t('marketplace.toast.awarded'), { offer: offer.id, participant: offerParticipantIdOf(offer) }), 'good'))
+        .catch(() => pushToast(t('marketplace.toast.awardFailed'), 'danger'));
     },
-    [awardMut],
+    [awardMut, t],
   );
 
   // Cancel-award: backend canonical action is `marketplace_award_respond_v1` with
@@ -1239,10 +1245,10 @@ export function MarketplaceModule() {
     (award: AwardRow, reason: string) => {
       respondAwardMut
         .mutateAsync({ award_id: award.id, response: 'cancel', reason })
-        .then(() => pushToast(`Cancelled award ${award.id}.`, 'warn'))
-        .catch(() => pushToast('Cancel failed — see audit log.', 'danger'));
+        .then(() => pushToast(fill(t('marketplace.toast.cancelled'), { id: award.id }), 'warn'))
+        .catch(() => pushToast(t('marketplace.toast.cancelFailed'), 'danger'));
     },
-    [respondAwardMut],
+    [respondAwardMut, t],
   );
 
 
@@ -1259,10 +1265,10 @@ export function MarketplaceModule() {
         // E2 closure (P1 #6) — `response: 'accept'` is RPC-canonical
         // (backend `marketplace_award_respond_v1` schema).
         .mutateAsync({ award_id: awardId, response: 'accept' })
-        .then(() => pushToast(`Activated ${contractNoOf(c) || c.id}.`, 'good'))
-        .catch(() => pushToast('Activation failed — see audit log.', 'danger'));
+        .then(() => pushToast(fill(t('marketplace.toast.activated'), { id: contractNoOf(c) || c.id }), 'good'))
+        .catch(() => pushToast(t('marketplace.toast.activationFailed'), 'danger'));
     },
-    [respondAwardMut],
+    [respondAwardMut, t],
   );
 
   const onRenegotiateContract = useCallback(
@@ -1278,10 +1284,10 @@ export function MarketplaceModule() {
           response: 'reject',
           reason: 'renegotiate_terms',
         })
-        .then(() => pushToast(`Renegotiation drafted for ${contractNoOf(c) || c.id}.`, 'info'))
-        .catch(() => pushToast('Renegotiation failed — see audit log.', 'danger'));
+        .then(() => pushToast(fill(t('marketplace.toast.renegotiated'), { id: contractNoOf(c) || c.id }), 'info'))
+        .catch(() => pushToast(t('marketplace.toast.renegotiationFailed'), 'danger'));
     },
-    [respondAwardMut],
+    [respondAwardMut, t],
   );
 
   const onTerminateContract = useCallback(
@@ -1295,10 +1301,10 @@ export function MarketplaceModule() {
           response: 'cancel',
           reason: 'contract_terminated',
         })
-        .then(() => pushToast(`Terminated ${contractNoOf(c) || c.id}.`, 'danger'))
-        .catch(() => pushToast('Termination failed — see audit log.', 'danger'));
+        .then(() => pushToast(fill(t('marketplace.toast.terminated'), { id: contractNoOf(c) || c.id }), 'danger'))
+        .catch(() => pushToast(t('marketplace.toast.terminationFailed'), 'danger'));
     },
-    [respondAwardMut],
+    [respondAwardMut, t],
   );
 
   // Refresh reputation: canonical signature is (participant_profile_id UUID).
@@ -1306,9 +1312,9 @@ export function MarketplaceModule() {
   const onRefreshReputation = useCallback(() => {
     refreshReputationMut
       .mutateAsync({ participant_profile_id: null })
-      .then(() => pushToast('Reputation snapshot refreshed.', 'good'))
-      .catch(() => pushToast('Reputation refresh failed.', 'danger'));
-  }, [refreshReputationMut]);
+      .then(() => pushToast(t('marketplace.toast.reputationRefreshed'), 'good'))
+      .catch(() => pushToast(t('marketplace.toast.reputationRefreshFailed'), 'danger'));
+  }, [refreshReputationMut, t]);
 
   // ── Award flow: prompt for terms inside a small modal ─────────────────
   function openAwardModal(offer: OfferRow) {
@@ -1325,23 +1331,23 @@ export function MarketplaceModule() {
       <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <KvGrid
           rows={[
-            { key: 'offer_id', label: 'Offer #', value: offer.id, mono: true },
+            { key: 'offer_id', label: t('marketplace.field.offerNo'), value: offer.id, mono: true },
             {
               key: 'participant_id',
-              label: 'Bidder',
+              label: t('marketplace.field.bidder'),
               value: offerParticipantId || '—',
               mono: true,
             },
-            { key: 'lane', label: 'Lane', value: offerLane || '—' },
+            { key: 'lane', label: t('marketplace.field.lane'), value: offerLane || '—' },
             {
               key: 'price',
-              label: 'Price',
+              label: t('marketplace.field.price'),
               value: offerPrice == null ? '—' : fmtCurrency(offerPrice, offerCurrency),
               mono: true,
             },
             {
               key: 'valid_until',
-              label: 'Valid until',
+              label: t('marketplace.field.validUntil'),
               value: offerValidUntil ? fmtDateTime(offerValidUntil) : '—',
               mono: true,
             },
@@ -1351,21 +1357,21 @@ export function MarketplaceModule() {
           className="state__hint"
           style={{ margin: 0, fontSize: 11, lineHeight: 1.4 }}
         >
-          Awarding an offer creates a marketplace_award row, fires{' '}
-          <span className="mono">marketplace.award_offer</span>, and notifies
-          the bidder. A draft contract is auto-staged for review.
+          {t('marketplace.award.hintBefore')}{' '}
+          <code className="mono">marketplace.award_offer</code>{/* i18n-literal-ok: RPC action key */}
+          {t('marketplace.award.hintAfter')}
         </p>
       </div>
     );
 
     modal.open({
-      title: `Award offer · ${offer.id}`,
+      title: fill(t('marketplace.award.title'), { id: offer.id }),
       body,
       footer: (
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Confirm award"
+            label={t('marketplace.action.confirmAward')}
             iconName="check"
             kind="primary"
             capability={CAP.MARKETPLACE_WRITE}
@@ -1390,17 +1396,17 @@ export function MarketplaceModule() {
           className="state__hint"
           style={{ margin: 0, fontSize: 12, lineHeight: 1.4 }}
         >
-          Provide a cancellation reason. The participant ({awardParticipantId || '—'})
-          will be notified and the linked contract (if any) drops to{' '}
-          <span className="mono">terminated</span>.
+          {t('marketplace.cancelAward.hintBefore')}<bdi>{awardParticipantId || '—'}</bdi>
+          {t('marketplace.cancelAward.hintAfter')}{' '}
+          <code className="mono">terminated</code>.{/* i18n-literal-ok: contract status token */}
         </p>
         <label
           style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}
         >
-          <span style={{ color: 'var(--ink-2)' }}>Cancellation reason</span>
+          <span style={{ color: 'var(--ink-2)' }}>{t('marketplace.cancelAward.reason')}</span>
           <textarea
             data-testid="cancel-award-reason"
-            placeholder="Customer postponed rollout, capacity reallocated, …"
+            placeholder={t('marketplace.cancelAward.placeholder')}
             rows={3}
             style={{
               padding: '8px 10px',
@@ -1420,13 +1426,13 @@ export function MarketplaceModule() {
     );
 
     modal.open({
-      title: `Cancel award · ${award.id}`,
+      title: fill(t('marketplace.cancelAward.title'), { id: award.id }),
       body,
       footer: (
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <Button label="Keep award" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('marketplace.action.keepAward')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Confirm cancellation"
+            label={t('marketplace.action.confirmCancellation')}
             iconName="alert"
             kind="danger"
             capability={CAP.MARKETPLACE_WRITE}
@@ -1453,13 +1459,12 @@ export function MarketplaceModule() {
           className="state__hint"
           style={{ margin: 0, fontSize: 12, lineHeight: 1.4 }}
         >
-          Create a new marketplace request. Bidders receive the structured
-          request details needed to price and accept capacity.
+          {t('marketplace.newRequest.hint')}
         </p>
         <label
           style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}
         >
-          <span style={{ color: 'var(--ink-2)' }}>Kind</span>
+          <span style={{ color: 'var(--ink-2)' }}>{t('marketplace.field.kind')}</span>
           <select
             data-testid="new-request-kind"
             defaultValue={kindKey}
@@ -1488,10 +1493,10 @@ export function MarketplaceModule() {
         <label
           style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}
         >
-          <span style={{ color: 'var(--ink-2)' }}>Lane</span>
+          <span style={{ color: 'var(--ink-2)' }}>{t('marketplace.field.lane')}</span>
           <input
             data-testid="new-request-lane"
-            placeholder="e.g. RUH ↔ JED"
+            placeholder={t('marketplace.newRequest.lanePlaceholder')}
             onChange={(e) => {
               lane = e.currentTarget.value;
             }}
@@ -1510,13 +1515,13 @@ export function MarketplaceModule() {
     );
 
     modal.open({
-      title: 'New marketplace request',
+      title: t('marketplace.newRequest.title'),
       body,
       footer: (
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Create request"
+            label={t('marketplace.action.createRequest')}
             iconName="plus"
             kind="primary"
             capability={CAP.MARKETPLACE_WRITE}
@@ -1526,8 +1531,8 @@ export function MarketplaceModule() {
                   request_kind_key: kindKey,
                   request_details: { lane: lane || 'unspecified' },
                 })
-                .then(() => pushToast(`Request opened (${kindKey}).`, 'good'))
-                .catch(() => pushToast('Request creation failed.', 'danger'));
+                .then(() => pushToast(fill(t('marketplace.toast.requestOpened'), { kind: kindKey }), 'good'))
+                .catch(() => pushToast(t('marketplace.toast.requestFailed'), 'danger'));
               modal.close();
             }}
           />
@@ -1555,10 +1560,10 @@ export function MarketplaceModule() {
         },
       })
       .then(() => {
-        pushToast('Settlement batch opened.', 'good');
+        pushToast(t('marketplace.toast.settlementOpened'), 'good');
       })
       .catch(() => {
-        pushToast('Settlement batch could not be opened. Try again.', 'danger');
+        pushToast(t('marketplace.toast.settlementFailed'), 'danger');
       });
   }
 
@@ -1571,10 +1576,10 @@ export function MarketplaceModule() {
     const body: ReactNode = (
       <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <p className="state__hint" style={{ margin: 0, fontSize: 12, lineHeight: 1.4 }}>
-          Opens a marketplace dispute against this contract for Finance follow-up.
+          {t('marketplace.dispute.hint')}
         </p>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}>
-          <span style={{ color: 'var(--ink-2)' }}>Category</span>
+          <span style={{ color: 'var(--ink-2)' }}>{t('marketplace.dispute.category')}</span>
           <select
             data-testid="marketplace-contract-dispute-category"
             defaultValue={category}
@@ -1595,14 +1600,14 @@ export function MarketplaceModule() {
                 {kind.label}
               </option>
             ))}
-            {disputeKinds.length === 0 ? <option value="general">General</option> : null}
+            {disputeKinds.length === 0 ? <option value="general">{t('marketplace.dispute.general')}</option> : null}
           </select>
         </label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}>
-          <span style={{ color: 'var(--ink-2)' }}>Title</span>
+          <span style={{ color: 'var(--ink-2)' }}>{t('marketplace.dispute.titleLabel')}</span>
           <input
             data-testid="marketplace-contract-dispute-title"
-            placeholder="Settlement amount mismatch"
+            placeholder={t('marketplace.dispute.titlePlaceholder')}
             onChange={(e) => {
               title = e.currentTarget.value;
             }}
@@ -1618,10 +1623,10 @@ export function MarketplaceModule() {
           />
         </label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}>
-          <span style={{ color: 'var(--ink-2)' }}>Description</span>
+          <span style={{ color: 'var(--ink-2)' }}>{t('marketplace.dispute.description')}</span>
           <textarea
             data-testid="marketplace-contract-dispute-description"
-            placeholder="Describe the contract or settlement issue for audit."
+            placeholder={t('marketplace.dispute.descriptionPlaceholder')}
             rows={3}
             onChange={(e) => {
               description = e.currentTarget.value;
@@ -1641,13 +1646,13 @@ export function MarketplaceModule() {
     );
 
     modal.open({
-      title: `Open dispute - ${contractNoOf(c) || c.id}`,
+      title: fill(t('marketplace.dispute.modalTitle'), { id: contractNoOf(c) || c.id }),
       body,
       footer: (
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('common.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Open dispute"
+            label={t('marketplace.action.openDispute')}
             iconName="alert"
             kind="primary"
             capability={CAP.MARKETPLACE_WRITE}
@@ -1657,8 +1662,8 @@ export function MarketplaceModule() {
                 .mutateAsync({
                   contract_id: c.id,
                   category,
-                  title: title || `Marketplace contract dispute - ${contractNoOf(c) || c.id}`,
-                  description: description || 'Opened from Console V2 marketplace contract workflow.',
+                  title: title || fill(t('marketplace.dispute.defaultTitle'), { id: contractNoOf(c) || c.id }),
+                  description: description || t('marketplace.dispute.defaultDescription'),
                   metadata: {
                     source: 'console-v2/network/marketplace',
                     contract_id: c.id,
@@ -1667,10 +1672,10 @@ export function MarketplaceModule() {
                 })
                 .then(() => {
                   modal.close();
-                  pushToast('Dispute opened.', 'good');
+                  pushToast(t('marketplace.toast.disputeOpened'), 'good');
                 })
                 .catch(() => {
-                  pushToast('Dispute could not be opened. Try again.', 'danger');
+                  pushToast(t('marketplace.toast.disputeFailed'), 'danger');
                 });
             }}
           />
@@ -1694,26 +1699,26 @@ export function MarketplaceModule() {
     const offerParticipantId = offerParticipantIdOf(o);
 
     const kvRows: KvRow[] = [
-      { key: 'id', label: 'Offer #', value: o.id, mono: true },
-      { key: 'request_id', label: 'Request', value: o.request_id, mono: true },
-      { key: 'lane', label: 'Lane', value: offerLane || '—' },
-      { key: 'participant_id', label: 'Bidder', value: offerParticipantId || '—', mono: true },
+      { key: 'id', label: t('marketplace.field.offerNo'), value: o.id, mono: true },
+      { key: 'request_id', label: t('marketplace.field.request'), value: o.request_id, mono: true },
+      { key: 'lane', label: t('marketplace.field.lane'), value: offerLane || '—' },
+      { key: 'participant_id', label: t('marketplace.field.bidder'), value: offerParticipantId || '—', mono: true },
       {
         key: 'price',
-        label: 'Price',
+        label: t('marketplace.field.price'),
         value: offerPrice == null ? '—' : fmtCurrency(offerPrice, offerCurrency),
         mono: true,
       },
       {
         key: 'valid_until',
-        label: 'Valid until',
+        label: t('marketplace.field.validUntil'),
         value: offerValidUntil ? fmtDateTime(offerValidUntil) : '—',
         mono: true,
       },
-      { key: 'status', label: 'Status', value: o.status ?? '—', mono: true },
+      { key: 'status', label: t('marketplace.field.status'), value: o.status ?? '—', mono: true },
       {
         key: 'submitted_at',
-        label: 'Submitted',
+        label: t('marketplace.field.submitted'),
         value: o.submitted_at ? fmtDateTime(o.submitted_at) : '—',
         mono: true,
       },
@@ -1723,10 +1728,10 @@ export function MarketplaceModule() {
     // `qty` so existing view-saved sorts/filters keep working (`qtyOf` reads
     // `payload.qty`).
     const itemColumns: Array<DataTableColumn<RequestItemRow>> = [
-      { key: 'item_kind', label: 'Item kind', mono: true, sortable: true },
+      { key: 'item_kind', label: t('marketplace.field.itemKind'), mono: true, sortable: true },
       {
         key: 'qty',
-        label: 'Qty',
+        label: t('marketplace.field.qty'),
         mono: true,
         align: 'right',
         sortable: true,
@@ -1751,18 +1756,18 @@ export function MarketplaceModule() {
             <CanonicalChip
               category="marketplace_offer_status"
               value={o.status}
-              labelOverride={`offer: ${o.status}`}
+              labelOverride={fill(t('marketplace.chip.offer'), { status: o.status })}
             />
           ) : null}
           {days != null && offerExpiryWarnDays != null && days <= offerExpiryWarnDays ? (
-            <ExpiryChip expiresAt={o.valid_until ?? null} prefix="Valid" size="xs" />
+            <ExpiryChip expiresAt={o.valid_until ?? null} prefix={t('marketplace.expiry.valid')} size="xs" />
           ) : null}
         </div>
         <KvGrid rows={kvRows} />
 
-        <div className="section-eyebrow">Request items</div>
+        <div className="section-eyebrow">{t('marketplace.section.requestItems')}</div>
         {items.length === 0 ? (
-          <StateView kind="empty" hint="No items associated with this request." />
+          <StateView kind="empty" hint={t('marketplace.state.noOfferItems')} />
         ) : (
           <DataTable<RequestItemRow>
             columns={itemColumns}
@@ -1773,7 +1778,7 @@ export function MarketplaceModule() {
           />
         )}
 
-        <div className="section-eyebrow">Quick links</div>
+        <div className="section-eyebrow">{t('marketplace.section.quickLinks')}</div>
         <div
           style={{
             display: 'flex',
@@ -1783,7 +1788,7 @@ export function MarketplaceModule() {
           }}
         >
           <Button
-            label="View bidder"
+            label={t('marketplace.action.viewBidder')}
             iconName="user"
             kind="ghost"
             onClick={() => {
@@ -1793,7 +1798,7 @@ export function MarketplaceModule() {
             }}
           />
           <Button
-            label="Award offer"
+            label={t('marketplace.action.awardOffer')}
             iconName="check"
             kind="primary"
             capability={CAP.MARKETPLACE_WRITE}
@@ -1807,7 +1812,7 @@ export function MarketplaceModule() {
     );
 
     drawer.open({
-      title: `Offer · ${o.id}`,
+      title: fill(t('marketplace.drawer.offer'), { id: o.id }),
       size: 'lg',
       deepLink: `/network/marketplace?tab=offers&focus=${encodeURIComponent(o.id)}`,
       body,
@@ -1825,35 +1830,35 @@ export function MarketplaceModule() {
     const awardCancellationReason = awardCancellationReasonOf(a);
     const awardedByDisplay = a.awarded_by ?? a.awarded_by_user_id ?? '—';
     const kvRows: KvRow[] = [
-      { key: 'id', label: 'Award #', value: a.id, mono: true },
-      { key: 'offer_id', label: 'Offer', value: a.offer_id ?? '—', mono: true },
+      { key: 'id', label: t('marketplace.field.awardNo'), value: a.id, mono: true },
+      { key: 'offer_id', label: t('marketplace.field.offer'), value: a.offer_id ?? '—', mono: true },
       {
         key: 'participant_id',
-        label: 'Participant',
+        label: t('marketplace.field.participant'),
         value: awardParticipantId || '—',
         mono: true,
       },
       {
         key: 'awarded_at',
-        label: 'Awarded',
+        label: t('marketplace.field.awarded'),
         value: awardedAt ? fmtDateTime(awardedAt) : '—',
         mono: true,
       },
-      { key: 'awarded_by', label: 'Awarded by', value: awardedByDisplay },
+      { key: 'awarded_by', label: t('marketplace.field.awardedBy'), value: awardedByDisplay },
       // W17-2 — `terms_summary` resolved from canonical award_terms jsonb.
-      { key: 'terms_summary', label: 'Terms', value: termsSummaryOf(a) || '—' },
-      { key: 'status', label: 'Status', value: a.status ?? '—', mono: true },
+      { key: 'terms_summary', label: t('marketplace.field.terms'), value: termsSummaryOf(a) || '—' },
+      { key: 'status', label: t('marketplace.field.status'), value: a.status ?? '—', mono: true },
     ];
     if (awardCancelledAt) {
       kvRows.push({
         key: 'cancelled_at',
-        label: 'Cancelled',
+        label: t('marketplace.field.cancelled'),
         value: fmtDateTime(awardCancelledAt),
         mono: true,
       });
       kvRows.push({
         key: 'cancellation_reason',
-        label: 'Reason',
+        label: t('marketplace.field.reason'),
         value: awardCancellationReason ?? '—',
       });
     }
@@ -1874,7 +1879,7 @@ export function MarketplaceModule() {
             <CanonicalChip
               category="marketplace_award_status"
               value={a.status}
-              labelOverride={`award: ${a.status}`}
+              labelOverride={fill(t('marketplace.chip.award'), { status: a.status })}
             />
           ) : null}
           {/* W18-3 — lane resolved via canonical terms.lane jsonb. */}
@@ -1885,7 +1890,7 @@ export function MarketplaceModule() {
         </div>
         <KvGrid rows={kvRows} />
 
-        <div className="section-eyebrow">Quick links</div>
+        <div className="section-eyebrow">{t('marketplace.section.quickLinks')}</div>
         <div
           style={{
             display: 'flex',
@@ -1895,7 +1900,7 @@ export function MarketplaceModule() {
           }}
         >
           <Button
-            label="View participant"
+            label={t('marketplace.action.viewParticipant')}
             iconName="user"
             kind="ghost"
             onClick={() => {
@@ -1916,7 +1921,7 @@ export function MarketplaceModule() {
             return allowedActions.includes('cancel');
           })() ? (
             <Button
-              label="Cancel award"
+              label={t('marketplace.action.cancelAward')}
               iconName="close"
               kind="danger"
               capability={CAP.MARKETPLACE_WRITE}
@@ -1931,7 +1936,7 @@ export function MarketplaceModule() {
     );
 
     drawer.open({
-      title: `Award · ${a.id}`,
+      title: fill(t('marketplace.drawer.award'), { id: a.id }),
       size: 'lg',
       deepLink: `/network/marketplace?tab=awards&focus=${encodeURIComponent(a.id)}`,
       body,
@@ -1949,28 +1954,28 @@ export function MarketplaceModule() {
     const days = daysUntil(contractEndsAt);
     const kvRows: KvRow[] = [
       // W17-2 — `contract_no` resolved from canonical metadata jsonb.
-      { key: 'id', label: 'Contract #', value: contractNoOf(c) || c.id, mono: true },
-      { key: 'award_id', label: 'Award', value: c.award_id ?? '—', mono: true },
+      { key: 'id', label: t('marketplace.field.contractNo'), value: contractNoOf(c) || c.id, mono: true },
+      { key: 'award_id', label: t('marketplace.field.award'), value: c.award_id ?? '—', mono: true },
       {
         key: 'participant_id',
-        label: 'Participant',
+        label: t('marketplace.field.participant'),
         value: contractParticipantId || '—',
         mono: true,
       },
       {
         key: 'started_at',
-        label: 'Started',
+        label: t('marketplace.field.started'),
         value: contractStartedAt ? fmtDateTime(contractStartedAt) : '—',
         mono: true,
       },
       {
         key: 'ends_at',
-        label: 'Ends',
+        label: t('marketplace.field.ends'),
         value: contractEndsAt ? fmtDateTime(contractEndsAt) : '—',
         mono: true,
       },
-      { key: 'status', label: 'Status', value: c.status ?? '—', mono: true },
-      { key: 'terms', label: 'Terms', value: c.terms ?? '—' },
+      { key: 'status', label: t('marketplace.field.status'), value: c.status ?? '—', mono: true },
+      { key: 'terms', label: t('marketplace.field.terms'), value: c.terms ?? '—' },
     ];
 
     const body: ReactNode = (
@@ -1989,16 +1994,16 @@ export function MarketplaceModule() {
             <CanonicalChip
               category="marketplace_contract_status"
               value={c.status}
-              labelOverride={`contract: ${c.status}`}
+              labelOverride={fill(t('marketplace.chip.contract'), { status: c.status })}
             />
           ) : null}
           {days != null && contractExpiryWarnDays != null && days <= contractExpiryWarnDays ? (
-            <ExpiryChip expiresAt={contractEndsAt ?? null} prefix="Ends" size="xs" />
+            <ExpiryChip expiresAt={contractEndsAt ?? null} prefix={t('marketplace.expiry.ends')} size="xs" />
           ) : null}
         </div>
         <KvGrid rows={kvRows} />
 
-        <div className="section-eyebrow">Lifecycle</div>
+        <div className="section-eyebrow">{t('marketplace.section.lifecycle')}</div>
         <div
           style={{
             display: 'flex',
@@ -2008,7 +2013,7 @@ export function MarketplaceModule() {
           }}
         >
           <Button
-            label="View participant"
+            label={t('marketplace.action.viewParticipant')}
             iconName="user"
             kind="ghost"
             onClick={() => {
@@ -2018,7 +2023,7 @@ export function MarketplaceModule() {
             }}
           />
           <Button
-            label="Open settlement batch"
+            label={t('marketplace.action.openSettlementBatch')}
             iconName="plus"
             kind="ghost"
             capability={CAP.SETTLEMENTS_WRITE}
@@ -2026,7 +2031,7 @@ export function MarketplaceModule() {
             onClick={() => openContractSettlementBatch(c)}
           />
           <Button
-            label="Open dispute"
+            label={t('marketplace.action.openDispute')}
             iconName="alert"
             kind="ghost"
             capability={CAP.MARKETPLACE_WRITE}
@@ -2048,7 +2053,7 @@ export function MarketplaceModule() {
               <>
                 {showActivate ? (
                   <Button
-                    label="Activate"
+                    label={t('marketplace.action.activate')}
                     iconName="check"
                     kind="primary"
                     capability={CAP.MARKETPLACE_WRITE}
@@ -2057,7 +2062,7 @@ export function MarketplaceModule() {
                 ) : null}
                 {showRenegotiate ? (
                   <Button
-                    label="Renegotiate"
+                    label={t('marketplace.action.renegotiate')}
                     iconName="edit"
                     kind="ghost"
                     capability={CAP.MARKETPLACE_WRITE}
@@ -2066,7 +2071,7 @@ export function MarketplaceModule() {
                 ) : null}
                 {showTerminate ? (
                   <Button
-                    label="Terminate"
+                    label={t('marketplace.action.terminate')}
                     iconName="close"
                     kind="danger"
                     capability={CAP.MARKETPLACE_WRITE}
@@ -2081,7 +2086,7 @@ export function MarketplaceModule() {
     );
 
     drawer.open({
-      title: `Contract · ${contractNoOf(c) || c.id}`,
+      title: fill(t('marketplace.drawer.contract'), { id: contractNoOf(c) || c.id }),
       size: 'lg',
       deepLink: `/network/marketplace?tab=contracts&focus=${encodeURIComponent(c.id)}`,
       body,
@@ -2100,29 +2105,29 @@ export function MarketplaceModule() {
     const requestPayload = payloadOf(r);
 
     const kvRows: KvRow[] = [
-      { key: 'id', label: 'Request #', value: r.id, mono: true },
+      { key: 'id', label: t('marketplace.field.requestNo'), value: r.id, mono: true },
       {
         key: 'request_kind',
-        label: 'Kind',
+        label: t('marketplace.field.kind'),
         value: kindMeta?.label ?? requestKind ?? '—',
       },
       {
         key: 'lane',
-        label: 'Lane',
+        label: t('marketplace.field.lane'),
         value: (typeof requestPayload.lane === 'string' ? requestPayload.lane : undefined) ?? '—',
       },
       // W17-2 — `opener` resolved from canonical request_details jsonb.
-      { key: 'opener', label: 'Opened by', value: openerOf(r) || '—' },
+      { key: 'opener', label: t('marketplace.field.openedBy'), value: openerOf(r) || '—' },
       {
         key: 'opened_at',
-        label: 'Opened',
+        label: t('marketplace.field.opened'),
         value: requestOpenedAt ? fmtDateTime(requestOpenedAt) : '—',
         mono: true,
       },
-      { key: 'status', label: 'Status', value: r.status ?? '—', mono: true },
+      { key: 'status', label: t('marketplace.field.status'), value: r.status ?? '—', mono: true },
       {
         key: 'response_count',
-        label: 'Bids received',
+        label: t('marketplace.field.bidsReceived'),
         // W13-1 — derive bid count from canonical offers list (no row-level
         // alias on RequestRow). `bidHistory` is already filtered by request_id.
         value: fmtNumber(bidHistory.length),
@@ -2133,10 +2138,10 @@ export function MarketplaceModule() {
     // W18-3 — `qty` resolved from canonical payload jsonb; column key stays
     // `qty` so existing view-saved sorts/filters keep working.
     const itemColumns: Array<DataTableColumn<RequestItemRow>> = [
-      { key: 'item_kind', label: 'Item kind', mono: true, sortable: true },
+      { key: 'item_kind', label: t('marketplace.field.itemKind'), mono: true, sortable: true },
       {
         key: 'qty',
-        label: 'Qty',
+        label: t('marketplace.field.qty'),
         mono: true,
         align: 'right',
         sortable: true,
@@ -2150,11 +2155,11 @@ export function MarketplaceModule() {
     // render function reads `pricing.price` + `pricing.currency` and falls
     // back to "—" when no offer pricing is set.
     const bidColumns: Array<DataTableColumn<OfferRow>> = [
-      { key: 'id', label: 'Offer #', mono: true, sortable: true },
-      { key: 'participant_id', label: 'Bidder', mono: true, sortable: true },
+      { key: 'id', label: t('marketplace.field.offerNo'), mono: true, sortable: true },
+      { key: 'participant_id', label: t('marketplace.field.bidder'), mono: true, sortable: true },
       {
         key: 'price',
-        label: 'Price',
+        label: t('marketplace.field.price'),
         align: 'right',
         sortable: true,
         type: 'number',
@@ -2166,10 +2171,10 @@ export function MarketplaceModule() {
           return <span className="mono">{fmtCurrency(p, currencyOf(o, tenantCurrencyIso))}</span>;
         },
       },
-      { key: 'valid_until', label: 'Valid until', format: 'datetime', sortable: true },
+      { key: 'valid_until', label: t('marketplace.field.validUntil'), format: 'datetime', sortable: true },
       {
         key: 'status',
-        label: 'Status',
+        label: t('marketplace.field.status'),
         sortable: true,
         render: (raw) => {
           const v = raw == null ? null : String(raw);
@@ -2194,16 +2199,16 @@ export function MarketplaceModule() {
             <CanonicalChip
               category="marketplace_request_status"
               value={r.status}
-              labelOverride={`request: ${r.status}`}
+              labelOverride={fill(t('marketplace.chip.request'), { status: r.status })}
             />
           ) : null}
           {kindMeta ? <Chip label={kindMeta.label} kind="info" size="xs" /> : null}
         </div>
         <KvGrid rows={kvRows} />
 
-        <div className="section-eyebrow">Items</div>
+        <div className="section-eyebrow">{t('marketplace.section.items')}</div>
         {items.length === 0 ? (
-          <StateView kind="empty" hint="No items on this request yet." />
+          <StateView kind="empty" hint={t('marketplace.state.noRequestItems')} />
         ) : (
           <DataTable<RequestItemRow>
             columns={itemColumns}
@@ -2214,9 +2219,9 @@ export function MarketplaceModule() {
           />
         )}
 
-        <div className="section-eyebrow">Bid history</div>
+        <div className="section-eyebrow">{t('marketplace.section.bidHistory')}</div>
         {bidHistory.length === 0 ? (
-          <StateView kind="empty" hint="No bids received yet." />
+          <StateView kind="empty" hint={t('marketplace.state.noBids')} />
         ) : (
           <DataTable<OfferRow>
             columns={bidColumns}
@@ -2230,7 +2235,7 @@ export function MarketplaceModule() {
     );
 
     drawer.open({
-      title: `Request · ${r.id}`,
+      title: fill(t('marketplace.drawer.request'), { id: r.id }),
       size: 'lg',
       deepLink: `/network/marketplace?tab=requests&focus=${encodeURIComponent(r.id)}`,
       body,
@@ -2270,38 +2275,38 @@ export function MarketplaceModule() {
     const latest = history[history.length - 1];
 
     const kvRows: KvRow[] = [
-      { key: 'participant_id', label: 'Participant', value: participantId, mono: true },
-      { key: 'name', label: 'Name', value: profile?.display_name ?? participant?.name ?? participantId },
+      { key: 'participant_id', label: t('marketplace.field.participant'), value: participantId, mono: true },
+      { key: 'name', label: t('marketplace.field.name'), value: profile?.display_name ?? participant?.name ?? participantId },
       {
         key: 'kind',
-        label: 'Kind',
+        label: t('marketplace.field.kind'),
         value: profile?.participant_type_key ?? participant?.kind ?? '—',
         mono: true,
       },
       {
         key: 'status',
-        label: 'Status',
+        label: t('marketplace.field.status'),
         value: profile?.status ?? '—',
         mono: true,
       },
       {
         key: 'compliance_state',
-        label: 'Compliance',
+        label: t('marketplace.field.compliance'),
         value: profile?.compliance_state ?? participant?.compliance ?? '—',
         mono: true,
       },
       {
         key: 'score',
-        label: 'Latest score',
+        label: t('marketplace.field.latestScore'),
         value:
           latest?.score != null
-            ? `${fmtNumber(latest.score)} / 100`
+            ? fill(t('marketplace.value.outOf100'), { n: fmtNumber(latest.score) })
             : '—',
         mono: true,
       },
       {
         key: 'snapshot_at',
-        label: 'As of',
+        label: t('marketplace.field.asOf'),
         // W19-1 — resolved via canonical `updated_at` shadow.
         value: (() => {
           const at = snapshotAtOf(latest);
@@ -2311,25 +2316,25 @@ export function MarketplaceModule() {
       },
       {
         key: 'samples',
-        label: 'Snapshots',
+        label: t('marketplace.field.snapshots'),
         value: fmtNumber(history.length),
         mono: true,
       },
       {
         key: 'memberships',
-        label: 'Members',
-        value: `${fmtNumber(activeMemberships.length)} active / ${fmtNumber(profileMemberships.length)} total`,
+        label: t('marketplace.field.members'),
+        value: fill(t('marketplace.value.activeOfTotal'), { active: fmtNumber(activeMemberships.length), total: fmtNumber(profileMemberships.length) }),
         mono: true,
       },
       {
         key: 'capabilities',
-        label: 'Capabilities',
-        value: `${fmtNumber(activeCapabilities.length)} active / ${fmtNumber(profileCapabilities.length)} total`,
+        label: t('marketplace.field.capabilities'),
+        value: fill(t('marketplace.value.activeOfTotal'), { active: fmtNumber(activeCapabilities.length), total: fmtNumber(profileCapabilities.length) }),
         mono: true,
       },
       {
         key: 'verification',
-        label: 'Verification',
+        label: t('marketplace.field.verification'),
         // E2 closure (P1 #4) — approved/pending verification counters derive
         // from canonical `marketplace_verification_status.metadata.is_approved_verification`
         // / `is_pending_verification`. Replaces literal `=== 'approved'` /
@@ -2348,7 +2353,7 @@ export function MarketplaceModule() {
               | undefined;
             return m?.is_pending_verification === true;
           }).length;
-          return `${fmtNumber(approvedCount)} approved · ${fmtNumber(pendingCount)} pending`;
+          return fill(t('marketplace.value.verificationCounts'), { approved: fmtNumber(approvedCount), pending: fmtNumber(pendingCount) });
         })(),
         mono: true,
       },
@@ -2359,7 +2364,7 @@ export function MarketplaceModule() {
     const historyColumns: Array<DataTableColumn<ReputationSnapshot>> = [
       {
         key: 'snapshot_at',
-        label: 'When',
+        label: t('marketplace.field.when'),
         sortable: true,
         render: (_raw, row) => {
           const v = snapshotAtOf(row as ReputationSnapshot);
@@ -2368,7 +2373,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'score',
-        label: 'Score',
+        label: t('marketplace.field.score'),
         align: 'right',
         mono: true,
         sortable: true,
@@ -2378,12 +2383,12 @@ export function MarketplaceModule() {
 
     // W13-4 — per-event reputation ledger columns
     const reputationEventColumns: Array<DataTableColumn<ReputationEventRow>> = [
-      { key: 'occurred_at', label: 'When', format: 'datetime', sortable: true },
-      { key: 'event_type', label: 'Event', mono: true, sortable: true, filterable: true },
-      { key: 'metric_key', label: 'Metric', mono: true, sortable: true, filterable: true },
+      { key: 'occurred_at', label: t('marketplace.field.when'), format: 'datetime', sortable: true },
+      { key: 'event_type', label: t('marketplace.field.event'), mono: true, sortable: true, filterable: true },
+      { key: 'metric_key', label: t('marketplace.field.metric'), mono: true, sortable: true, filterable: true },
       {
         key: 'score_delta',
-        label: 'Delta',
+        label: t('marketplace.field.delta'),
         align: 'right',
         mono: true,
         sortable: true,
@@ -2398,7 +2403,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'weight',
-        label: 'Weight',
+        label: t('marketplace.field.weight'),
         align: 'right',
         mono: true,
         sortable: true,
@@ -2416,10 +2421,10 @@ export function MarketplaceModule() {
     // inline ternary tone branch with a `<CanonicalChip>` that renders a
     // loud `(missing)` chip when the canonical row is absent.
     const verificationColumns: Array<DataTableColumn<VerificationRecordRow>> = [
-      { key: 'document_type_key', label: 'Document', mono: true, sortable: true },
+      { key: 'document_type_key', label: t('marketplace.field.document'), mono: true, sortable: true },
       {
         key: 'status',
-        label: 'Status',
+        label: t('marketplace.field.status'),
         sortable: true,
         filterable: true,
         render: (raw) => {
@@ -2434,8 +2439,8 @@ export function MarketplaceModule() {
           );
         },
       },
-      { key: 'issued_at', label: 'Issued', format: 'date', sortable: true },
-      { key: 'expires_at', label: 'Expires', format: 'date', sortable: true },
+      { key: 'issued_at', label: t('marketplace.field.issued'), format: 'date', sortable: true },
+      { key: 'expires_at', label: t('marketplace.field.expires'), format: 'date', sortable: true },
     ];
 
     // W13-1 — reads breakdown via canonical metadata path (no top-level field).
@@ -2463,7 +2468,7 @@ export function MarketplaceModule() {
           <ScopePill scopeType="tenant" scopeId={tenantId} />
           {latest ? (
             <Chip
-              label={`score: ${latest.score}`}
+              label={fill(t('marketplace.chip.score'), { score: String(latest.score) })}
               kind={reputationTone(Number(latest.score ?? 0), reputationThresholds)}
               size="xs"
               className="mono"
@@ -2474,7 +2479,7 @@ export function MarketplaceModule() {
             if (!row) {
               return (
                 <Chip
-                  label={`marketplace_participant_status/${profile.status} (missing)`}
+                  label={fill(t('marketplace.chip.missing'), { category: 'marketplace_participant_status', value: profile.status })}
                   kind="danger"
                   size="xs"
                   className="mono"
@@ -2483,7 +2488,7 @@ export function MarketplaceModule() {
             }
             return (
               <Chip
-                label={`status: ${profile.status}`}
+                label={fill(t('marketplace.chip.status'), { status: profile.status })}
                 kind={row.tone as ChipKind}
                 size="xs"
                 className="mono"
@@ -2495,7 +2500,7 @@ export function MarketplaceModule() {
 
         {breakdownEntries.length > 0 ? (
           <>
-            <div className="section-eyebrow">Score breakdown</div>
+            <div className="section-eyebrow">{t('marketplace.section.scoreBreakdown')}</div>
             <div
               style={{
                 display: 'flex',
@@ -2519,7 +2524,7 @@ export function MarketplaceModule() {
 
         {profileCapabilities.length > 0 ? (
           <>
-            <div className="section-eyebrow">Capabilities</div>
+            <div className="section-eyebrow">{t('marketplace.section.capabilities')}</div>
             <div
               data-testid="participant-capability-strip"
               style={{
@@ -2538,7 +2543,7 @@ export function MarketplaceModule() {
                   return (
                     <Chip
                       key={c.id}
-                      label={`${c.capability_key} · ${status ?? '—'} (missing)`}
+                      label={fill(t('marketplace.chip.capabilityMissing'), { capability: c.capability_key, status: status ?? '—' })}
                       kind="danger"
                       size="xs"
                       className="mono"
@@ -2561,7 +2566,7 @@ export function MarketplaceModule() {
 
         {profileVerifications.length > 0 ? (
           <>
-            <div className="section-eyebrow">Verification records</div>
+            <div className="section-eyebrow">{t('marketplace.section.verificationRecords')}</div>
             <DataTable<VerificationRecordRow>
               columns={verificationColumns}
               rows={profileVerifications}
@@ -2574,7 +2579,7 @@ export function MarketplaceModule() {
 
         {profileAvailability.length > 0 ? (
           <>
-            <div className="section-eyebrow">Availability windows</div>
+            <div className="section-eyebrow">{t('marketplace.section.availability')}</div>
             <div
               data-testid="participant-availability-strip"
               style={{
@@ -2598,10 +2603,10 @@ export function MarketplaceModule() {
                     : null;
                 const label =
                   wdName && hr != null
-                    ? `${wdName} ${String(hr).padStart(2, '0')}:00${cap != null ? ` · cap ${cap}` : ''}`
+                    ? `${wdName} ${String(hr).padStart(2, '0')}:00${cap != null ? fill(t('marketplace.availability.cap'), { cap }) : ''}`
                     : (w.starts_at && w.ends_at)
                       ? `${fmtDateTime(w.starts_at)} → ${fmtDateTime(w.ends_at)}`
-                      : `slot ${i + 1}`;
+                      : fill(t('marketplace.availability.slot'), { n: i + 1 });
                 return (
                   <Chip
                     key={String(w.id ?? `${participantId}_${i}`)}
@@ -2616,9 +2621,9 @@ export function MarketplaceModule() {
           </>
         ) : null}
 
-        <div className="section-eyebrow">Snapshot history</div>
+        <div className="section-eyebrow">{t('marketplace.section.snapshotHistory')}</div>
         {history.length === 0 ? (
-          <StateView kind="empty" hint="No reputation snapshots on file." />
+          <StateView kind="empty" hint={t('marketplace.state.noSnapshots')} />
         ) : (
           <DataTable<ReputationSnapshot>
             columns={historyColumns}
@@ -2629,9 +2634,9 @@ export function MarketplaceModule() {
           />
         )}
 
-        <div className="section-eyebrow">Reputation event ledger</div>
+        <div className="section-eyebrow">{t('marketplace.section.reputationLedger')}</div>
         {profileReputationEvents.length === 0 ? (
-          <StateView kind="empty" hint="No scoring events recorded yet." />
+          <StateView kind="empty" hint={t('marketplace.state.noScoringEvents')} />
         ) : (
           <DataTable<ReputationEventRow>
             columns={reputationEventColumns}
@@ -2642,7 +2647,7 @@ export function MarketplaceModule() {
           />
         )}
 
-        <div className="section-eyebrow">Quick links</div>
+        <div className="section-eyebrow">{t('marketplace.section.quickLinks')}</div>
         <div
           style={{
             display: 'flex',
@@ -2652,7 +2657,7 @@ export function MarketplaceModule() {
           }}
         >
           <Button
-            label="View partner profile"
+            label={t('marketplace.action.viewPartnerProfile')}
             iconName="user"
             kind="ghost"
             onClick={() => {
@@ -2662,7 +2667,7 @@ export function MarketplaceModule() {
             }}
           />
           <Button
-            label="View disputes"
+            label={t('marketplace.action.viewDisputes')}
             iconName="flag"
             kind="ghost"
             onClick={() => {
@@ -2676,7 +2681,7 @@ export function MarketplaceModule() {
     );
 
     drawer.open({
-      title: `Reputation · ${profile?.display_name ?? participant?.name ?? participantId}`,
+      title: fill(t('marketplace.drawer.reputation'), { name: profile?.display_name ?? participant?.name ?? participantId }),
       size: 'lg',
       deepLink: `/network/marketplace?tab=reputation&focus=${encodeURIComponent(
         participantId
@@ -2698,10 +2703,10 @@ export function MarketplaceModule() {
   // returns the canonical value when present, the FE alias otherwise.
   const offerColumns = useMemo<Array<DataTableColumn<OfferRow>>>(
     () => [
-      { key: 'id', label: 'Offer #', mono: true, sortable: true },
+      { key: 'id', label: t('marketplace.field.offerNo'), mono: true, sortable: true },
       {
         key: 'participant_id',
-        label: 'Bidder',
+        label: t('marketplace.field.bidder'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => {
@@ -2721,7 +2726,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'lane',
-        label: 'Lane',
+        label: t('marketplace.field.lane'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => {
@@ -2734,7 +2739,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'price',
-        label: 'Price',
+        label: t('marketplace.field.price'),
         mono: true,
         align: 'right',
         sortable: true,
@@ -2748,7 +2753,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'currency',
-        label: 'CCY',
+        label: t('marketplace.field.currency'),
         mono: true,
         sortable: true,
         filterable: true,
@@ -2756,7 +2761,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'valid_until',
-        label: 'Valid until',
+        label: t('marketplace.field.validUntil'),
         sortable: true,
         render: (_raw, row) => {
           const v = validUntilOf(row as OfferRow);
@@ -2774,7 +2779,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'status',
-        label: 'Status',
+        label: t('marketplace.field.status'),
         sortable: true,
         filterable: true,
         render: (raw) => {
@@ -2786,7 +2791,7 @@ export function MarketplaceModule() {
     // W27 Cycle E closure (P2 #7) — `offerExpiryWarnDays` is read inside the
     // `valid_until` render closure; include it in deps so the column re-memos
     // once the canonical `marketplace_health_policy` resolves.
-    [fmtDateTime, fmtCurrency, requestById, tenantCurrencyIso, offerExpiryWarnDays]
+    [t, fmtDateTime, fmtCurrency, requestById, tenantCurrencyIso, offerExpiryWarnDays]
   );
 
   // W19-1 — award columns now resolve `participant_id` / `awarded_at` /
@@ -2796,14 +2801,14 @@ export function MarketplaceModule() {
     () => [
       {
         key: 'id',
-        label: 'Award #',
+        label: t('marketplace.field.awardNo'),
         mono: true,
         sortable: true,
       },
-      { key: 'offer_id', label: 'Offer', mono: true, sortable: true, filterable: true },
+      { key: 'offer_id', label: t('marketplace.field.offer'), mono: true, sortable: true, filterable: true },
       {
         key: 'participant_id',
-        label: 'Participant',
+        label: t('marketplace.field.participant'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => {
@@ -2823,7 +2828,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'awarded_at',
-        label: 'Awarded',
+        label: t('marketplace.field.awarded'),
         sortable: true,
         render: (_raw, row) => {
           const v = awardedAtOf(row as AwardRow);
@@ -2832,7 +2837,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'awarded_by',
-        label: 'Awarded by',
+        label: t('marketplace.field.awardedBy'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => {
@@ -2844,7 +2849,7 @@ export function MarketplaceModule() {
       // W17-2 — `terms_summary` resolved from canonical award_terms jsonb.
       {
         key: 'terms_summary',
-        label: 'Terms',
+        label: t('marketplace.field.terms'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => {
@@ -2854,7 +2859,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'status',
-        label: 'Status',
+        label: t('marketplace.field.status'),
         sortable: true,
         filterable: true,
         render: (raw) => {
@@ -2863,7 +2868,7 @@ export function MarketplaceModule() {
         },
       },
     ],
-    [fmtDateTime]
+    [t, fmtDateTime]
   );
 
   // W19-1 — contract columns now resolve `participant_id` / `started_at`
@@ -2875,7 +2880,7 @@ export function MarketplaceModule() {
       // W17-2 — `contract_no` resolved from canonical metadata jsonb.
       {
         key: 'contract_no',
-        label: 'Contract #',
+        label: t('marketplace.field.contractNo'),
         mono: true,
         sortable: true,
         filterable: true,
@@ -2886,7 +2891,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'participant_id',
-        label: 'Participant',
+        label: t('marketplace.field.participant'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => {
@@ -2906,7 +2911,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'started_at',
-        label: 'Started',
+        label: t('marketplace.field.started'),
         sortable: true,
         render: (_raw, row) => {
           const v = startedAtOf(row as ContractRow);
@@ -2915,7 +2920,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'ends_at',
-        label: 'Ends',
+        label: t('marketplace.field.ends'),
         sortable: true,
         render: (_raw, row) => {
           const v = endsAtOf(row as ContractRow);
@@ -2942,7 +2947,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'status',
-        label: 'Status',
+        label: t('marketplace.field.status'),
         sortable: true,
         filterable: true,
         render: (raw) => {
@@ -2960,17 +2965,17 @@ export function MarketplaceModule() {
     // re-memos once the canonical policy resolves (otherwise the data-testid
     // host stays unset for the whole test window, see marketplace.test.tsx
     // "shows the aging chip" wait-for).
-    [fmtDateTime, contractExpiryWarnDays]
+    [t, fmtDateTime, contractExpiryWarnDays]
   );
 
   // W19-1 — request columns now resolve `request_kind` / `opened_at`
   // through canonical column shadows (`request_kind_key` / `published_at`).
   const requestColumns = useMemo<Array<DataTableColumn<RequestRow>>>(
     () => [
-      { key: 'id', label: 'Request #', mono: true, sortable: true },
+      { key: 'id', label: t('marketplace.field.requestNo'), mono: true, sortable: true },
       {
         key: 'request_kind',
-        label: 'Kind',
+        label: t('marketplace.field.kind'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => {
@@ -2983,7 +2988,7 @@ export function MarketplaceModule() {
       // W17-2 — `opener` resolved from canonical request_details jsonb.
       {
         key: 'opener',
-        label: 'Opened by',
+        label: t('marketplace.field.openedBy'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => {
@@ -2993,7 +2998,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'opened_at',
-        label: 'Opened',
+        label: t('marketplace.field.opened'),
         sortable: true,
         render: (_raw, row) => {
           const v = openedAtOf(row as RequestRow);
@@ -3002,7 +3007,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'items_count',
-        label: 'Items',
+        label: t('marketplace.field.items'),
         align: 'right',
         sortable: true,
         type: 'number',
@@ -3013,7 +3018,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'status',
-        label: 'Status',
+        label: t('marketplace.field.status'),
         sortable: true,
         filterable: true,
         render: (raw) => {
@@ -3030,7 +3035,7 @@ export function MarketplaceModule() {
       // the projected key.
       {
         key: 'response_count',
-        label: 'Bids',
+        label: t('marketplace.field.bids'),
         align: 'right',
         sortable: false,
         mono: true,
@@ -3040,7 +3045,7 @@ export function MarketplaceModule() {
         },
       },
     ],
-    [fmtNumber, fmtDateTime, itemsByRequest, offersByRequest, requestKindByKey]
+    [t, fmtNumber, fmtDateTime, itemsByRequest, offersByRequest, requestKindByKey]
   );
 
   // Reputation tab — derive a per-participant aggregate row plus a sparkline.
@@ -3093,7 +3098,7 @@ export function MarketplaceModule() {
     () => [
       {
         key: 'name',
-        label: 'Participant',
+        label: t('marketplace.field.participant'),
         sortable: true,
         filterable: true,
         render: (raw, row) => (
@@ -3110,7 +3115,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'score',
-        label: 'Latest',
+        label: t('marketplace.field.latest'),
         align: 'right',
         mono: true,
         sortable: true,
@@ -3125,14 +3130,14 @@ export function MarketplaceModule() {
       },
       {
         key: 'history',
-        label: 'Trend (8w)',
+        label: t('marketplace.field.trend'),
         sortable: false,
         render: (_raw, row) => {
           const values = (row.history as number[] | undefined) ?? [];
           if (values.length === 0) {
             return (
               <span className="mono" style={{ color: 'var(--ink-2)' }}>
-                no data
+                {t('marketplace.value.noData')}
               </span>
             );
           }
@@ -3156,7 +3161,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'breakdown',
-        label: 'Breakdown',
+        label: t('marketplace.field.breakdown'),
         sortable: false,
         render: (_raw, row) => {
           const bd = (row.breakdown as Record<string, number> | undefined) ?? {};
@@ -3179,21 +3184,21 @@ export function MarketplaceModule() {
       },
       {
         key: 'snapshot_at',
-        label: 'Updated',
+        label: t('marketplace.field.updated'),
         sortable: true,
         format: 'datetime',
       },
     ],
-    [reputationThresholds]
+    [t, reputationThresholds]
   );
 
   // W13-4 — Events tab columns (canonical marketplace_events ledger).
   const eventColumns = useMemo<Array<DataTableColumn<MarketplaceEventRow>>>(
     () => [
-      { key: 'occurred_at', label: 'When', format: 'datetime', sortable: true },
+      { key: 'occurred_at', label: t('marketplace.field.when'), format: 'datetime', sortable: true },
       {
         key: 'participant_id',
-        label: 'Participant',
+        label: t('marketplace.field.participant'),
         sortable: true,
         filterable: true,
         render: (raw, row) => {
@@ -3215,7 +3220,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'event_type',
-        label: 'Event',
+        label: t('marketplace.field.event'),
         mono: true,
         sortable: true,
         filterable: true,
@@ -3241,7 +3246,7 @@ export function MarketplaceModule() {
       },
       {
         key: 'payload',
-        label: 'Request details',
+        label: t('marketplace.field.requestDetails'),
         sortable: false,
         render: (raw) => {
           if (!raw || typeof raw !== 'object') return <span>—</span>;
@@ -3251,15 +3256,15 @@ export function MarketplaceModule() {
             <span className="mono" style={{ fontSize: 11 }}>
               {entries
                 .slice(0, 3)
-                .map(([k, v]) => `${marketplaceDetailLabel(k)}: ${marketplaceDetailValue(v)}`)
+                .map(([k, v]) => `${marketplaceDetailLabel(k)}: ${marketplaceDetailValue(v, t)}`)
                 .join(' · ')}
-              {entries.length > 3 ? ` · +${entries.length - 3} more` : ''}
+              {entries.length > 3 ? fill(t('marketplace.value.more'), { n: entries.length - 3 }) : ''}
             </span>
           );
         },
       },
     ],
-    [],
+    [t],
   );
 
   const eventRows = useMemo<MarketplaceEventRow[]>(() => {
@@ -3276,14 +3281,14 @@ export function MarketplaceModule() {
       <div className="page">
         <PageHeader
           moduleKey="marketplace"
-          eyebrow="Network"
-          titleAccent="Marketplace"
-          titlePlain="— offers · awards · contracts · requests · reputation"
+          eyebrow={t('marketplace.header.eyebrow')}
+          titleAccent={t('marketplace.header.accent')}
+          titlePlain={t('marketplace.header.plain')}
         />
         <StateView
           kind="denied"
           capability={CAP.MARKETPLACE_READ}
-          hint="You do not have permission to view the marketplace."
+          hint={t('marketplace.state.denied')}
         />
       </div>
     );
@@ -3293,14 +3298,14 @@ export function MarketplaceModule() {
     <div className="page">
       <PageHeader
         moduleKey="marketplace"
-        eyebrow="Network"
-        titleAccent="Marketplace"
-        titlePlain="— offers · awards · contracts · requests · reputation"
+        eyebrow={t('marketplace.header.eyebrow')}
+        titleAccent={t('marketplace.header.accent')}
+        titlePlain={t('marketplace.header.plain')}
         pills={[
           <ScopePill key="scope" scopeType="tenant" scopeId={tenantId} />,
           <Chip
             key="src"
-            label="marketplace_*"
+            label="marketplace_*" // i18n-literal-ok: resource key family
             kind="neutral"
             size="xs"
             className="mono"
@@ -3309,7 +3314,7 @@ export function MarketplaceModule() {
         actions={[
           <Button
             key="new-request"
-            label="New request"
+            label={t('marketplace.action.newRequest')}
             iconName="plus"
             kind="primary"
             capability={CAP.MARKETPLACE_WRITE}
@@ -3317,7 +3322,7 @@ export function MarketplaceModule() {
           />,
           <Button
             key="refresh-reputation"
-            label="Refresh reputation"
+            label={t('marketplace.action.refreshReputation')}
             iconName="refresh"
             kind="ghost"
             capability={CAP.MARKETPLACE_WRITE}
@@ -3327,16 +3332,16 @@ export function MarketplaceModule() {
       />
 
       {isError ? (
-        <StateView kind="error" hint="Could not load marketplace data." />
+        <StateView kind="error" hint={t('marketplace.state.loadError')} />
       ) : isLoading ? (
-        <StateView kind="loading" hint="Loading marketplace…" />
+        <StateView kind="loading" hint={t('marketplace.state.loading')} />
       ) : (
         <>
           <div className="kpi-strip" data-testid="marketplace-kpi-strip">
             <KPICard
-              label="Open requests"
+              label={t('marketplace.kpi.openRequests')}
               value={fmtNumber(openRequests)}
-              delta={`of ${fmtNumber(requests.length)} total`}
+              delta={fill(t('marketplace.kpi.ofTotal'), { n: fmtNumber(requests.length) })}
               tone={openRequests > 0 ? 'info' : 'good'}
             />
             {/* W27 Cycle D Network closure (P1 #8): pendingAwards tone
@@ -3344,9 +3349,9 @@ export function MarketplaceModule() {
                 (sv_480). Replaces inline `> 5` magic literal. Missing
                 policy → tone falls through to info/good baseline. */}
             <KPICard
-              label="Pending awards"
+              label={t('marketplace.kpi.pendingAwards')}
               value={fmtNumber(pendingAwards)}
-              delta="offers awaiting decision"
+              delta={t('marketplace.kpi.awaitingDecision')}
               tone={
                 marketplaceHealthThresholds?.pending_awards_warn_threshold != null
                   ? pendingAwards > marketplaceHealthThresholds.pending_awards_warn_threshold
@@ -3360,18 +3365,18 @@ export function MarketplaceModule() {
               }
             />
             <KPICard
-              label="Active contracts"
+              label={t('marketplace.kpi.activeContracts')}
               value={fmtNumber(activeContracts)}
-              delta="active or expiring soon"
+              delta={t('marketplace.kpi.activeOrExpiring')}
               tone={activeContracts > 0 ? 'good' : 'neutral'}
             />
             <KPICard
-              label="Avg reputation"
-              value={avgReputation == null ? '—' : `${fmtNumber(avgReputation)} / 100`}
+              label={t('marketplace.kpi.avgReputation')}
+              value={avgReputation == null ? '—' : fill(t('marketplace.value.outOf100'), { n: fmtNumber(avgReputation) })}
               delta={
                 avgReputation == null
-                  ? 'no snapshots yet'
-                  : `across ${fmtNumber(reputationByParticipant.size)} participants`
+                  ? t('marketplace.kpi.noSnapshots')
+                  : fill(t('marketplace.kpi.acrossParticipants'), { n: fmtNumber(reputationByParticipant.size) })
               }
               tone={
                 avgReputation == null
@@ -3385,7 +3390,7 @@ export function MarketplaceModule() {
             className="dt-toolbar"
             style={{ borderBottom: '1px solid var(--line)' }}
             role="tablist"
-            aria-label="Marketplace tabs"
+            aria-label={t('marketplace.tabs.aria')}
           >
             {TABS.map((tab) => (
               <button
@@ -3397,7 +3402,7 @@ export function MarketplaceModule() {
                 onClick={() => setActiveTab(tab)}
                 data-testid={`marketplace-tab-${tab}`}
               >
-                {TAB_LABELS[tab]}
+                {t(TAB_LABEL_KEYS[tab])}
               </button>
             ))}
           </div>
@@ -3414,7 +3419,7 @@ export function MarketplaceModule() {
               }
               rowActions={[
                 {
-                  label: 'Award offer',
+                  label: t('marketplace.action.awardOffer'),
                   icon: 'check',
                   kind: 'primary',
                   capability: CAP.MARKETPLACE_WRITE,
@@ -3436,7 +3441,7 @@ export function MarketplaceModule() {
               }
               rowActions={[
                 {
-                  label: 'Cancel award',
+                  label: t('marketplace.action.cancelAward'),
                   icon: 'close',
                   kind: 'danger',
                   capability: CAP.MARKETPLACE_WRITE,
@@ -3458,20 +3463,20 @@ export function MarketplaceModule() {
               }
               rowActions={[
                 {
-                  label: 'Activate',
+                  label: t('marketplace.action.activate'),
                   icon: 'check',
                   kind: 'primary',
                   capability: CAP.MARKETPLACE_WRITE,
                   onClick: (row) => onActivateContract(row),
                 },
                 {
-                  label: 'Renegotiate',
+                  label: t('marketplace.action.renegotiate'),
                   icon: 'edit',
                   capability: CAP.MARKETPLACE_WRITE,
                   onClick: (row) => onRenegotiateContract(row),
                 },
                 {
-                  label: 'Terminate',
+                  label: t('marketplace.action.terminate'),
                   icon: 'close',
                   kind: 'danger',
                   capability: CAP.MARKETPLACE_WRITE,
@@ -3511,7 +3516,7 @@ export function MarketplaceModule() {
 
           {activeTab === 'events' ? (
             eventRows.length === 0 ? (
-              <StateView kind="empty" hint="No marketplace events recorded yet." />
+              <StateView kind="empty" hint={t('marketplace.state.noEvents')} />
             ) : (
               <DataTable<MarketplaceEventRow>
                 columns={eventColumns}

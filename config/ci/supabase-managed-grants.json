@@ -283,6 +283,16 @@
       "file": "supabase/migrations/20261122043000_append_only_ledger_table_contracts_v1.sql",
       "sha256": "a22581e0a27af3de0a4cf724cc5b94acd8af5f655fcb91bf594db0a75a147388",
       "reason": "Reconciles row and truncate guards only on catalog-resolved public application tables. Preserves canonical ledger guards and drops only existing local table-contract guards when redundant or mutable. No privilege changes are dynamic."
+    },
+    {
+      "file": "supabase/migrations/20261127121908_console_live_broadcast_v1.sql",
+      "sha256": "4474bb6e04c4e39ade5f39a72ede9f09d46637068325675302649f3685bfe25a",
+      "reason": "Adds four tenant-bound Broadcast policies on realtime.messages for Console live invalidations. Preserves the managed schema, relation and role grants."
+    },
+    {
+      "file": "supabase/migrations/20261127232458_privileged_session_assurance.sql",
+      "sha256": "fe0bdf347c837105f0125e81ed44dc557d5bc545d4e7bab699d1ca23e2ebe699",
+      "reason": "Sets pgrst.db_pre_request on authenticator to the invoker hook in an unexposed application schema. Every impersonated role can invoke the hook and the separate assurance predicate has specific executor grants."
     }
   ]
 }

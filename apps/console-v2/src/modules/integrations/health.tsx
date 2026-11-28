@@ -14,6 +14,7 @@ import { useCapability } from '@/lib/identity';
 import { CAP } from '@/lib/capabilities';
 import { lookupRow } from '@/lib/api';
 import type { ChipKind } from '@/components/Chip';
+import { fill, useI18n, type Translate } from '@/lib/i18n';
 
 interface ProviderHealthRow extends Record<string, unknown> {
   provider_id: string;
@@ -78,11 +79,11 @@ function providerLabel(row: ProviderHealthRow | CircuitBreakerRow): string {
   return row.provider_name || row.provider_id;
 }
 
-function lookupChip(category: string, value: unknown, emptyLabel = '-'): ReactNode {
+function lookupChip(category: string, value: unknown, t: Translate, emptyLabel = '-'): ReactNode {
   const v = String(value ?? '');
   if (!v) return <Chip label={emptyLabel} kind="neutral" size="xs" />;
   const row = lookupRow(category, v);
-  if (!row) return <Chip label={`Unknown ${category}: ${v}`} kind="danger" size="xs" />;
+  if (!row) return <Chip label={fill(t('integrationsHealth.lookupChip.unknown'), { category, value: v })} kind="danger" size="xs" />;
   return <Chip label={row.label ?? v} kind={(row.tone as ChipKind) ?? 'neutral'} size="xs" />;
 }
 
@@ -107,11 +108,11 @@ function DetailGrid({ rows }: { rows: Array<[string, ReactNode]> }) {
   );
 }
 
-function interventionChip(required?: boolean) {
+function interventionChip(t: Translate, required?: boolean) {
   return required ? (
-    <Chip label="Required" kind="danger" size="xs" />
+    <Chip label={t('integrationsHealth.interventionChip.required')} kind="danger" size="xs" />
   ) : (
-    <Chip label="Not required" kind="good" size="xs" />
+    <Chip label={t('integrationsHealth.interventionChip.notRequired')} kind="good" size="xs" />
   );
 }
 
@@ -122,28 +123,29 @@ function ProviderHealthDrawer({
   row: ProviderHealthRow;
   breakers: CircuitBreakerRow[];
 }) {
+  const { t } = useI18n();
   return (
     <div data-testid="provider-health-drawer">
-      <div className="section-eyebrow">Latest provider signal</div>
+      <div className="section-eyebrow">{t('integrationsHealth.providerHealthDrawer.latestProviderSignal')}</div>
       <div className="card">
         <DetailGrid
           rows={[
-            ['Provider', providerLabel(row)],
-            ['Provider reference', providerLabel(row)],
-            ['Status', lookupChip('provider_health', row.status)],
-            ['Success 24h', formatPercentValue(row.success_rate_24h)],
-            ['Error rate 24h', formatPercentValue(row.error_rate_24h)],
-            ['Average latency', row.avg_latency_ms == null ? '-' : `${Number(row.avg_latency_ms).toFixed(0)} ms`],
-            ['Last check', formatDateTime(row.created_at)],
-            ['Error', row.error_message || '-'],
-            ['Correlation', row.correlation_id || '-'],
-            ['Decision log', row.decision_log_id || '-'],
+            [t('integrationsHealth.detail.provider'), providerLabel(row)],
+            [t('integrationsHealth.detail.providerReference'), providerLabel(row)],
+            [t('integrationsHealth.detail.status'), lookupChip('provider_health', row.status, t)],
+            [t('integrationsHealth.detail.success24h'), formatPercentValue(row.success_rate_24h)],
+            [t('integrationsHealth.detail.errorRate24h'), formatPercentValue(row.error_rate_24h)],
+            [t('integrationsHealth.detail.averageLatency'), row.avg_latency_ms == null ? '-' : `${Number(row.avg_latency_ms).toFixed(0)} ms`],
+            [t('integrationsHealth.detail.lastCheck'), formatDateTime(row.created_at)],
+            [t('integrationsHealth.detail.error'), row.error_message || '-'],
+            [t('integrationsHealth.detail.correlation'), row.correlation_id || '-'],
+            [t('integrationsHealth.detail.decisionLog'), row.decision_log_id || '-'],
           ]}
         />
       </div>
 
       <div className="section-eyebrow" style={{ marginTop: '14px' }}>
-        Related circuit breakers
+        {t('integrationsHealth.providerHealthDrawer.relatedCircuitBreakers')}
       </div>
       {breakers.length ? (
         <div style={{ display: 'grid', gap: '8px' }}>
@@ -151,49 +153,50 @@ function ProviderHealthDrawer({
             <div className="card" key={`${breaker.provider_id}:${breaker.operation_name}`}>
               <DetailGrid
                 rows={[
-                  ['Operation', breaker.operation_name],
-                  ['State', lookupChip('circuit_state', breaker.state)],
-                  ['Failure rate', formatPercentValue(breaker.failure_rate)],
-                  ['Reopens', String(breaker.reopen_count ?? 0)],
-                  ['Intervention', interventionChip(breaker.manual_intervention_required)],
-                  ['Changed', formatDateTime(breaker.updated_at)],
-                  ['Next probe', formatDateTime(breaker.half_open_test_at)],
-                  ['Last health', breaker.last_health_status || '-'],
-                  ['Last error', breaker.last_health_error || '-'],
+                  [t('integrationsHealth.detail.operation'), breaker.operation_name],
+                  [t('integrationsHealth.detail.state'), lookupChip('circuit_state', breaker.state, t)],
+                  [t('integrationsHealth.detail.failureRate'), formatPercentValue(breaker.failure_rate)],
+                  [t('integrationsHealth.detail.reopens'), String(breaker.reopen_count ?? 0)],
+                  [t('integrationsHealth.detail.intervention'), interventionChip(t, breaker.manual_intervention_required)],
+                  [t('integrationsHealth.detail.changed'), formatDateTime(breaker.updated_at)],
+                  [t('integrationsHealth.detail.nextProbe'), formatDateTime(breaker.half_open_test_at)],
+                  [t('integrationsHealth.detail.lastHealth'), breaker.last_health_status || '-'],
+                  [t('integrationsHealth.detail.lastError'), breaker.last_health_error || '-'],
                 ]}
               />
             </div>
           ))}
         </div>
       ) : (
-        <StateView kind="empty" hint="No circuit breaker is currently associated with this provider." />
+        <StateView kind="empty" hint={t('integrationsHealth.providerHealthDrawer.noCircuitBreakerIs')} />
       )}
     </div>
   );
 }
 
 function CircuitBreakerDrawer({ row }: { row: CircuitBreakerRow }) {
+  const { t } = useI18n();
   return (
     <div data-testid="circuit-breaker-drawer">
-      <div className="section-eyebrow">Circuit breaker state</div>
+      <div className="section-eyebrow">{t('integrationsHealth.circuitBreakerDrawer.circuitBreakerState')}</div>
       <div className="card">
         <DetailGrid
           rows={[
-            ['Provider', providerLabel(row)],
-            ['Provider ID', row.provider_id],
-            ['Operation', row.operation_name],
-            ['State', lookupChip('circuit_state', row.state)],
-            ['Failure rate', formatPercentValue(row.failure_rate)],
-            ['Reopens', String(row.reopen_count ?? 0)],
-            ['Intervention', interventionChip(row.manual_intervention_required)],
-            ['Opened', formatDateTime(row.opened_at)],
-            ['Changed', formatDateTime(row.updated_at)],
-            ['Next probe', formatDateTime(row.half_open_test_at)],
-            ['Last failure', formatDateTime(row.last_failure_at)],
-            ['Last success', formatDateTime(row.last_success_at)],
-            ['Last health', row.last_health_status || '-'],
-            ['Last health at', formatDateTime(row.last_health_at)],
-            ['Last error', row.last_health_error || '-'],
+            [t('integrationsHealth.detail.provider'), providerLabel(row)],
+            [t('integrationsHealth.detail.providerId'), row.provider_id],
+            [t('integrationsHealth.detail.operation'), row.operation_name],
+            [t('integrationsHealth.detail.state'), lookupChip('circuit_state', row.state, t)],
+            [t('integrationsHealth.detail.failureRate'), formatPercentValue(row.failure_rate)],
+            [t('integrationsHealth.detail.reopens'), String(row.reopen_count ?? 0)],
+            [t('integrationsHealth.detail.intervention'), interventionChip(t, row.manual_intervention_required)],
+            [t('integrationsHealth.detail.opened'), formatDateTime(row.opened_at)],
+            [t('integrationsHealth.detail.changed'), formatDateTime(row.updated_at)],
+            [t('integrationsHealth.detail.nextProbe'), formatDateTime(row.half_open_test_at)],
+            [t('integrationsHealth.detail.lastFailure'), formatDateTime(row.last_failure_at)],
+            [t('integrationsHealth.detail.lastSuccess'), formatDateTime(row.last_success_at)],
+            [t('integrationsHealth.detail.lastHealth'), row.last_health_status || '-'],
+            [t('integrationsHealth.detail.lastHealthAt'), formatDateTime(row.last_health_at)],
+            [t('integrationsHealth.detail.lastError'), row.last_health_error || '-'],
           ]}
         />
       </div>
@@ -201,71 +204,78 @@ function CircuitBreakerDrawer({ row }: { row: CircuitBreakerRow }) {
   );
 }
 
-const HEALTH_COLUMNS: Array<DataTableColumn<ProviderHealthRow>> = [
-  {
-    key: 'provider_name',
-    label: 'Provider',
-    sortable: true,
-    filterable: true,
-    render: (_raw, row) => (
-      <span>
-        {providerLabel(row)}
-        <span className="mono" style={{ color: 'var(--ink-3)', marginLeft: 6, fontSize: '11px' }}>
-          {row.provider_id}
+function healthColumns(t: Translate): Array<DataTableColumn<ProviderHealthRow>> {
+  return [
+    {
+      key: 'provider_name',
+      label: t('integrationsHealth.columns.provider'),
+      sortable: true,
+      filterable: true,
+      render: (_raw, row) => (
+        <span>
+          {providerLabel(row)}
+          <span className="mono" style={{ color: 'var(--ink-3)', marginLeft: 6, fontSize: '11px' }}>
+            {row.provider_id}
+          </span>
         </span>
-      </span>
-    ),
-  },
-  { key: 'status', label: 'Status', sortable: true, filterable: true, render: (raw) => lookupChip('provider_health', raw) },
-  { key: 'success_rate_24h', label: 'Success', align: 'right', format: 'percent', sortable: true },
-  { key: 'avg_latency_ms', label: 'Avg latency', align: 'right', format: 'ms', sortable: true },
-  { key: 'error_rate_24h', label: 'Error rate', align: 'right', format: 'percent', sortable: true },
-  {
-    key: 'error_message',
-    label: 'Last error',
-    sortable: true,
-    filterable: true,
-    render: (raw) => (raw ? <span>{String(raw)}</span> : <span className="mono">-</span>),
-  },
-  { key: 'created_at', label: 'Last check', format: 'datetime' },
-];
+      ),
+    },
+    { key: 'status', label: t('integrationsHealth.columns.status'), sortable: true, filterable: true, render: (raw) => lookupChip('provider_health', raw, t) },
+    { key: 'success_rate_24h', label: t('integrationsHealth.columns.success'), align: 'right', format: 'percent', sortable: true },
+    { key: 'avg_latency_ms', label: t('integrationsHealth.columns.avgLatency'), align: 'right', format: 'ms', sortable: true },
+    { key: 'error_rate_24h', label: t('integrationsHealth.columns.errorRate'), align: 'right', format: 'percent', sortable: true },
+    {
+      key: 'error_message',
+      label: t('integrationsHealth.columns.lastError'),
+      sortable: true,
+      filterable: true,
+      render: (raw) => (raw ? <span>{String(raw)}</span> : <span className="mono">-</span>),
+    },
+    { key: 'created_at', label: t('integrationsHealth.columns.lastCheck'), format: 'datetime' },
+  ];
+}
 
-const BREAKER_COLUMNS: Array<DataTableColumn<CircuitBreakerRow>> = [
-  {
-    key: 'provider_name',
-    label: 'Provider',
-    sortable: true,
-    filterable: true,
-    render: (_raw, row) => (
-      <span>
-        {providerLabel(row)}
-        <span className="mono" style={{ color: 'var(--ink-3)', marginLeft: 6, fontSize: '11px' }}>
-          {row.provider_id}
+function breakerColumns(t: Translate): Array<DataTableColumn<CircuitBreakerRow>> {
+  return [
+    {
+      key: 'provider_name',
+      label: t('integrationsHealth.columns.provider'),
+      sortable: true,
+      filterable: true,
+      render: (_raw, row) => (
+        <span>
+          {providerLabel(row)}
+          <span className="mono" style={{ color: 'var(--ink-3)', marginLeft: 6, fontSize: '11px' }}>
+            {row.provider_id}
+          </span>
         </span>
-      </span>
-    ),
-  },
-  { key: 'operation_name', label: 'Operation', sortable: true, filterable: true },
-  { key: 'state', label: 'State', sortable: true, filterable: true, render: (raw) => lookupChip('circuit_state', raw) },
-  { key: 'failure_rate', label: 'Failure rate', align: 'right', format: 'percent', sortable: true },
-  {
-    key: 'reopen_count',
-    label: 'Reopens',
-    align: 'right',
-    sortable: true,
-    render: (raw) => <span className="mono">{Number(raw ?? 0)}</span>,
-  },
-  {
-    key: 'manual_intervention_required',
-    label: 'Intervention',
-    sortable: true,
-    render: (raw) => interventionChip(Boolean(raw)),
-  },
-  { key: 'updated_at', label: 'Changed', format: 'datetime', sortable: true },
-  { key: 'half_open_test_at', label: 'Next probe', format: 'datetime', sortable: true },
-];
+      ),
+    },
+    { key: 'operation_name', label: t('integrationsHealth.columns.operation'), sortable: true, filterable: true },
+    { key: 'state', label: t('integrationsHealth.columns.state'), sortable: true, filterable: true, render: (raw) => lookupChip('circuit_state', raw, t) },
+    { key: 'failure_rate', label: t('integrationsHealth.columns.failureRate'), align: 'right', format: 'percent', sortable: true },
+    {
+      key: 'reopen_count',
+      label: t('integrationsHealth.columns.reopens'),
+      align: 'right',
+      sortable: true,
+      render: (raw) => <span className="mono">{Number(raw ?? 0)}</span>,
+    },
+    {
+      key: 'manual_intervention_required',
+      label: t('integrationsHealth.columns.intervention'),
+      sortable: true,
+      render: (raw) => interventionChip(t, Boolean(raw)),
+    },
+    { key: 'updated_at', label: t('integrationsHealth.columns.changed'), format: 'datetime', sortable: true },
+    { key: 'half_open_test_at', label: t('integrationsHealth.columns.nextProbe'), format: 'datetime', sortable: true },
+  ];
+}
 
 export function HealthModule() {
+  const { t } = useI18n();
+  const healthCols = useMemo(() => healthColumns(t), [t]);
+  const breakerCols = useMemo(() => breakerColumns(t), [t]);
   const canRead = useCapability(CAP.INTEGRATIONS_READ);
   const canWriteIntegrations = useCapability(CAP.INTEGRATIONS_WRITE);
   const canWriteIntegrationPlugins = useCapability(CAP.INTEGRATION_PLUGINS_WRITE);
@@ -282,8 +292,8 @@ export function HealthModule() {
   const breakerQuery = useResourceList<CircuitBreakerRow>('circuit_breaker_dashboard', undefined, readQueryOptions);
 
   const headerPills = [
-    <span key="src" className="chip chip--xs">Provider telemetry - circuit breaker state</span>,
-    refreshedAt ? <span key="refresh" className="chip chip--xs mono">refreshed {formatDateTime(refreshedAt)}</span> : null,
+    <span key="src" className="chip chip--xs">{t('integrationsHealth.healthModule.providerTelemetryCircuitBreaker')}</span>,
+    refreshedAt ? <span key="refresh" className="chip chip--xs mono">{fill(t('integrationsHealth.healthModule.refreshed'), { value: String(formatDateTime(refreshedAt)) })}</span> : null,
   ].filter(Boolean) as ReactNode[];
 
   if (!canRead) {
@@ -291,15 +301,15 @@ export function HealthModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-health"
-          eyebrow="Integrations"
-          titleAccent="Provider"
-          titlePlain="health"
-          pills={[<span key="src" className="chip chip--xs">Provider telemetry - circuit breaker state</span>]}
+          eyebrow={t('integrationsHealth.healthModule.integrations')}
+          titleAccent={t('integrationsHealth.healthModule.titleAccent')}
+          titlePlain={t('integrationsHealth.healthModule.titlePlain')}
+          pills={[<span key="src" className="chip chip--xs">{t('integrationsHealth.healthModule.providerTelemetryCircuitBreaker')}</span>]}
         />
         <StateView
           kind="denied"
           capability={CAP.INTEGRATIONS_READ}
-          hint="You do not have permission to view provider health."
+          hint={t('integrationsHealth.healthModule.youDoNotHave')}
         />
       </div>
     );
@@ -310,10 +320,10 @@ export function HealthModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-health"
-          eyebrow="Integrations"
-          titleAccent="Provider"
-          titlePlain="health"
-          pills={[<span key="src" className="chip chip--xs">Provider telemetry - circuit breaker state</span>]}
+          eyebrow={t('integrationsHealth.healthModule.integrations')}
+          titleAccent={t('integrationsHealth.healthModule.titleAccent')}
+          titlePlain={t('integrationsHealth.healthModule.titlePlain')}
+          pills={[<span key="src" className="chip chip--xs">{t('integrationsHealth.healthModule.providerTelemetryCircuitBreaker')}</span>]}
         />
         <StateView kind="loading" />
       </div>
@@ -325,9 +335,9 @@ export function HealthModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-health"
-          eyebrow="Integrations"
-          titleAccent="Provider"
-          titlePlain="health"
+          eyebrow={t('integrationsHealth.healthModule.integrations')}
+          titleAccent={t('integrationsHealth.healthModule.titleAccent')}
+          titlePlain={t('integrationsHealth.healthModule.titlePlain')}
           pills={[]}
         />
         <StateView kind="error" hint={String(healthQuery.error || breakerQuery.error)} />
@@ -381,12 +391,12 @@ export function HealthModule() {
         ) ?? null
       : null;
   const drawerTitle = selectedHealthRow
-    ? `Provider health - ${providerLabel(selectedHealthRow)}`
+    ? fill(t('integrationsHealth.healthModule.providerHealthFor'), { provider: providerLabel(selectedHealthRow) })
     : selectedBreakerRow
-      ? `Circuit breaker - ${providerLabel(selectedBreakerRow)}`
+      ? fill(t('integrationsHealth.healthModule.circuitBreakerFor'), { provider: providerLabel(selectedBreakerRow) })
       : activeDrawer?.kind === 'health'
-        ? 'Provider health'
-        : 'Circuit breaker';
+        ? t('integrationsHealth.healthModule.providerHealth')
+        : t('integrationsHealth.healthModule.circuitBreaker');
   const drawerBody = selectedHealthRow ? (
     <ProviderHealthDrawer
       row={selectedHealthRow}
@@ -398,16 +408,16 @@ export function HealthModule() {
       {resetReadback ? (
         <div className="card" style={{ marginTop: '14px' }} data-testid="provider-circuit-reset-readback">
           <div className="section-eyebrow">
-            {resetReadback.decision_point === 'recovery_probe' ? 'Recovery probe confirmed' : 'Reset confirmed'}
+            {resetReadback.decision_point === 'recovery_probe' ? t('integrationsHealth.healthModule.recoveryProbeConfirmed') : t('integrationsHealth.healthModule.resetConfirmed')}
           </div>
           <DetailGrid
             rows={[
-              ['Provider', resetReadback.provider_id || '-'],
-              ['Operation', resetReadback.operation_name || '-'],
-              ['Circuit state', lookupChip('circuit_state', resetReadback.state)],
-              ['Provider health', lookupChip('provider_health', resetReadback.health_status)],
-              ['Correlation', resetReadback.correlation_id || '-'],
-              ['Decision log', resetReadback.decision_log_id || '-'],
+              [t('integrationsHealth.detail.provider'), resetReadback.provider_id || '-'],
+              [t('integrationsHealth.detail.operation'), resetReadback.operation_name || '-'],
+              [t('integrationsHealth.detail.circuitState'), lookupChip('circuit_state', resetReadback.state, t)],
+              [t('integrationsHealth.detail.providerHealth'), lookupChip('provider_health', resetReadback.health_status, t)],
+              [t('integrationsHealth.detail.correlation'), resetReadback.correlation_id || '-'],
+              [t('integrationsHealth.detail.decisionLog'), resetReadback.decision_log_id || '-'],
             ]}
           />
         </div>
@@ -417,7 +427,7 @@ export function HealthModule() {
       ) : null}
     </>
   ) : (
-    <StateView kind="empty" hint="The selected provider signal is no longer available in the current list." />
+    <StateView kind="empty" hint={t('integrationsHealth.healthModule.theSelectedProviderSignal')} />
   );
 
   const resetSelectedBreaker = async () => {
@@ -479,14 +489,14 @@ export function HealthModule() {
     <div className="page">
       <PageHeader
         moduleKey="int-health"
-        eyebrow="Integrations"
-        titleAccent="Provider"
-        titlePlain="health"
+        eyebrow={t('integrationsHealth.healthModule.integrations')}
+        titleAccent={t('integrationsHealth.healthModule.titleAccent')}
+        titlePlain={t('integrationsHealth.healthModule.titlePlain')}
         pills={headerPills}
         actions={[
           <Button
             key="refresh"
-            label={refreshing ? 'Refreshing...' : 'Refresh telemetry'}
+            label={refreshing ? t('integrationsHealth.healthModule.refreshing') : t('integrationsHealth.healthModule.refreshTelemetry')}
             iconName="refresh"
             kind="ghost"
             disabled={refreshing}
@@ -495,27 +505,27 @@ export function HealthModule() {
         ]}
       />
       <div className="kpi-strip">
-        <KPICard label="Providers" value={health.length} tone="neutral" />
-        <KPICard label="Healthy" value={healthyCount} tone="good" />
-        <KPICard label="Degraded" value={degradedCount} tone="warn" />
-        <KPICard label="Open breakers" value={openBreakerCount} tone={openBreakerCount ? 'danger' : 'good'} />
-        <KPICard label="Needs intervention" value={interventionCount} tone={interventionCount ? 'danger' : 'good'} />
+        <KPICard label={t('integrationsHealth.healthModule.providers')} value={health.length} tone="neutral" />
+        <KPICard label={t('integrationsHealth.healthModule.healthy')} value={healthyCount} tone="good" />
+        <KPICard label={t('integrationsHealth.healthModule.degraded')} value={degradedCount} tone="warn" />
+        <KPICard label={t('integrationsHealth.healthModule.openBreakers')} value={openBreakerCount} tone={openBreakerCount ? 'danger' : 'good'} />
+        <KPICard label={t('integrationsHealth.healthModule.needsIntervention')} value={interventionCount} tone={interventionCount ? 'danger' : 'good'} />
       </div>
-      <div className="section-eyebrow">Provider health (24h)</div>
+      <div className="section-eyebrow">{t('integrationsHealth.healthModule.providerHealth24h')}</div>
       <DataTable<ProviderHealthRow>
-        columns={HEALTH_COLUMNS}
+        columns={healthCols}
         rows={health}
         viewKey="provider_health_latest"
         entityKind="provider_health"
         onRowClick={openHealthDrawer}
       />
-      <div className="section-eyebrow">Circuit breakers</div>
+      <div className="section-eyebrow">{t('integrationsHealth.healthModule.circuitBreakers')}</div>
       <DataTable<CircuitBreakerRow>
-        columns={BREAKER_COLUMNS}
+        columns={breakerCols}
         rows={breakers}
         viewKey="circuit_breaker"
         entityKind="circuit_breaker"
-        emptyText="All circuits closed."
+        emptyText={t('integrationsHealth.healthModule.allCircuitsClosed')}
         onRowClick={openBreakerDrawer}
       />
       <Drawer
@@ -526,28 +536,28 @@ export function HealthModule() {
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, width: '100%' }}>
             {showProbeAction ? (
               <Button
-                label={probeMutation.isPending ? 'Probing...' : 'Run recovery probe'}
+                label={probeMutation.isPending ? t('integrationsHealth.healthModule.probing') : t('integrationsHealth.healthModule.runRecoveryProbe')}
                 iconName="play"
                 kind="primary"
                 disabled={probeMutation.isPending}
                 anyCapabilities={[CAP.INTEGRATIONS_WRITE, CAP.INTEGRATION_PLUGINS_WRITE]}
-                title={canReset ? undefined : 'Integration update permission required'}
+                title={canReset ? undefined : t('integrationsHealth.healthModule.integrationUpdatePermissionRequired')}
                 onClick={() => void probeSelectedBreaker()}
               />
             ) : null}
             {showResetAction ? (
               <Button
-                label={resetMutation.isPending ? 'Resetting...' : 'Reset breaker'}
+                label={resetMutation.isPending ? t('integrationsHealth.healthModule.resetting') : t('integrationsHealth.healthModule.resetBreaker')}
                 iconName="check"
                 kind="primary"
                 disabled={resetMutation.isPending}
                 anyCapabilities={[CAP.INTEGRATIONS_WRITE, CAP.INTEGRATION_PLUGINS_WRITE]}
-                title={canReset ? undefined : 'Integration update permission required'}
+                title={canReset ? undefined : t('integrationsHealth.healthModule.integrationUpdatePermissionRequired')}
                 onClick={() => void resetSelectedBreaker()}
               />
             ) : null}
             <Button
-              label={refreshing ? 'Refreshing...' : 'Refresh telemetry'}
+              label={refreshing ? t('integrationsHealth.healthModule.refreshing') : t('integrationsHealth.healthModule.refreshTelemetry')}
               iconName="refresh"
               kind="ghost"
               disabled={refreshing}

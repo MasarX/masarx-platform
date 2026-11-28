@@ -54,6 +54,7 @@ import {
 import { pushToast } from '@/components/toastStore';
 import { useCapability, useIdentity } from '@/lib/identity';
 import { readUrlParam } from '@/lib/url-params';
+import { englishT, fill, useT, type Translate } from '@/lib/i18n';
 // Strict canonical tone/label SSOT. AGENTS.md §2 (ZERO HARDCODING) + §4 (SSOT):
 // every chip tone derives from `lookup_values.metadata.tone` via this resolver.
 // Missing canonical row → caller renders a `danger` chip with `(missing)`
@@ -242,12 +243,13 @@ function severityToTimelineTone(
 function resolveDecisionSummary(
   decision: string | null | undefined,
   fields: { invite_redirect_to?: string | null; review_reason?: string | null },
+  t: Translate = englishT,
 ): string {
-  if (decision == null) return '(missing summary template)';
+  if (decision == null) return t('fleetApplications.missingSummaryTemplate');
   const template = (lookupRow('marketplace_participant_request_status', decision)
     ?.metadata as { review_summary_template?: string | null } | undefined)
     ?.review_summary_template;
-  if (template == null) return '(missing summary template)';
+  if (template == null) return t('fleetApplications.missingSummaryTemplate');
   return template.replace(
     /\{(invite_redirect_to|review_reason)\|([^}]*)\}/g,
     (_match, key: string, fallback: string) => {
@@ -308,12 +310,12 @@ function daysSince(iso: string | null | undefined, now: Date): number | null {
   return Math.floor((now.getTime() - t) / 86_400_000);
 }
 
-function applicationDisplayName(application: DriverApplicationRow): string {
+function applicationDisplayName(application: DriverApplicationRow, t: Translate = englishT): string {
   return (
     application.full_name ||
     application.email ||
     application.organization_name ||
-    'Driver applicant'
+    t('fleetApplications.fallback.applicant')
   );
 }
 
@@ -326,17 +328,17 @@ function applicationInitials(application: DriverApplicationRow): string {
     .join('') || 'DA';
 }
 
-function applicationSecondaryLabel(application: DriverApplicationRow): string {
-  return application.email || application.organization_name || 'Landing intake';
+function applicationSecondaryLabel(application: DriverApplicationRow, t: Translate = englishT): string {
+  return application.email || application.organization_name || t('fleetApplications.fallback.landingIntake');
 }
 
-function reviewerDisplay(application: DriverApplicationRow): string {
-  return application.reviewer_label || application.reviewer_email || 'Reviewer';
+function reviewerDisplay(application: DriverApplicationRow, t: Translate = englishT): string {
+  return application.reviewer_label || application.reviewer_email || t('fleetApplications.assignedStaff');
 }
 
-function approvedOrganizationLabel(application: DriverApplicationRow): string {
+function approvedOrganizationLabel(application: DriverApplicationRow, t: Translate = englishT): string {
   if (!application.approved_organization_id) return '-';
-  return application.organization_name || 'Tenant record created';
+  return application.organization_name || t('fleetApplications.fallback.tenantRecordCreated');
 }
 
 function reviewActionsForApplication(application: DriverApplicationRow): string[] {
@@ -356,21 +358,27 @@ function reviewActionDisabledReason(
   action: ReviewAction,
   canReview: boolean,
   reviewDisabledReason: string,
+  t: Translate = englishT,
 ): string | undefined {
   if (!canReview) return reviewDisabledReason;
   if (canApplyReviewAction(application, action)) return undefined;
-  return `Status ${application.status || 'unknown'} does not allow ${action}`;
+  const status = application.status || 'unknown';
+  return fill(t('fleetApplications.review.notAllowed'), {
+    status: t(`fleetApplications.statusCode.${status}`, status),
+    action: t(`fleetApplications.reviewAction.${action}`, action),
+  });
 }
 
 // ─── Page-level module ────────────────────────────────────────────────────
 export function DriverApplicationsModule() {
+  const t = useT();
   const { scope, isPlatformUser } = useIdentity();
   const canRead = useCapability(CAP.FLEET_READ);
   const hasReviewCapability = useCapability(CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW);
   const canReview = hasReviewCapability && isPlatformUser();
   const reviewDisabledReason = hasReviewCapability
-    ? 'Platform reviewer scope required'
-    : 'Partner application review required';
+    ? t('fleetApplications.review.platformScopeRequired')
+    : t('fleetApplications.review.partnerReviewRequired');
   const drawer = useDrawer();
   const modal = useModal();
 
@@ -437,10 +445,10 @@ export function DriverApplicationsModule() {
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
     if (!lastRow) {
-      throw new Error('Driver application status is still updating. Try again.');
+      throw new Error(t('fleetApplications.toast.stillUpdating'));
     }
     if (expectedStatus && lastRow.status !== expectedStatus) {
-      throw new Error('Driver application status is still updating. Try again.');
+      throw new Error(t('fleetApplications.toast.stillUpdating'));
     }
     rememberReviewReadback({ driver_application_readback: lastRow });
     return lastRow;
@@ -501,7 +509,7 @@ export function DriverApplicationsModule() {
     () => [
       {
         key: 'full_name',
-        label: 'Applicant',
+        label: t('fleetApplications.columns.applicant'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => (
@@ -524,23 +532,23 @@ export function DriverApplicationsModule() {
             >
               {applicationInitials(row)}
             </span>
-            <span>{applicationDisplayName(row)}</span>
+            <span>{applicationDisplayName(row, t)}</span>
           </span>
         ),
       },
-      { key: 'email', label: 'Email', mono: true, sortable: true, filterable: true },
-      { key: 'phone', label: 'Phone', mono: true, sortable: true, filterable: true },
+      { key: 'email', label: t('fleetApplications.columns.email'), mono: true, sortable: true, filterable: true },
+      { key: 'phone', label: t('fleet.phone'), mono: true, sortable: true, filterable: true },
       {
         key: 'status',
-        label: 'Status',
+        label: t('fleet.status'),
         sortable: true,
         filterable: true,
         lookup: 'driver_application_status',
       },
-      { key: 'created_at', label: 'Submitted', format: 'datetime', sortable: true },
+      { key: 'created_at', label: t('fleetApplications.columns.submitted'), format: 'datetime', sortable: true },
       {
         key: 'reviewed_at',
-        label: 'Decided',
+        label: t('fleetApplications.columns.decided'),
         format: 'datetime',
         sortable: true,
         render: (raw) =>
@@ -554,12 +562,12 @@ export function DriverApplicationsModule() {
       },
       {
         key: 'turnstile_verified',
-        label: 'Turnstile',
+        label: t('fleetApplications.columns.turnstile'),
         align: 'center',
         sortable: true,
         render: (raw) => (
           <Chip
-            label={raw ? 'verified' : 'unverified'}
+            label={raw ? t('fleetApplications.turnstile.verified') : t('fleetApplications.turnstile.unverified')}
             kind={raw ? 'good' : 'warn'}
             size="xs"
             className="mono"
@@ -567,16 +575,16 @@ export function DriverApplicationsModule() {
         ),
       },
     ],
-    [],
+    [t],
   );
 
   function openApplicationDrawer(app: DriverApplicationRow) {
     drawer.open({
       title: (
         <span>
-          <span>{applicationDisplayName(app)}</span>
+          <span>{applicationDisplayName(app, t)}</span>
           {' · '}
-          <span className="mono" style={{ color: 'var(--ink-3)' }}>{applicationSecondaryLabel(app)}</span>
+          <span className="mono" style={{ color: 'var(--ink-3)' }}>{applicationSecondaryLabel(app, t)}</span>
         </span>
       ),
       size: 'xl',
@@ -616,7 +624,7 @@ export function DriverApplicationsModule() {
 
   function openRequestDocsModal({ application }: { application: DriverApplicationRow }) {
     modal.open({
-      title: `Request additional documents · ${applicationDisplayName(application)}`,
+      title: fill(t('fleetApplications.modal.requestDocsTitle'), { name: applicationDisplayName(application, t) }),
       body: (
         <RequestDocsModalBody
           application={application}
@@ -632,7 +640,7 @@ export function DriverApplicationsModule() {
 
   function openRejectApplicationModal({ application }: { application: DriverApplicationRow }) {
     modal.open({
-      title: `Reject application - ${applicationDisplayName(application)}`,
+      title: fill(t('fleetApplications.modal.rejectTitle'), { name: applicationDisplayName(application, t) }),
       body: (
         <RejectApplicationModalBody
           application={application}
@@ -653,7 +661,7 @@ export function DriverApplicationsModule() {
   ) {
     const reason = reviewReasonForDecision(reviewReasonRows, decision);
     if (!reason) {
-      pushToast('Review reason lookup is unavailable', 'danger');
+      pushToast(t('fleetApplications.toast.reasonUnavailable'), 'danger');
       return;
     }
     try {
@@ -668,16 +676,16 @@ export function DriverApplicationsModule() {
       await reconcileReviewReadback(result, application.id, 'approved');
       await applicationsQ.refetch?.();
       pushToast(
-        `Driver application ${decision === 'approve' ? 'approved' : 'rejected'} - ${applicationDisplayName(application)}`,
+        fill(t('fleetApplications.toast.approved'), { name: applicationDisplayName(application, t) }),
         decision === 'approve' ? 'good' : 'warn',
       );
     } catch (err) {
       try {
         await reconcileReviewReadback({}, application.id, 'approved');
         await applicationsQ.refetch?.();
-        pushToast(`Driver application approved - ${applicationDisplayName(application)}`, 'good');
+        pushToast(fill(t('fleetApplications.toast.approved'), { name: applicationDisplayName(application, t) }), 'good');
       } catch {
-        pushToast('Driver application approval could not be completed. Try again.', 'danger');
+        pushToast(t('fleetApplications.toast.approveFailed'), 'danger');
       }
     }
   }
@@ -686,35 +694,35 @@ export function DriverApplicationsModule() {
     return (
       <div className="page">
         <PageHeader
-          eyebrow="Operate · Fleet"
-          titleAccent="Driver applications"
-          titlePlain="— freelance driver intake review queue"
+          eyebrow={t('fleet.eyebrow')}
+          titleAccent={t('fleetApplications.header.accent')}
+          titlePlain={t('fleetApplications.header.plain')}
         />
         <StateView
           kind="denied"
           capability={CAP.FLEET_READ}
-          hint="You do not have permission to view driver applications."
+          hint={t('fleetApplications.denied')}
         />
       </div>
     );
   }
 
-  if (applicationsQ.isLoading) return <StateView kind="loading" hint="Loading applications…" />;
+  if (applicationsQ.isLoading) return <StateView kind="loading" hint={t('fleetApplications.loading')} />;
   if (applicationsQ.isError)
-    return <StateView kind="error" hint="Could not load driver applications." />;
+    return <StateView kind="error" hint={t('fleetApplications.loadError')} />;
 
   if (applicationPendingWarnCount == null || applicationPendingBreachDays == null) {
     return (
       <div className="page">
         <PageHeader
-          eyebrow="Operate · Fleet"
-          titleAccent="Driver applications"
-          titlePlain="— freelance driver intake review queue"
+          eyebrow={t('fleet.eyebrow')}
+          titleAccent={t('fleetApplications.header.accent')}
+          titlePlain={t('fleetApplications.header.plain')}
         />
         <StateView
           kind="error"
-          title="Driver application thresholds are not configured"
-          hint="Pending-count and pending-age thresholds are missing. Finish driver application policy setup before using this surface."
+          title={t('fleetApplications.thresholds.title')}
+          hint={t('fleetApplications.thresholds.hint')}
         />
       </div>
     );
@@ -723,9 +731,9 @@ export function DriverApplicationsModule() {
   return (
     <div className="page">
       <PageHeader
-        eyebrow="Operate · Fleet"
-        titleAccent="Driver applications"
-        titlePlain="— freelance driver intake review queue"
+        eyebrow={t('fleet.eyebrow')}
+        titleAccent={t('fleetApplications.header.accent')}
+        titlePlain={t('fleetApplications.header.plain')}
         pills={[
           // W56-C closure — `scopeType="tenant"` is the canonical resource-tier
           // literal (driver applications scope via current_user_org_id()).
@@ -735,14 +743,14 @@ export function DriverApplicationsModule() {
             key="src"
             size="xs"
             label={
-              <span>Driver application queue</span>
+              <span>{t('fleetApplications.pills.queue')}</span>
             }
           />,
           <Chip
             key="rpc"
             size="xs"
             label={
-              <span>Review decision workflow</span>
+              <span>{t('fleetApplications.pills.workflow')}</span>
             }
             kind="info"
           />,
@@ -760,19 +768,19 @@ export function DriverApplicationsModule() {
           padding: '8px 0 12px',
         }}
       >
-        <KPICard label="Total applications" value={kpis.total} tone="neutral" />
+        <KPICard label={t('fleetApplications.kpi.total')} value={kpis.total} tone="neutral" />
         <KPICard
-          label="Pending review"
+          label={t('fleetApplications.kpi.pending')}
           value={kpis.pending}
           tone={kpis.pending === 0 ? 'good' : kpis.pending > applicationPendingWarnCount ? 'warn' : 'info'}
         />
-        <KPICard label="Approved" value={kpis.approved} tone="good" />
-        <KPICard label="Rejected" value={kpis.rejected} tone="danger" />
+        <KPICard label={t('common.approved')} value={kpis.approved} tone="good" />
+        <KPICard label={t('fleetApplications.kpi.rejected')} value={kpis.rejected} tone="danger" />
         <KPICard
-          label={`SLA breach (>${applicationPendingBreachDays}d pending)`}
+          label={fill(t('fleetApplications.kpi.slaBreach'), { days: applicationPendingBreachDays })}
           value={kpis.slaBreach}
           tone={kpis.slaBreach === 0 ? 'good' : 'danger'}
-          delta="awaiting reviewer"
+          delta={t('fleetApplications.kpi.awaitingReviewer')}
         />
       </div>
 
@@ -787,38 +795,38 @@ export function DriverApplicationsModule() {
           rowDeepLink={(r) => `/operate/fleet/driver-applications?focus=${encodeURIComponent(r.id)}`}
           rowActions={[
             {
-              label: 'Open application',
+              label: t('fleetApplications.actions.open'),
               icon: 'eye',
               onClick: (r) => openApplicationDrawer(r),
             },
             {
-              label: 'Approve',
+              label: t('common.approve'),
               icon: 'check',
               kind: 'primary',
               capability: CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW,
               disabled: (r) =>
-                Boolean(reviewActionDisabledReason(r, 'approve', canReview, reviewDisabledReason)),
+                Boolean(reviewActionDisabledReason(r, 'approve', canReview, reviewDisabledReason, t)),
               disabledReason: (r) =>
-                reviewActionDisabledReason(r, 'approve', canReview, reviewDisabledReason),
+                reviewActionDisabledReason(r, 'approve', canReview, reviewDisabledReason, t),
               onClick: (r) => {
                 void reviewApplicationFromRowAction(r, 'approve');
               },
             },
             {
-              label: 'Reject',
+              label: t('common.reject'),
               icon: 'alert',
               kind: 'danger',
               capability: CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW,
               disabled: (r) =>
-                Boolean(reviewActionDisabledReason(r, 'reject', canReview, reviewDisabledReason)),
+                Boolean(reviewActionDisabledReason(r, 'reject', canReview, reviewDisabledReason, t)),
               disabledReason: (r) =>
-                reviewActionDisabledReason(r, 'reject', canReview, reviewDisabledReason),
+                reviewActionDisabledReason(r, 'reject', canReview, reviewDisabledReason, t),
               onClick: (r) => {
                 openRejectApplicationModal({ application: r });
               },
             },
             {
-              label: 'Request additional docs',
+              label: t('fleetApplications.actions.requestDocs'),
               icon: 'edit',
               capability: CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW,
               disabled: (r) =>
@@ -828,10 +836,11 @@ export function DriverApplicationsModule() {
                     'request_additional_docs',
                     canReview,
                     reviewDisabledReason,
+                    t,
                   ),
                 ),
               disabledReason: (r) =>
-                reviewActionDisabledReason(r, 'request_additional_docs', canReview, reviewDisabledReason),
+                reviewActionDisabledReason(r, 'request_additional_docs', canReview, reviewDisabledReason, t),
               onClick: (r) =>
                 openRequestDocsModal({ application: r }),
             },
@@ -847,11 +856,11 @@ export function DriverApplicationsModule() {
 
 // ─── Drawer body (4 tabs) ────────────────────────────────────────────────
 type TabId = 'profile' | 'attestations' | 'documents' | 'decisions';
-const TABS: ReadonlyArray<{ id: TabId; label: string }> = [
-  { id: 'profile', label: 'Profile' },
-  { id: 'attestations', label: 'Attestations' },
-  { id: 'documents', label: 'Documents' },
-  { id: 'decisions', label: 'Decisions' },
+const TABS: ReadonlyArray<{ id: TabId; labelKey: string }> = [
+  { id: 'profile', labelKey: 'fleet.profile' },
+  { id: 'attestations', labelKey: 'fleetApplications.tabs.attestations' },
+  { id: 'documents', labelKey: 'fleet.documents' },
+  { id: 'decisions', labelKey: 'fleetApplications.tabs.decisions' },
 ];
 
 function ApplicationDrawerBody({
@@ -873,6 +882,7 @@ function ApplicationDrawerBody({
   canReview: boolean;
   reviewDisabledReason: string;
 }) {
+  const t = useT();
   const [tab, setTab] = useState<TabId>('profile');
   const applicationQ = useResource<DriverApplicationRow>(
     'driver_application_directory',
@@ -887,25 +897,25 @@ function ApplicationDrawerBody({
     ]);
     if (resourceResult.error) throw resourceResult.error;
     if (!resourceResult.data) {
-      throw new Error('Driver application status is still updating. Try again.');
+      throw new Error(t('fleetApplications.toast.stillUpdating'));
     }
     await onReviewReadback({ driver_application_readback: resourceResult.data }, application.id);
   }
 
   return (
     <div>
-      <div className="tabs" role="tablist" aria-label="Driver application drawer tabs">
-        {TABS.map((t) => (
+      <div className="tabs" role="tablist" aria-label={t('fleetApplications.tabs.aria')}>
+        {TABS.map((tabDef) => (
           <button
-            key={t.id}
+            key={tabDef.id}
             role="tab"
-            aria-selected={tab === t.id}
+            aria-selected={tab === tabDef.id}
             type="button"
-            className={`tabs__tab ${tab === t.id ? 'is-active' : ''}`}
-            onClick={() => setTab(t.id)}
-            data-key={t.id}
+            className={`tabs__tab ${tab === tabDef.id ? 'is-active' : ''}`}
+            onClick={() => setTab(tabDef.id)}
+            data-key={tabDef.id}
           >
-            {t.label}
+            {t(tabDef.labelKey)}
           </button>
         ))}
       </div>
@@ -931,70 +941,71 @@ function ApplicationDrawerBody({
 
 // ─── Profile tab ─────────────────────────────────────────────────────────
 function ProfileTab({ application }: { application: DriverApplicationRow }) {
+  const t = useT();
   const rows: KvRow[] = [
-    { key: 'full_name', label: 'Name', value: applicationDisplayName(application) },
-    { key: 'email', label: 'Email', value: application.email, mono: true },
-    { key: 'phone', label: 'Phone', value: application.phone ?? '—', mono: true },
-    { key: 'organization_name', label: 'Organization', value: application.organization_name },
+    { key: 'full_name', label: t('fleet.name'), value: applicationDisplayName(application, t) },
+    { key: 'email', label: t('fleetApplications.columns.email'), value: application.email, mono: true },
+    { key: 'phone', label: t('fleet.phone'), value: application.phone ?? '—', mono: true },
+    { key: 'organization_name', label: t('fleetApplications.profile.organization'), value: application.organization_name },
     {
       key: 'organization_slug',
-      label: 'Slug',
+      label: t('fleetApplications.profile.slug'),
       value: application.organization_slug ?? '—',
       mono: true,
     },
-    { key: 'locale', label: 'Locale', value: application.locale ?? '—', mono: true },
-    { key: 'website_url', label: 'Website', value: application.website_url ?? '—', mono: true },
-    { key: 'experience_summary', label: 'Experience', value: application.experience_summary ?? '—' },
+    { key: 'locale', label: t('fleetApplications.profile.locale'), value: application.locale ?? '—', mono: true },
+    { key: 'website_url', label: t('fleetApplications.profile.website'), value: application.website_url ?? '—', mono: true },
+    { key: 'experience_summary', label: t('fleetApplications.profile.experience'), value: application.experience_summary ?? '—' },
     {
       key: 'status',
-      label: 'Status',
+      label: t('fleet.status'),
       value: application.status,
       lookup: 'driver_application_status',
     },
     {
       key: 'created_at',
-      label: 'Submitted',
+      label: t('fleetApplications.columns.submitted'),
       value: application.created_at,
       mono: true,
     },
     {
       key: 'reviewed_at',
-      label: 'Decided',
+      label: t('fleetApplications.columns.decided'),
       value: application.reviewed_at ?? '—',
       mono: true,
     },
     {
       key: 'reviewed_by',
-      label: 'Reviewer',
-      value: application.reviewed_by ? reviewerDisplay(application) : '—',
+      label: t('fleetApplications.decidedBy'),
+      value: application.reviewed_by ? reviewerDisplay(application, t) : '—',
     },
     {
       key: 'driver_profile_id',
-      label: 'Fleet driver profile',
+      label: t('fleetApplications.profile.fleetDriverProfile'),
       value: application.driver_profile_id ?? '—',
       mono: true,
     },
     {
       key: 'fleet_driver_status',
-      label: 'Fleet driver status',
+      label: t('fleetApplications.profile.fleetDriverStatus'),
       value: application.fleet_driver_status ?? '—',
       lookup: 'driver_status',
     },
     {
       key: 'fleet_handoff_ready',
-      label: 'Fleet handoff',
-      value: application.fleet_handoff_ready ? 'ready' : 'pending',
+      label: t('fleetApplications.profile.fleetHandoff'),
+      value: application.fleet_handoff_ready ? t('fleetApplications.handoff.ready') : t('fleetApplications.handoff.pending'),
       mono: true,
     },
     {
       key: 'fleet_document_count',
-      label: 'Fleet documents',
+      label: t('fleetApplications.profile.fleetDocuments'),
       value: application.fleet_document_count ?? 0,
       mono: true,
     },
     {
       key: 'fleet_compliance_event_count',
-      label: 'Compliance handoff events',
+      label: t('fleetApplications.profile.complianceEvents'),
       value: application.fleet_compliance_event_count ?? 0,
       mono: true,
     },
@@ -1033,7 +1044,7 @@ function ProfileTab({ application }: { application: DriverApplicationRow }) {
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.25 }}>
-            {applicationDisplayName(application)}
+            {applicationDisplayName(application, t)}
           </div>
           <div style={{ fontSize: 12, color: 'var(--ink-3)' }} className="mono">
             {application.email}
@@ -1047,7 +1058,9 @@ function ProfileTab({ application }: { application: DriverApplicationRow }) {
           const tone = statusTone(application.status);
           return (
             <Chip
-              label={tone ? application.status : `${application.status} (missing)`}
+              label={tone
+                ? t(`fleetApplications.statusCode.${application.status}`, application.status)
+                : fill(t('fleetApplications.missingSuffix'), { value: application.status })}
               kind={tone ?? 'danger'}
               size="xs"
               className="mono"
@@ -1062,6 +1075,7 @@ function ProfileTab({ application }: { application: DriverApplicationRow }) {
 
 // ─── Attestations tab ───────────────────────────────────────────────────
 function AttestationsTab({ application }: { application: DriverApplicationRow }) {
+  const t = useT();
   const capabilities = application.capabilities_requested ?? [];
   const marketing = application.marketing ?? {};
   const meta = application.metadata ?? {};
@@ -1069,46 +1083,46 @@ function AttestationsTab({ application }: { application: DriverApplicationRow })
   const rows: KvRow[] = [
     {
       key: 'turnstile_verified',
-      label: 'Turnstile (Cloudflare)',
-      value: application.turnstile_verified ? 'verified' : 'unverified',
+      label: t('fleetApplications.attestations.turnstile'),
+      value: application.turnstile_verified ? t('fleetApplications.turnstile.verified') : t('fleetApplications.turnstile.unverified'),
       mono: true,
     },
     {
       key: 'capabilities_requested',
-      label: 'Capabilities requested',
+      label: t('fleetApplications.attestations.capabilities'),
       value: capabilities.length > 0 ? capabilities.join(', ') : '—',
       mono: true,
     },
-    { key: 'page_url', label: 'Landing page', value: application.page_url ?? '—', mono: true },
-    { key: 'referrer', label: 'Referrer', value: application.referrer ?? '—', mono: true },
-    { key: 'origin', label: 'Origin', value: application.origin ?? '—', mono: true },
+    { key: 'page_url', label: t('fleetApplications.attestations.landingPage'), value: application.page_url ?? '—', mono: true },
+    { key: 'referrer', label: t('fleetApplications.attestations.referrer'), value: application.referrer ?? '—', mono: true },
+    { key: 'origin', label: t('fleetApplications.attestations.origin'), value: application.origin ?? '—', mono: true },
     {
       key: 'utm_source',
-      label: 'UTM source',
+      label: t('fleetApplications.attestations.utmSource'),
       value: String(application.utm_source ?? marketing.utm_source ?? '—'),
       mono: true,
     },
     {
       key: 'utm_campaign',
-      label: 'UTM campaign',
+      label: t('fleetApplications.attestations.utmCampaign'),
       value: String(application.utm_campaign ?? marketing.utm_campaign ?? '—'),
       mono: true,
     },
     {
       key: 'metadata_source',
-      label: 'Intake source',
+      label: t('fleetApplications.attestations.intakeSource'),
       value: String(application.intake_source ?? meta.source ?? '—'),
       mono: true,
     },
     {
       key: 'metadata_country',
-      label: 'IP country',
+      label: t('fleetApplications.attestations.ipCountry'),
       value: String(application.ip_country ?? meta.ip_country ?? '—'),
       mono: true,
     },
     {
       key: 'metadata_dedupe_hint',
-      label: 'Dedupe hint',
+      label: t('fleetApplications.attestations.dedupeHint'),
       value: String(application.dedupe_hint ?? meta.dedupe_hint ?? '—'),
       mono: true,
     },
@@ -1120,9 +1134,7 @@ function AttestationsTab({ application }: { application: DriverApplicationRow })
         className="state__hint"
         style={{ padding: '0 14px 8px', fontSize: 11, color: 'var(--ink-3)' }}
       >
-        Attestations capture the integrity signals captured at submission time
-        (Turnstile, IP-derived metadata, intake source attribution). The IP hash
-        itself is salted server-side and never exposed to the operator surface.
+        {t('fleetApplications.attestations.intro')}
       </p>
       <KvGrid rows={rows} />
     </div>
@@ -1131,24 +1143,25 @@ function AttestationsTab({ application }: { application: DriverApplicationRow })
 
 // ─── Documents tab ──────────────────────────────────────────────────────
 function DocumentsTab({ application }: { application: DriverApplicationRow }) {
+  const t = useT();
   const docs = application.verification_documents ?? [];
 
   if (docs.length === 0) {
     return (
       <div style={{ padding: '0 14px' }}>
-        <StateView kind="empty" hint="No verification documents submitted." />
+        <StateView kind="empty" hint={t('fleetApplications.documents.empty')} />
       </div>
     );
   }
 
   const columns: Array<DataTableColumn<DriverApplicationDoc & Record<string, unknown>>> = [
-    { key: 'type', label: 'Document', sortable: true, filterable: true, mono: true },
-    { key: 'ref', label: 'Reference', mono: true, sortable: true },
-    { key: 'issued_at', label: 'Issued', format: 'date', sortable: true },
-    { key: 'expires_at', label: 'Expires', format: 'date', sortable: true },
+    { key: 'type', label: t('fleetApplications.columns.document'), sortable: true, filterable: true, mono: true },
+    { key: 'ref', label: t('fleetApplications.columns.reference'), mono: true, sortable: true },
+    { key: 'issued_at', label: t('fleet.doc.issued'), format: 'date', sortable: true },
+    { key: 'expires_at', label: t('fleet.doc.expires'), format: 'date', sortable: true },
     {
       key: 'status',
-      label: 'Status',
+      label: t('fleet.status'),
       sortable: true,
       filterable: true,
       lookup: 'driver_application_doc_status',
@@ -1161,7 +1174,7 @@ function DocumentsTab({ application }: { application: DriverApplicationRow }) {
         const tone = docStatusTone(value);
         return (
           <Chip
-            label={tone ? value : `${value} (missing)`}
+            label={tone ? value : fill(t('fleetApplications.missingSuffix'), { value })}
             kind={tone ?? 'danger'}
             size="xs"
             className="mono"
@@ -1201,6 +1214,7 @@ function DecisionsTab({
   canReview: boolean;
   reviewDisabledReason: string;
 }) {
+  const t = useT();
   const reviewMutation = useReviewMarketplaceParticipantRequest();
   const reasonQuery = useResourceList<LookupValueRow>(
     'lookup_values',
@@ -1224,7 +1238,7 @@ function DecisionsTab({
     at: application.created_at,
     type: 'application.submitted',
     actor: 'driver-signup-intake',
-    summary: 'Application submitted via landing intake',
+    summary: t('fleetApplications.decisions.submitted'),
     tone: 'neutral',
   });
 
@@ -1247,67 +1261,67 @@ function DecisionsTab({
     const decidedSummary = resolveDecisionSummary(application.review_decision, {
       invite_redirect_to: application.invite_redirect_to,
       review_reason: application.review_reason,
-    });
+    }, t);
     events.push({
       id: `${application.id}-decided`,
       at: application.reviewed_at,
       type: resolveDecisionEventType(application.review_decision),
-      actor: application.reviewed_by ? reviewerDisplay(application) : 'Reviewer',
+      actor: application.reviewed_by ? reviewerDisplay(application, t) : t('fleetApplications.assignedStaff'),
       summary: decidedTone
         ? decidedSummary
-        : `marketplace_participant_request_status/${application.review_decision} (missing) · ${decidedSummary}`,
+        : fill(t('fleetApplications.decisions.missingDecision'), { decision: application.review_decision, summary: decidedSummary }),
       tone: decidedTone ?? 'danger',
       detail: (
         <KvGrid
           rows={[
             {
               key: 'reviewer',
-              label: 'Reviewer',
-              value: application.reviewed_by ? reviewerDisplay(application) : '—',
+              label: t('fleetApplications.decidedBy'),
+              value: application.reviewed_by ? reviewerDisplay(application, t) : '—',
             },
             {
               key: 'reason',
-              label: 'Reason',
+              label: t('fleet.reason'),
               value: application.review_reason ?? '—',
             },
             {
               key: 'approved_org',
-              label: 'Approved org',
-              value: approvedOrganizationLabel(application),
+              label: t('fleetApplications.decisions.approvedOrg'),
+              value: approvedOrganizationLabel(application, t),
             },
             {
               key: 'driver_profile_id',
-              label: 'Fleet driver profile',
+              label: t('fleetApplications.profile.fleetDriverProfile'),
               value: application.driver_profile_id ?? '—',
               mono: true,
             },
             {
               key: 'fleet_driver_status',
-              label: 'Fleet driver status',
+              label: t('fleetApplications.profile.fleetDriverStatus'),
               value: application.fleet_driver_status ?? '—',
               lookup: 'driver_status',
             },
             {
               key: 'fleet_handoff_ready',
-              label: 'Fleet handoff',
-              value: application.fleet_handoff_ready ? 'ready' : 'pending',
+              label: t('fleetApplications.profile.fleetHandoff'),
+              value: application.fleet_handoff_ready ? t('fleetApplications.handoff.ready') : t('fleetApplications.handoff.pending'),
               mono: true,
             },
             {
               key: 'fleet_document_count',
-              label: 'Fleet documents',
+              label: t('fleetApplications.profile.fleetDocuments'),
               value: application.fleet_document_count ?? 0,
               mono: true,
             },
             {
               key: 'fleet_compliance_event_count',
-              label: 'Compliance handoff events',
+              label: t('fleetApplications.profile.complianceEvents'),
               value: application.fleet_compliance_event_count ?? 0,
               mono: true,
             },
             {
               key: 'invite_redirect_to',
-              label: 'Invite redirect',
+              label: t('fleetApplications.decisions.inviteRedirect'),
               value: application.invite_redirect_to ?? '—',
               mono: true,
             },
@@ -1339,23 +1353,24 @@ function DecisionsTab({
         application.updated_at ??
         application.created_at,
       type: 'application.request_additional_docs',
-      actor: application.reviewed_by ? reviewerDisplay(application) : 'Reviewer',
-      summary: `Additional documents requested · ${
-        requestedDocuments.length > 0 ? requestedDocuments.join(', ') : 'unspecified'
-      } · ${note}`,
+      actor: application.reviewed_by ? reviewerDisplay(application, t) : t('fleetApplications.assignedStaff'),
+      summary: fill(t('fleetApplications.decisions.docsRequested'), {
+        docs: requestedDocuments.length > 0 ? requestedDocuments.join(', ') : t('fleetApplications.decisions.unspecified'),
+        note,
+      }),
       tone: 'neutral',
       detail: (
         <KvGrid
           rows={[
             {
               key: 'requested_documents',
-              label: 'Requested documents',
+              label: t('fleetApplications.decisions.requestedDocuments'),
               value: requestedDocuments.length > 0 ? requestedDocuments.join(', ') : '—',
               mono: true,
             },
             {
               key: 'note',
-              label: 'Note',
+              label: t('fleetApplications.decisions.note'),
               value: note,
             },
           ]}
@@ -1369,24 +1384,27 @@ function DecisionsTab({
     'approve',
     canReview,
     reviewDisabledReason,
+    t,
   );
   const rejectDisabledReason = reviewActionDisabledReason(
     application,
     'reject',
     canReview,
     reviewDisabledReason,
+    t,
   );
   const requestDocsDisabledReason = reviewActionDisabledReason(
     application,
     'request_additional_docs',
     canReview,
     reviewDisabledReason,
+    t,
   );
 
   async function reviewApplication(decision: 'approve') {
     const reason = reviewReasonForDecision(reviewReasonRows, decision);
     if (!reason) {
-      pushToast('Review reason lookup is unavailable', 'danger');
+      pushToast(t('fleetApplications.toast.reasonUnavailable'), 'danger');
       return;
     }
     try {
@@ -1401,23 +1419,23 @@ function DecisionsTab({
       await onReviewReadback(result, application.id, 'approved');
       await onChanged();
       pushToast(
-        `Driver application ${decision === 'approve' ? 'approved' : 'rejected'} - ${applicationDisplayName(application)}`,
+        fill(t('fleetApplications.toast.approved'), { name: applicationDisplayName(application, t) }),
         decision === 'approve' ? 'good' : 'warn',
       );
     } catch (err) {
       try {
         await onReviewReadback({}, application.id, 'approved');
         await onChanged();
-        pushToast(`Driver application approved - ${applicationDisplayName(application)}`, 'good');
+        pushToast(fill(t('fleetApplications.toast.approved'), { name: applicationDisplayName(application, t) }), 'good');
       } catch {
-        pushToast('Driver application approval could not be completed. Try again.', 'danger');
+        pushToast(t('fleetApplications.toast.approveFailed'), 'danger');
       }
     }
   }
 
   function openRejectModal() {
     modal.open({
-      title: `Reject application - ${applicationDisplayName(application)}`,
+      title: fill(t('fleetApplications.modal.rejectTitle'), { name: applicationDisplayName(application, t) }),
       body: (
         <RejectApplicationModalBody
           application={application}
@@ -1443,7 +1461,7 @@ function DecisionsTab({
         }}
       >
         <Button
-          label="Approve"
+          label={t('common.approve')}
           iconName="check"
           kind="primary"
           capability={CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW}
@@ -1454,7 +1472,7 @@ function DecisionsTab({
           }}
         />
         <Button
-          label="Reject"
+          label={t('common.reject')}
           iconName="alert"
           kind="danger"
           capability={CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW}
@@ -1465,7 +1483,7 @@ function DecisionsTab({
           }}
         />
         <Button
-          label="Request additional docs"
+          label={t('fleetApplications.actions.requestDocs')}
           iconName="edit"
           kind="ghost"
           capability={CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW}
@@ -1473,7 +1491,7 @@ function DecisionsTab({
           title={requestDocsDisabledReason}
           onClick={() => {
             modal.open({
-              title: `Request additional documents · ${applicationDisplayName(application)}`,
+              title: fill(t('fleetApplications.modal.requestDocsTitle'), { name: applicationDisplayName(application, t) }),
               body: (
                 <RequestDocsModalBody
                   application={application}
@@ -1490,7 +1508,7 @@ function DecisionsTab({
       </div>
 
       {events.length === 0 ? (
-        <StateView kind="empty" hint="No decisions recorded yet." />
+        <StateView kind="empty" hint={t('fleetApplications.decisions.empty')} />
       ) : (
         <TimelineLog events={events} />
       )}
@@ -1519,12 +1537,13 @@ function RejectApplicationModalBody({
   ) => Promise<DriverApplicationRow>;
   onDone: () => void | Promise<unknown>;
 }) {
+  const t = useT();
   const { isPlatformUser } = useIdentity();
   const hasReviewCapability = useCapability(CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW);
   const canReview = hasReviewCapability && isPlatformUser();
   const reviewDisabledReason = hasReviewCapability
-    ? 'Platform reviewer scope required'
-    : 'Partner application review required';
+    ? t('fleetApplications.review.platformScopeRequired')
+    : t('fleetApplications.review.partnerReviewRequired');
   const reviewMutation = useReviewMarketplaceParticipantRequest();
   const rejectionReasons = reviewReasonRows.filter((row) => {
     const decision = row.metadata?.decision;
@@ -1543,12 +1562,10 @@ function RejectApplicationModalBody({
   return (
     <div>
       <p className="state__hint">
-        Reject the driver application with a row-driven reason. The applicant
-        can read the denied state from FieldOps Mobile V2 without receiving a
-        profile handoff.
+        {t('fleetApplications.modal.rejectIntro')}
       </p>
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Rejection reason</label>
+        <label className="field__label">{t('fleet.rejectionReason')}</label>
         <select value={reason} onChange={(event) => setReason(event.target.value)}>
           {rejectionReasons.map((option) => (
             <option key={option.value} value={option.value}>
@@ -1558,13 +1575,13 @@ function RejectApplicationModalBody({
         </select>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onDone} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
         <Button
-          label="Reject application"
+          label={t('fleetApplications.actions.rejectApplication')}
           kind="danger"
           capability={CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW}
           disabled={!reason || !canReview}
-          title={!canReview ? reviewDisabledReason : !reason ? 'Select a rejection reason' : undefined}
+          title={!canReview ? reviewDisabledReason : !reason ? t('fleetApplications.modal.selectReason') : undefined}
           onClick={async () => {
             try {
               const result = await reviewMutation.mutateAsync({
@@ -1578,7 +1595,7 @@ function RejectApplicationModalBody({
               await onReviewReadback(result, application.id, 'rejected');
               await onDone();
               pushToast(
-                `Driver application rejected - ${applicationDisplayName(application)} - ${reason}`,
+                fill(t('fleetApplications.toast.rejected'), { name: applicationDisplayName(application, t), reason }),
                 'warn',
               );
             } catch (err) {
@@ -1586,11 +1603,11 @@ function RejectApplicationModalBody({
                 await onReviewReadback({}, application.id, 'rejected');
                 await onDone();
                 pushToast(
-                  `Driver application rejected - ${applicationDisplayName(application)} - ${reason}`,
+                  fill(t('fleetApplications.toast.rejected'), { name: applicationDisplayName(application, t), reason }),
                   'warn',
                 );
               } catch {
-                pushToast('Driver application rejection could not be completed. Try again.', 'danger');
+                pushToast(t('fleetApplications.toast.rejectFailed'), 'danger');
               }
             }
           }}
@@ -1613,12 +1630,13 @@ function RequestDocsModalBody({
   ) => Promise<DriverApplicationRow>;
   onDone: () => void | Promise<unknown>;
 }) {
+  const t = useT();
   const { isPlatformUser } = useIdentity();
   const hasReviewCapability = useCapability(CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW);
   const canReview = hasReviewCapability && isPlatformUser();
   const reviewDisabledReason = hasReviewCapability
-    ? 'Platform reviewer scope required'
-    : 'Partner application review required';
+    ? t('fleetApplications.review.platformScopeRequired')
+    : t('fleetApplications.review.partnerReviewRequired');
   const reviewMutation = useReviewMarketplaceParticipantRequest();
   // W54-C — doc kind options resolved strictly from canonical
   // `driver_application_doc_kind` lookup_values. Default selection is the
@@ -1655,12 +1673,11 @@ function RequestDocsModalBody({
   return (
     <div>
       <p className="state__hint">
-        Request additional documents from the applicant. The application stays
-        pending while the missing document list is sent to the applicant.
+        {t('fleetApplications.modal.requestIntro')}
       </p>
 
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Documents to request</label>
+        <label className="field__label">{t('fleetApplications.modal.documentsToRequest')}</label>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {docKinds.map((d) => (
             <button
@@ -1682,23 +1699,23 @@ function RequestDocsModalBody({
       </div>
 
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Note to applicant</label>
+        <label className="field__label">{t('fleetApplications.modal.noteToApplicant')}</label>
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
           rows={3}
-          placeholder="Optional context for the applicant"
+          placeholder={t('fleetApplications.modal.notePlaceholder')}
         />
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onDone} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
         <Button
-          label="Send request"
+          label={t('fleetApplications.actions.sendRequest')}
           kind="primary"
           capability={CAP.MARKETPLACE_PARTICIPANT_REQUESTS_REVIEW}
           disabled={docs.length === 0 || !canReview}
-          title={!canReview ? reviewDisabledReason : docs.length === 0 ? 'Select at least one document' : undefined}
+          title={!canReview ? reviewDisabledReason : docs.length === 0 ? t('fleetApplications.modal.selectDocument') : undefined}
           onClick={async () => {
             try {
               const result = await reviewMutation.mutateAsync({
@@ -1714,11 +1731,11 @@ function RequestDocsModalBody({
               await onReviewReadback(result, application.id);
               await onDone();
               pushToast(
-                `Additional documents requested - ${applicationDisplayName(application)} - ${docs.length} doc(s)`,
+                fill(t('fleetApplications.toast.docsRequested'), { name: applicationDisplayName(application, t), n: docs.length }),
                 'good',
               );
             } catch {
-              pushToast('Document request could not be sent. Try again.', 'danger');
+              pushToast(t('fleetApplications.toast.docsFailed'), 'danger');
             }
           }}
         />

@@ -243,7 +243,10 @@ function main() {
   loadEnv();
   const runtimeEnv = { ...resolveIntegrationEdgeAuthAliases(process.env), ...callerRunFlags };
   const extraArgs = process.argv.slice(2);
-  const requiredToggles = resolveRequiredTestToggles({ argv: extraArgs, env: runtimeEnv });
+  // Hosted CI selects files by path while keeping the live-provider flags fixed.
+  const requiredToggles = runtimeEnv.INTEGRATION_AUTO_ENABLE_TEST_TOGGLES === '0'
+    ? {}
+    : resolveRequiredTestToggles({ argv: extraArgs, env: runtimeEnv });
   // Child scripts load the file again, so keep the runner's resolved values authoritative.
   const executionEnv = { ...runtimeEnv, ...requiredToggles, ENV_FILE_OVERRIDE: '0' };
   if (Object.keys(requiredToggles).length > 0) {

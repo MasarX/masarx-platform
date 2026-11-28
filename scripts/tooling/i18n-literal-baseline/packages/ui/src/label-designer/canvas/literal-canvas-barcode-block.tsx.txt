@@ -1,0 +1,1 @@
+packages/ui/src/label-designer/canvas/canvas-barcode-block.tsx 2

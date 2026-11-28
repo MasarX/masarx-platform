@@ -75,6 +75,7 @@ Runtime source suites linked to F370 remain separate from this browser selection
 - The UI surfaces correlation_id and request_id for all label actions.
 
 ## Security and caching
+- The signer checks each object key against the organization on the authorized record before issuing a download URL.
 - Do not persist signed URLs beyond session scope.
 - Do not expose storage paths; only show label bundle id and file metadata.
 - Do not auto-refresh without user intent; require explicit user action.

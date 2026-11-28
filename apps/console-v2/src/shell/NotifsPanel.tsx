@@ -3,6 +3,7 @@
 // AppShell owns open/pinned/closed state and persists the pin to localStorage.
 
 import { Icon } from '@/components/Icon';
+import { useT } from '@/lib/i18n';
 import { useRouter } from '@tanstack/react-router';
 import { DEFAULT_NOTIFICATIONS, type NotifItem } from './notifications';
 
@@ -24,25 +25,26 @@ export function NotifsPanel({
   onItemPick,
 }: NotifsPanelProps) {
   const router = useRouter();
+  const t = useT();
   const mounted = open || pinned;
 
   return (
     <aside
       className="notifs-panel"
-      aria-label="Notifications"
+      aria-label={t('shell.notifications')}
       data-pinned={pinned ? 'true' : 'false'}
       data-open={open || pinned ? 'true' : 'false'}
       hidden={!mounted}
     >
       <header className="notifs-panel__head">
-        <span className="eyebrow">Notifications</span>
+        <span className="eyebrow">{t('shell.notifications')}</span>
         <div style={{ flex: 1 }} />
         <button
           className="icon-btn notifs-panel__pin"
           type="button"
-          aria-label={pinned ? 'Unpin' : 'Pin open'}
+          aria-label={pinned ? t('shell.notifs.unpin') : t('shell.notifs.pinOpen')}
           aria-pressed={pinned}
-          title="Pin"
+          title={t('shell.notifs.pin')}
           onClick={onTogglePin}
         >
           <Icon name="pin" size={13} />
@@ -50,7 +52,7 @@ export function NotifsPanel({
         <button
           className="icon-btn"
           type="button"
-          aria-label="Close"
+          aria-label={t('shell.close')}
           onClick={onClose}
         >
           x
@@ -60,7 +62,7 @@ export function NotifsPanel({
       <div className="notifs-panel__body">
         {notifications.length === 0 ? (
           <div className="state__hint" style={{ padding: 14 }}>
-            No active notifications
+            {t('shell.notifs.empty')}
           </div>
         ) : null}
         {notifications.map((n) => (

@@ -8,14 +8,17 @@
       ],
       "allowed_changed_path_re": [
         "^AGENTS\\.md$",
+        "^config/ci/critical-paths\\.json$",
+        "^scripts/ci-hosted/review-verdict\\.cjs$",
         "^scripts/ops/ci/changed-migrations-regex\\.js$",
-        "^tests/unit/ops/(?:changed-migrations-regex|local-gate|migration-fixture-guard|migration-guards|native-objectives-lint|native-pr-admission-workflow|pr-change-classify)\\.test\\.js$"
+        "^tests/unit/ops/(?:changed-migrations-regex|local-gate|migration-fixture-guard|migration-guards|native-objectives-lint|native-pr-admission-workflow|pr-change-classify|review-verdict)\\.test\\.js$"
       ],
       "test_paths": [
         "tests/unit/ops/changed-migrations-regex.test.js",
         "tests/unit/ops/local-gate.test.js",
         "tests/unit/ops/native-objectives-lint.test.js",
-        "tests/unit/ops/native-pr-admission-workflow.test.js"
+        "tests/unit/ops/native-pr-admission-workflow.test.js",
+        "tests/unit/ops/review-verdict.test.js"
       ]
     },
     {
@@ -53,6 +56,24 @@
         "tests/unit/ops/review-cache-policy.test.js",
         "tests/unit/ops/reviewer-gate-pr-workflow.test.js",
         "tests/unit/ops/workflow-lint-toolchain.test.js"
+      ]
+    },
+    {
+      "id": "database_apply_guard",
+      "required_impact_surfaces": [
+        "ci"
+      ],
+      "allowed_changed_path_re": [
+        "^scripts/deploy/apply-guard\\.cjs$",
+        "^tests/unit/ops/(?:dev-deploy-apply-guard(?:-retry)?|stg-deploy-(?:apply-guard|release-ref|workflow))\\.test\\.js$"
+      ],
+      "test_paths": [
+        "tests/unit/ops/deploy-branch-refs.test.js",
+        "tests/unit/ops/dev-deploy-apply-guard-retry.test.js",
+        "tests/unit/ops/dev-deploy-apply-guard.test.js",
+        "tests/unit/ops/stg-deploy-apply-guard.test.js",
+        "tests/unit/ops/stg-deploy-release-ref.test.js",
+        "tests/unit/ops/stg-deploy-workflow.test.js"
       ]
     },
     {

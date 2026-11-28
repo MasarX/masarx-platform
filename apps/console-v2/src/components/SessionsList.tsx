@@ -42,6 +42,9 @@ import { Chip, type ChipKind } from './Chip';
 import { StateView } from './StateView';
 import { CapabilityLock } from './CapabilityLock';
 import { pushToast } from './toastStore';
+import { fill, useT } from '@/lib/i18n';
+
+type Translate = (path: string, fallback?: string) => string;
 
 export interface UserSessionRow extends Record<string, unknown> {
   id: string;
@@ -89,22 +92,22 @@ export interface SessionsListProps {
 }
 
 
-function formatRelativeMinutes(ts: string | undefined): string {
+function formatRelativeMinutes(ts: string | undefined, t: Translate): string {
   if (!ts) return '—';
   const then = Date.parse(ts);
   if (Number.isNaN(then)) return '—';
   const diff = Date.now() - then;
   const minutes = Math.max(0, Math.round(diff / 60000));
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 1) return t('shell.time.justNow');
+  if (minutes < 60) return fill(t('shell.time.minutesAgo'), { n: minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
+  if (hours < 24) return fill(t('shell.time.hoursAgo'), { n: hours });
   const days = Math.round(hours / 24);
-  return `${days} d ago`;
+  return fill(t('shell.time.daysAgo'), { n: days });
 }
 
-function shortenAgent(ua: string | undefined): string {
-  if (!ua) return 'Unknown agent';
+function shortenAgent(ua: string | undefined, t: Translate): string {
+  if (!ua) return t('shell.sessions.unknownAgent');
   // Trim long UA strings to a recognizable prefix without hardcoding a brand
   // table — the readable token (Browser/Version) typically lives between the
   // first parens block and the next semicolon. We keep at most ~64 chars so
@@ -117,22 +120,31 @@ function revocationStatusOf(row: UserSessionRow): string {
   return String(row.revocation_status ?? '').trim().toLowerCase();
 }
 
-function formatRevocation(row: UserSessionRow): string {
+function revocationStatusLabel(status: string, t: Translate): string {
+  return t(`shell.revocation.${status}`, status);
+}
+
+function formatRevocation(row: UserSessionRow, t: Translate): string {
   const status = revocationStatusOf(row);
   if (!status) return '';
-  const requestedAt = row.revocation_requested_at ? ` at ${new Date(row.revocation_requested_at).toLocaleString()}` : '';
-  const reason = row.revocation_reason ? ` - ${row.revocation_reason}` : '';
-  return `Revoke ${status}${requestedAt}${reason}`;
+  let line = fill(t('shell.sessions.revocation'), { status: revocationStatusLabel(status, t) });
+  if (row.revocation_requested_at) {
+    line = fill(t('shell.sessions.revocationAt'), { line, time: new Date(row.revocation_requested_at).toLocaleString() });
+  }
+  if (row.revocation_reason) line = fill(t('shell.sessions.revocationReason'), { line, reason: row.revocation_reason });
+  return line;
 }
 
 export function SessionsList({
   userId,
   readCapability = 'users.read',
   writeCapability = 'users.manage',
-  title = 'Active sessions',
+  title: titleProp,
   className,
   hideTitle = false,
 }: SessionsListProps) {
+  const t = useT();
+  const title = titleProp ?? t('shell.sessions.title');
   const canRead = useCapability(readCapability);
   const canManage = useCapability(writeCapability);
 
@@ -184,7 +196,7 @@ export function SessionsList({
         {hideTitle ? null : <div className="section-eyebrow">{title}</div>}
         <StateView
           kind="error"
-          hint={(list.error as Error | undefined)?.message ?? 'Failed to load sessions.'}
+          hint={(list.error as Error | undefined)?.message ?? t('shell.sessions.loadFailed')}
         />
       </section>
     );
@@ -196,7 +208,7 @@ export function SessionsList({
     if (!canManage) return;
     const trimmedReason = revokeReason.trim();
     if (!trimmedReason) {
-      pushToast('Session revocation reason required', 'warn');
+      pushToast(t('shell.sessions.reasonRequiredToast'), 'warn');
       return;
     }
     setPendingId(row.id);
@@ -206,11 +218,11 @@ export function SessionsList({
         session_id: row.id,
         reason: trimmedReason,
       });
-      pushToast('Revoke queued - session termination pending', 'good');
+      pushToast(t('shell.sessions.revokeQueued'), 'good');
       setRevokeFormId(null);
       setRevokeReason('');
     } catch (e) {
-      pushToast(`Revoke failed - ${(e as Error)?.message ?? 'unknown'}`, 'danger');
+      pushToast(fill(t('shell.sessions.revokeFailed'), { reason: (e as Error)?.message ?? t('shell.unknown') }), 'danger');
     } finally {
       setPendingId(null);
     }
@@ -225,7 +237,7 @@ export function SessionsList({
       ) : (
         <ul
           className="sessions-list__items"
-          aria-label="Sessions"
+          aria-label={t('shell.sessions.listLabel')}
           style={{ listStyle: 'none', padding: 0, margin: 0 }}
         >
           {rows.map((row) => {
@@ -235,7 +247,7 @@ export function SessionsList({
             // a danger-toned chip so the gap is visible.
             const aalRow = lookupRow('session_aal', row.aal ?? '');
             const aalTone: ChipKind = (aalRow?.tone as ChipKind | undefined) ?? 'danger';
-            const aalLabel = aalRow ? row.aal!.toUpperCase() : `${(row.aal ?? 'aal?').toUpperCase()} (missing)`;
+            const aalLabel = aalRow ? <bdi>{row.aal!.toUpperCase()}</bdi> : fill(t('shell.sessions.aalMissing'), { aal: (row.aal ?? 'aal?').toUpperCase() });
             const isPending = pendingId === row.id;
             const revocationStatus = revocationStatusOf(row);
             const isRevokeFormOpen = revokeFormId === row.id;
@@ -274,10 +286,10 @@ export function SessionsList({
                   >
                     <Chip label={aalLabel} kind={aalTone} />
                     {row.is_current ? (
-                      <Chip label="Current" kind="info" />
+                      <Chip label={t('shell.sessions.current')} kind="info" />
                     ) : null}
                     {revocationStatus ? (
-                      <Chip label={`revoke ${revocationStatus}`} kind={revocationTone} />
+                      <Chip label={fill(t('shell.sessions.revokeChip'), { status: revocationStatusLabel(revocationStatus, t) })} kind={revocationTone} />
                     ) : null}
                     {row.user_email ? (
                       <span
@@ -292,13 +304,13 @@ export function SessionsList({
                     className="sessions-list__agent"
                     style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 4 }}
                   >
-                    {shortenAgent(row.user_agent ?? undefined)}
+                    {shortenAgent(row.user_agent ?? undefined, t)}
                   </div>
                   <div
                     className="sessions-list__meta mono"
                     style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}
                   >
-                    {row.ip ?? '—'} · seen {formatRelativeMinutes(row.updated_at ?? undefined)}
+                    {fill(t('shell.sessions.seen'), { ip: row.ip ?? '—', when: formatRelativeMinutes(row.updated_at ?? undefined, t) })}
                   </div>
                   {revocationStatus ? (
                     <div
@@ -306,7 +318,7 @@ export function SessionsList({
                       data-testid={`sessions-list-revocation-${row.id}`}
                       style={{ fontSize: 11, color: 'var(--ink-2)', marginTop: 4 }}
                     >
-                      {formatRevocation(row)}
+                      {formatRevocation(row, t)}
                     </div>
                   ) : null}
                   {isRevokeFormOpen && !revokeBlocked ? (
@@ -315,13 +327,13 @@ export function SessionsList({
                       style={{ display: 'grid', gap: 8, marginTop: 8, maxWidth: 420 }}
                     >
                       <label className="field__label" htmlFor={`session-revoke-reason-${row.id}`}>
-                        Revocation reason
+                        {t('shell.revokeReason')}
                       </label>
                       <input
                         id={`session-revoke-reason-${row.id}`}
                         value={revokeReason}
                         onChange={(event) => setRevokeReason(event.target.value)}
-                        placeholder="Lost laptop, user left, or security review"
+                        placeholder={t('shell.sessions.reasonPlaceholder')}
                       />
                       {!revokeReasonValid ? (
                         <div
@@ -329,12 +341,12 @@ export function SessionsList({
                           data-testid={`sessions-list-revoke-reason-required-${row.id}`}
                           style={{ fontSize: 11.5 }}
                         >
-                          Revocation reason is required before this session can be revoked.
+                          {t('shell.sessions.reasonRequired')}
                         </div>
                       ) : null}
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <Button
-                          label="Cancel"
+                          label={t('common.cancel')}
                           kind="ghost"
                           size="sm"
                           onClick={() => {
@@ -343,7 +355,7 @@ export function SessionsList({
                           }}
                         />
                         <Button
-                          label={isPending ? 'Revoking...' : 'Confirm revoke'}
+                          label={isPending ? t('shell.revoking') : t('shell.confirmRevoke')}
                           kind="danger"
                           size="sm"
                           disabled={isPending || revoke.isPending || !revokeReasonValid}
@@ -356,19 +368,19 @@ export function SessionsList({
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   {canManage && !revokeBlocked ? (
                     <Button
-                      label={isPending ? 'Revoking…' : 'Revoke'}
+                      label={isPending ? t('shell.revoking') : t('shell.revoke')}
                       kind="danger"
                       size="sm"
                       onClick={() => {
                         setRevokeFormId(row.id);
                         setRevokeReason('');
                       }}
-                      ariaLabel={`Revoke session ${row.id}`}
+                      ariaLabel={fill(t('shell.sessions.revokeLabel'), { id: row.id })}
                       disabled={isPending || revoke.isPending}
                     />
                   ) : canManage ? (
                     <Button
-                      label={revocationStatus === 'completed' ? 'Revoked' : 'Revoke pending'}
+                      label={revocationStatus === 'completed' ? t('shell.revoked') : t('shell.revokePending')}
                       kind="ghost"
                       size="sm"
                       disabled

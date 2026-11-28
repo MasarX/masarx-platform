@@ -1,3 +1,10 @@
+const { fixtureHost } = require('../../fixtures/builders/hosts');
+
+const consoleHost = fixtureHost('console', 'vercel.app');
+const portalHost = fixtureHost('portal', 'vercel.app');
+const surfaceConsoleHost = fixtureHost('console-surface', 'vercel.app');
+const rootConsoleHost = fixtureHost('console-root', 'vercel.app');
+
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -482,8 +489,8 @@ describe('preview/shared', () => {
   });
 
   test('normalizeSurfaceUrlValue normalizes bare preview hosts', () => {
-    expect(normalizeSurfaceUrlValue('console-preview.vercel.app')).toBe('https://console-preview.vercel.app');
-    expect(normalizeSurfaceUrlValue('https://portal-preview.vercel.app')).toBe('https://portal-preview.vercel.app');
+    expect(normalizeSurfaceUrlValue(consoleHost)).toBe(`https://${consoleHost}`);
+    expect(normalizeSurfaceUrlValue(`https://${portalHost}`)).toBe(`https://${portalHost}`);
     expect(normalizeSurfaceUrlValue('not a host')).toBe('');
   });
 
@@ -491,17 +498,17 @@ describe('preview/shared', () => {
     const manifest = {
       surfaces: {
         console: {
-          deployment_url: 'https://console-from-surface.vercel.app',
+          deployment_url: `https://${surfaceConsoleHost}`,
         },
       },
-      console_url: 'https://console-from-root.vercel.app',
+      console_url: `https://${rootConsoleHost}`,
     };
 
     expect(resolveSurfaceUrl({
       manifest,
       surfaceId: 'console',
       includeEnvFallback: false,
-    })).toBe('https://console-from-surface.vercel.app');
+    })).toBe(`https://${surfaceConsoleHost}`);
   });
 
   test('resolveSurfaceUrl falls back to matching compound surface ids and env keys only when allowed', () => {

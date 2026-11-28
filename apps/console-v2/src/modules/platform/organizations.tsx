@@ -36,6 +36,7 @@ import { pushToast } from '@/components/toastStore';
 import { getLookups, getSettingsCategories, lookupRow } from '@/lib/api';
 import { readUrlParam } from '@/lib/url-params';
 import { useConsoleNavigator } from '@/lib/useConsoleNavigator';
+import { fill, fillNodes, useI18n, type Translate } from '@/lib/i18n';
 
 // W10-5 schema-drift remediation (PLATFORM §6) — applies the SCHEMA-DRIFT
 // inventory verdict for `public.organizations`:
@@ -164,31 +165,35 @@ export interface TenantSignupRequestSummaryRow extends Record<string, unknown> {
   decision_age_seconds: number | null;       // SSOT: projection — extract(epoch from now()-reviewed_at) when reviewed
 }
 
-const ORG_COLUMNS: DataTableColumn<OrgRow>[] = [
-  { key: 'name', label: 'Name', sortable: true, filterable: true },
-  { key: 'billing_status', label: 'Billing', sortable: true, filterable: true },
-  { key: 'created_at', label: 'Created', format: 'datetime', sortable: true },
-];
+function orgColumns(t: Translate): DataTableColumn<OrgRow>[] {
+  return [
+    { key: 'name', label: t('platformOrganizations.organizationsModule.name'), sortable: true, filterable: true },
+    { key: 'billing_status', label: t('platformOrganizations.organizationsModule.billing'), sortable: true, filterable: true },
+    { key: 'created_at', label: t('platformOrganizations.organizationsModule.created'), format: 'datetime', sortable: true },
+  ];
+}
 
-const SIGNUP_COLUMNS: DataTableColumn<TenantSignupRequestRow>[] = [
-  {
-    key: 'organization_name',
-    label: 'Organization',
-    sortable: true,
-    filterable: true,
-    render: (raw, row) => <span className="mono">{String(raw ?? row.org_name ?? '-')}</span>,
-  },
-  { key: 'email', label: 'Admin email', mono: true, sortable: true, filterable: true },
-  { key: 'full_name', label: 'Admin name', sortable: true, filterable: true },
-  {
-    key: 'created_at',
-    label: 'Received',
-    format: 'datetime',
-    sortable: true,
-    render: (raw, row) => String(raw ?? row.received_at ?? '-'),
-  },
-  { key: 'status', label: 'Status', sortable: true, filterable: true },
-];
+function signupColumns(t: Translate): DataTableColumn<TenantSignupRequestRow>[] {
+  return [
+    {
+      key: 'organization_name',
+      label: t('platformOrganizations.organizationsModule.organization'),
+      sortable: true,
+      filterable: true,
+      render: (raw, row) => <span className="mono">{String(raw ?? row.org_name ?? '-')}</span>,
+    },
+    { key: 'email', label: t('platformOrganizations.organizationsModule.adminEmail'), mono: true, sortable: true, filterable: true },
+    { key: 'full_name', label: t('platformOrganizations.organizationsModule.adminName'), sortable: true, filterable: true },
+    {
+      key: 'created_at',
+      label: t('platformOrganizations.organizationsModule.received'),
+      format: 'datetime',
+      sortable: true,
+      render: (raw, row) => String(raw ?? row.received_at ?? '-'),
+    },
+    { key: 'status', label: t('platformOrganizations.organizationsModule.status'), sortable: true, filterable: true },
+  ];
+}
 
 // W50 — Signup-queue status filter chips derive from the canonical
 // `tenant_signup_request_status` lookup (already registered in
@@ -260,7 +265,8 @@ function parseJsonObject(raw: string): Record<string, unknown> {
   if (!trimmed) return {};
   const parsed = JSON.parse(trimmed) as unknown;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Organization defaults must be a JSON object.');
+    // Callers show the translated message; this code only stops the save.
+    throw new Error('organization_defaults_not_object');
   }
   return parsed as Record<string, unknown>;
 }
@@ -295,6 +301,7 @@ function normalizeSettingsCategoryOption(row: Record<string, unknown>): OrgDefau
 function orgDefaultKeyOptions(
   defaultsPatch: string,
   settingsCategoryRows: Array<Record<string, unknown>>,
+  t: Translate,
 ): OrgDefaultKeyOption[] {
   const merged = new Map<string, OrgDefaultKeyOption>();
   let current: Record<string, unknown> = {};
@@ -311,7 +318,7 @@ function orgDefaultKeyOptions(
       merged.set(key, {
         value: key,
         label: labelFromSettingsCategory(key),
-        domain: 'Current defaults',
+        domain: t('platformOrganizations.orgProfileForm.currentDefaults'),
       });
     });
 
@@ -370,21 +377,22 @@ function orgProfileSaveEvidenceFromResult(
 }
 
 function OrgProfileReadbackPanel({ evidence }: { evidence: OrgProfileSaveEvidence }) {
+  const { t } = useI18n();
   return (
     <div className="state__hint" role="status" data-testid="org-profile-save-readback" style={{ padding: '8px 4px 0' }}>
-      <div className="section-eyebrow">Saved result</div>
+      <div className="section-eyebrow">{t('platformOrganizations.orgProfileReadbackPanel.savedResult')}</div>
       <div className="kvgrid">
-        <KvRow label="Organization">
+        <KvRow label={t('platformOrganizations.orgProfileReadbackPanel.organization')}>
           <span className="mono">{evidence.organizationLabel}</span>
         </KvRow>
-        <KvRow label="Action">Profile update confirmed</KvRow>
-        <KvRow label="Confirmed from">Saved organization profile</KvRow>
-        <KvRow label="Request trail">{evidence.correlationId ? 'Recorded' : 'Not returned'}</KvRow>
-        <KvRow label="Settings status">{evidence.settingsResolutionId ? 'Recorded' : 'Not returned'}</KvRow>
-        <KvRow label="Defaults">
-          {evidence.defaultKeys.length > 0 ? evidence.defaultKeys.join(', ') : 'No non-branding defaults'}
+        <KvRow label={t('platformOrganizations.orgProfileReadbackPanel.action')}>{t('platformOrganizations.orgProfileReadbackPanel.profileUpdateConfirmed')}</KvRow>
+        <KvRow label={t('platformOrganizations.orgProfileReadbackPanel.confirmedFrom')}>{t('platformOrganizations.orgProfileReadbackPanel.savedOrganizationProfile')}</KvRow>
+        <KvRow label={t('platformOrganizations.orgProfileReadbackPanel.requestTrail')}>{evidence.correlationId ? t('platformOrganizations.orgProfileReadbackPanel.recorded') : t('platformOrganizations.orgProfileReadbackPanel.notReturned')}</KvRow>
+        <KvRow label={t('platformOrganizations.orgProfileReadbackPanel.settingsStatus')}>{evidence.settingsResolutionId ? t('platformOrganizations.orgProfileReadbackPanel.recorded') : t('platformOrganizations.orgProfileReadbackPanel.notReturned')}</KvRow>
+        <KvRow label={t('platformOrganizations.orgProfileReadbackPanel.defaults')}>
+          {evidence.defaultKeys.length > 0 ? evidence.defaultKeys.join(', ') : t('platformOrganizations.orgProfileReadbackPanel.noNonBrandingDefaults')}
         </KvRow>
-        <KvRow label="Saved">{evidence.savedAt}</KvRow>
+        <KvRow label={t('platformOrganizations.orgProfileReadbackPanel.saved')}>{evidence.savedAt}</KvRow>
       </div>
     </div>
   );
@@ -427,6 +435,7 @@ function TenantConsoleRequestForm({
   onCancel,
   onSubmit,
 }: TenantConsoleRequestFormProps) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState({
     email: '',
     full_name: '',
@@ -444,7 +453,7 @@ function TenantConsoleRequestForm({
 
   return (
     <div data-testid="tenant-console-request-form">
-      <div className="section-eyebrow">Console tenant request</div>
+      <div className="section-eyebrow">{t('platformOrganizations.tenantConsoleRequestForm.consoleTenantRequest')}</div>
       <div
         style={{
           display: 'grid',
@@ -454,21 +463,21 @@ function TenantConsoleRequestForm({
           padding: '0 4px',
         }}
       >
-        <label className="mono" htmlFor="tenant-request-org">Organization</label>
+        <label className="mono" htmlFor="tenant-request-org">{t('platformOrganizations.tenantConsoleRequestForm.organization')}</label>
         <input
           id="tenant-request-org"
           className="dt-inline-input"
           value={draft.organization_name}
           onChange={(e) => setDraft((s) => ({ ...s, organization_name: e.target.value }))}
         />
-        <label className="mono" htmlFor="tenant-request-slug">Slug</label>
+        <label className="mono" htmlFor="tenant-request-slug">{t('platformOrganizations.tenantConsoleRequestForm.slug')}</label>
         <input
           id="tenant-request-slug"
           className="dt-inline-input"
           value={draft.organization_slug}
           onChange={(e) => setDraft((s) => ({ ...s, organization_slug: e.target.value }))}
         />
-        <label className="mono" htmlFor="tenant-request-email">Admin email</label>
+        <label className="mono" htmlFor="tenant-request-email">{t('platformOrganizations.tenantConsoleRequestForm.adminEmail')}</label>
         <input
           id="tenant-request-email"
           className="dt-inline-input"
@@ -476,35 +485,35 @@ function TenantConsoleRequestForm({
           value={draft.email}
           onChange={(e) => setDraft((s) => ({ ...s, email: e.target.value }))}
         />
-        <label className="mono" htmlFor="tenant-request-name">Admin name</label>
+        <label className="mono" htmlFor="tenant-request-name">{t('platformOrganizations.tenantConsoleRequestForm.adminName')}</label>
         <input
           id="tenant-request-name"
           className="dt-inline-input"
           value={draft.full_name}
           onChange={(e) => setDraft((s) => ({ ...s, full_name: e.target.value }))}
         />
-        <label className="mono" htmlFor="tenant-request-website">Website</label>
+        <label className="mono" htmlFor="tenant-request-website">{t('platformOrganizations.tenantConsoleRequestForm.website')}</label>
         <input
           id="tenant-request-website"
           className="dt-inline-input"
           value={draft.website_url}
           onChange={(e) => setDraft((s) => ({ ...s, website_url: e.target.value }))}
         />
-        <label className="mono" htmlFor="tenant-request-phone">Phone</label>
+        <label className="mono" htmlFor="tenant-request-phone">{t('platformOrganizations.tenantConsoleRequestForm.phone')}</label>
         <input
           id="tenant-request-phone"
           className="dt-inline-input"
           value={draft.phone}
           onChange={(e) => setDraft((s) => ({ ...s, phone: e.target.value }))}
         />
-        <label className="mono" htmlFor="tenant-request-locale">Locale</label>
+        <label className="mono" htmlFor="tenant-request-locale">{t('platformOrganizations.tenantConsoleRequestForm.locale')}</label>
         <input
           id="tenant-request-locale"
           className="dt-inline-input"
           value={draft.locale}
           onChange={(e) => setDraft((s) => ({ ...s, locale: e.target.value }))}
         />
-        <label className="mono" htmlFor="tenant-request-notes">Notes</label>
+        <label className="mono" htmlFor="tenant-request-notes">{t('platformOrganizations.tenantConsoleRequestForm.notes')}</label>
         <textarea
           id="tenant-request-notes"
           className="dt-inline-input"
@@ -514,9 +523,9 @@ function TenantConsoleRequestForm({
         />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onCancel} />
+        <Button label={t('platformOrganizations.tenantConsoleRequestForm.cancel')} kind="ghost" onClick={onCancel} />
         <Button
-          label="Create request"
+          label={t('platformOrganizations.tenantConsoleRequestForm.createRequest')}
           iconName="plus"
           kind="primary"
           capability={CAP.TENANT_SIGNUP_REQUESTS_REVIEW}
@@ -574,6 +583,7 @@ function OrgProfileForm({
   onOpenAccess,
   onSubmit,
 }: OrgProfileFormProps) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState(() => orgProfileDraftFromRow(row));
   const [fileError, setFileError] = useState<string>('');
   const [settingsError, setSettingsError] = useState<string>('');
@@ -586,8 +596,8 @@ function OrgProfileForm({
     const rows = liveRows.length > 0
       ? liveRows
       : ((getSettingsCategories() as Array<Record<string, unknown>>) || []);
-    return orgDefaultKeyOptions(draft.default_settings_patch, rows);
-  }, [draft.default_settings_patch, settingsCategoriesQuery.data]);
+    return orgDefaultKeyOptions(draft.default_settings_patch, rows, t);
+  }, [draft.default_settings_patch, settingsCategoriesQuery.data, t]);
 
   useEffect(() => {
     setDraft(orgProfileDraftFromRow(row));
@@ -603,15 +613,15 @@ function OrgProfileForm({
 
   return (
     <div data-testid="org-profile-form">
-      <div className="section-eyebrow">Organization profile</div>
+      <div className="section-eyebrow">{t('platformOrganizations.orgProfileForm.organizationProfile')}</div>
       <div
         data-testid="org-profile-lifecycle-actions"
         style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '0 4px 14px' }}
       >
-        <Button label="Readiness" iconName="check" kind="ghost" onClick={onOpenReadiness} />
-        <Button label="Settings" iconName="settings" kind="ghost" onClick={onOpenSettings} />
-        <Button label="Users" iconName="users" kind="ghost" onClick={onOpenUsers} />
-        <Button label="Access" iconName="shield" kind="ghost" onClick={onOpenAccess} />
+        <Button label={t('platformOrganizations.orgProfileForm.readiness')} iconName="check" kind="ghost" onClick={onOpenReadiness} />
+        <Button label={t('platformOrganizations.orgProfileForm.settings')} iconName="settings" kind="ghost" onClick={onOpenSettings} />
+        <Button label={t('platformOrganizations.orgProfileForm.users')} iconName="users" kind="ghost" onClick={onOpenUsers} />
+        <Button label={t('platformOrganizations.orgProfileForm.access')} iconName="shield" kind="ghost" onClick={onOpenAccess} />
       </div>
       <div
         style={{
@@ -622,7 +632,7 @@ function OrgProfileForm({
           padding: '0 4px',
         }}
       >
-        <label className="mono" htmlFor="org-profile-name">Name</label>
+        <label className="mono" htmlFor="org-profile-name">{t('platformOrganizations.orgProfileForm.name')}</label>
         <input
           id="org-profile-name"
           className="dt-inline-input"
@@ -630,7 +640,7 @@ function OrgProfileForm({
           disabled={controlsDisabled}
           onChange={(e) => setDraft((s) => ({ ...s, name: e.target.value }))}
         />
-        <label className="mono" htmlFor="org-profile-timezone">Timezone</label>
+        <label className="mono" htmlFor="org-profile-timezone">{t('platformOrganizations.orgProfileForm.timezone')}</label>
         <input
           id="org-profile-timezone"
           className="dt-inline-input"
@@ -638,7 +648,7 @@ function OrgProfileForm({
           disabled={controlsDisabled}
           onChange={(e) => setDraft((s) => ({ ...s, timezone: e.target.value }))}
         />
-        <label className="mono" htmlFor="org-profile-locale">Locale</label>
+        <label className="mono" htmlFor="org-profile-locale">{t('platformOrganizations.orgProfileForm.locale')}</label>
         <input
           id="org-profile-locale"
           className="dt-inline-input"
@@ -646,7 +656,7 @@ function OrgProfileForm({
           disabled={controlsDisabled}
           onChange={(e) => setDraft((s) => ({ ...s, locale: e.target.value }))}
         />
-        <label className="mono" htmlFor="org-profile-logo-url">Logo URL</label>
+        <label className="mono" htmlFor="org-profile-logo-url">{t('platformOrganizations.orgProfileForm.logoUrl')}</label>
         <input
           id="org-profile-logo-url"
           className="dt-inline-input"
@@ -654,7 +664,7 @@ function OrgProfileForm({
           disabled={controlsDisabled}
           onChange={(e) => setDraft((s) => ({ ...s, logo_url: e.target.value }))}
         />
-        <label className="mono" htmlFor="org-profile-logo-file">Logo file</label>
+        <label className="mono" htmlFor="org-profile-logo-file">{t('platformOrganizations.orgProfileForm.logoFile')}</label>
         <input
           id="org-profile-logo-file"
           className="dt-inline-input"
@@ -671,7 +681,7 @@ function OrgProfileForm({
             if (!ORG_LOGO_ACCEPTED_TYPES.includes(file.type as (typeof ORG_LOGO_ACCEPTED_TYPES)[number])) {
               e.currentTarget.value = '';
               setDraft((s) => ({ ...s, file_name: '', file_base64: '', content_type: '' }));
-              setFileError('Logo file must be PNG, JPEG, or WebP.');
+              setFileError(t('platformOrganizations.orgProfileForm.logoFileMustBe'));
               return;
             }
             void readFileAsDataUrl(file)
@@ -683,10 +693,10 @@ function OrgProfileForm({
                   content_type: file.type || 'application/octet-stream',
                 }));
               })
-              .catch(() => setFileError('Logo file could not be read. Choose another file and try again.'));
+              .catch(() => setFileError(t('platformOrganizations.orgProfileForm.logoFileCouldNot')));
           }}
         />
-        <label className="mono" htmlFor="org-profile-primary-color">Primary color</label>
+        <label className="mono" htmlFor="org-profile-primary-color">{t('platformOrganizations.orgProfileForm.primaryColor')}</label>
         <input
           id="org-profile-primary-color"
           className="dt-inline-input"
@@ -695,16 +705,16 @@ function OrgProfileForm({
           onChange={(e) => setDraft((s) => ({ ...s, primary_color: e.target.value }))}
           placeholder="#0f766e"
         />
-        <label className="mono" htmlFor="org-profile-secondary-color">Secondary color</label>
+        <label className="mono" htmlFor="org-profile-secondary-color">{t('platformOrganizations.orgProfileForm.secondaryColor')}</label>
         <input
           id="org-profile-secondary-color"
           className="dt-inline-input"
           value={draft.secondary_color}
           disabled={controlsDisabled}
           onChange={(e) => setDraft((s) => ({ ...s, secondary_color: e.target.value }))}
-          placeholder="#1d4ed8"
+          placeholder={t('platformOrganizations.orgProfileForm.n1d4ed8')}
         />
-        <label className="mono" htmlFor="org-profile-default-key">Default key lookup</label>
+        <label className="mono" htmlFor="org-profile-default-key">{t('platformOrganizations.orgProfileForm.defaultKeyLookup')}</label>
         <select
           id="org-profile-default-key"
           className="dt-inline-input"
@@ -715,14 +725,14 @@ function OrgProfileForm({
             setDraft((s) => ({ ...s, quick_default_key: e.target.value }));
           }}
         >
-          <option value="">Choose a default key</option>
+          <option value="">{t('platformOrganizations.orgProfileForm.chooseADefaultKey')}</option>
           {defaultKeyOptions.map((option) => (
             <option key={option.value} value={option.value}>
               {option.domain ? `${option.label} - ${option.domain}` : option.label}
             </option>
           ))}
         </select>
-        <label className="mono" htmlFor="org-profile-default-value">Default value</label>
+        <label className="mono" htmlFor="org-profile-default-value">{t('platformOrganizations.orgProfileForm.defaultValue')}</label>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 8 }}>
           <input
             id="org-profile-default-value"
@@ -733,10 +743,10 @@ function OrgProfileForm({
               setSettingsError('');
               setDraft((s) => ({ ...s, quick_default_value: e.target.value }));
             }}
-            placeholder='{"cutoff":"18:00"}'
+            placeholder={t('platformOrganizations.orgProfileForm.text')}
           />
           <Button
-            label="Apply default"
+            label={t('platformOrganizations.orgProfileForm.applyDefault')}
             iconName="plus"
             kind="ghost"
             capability={CAP.ORGANIZATIONS_WRITE}
@@ -744,18 +754,18 @@ function OrgProfileForm({
             onClick={() => {
               const key = draft.quick_default_key.trim();
               if (!key) {
-                setSettingsError('Default key is required.');
+                setSettingsError(t('platformOrganizations.orgProfileForm.defaultKeyIsRequired'));
                 return;
               }
               if (key === 'branding') {
-                setSettingsError('Branding defaults use the logo and color fields.');
+                setSettingsError(t('platformOrganizations.orgProfileForm.brandingDefaultsUseThe'));
                 return;
               }
               let current: Record<string, unknown>;
               try {
                 current = parseJsonObject(draft.default_settings_patch);
-              } catch (err) {
-                setSettingsError((err as Error).message);
+              } catch {
+                setSettingsError(t('platformOrganizations.orgProfileForm.organizationDefaultsMustBe'));
                 return;
               }
               const next = {
@@ -772,7 +782,7 @@ function OrgProfileForm({
             }}
           />
         </div>
-        <label className="mono" htmlFor="org-profile-defaults">Defaults patch</label>
+        <label className="mono" htmlFor="org-profile-defaults">{t('platformOrganizations.orgProfileForm.defaultsPatch')}</label>
         <textarea
           id="org-profile-defaults"
           className="dt-inline-input"
@@ -794,7 +804,7 @@ function OrgProfileForm({
       ) : null}
       {draft.file_name ? (
         <div className="state__hint" style={{ padding: '8px 4px 0' }}>
-          Selected logo: <span className="mono">{draft.file_name}</span>
+          {t('platformOrganizations.orgProfileForm.selectedLogo')} <span className="mono">{draft.file_name}</span>
         </div>
       ) : null}
       {!draft.file_name && (draft.backend_logo_file_name || draft.backend_logo_artifact_id || draft.backend_logo_storage_key) ? (
@@ -804,17 +814,17 @@ function OrgProfileForm({
           role="status"
           style={{ padding: '8px 4px 0' }}
         >
-          Saved logo:{' '}
+          {t('platformOrganizations.orgProfileForm.savedLogo')}{' '}
           <span className="mono">
-            {draft.backend_logo_file_name || 'file recorded'}
+            {draft.backend_logo_file_name || t('platformOrganizations.orgProfileForm.fileRecorded')}
             {draft.backend_logo_content_type ? ` · ${draft.backend_logo_content_type}` : ''}
           </span>
         </div>
       ) : null}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onCancel} />
+        <Button label={t('platformOrganizations.orgProfileForm.cancel')} kind="ghost" onClick={onCancel} />
         <Button
-          label="Save profile"
+          label={t('platformOrganizations.orgProfileForm.saveProfile')}
           iconName="upload"
           kind="primary"
           capability={CAP.ORGANIZATIONS_WRITE}
@@ -823,8 +833,8 @@ function OrgProfileForm({
             let defaultSettingsPatch: Record<string, unknown>;
             try {
               defaultSettingsPatch = parseJsonObject(draft.default_settings_patch);
-            } catch (err) {
-              setSettingsError((err as Error).message);
+            } catch {
+              setSettingsError(t('platformOrganizations.orgProfileForm.organizationDefaultsMustBe'));
               return;
             }
             defaultSettingsPatch = {
@@ -867,16 +877,16 @@ function KvRow({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function intakeContextLabel(key: string): string {
+function intakeContextLabel(key: string, t: Translate): string {
   const overrides: Record<string, string> = {
-    utm_source: 'Campaign source',
-    utm_campaign: 'Campaign',
-    utm_medium: 'Channel',
-    referrer: 'Referrer',
-    source: 'Source',
-    locale: 'Locale',
-    ip: 'IP address',
-    user_agent: 'Browser',
+    utm_source: t('platformOrganizations.signupDrawerBody.campaignSource'),
+    utm_campaign: t('platformOrganizations.signupDrawerBody.campaign'),
+    utm_medium: t('platformOrganizations.signupDrawerBody.channel'),
+    referrer: t('platformOrganizations.signupDrawerBody.referrer'),
+    source: t('platformOrganizations.signupDrawerBody.source'),
+    locale: t('platformOrganizations.signupDrawerBody.intakeLocale'),
+    ip: t('platformOrganizations.signupDrawerBody.ipAddress'),
+    user_agent: t('platformOrganizations.signupDrawerBody.browser'),
   };
   return overrides[key] ?? key
     .replace(/[_-]+/g, ' ')
@@ -884,29 +894,38 @@ function intakeContextLabel(key: string): string {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-function intakeContextValue(value: unknown): string {
-  if (value == null || value === '') return 'Not provided';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+function intakeContextValue(value: unknown, t: Translate): string {
+  if (value == null || value === '') return t('platformOrganizations.signupDrawerBody.notProvided');
+  if (typeof value === 'boolean') return value ? t('platformOrganizations.signupDrawerBody.yes') : t('platformOrganizations.signupDrawerBody.no');
   if (typeof value === 'number') return String(value);
   if (typeof value === 'string') return value.replace(/[_-]+/g, ' ');
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+  if (Array.isArray(value)) {
+    return fill(t(value.length === 1 ? 'platformOrganizations.signupDrawerBody.itemOne' : 'platformOrganizations.signupDrawerBody.itemOther'), { count: value.length });
+  }
   if (typeof value === 'object') {
     const size = Object.keys(value as Record<string, unknown>).length;
-    return `${size} detail${size === 1 ? '' : 's'} captured`;
+    return fill(t(size === 1 ? 'platformOrganizations.signupDrawerBody.detailOne' : 'platformOrganizations.signupDrawerBody.detailOther'), { count: size });
   }
   return String(value);
 }
 
-function provisionedReference(value: unknown, kind: 'organization' | 'user'): string {
+function provisionedReference(value: unknown, kind: 'organization' | 'user', t: Translate): string {
   const token = String(value ?? '').trim();
-  if (!token) return 'Not recorded';
+  if (!token) return t('platformOrganizations.signupDrawerBody.notRecorded');
   const short = token.replace(/-/g, '').slice(-6).toUpperCase();
-  return `${kind === 'organization' ? 'Organization' : 'User'} ready${short ? ` · Ref ${short}` : ''}`;
+  if (kind === 'organization') {
+    return short
+      ? fill(t('platformOrganizations.signupDrawerBody.organizationReadyRef'), { ref: short })
+      : t('platformOrganizations.signupDrawerBody.organizationReady');
+  }
+  return short
+    ? fill(t('platformOrganizations.signupDrawerBody.provisionedUserReadyRef'), { ref: short })
+    : t('platformOrganizations.signupDrawerBody.provisionedUserReady');
 }
 
-function compactStatusDetail(value: unknown): string {
+function compactStatusDetail(value: unknown, t: Translate): string {
   const text = String(value ?? '').trim();
-  if (!text) return 'Not recorded';
+  if (!text) return t('platformOrganizations.signupDrawerBody.notRecorded');
   return text;
 }
 
@@ -918,16 +937,17 @@ interface RejectReasonFormProps {
 }
 
 function RejectReasonForm({ count, pending, onCancel, onSubmit }: RejectReasonFormProps) {
+  const { t } = useI18n();
   const [reason, setReason] = useState('');
   const trimmed = reason.trim();
   return (
     <div data-testid="tenant-signup-reject-form">
-      <div className="section-eyebrow">Reject tenant request</div>
+      <div className="section-eyebrow">{t('platformOrganizations.rejectReasonForm.rejectTenantRequest')}</div>
       <p className="state__hint" style={{ padding: '0 4px 10px' }}>
-        Capture the decision reason so the request history and invite outcome stay auditable.
+        {t('platformOrganizations.rejectReasonForm.captureTheDecisionReason')}
       </p>
       <label className="mono" htmlFor="tenant-signup-reject-reason">
-        Reason
+        {t('platformOrganizations.rejectReasonForm.reason')}
       </label>
       <textarea
         id="tenant-signup-reject-reason"
@@ -938,9 +958,9 @@ function RejectReasonForm({ count, pending, onCancel, onSubmit }: RejectReasonFo
         style={{ marginTop: 6 }}
       />
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onCancel} disabled={pending} />
+        <Button label={t('platformOrganizations.rejectReasonForm.cancel')} kind="ghost" onClick={onCancel} disabled={pending} />
         <Button
-          label={count > 1 ? `Reject ${count} requests` : 'Reject request'}
+          label={count > 1 ? fill(t('platformOrganizations.rejectReasonForm.rejectRequests'), { count: String(count) }) : t('platformOrganizations.rejectReasonForm.rejectRequest')}
           iconName="close"
           kind="danger"
           capability={CAP.TENANT_SIGNUP_REQUESTS_REVIEW}
@@ -961,6 +981,7 @@ function IntakeContextGrid({
   emptyText: string;
   testId: string;
 }) {
+  const { t } = useI18n();
   const entries = Object.entries(values).filter(([, value]) => value != null && value !== '');
   if (entries.length === 0) {
     return <div className="state__hint" data-testid={testId}>{emptyText}</div>;
@@ -968,8 +989,8 @@ function IntakeContextGrid({
   return (
     <div className="kvgrid" data-testid={testId}>
       {entries.map(([key, value]) => (
-        <KvRow key={key} label={intakeContextLabel(key)}>
-          <span>{intakeContextValue(value)}</span>
+        <KvRow key={key} label={intakeContextLabel(key, t)}>
+          <span>{intakeContextValue(value, t)}</span>
         </KvRow>
       ))}
     </div>
@@ -1018,6 +1039,7 @@ function SignupDrawerBody({
   onOpenUserAccess,
   pending,
 }: SignupDrawerProps) {
+  const { t } = useI18n();
   const approveActivationRef = useRef(false);
   const [approvedExistingOrganizationId, setApprovedExistingOrganizationId] = useState('');
   const marketing = (row.marketing ?? {}) as Record<string, unknown>;
@@ -1080,33 +1102,33 @@ function SignupDrawerBody({
 
   return (
     <div data-testid="org-signup-drawer">
-      <div className="section-eyebrow">Signup intake</div>
+      <div className="section-eyebrow">{t('platformOrganizations.signupDrawerBody.signupIntake')}</div>
       <div className="kvgrid">
-        <KvRow label="Organization">
+        <KvRow label={t('platformOrganizations.signupDrawerBody.organization')}>
           <span className="mono">{row.organization_name ?? row.org_name ?? '—'}</span>
         </KvRow>
-        <KvRow label="Slug">
+        <KvRow label={t('platformOrganizations.signupDrawerBody.slug')}>
           <span className="mono">{row.organization_slug ?? '—'}</span>
         </KvRow>
-        <KvRow label="Contact">
+        <KvRow label={t('platformOrganizations.signupDrawerBody.contact')}>
           <span className="mono">{row.email ?? '—'}</span>
         </KvRow>
-        <KvRow label="Name">
+        <KvRow label={t('platformOrganizations.signupDrawerBody.name')}>
           <span>{row.full_name ?? '—'}</span>
         </KvRow>
-        <KvRow label="Phone">
+        <KvRow label={t('platformOrganizations.signupDrawerBody.phone')}>
           <span className="mono">{row.phone ?? '—'}</span>
         </KvRow>
-        <KvRow label="Industry">
+        <KvRow label={t('platformOrganizations.signupDrawerBody.industry')}>
           <span>{row.industry ?? (metadata['industry'] as string) ?? '—'}</span>
         </KvRow>
-        <KvRow label="Size">
+        <KvRow label={t('platformOrganizations.signupDrawerBody.size')}>
           <span>{row.size ?? (metadata['org_size'] as string) ?? '—'}</span>
         </KvRow>
-        <KvRow label="Received">
+        <KvRow label={t('platformOrganizations.signupDrawerBody.received')}>
           <span className="mono">{row.received_at ?? '—'}</span>
         </KvRow>
-        <KvRow label="Status">
+        <KvRow label={t('platformOrganizations.signupDrawerBody.status')}>
           <Chip
             size="xs"
             kind={(lookupRow('tenant_signup_request_status', status)?.tone as ChipKind | undefined) ?? 'warn'}
@@ -1115,13 +1137,13 @@ function SignupDrawerBody({
         </KvRow>
       </div>
 
-      <div className="section-eyebrow">Attestations</div>
+      <div className="section-eyebrow">{t('platformOrganizations.signupDrawerBody.attestations')}</div>
       <div
         data-testid="org-signup-attestations"
         style={{ padding: '4px 14px 12px', display: 'flex', flexWrap: 'wrap', gap: 6 }}
       >
         {attestationKeys.length === 0 ? (
-          <span className="state__hint">No attestation envelope on this request.</span>
+          <span className="state__hint">{t('platformOrganizations.signupDrawerBody.noAttestationEnvelopeOn')}</span>
         ) : (
           attestationKeys.map((k) => (
             <AttestationChip
@@ -1133,7 +1155,7 @@ function SignupDrawerBody({
         )}
         <AttestationChip
           ok={Boolean(row.turnstile_verified ?? metadata['turnstile_verified'])}
-          label="turnstile verified"
+          label={t('platformOrganizations.signupDrawerBody.turnstileVerified')}
         />
       </div>
 
@@ -1155,20 +1177,20 @@ function SignupDrawerBody({
           <Chip
             size="xs"
             kind="info"
-            label={`attestations · ${summary.attestation_passed_count}/${summary.attestation_count}`}
+            label={fill(t('platformOrganizations.signupDrawerBody.attestations2'), { attestation_passed_count: String(summary.attestation_passed_count), attestation_count: String(summary.attestation_count) })}
             data-testid="org-signup-summary-attestation-count"
           />
           <Chip
             size="xs"
             kind={summary.attestation_complete ? 'good' : 'warn'}
-            label={summary.attestation_complete ? 'attestation complete' : 'attestation incomplete'}
+            label={summary.attestation_complete ? t('platformOrganizations.signupDrawerBody.attestationComplete') : t('platformOrganizations.signupDrawerBody.attestationIncomplete')}
             data-testid="org-signup-summary-attestation-complete"
           />
           {summary.has_marketing_consent ? (
             <Chip
               size="xs"
               kind="info"
-              label="marketing consent"
+              label={t('platformOrganizations.signupDrawerBody.marketingConsent')}
               data-testid="org-signup-summary-marketing-consent"
             />
           ) : null}
@@ -1176,7 +1198,7 @@ function SignupDrawerBody({
             <Chip
               size="xs"
               kind="neutral"
-              label={`reviewer · ${summary.reviewer_label}`}
+              label={fillNodes(t('platformOrganizations.signupDrawerBody.reviewer'), { reviewer_label: <bdi>{String(summary.reviewer_label)}</bdi> })}
               data-testid="org-signup-summary-reviewer-label"
             />
           ) : null}
@@ -1184,7 +1206,7 @@ function SignupDrawerBody({
             <Chip
               size="xs"
               kind="good"
-              label={`provisioned · ${summary.approved_organization_label}`}
+              label={fillNodes(t('platformOrganizations.signupDrawerBody.provisioned'), { approved_organization_label: <bdi>{String(summary.approved_organization_label)}</bdi> })}
               data-testid="org-signup-summary-approved-org-label"
             />
           ) : null}
@@ -1192,58 +1214,58 @@ function SignupDrawerBody({
             <Chip
               size="xs"
               kind="neutral"
-              label={`decision age · ${summary.decision_age_seconds}s`}
+              label={fill(t('platformOrganizations.signupDrawerBody.decisionAgeS'), { decision_age_seconds: String(summary.decision_age_seconds) })}
               data-testid="org-signup-summary-decision-age"
             />
           ) : null}
         </div>
       ) : null}
 
-      <div className="section-eyebrow">Marketing context</div>
+      <div className="section-eyebrow">{t('platformOrganizations.signupDrawerBody.marketingContext')}</div>
       <IntakeContextGrid
         values={marketing}
-        emptyText="No marketing context was submitted with this request."
+        emptyText={t('platformOrganizations.signupDrawerBody.noMarketingContextWas')}
         testId="org-signup-marketing"
       />
 
-      <div className="section-eyebrow">Decision history</div>
+      <div className="section-eyebrow">{t('platformOrganizations.signupDrawerBody.decisionHistory')}</div>
       <div data-testid="org-signup-decision-history">
         {!reviewed ? (
           <div className="state__hint" style={{ padding: '4px 14px 12px' }}>
-            Pending review. Use Approve or Reject below to apply
-            <span className="mono"> tenant review</span>.
+            {t('platformOrganizations.signupDrawerBody.pendingReviewUseApprove')}
+            <span className="mono"> {t('platformOrganizations.signupDrawerBody.tenantReview')}</span>.
           </div>
         ) : (
           <div className="kvgrid">
-            <KvRow label="Decision">
+            <KvRow label={t('platformOrganizations.signupDrawerBody.decision')}>
               <Chip
                 size="xs"
                 kind={(lookupRow('tenant_signup_request_status', row.review_decision ?? status)?.tone as ChipKind | undefined) ?? 'warn'}
                 label={String(row.review_decision ?? status)}
               />
             </KvRow>
-            <KvRow label="Reviewed at">
+            <KvRow label={t('platformOrganizations.signupDrawerBody.reviewedAt')}>
               <span className="mono">
                 {row.reviewed_at ?? row.approved_at ?? '—'}
               </span>
             </KvRow>
-            <KvRow label="Reviewer">
+            <KvRow label={t('platformOrganizations.signupDrawerBody.reviewerName')}>
               <span className="mono">{reviewerLabel ?? '—'}</span>
             </KvRow>
-            <KvRow label="Reason">
+            <KvRow label={t('platformOrganizations.signupDrawerBody.reason')}>
               <span>{row.review_reason ?? '—'}</span>
             </KvRow>
             {approvedOrgId ? (
-              <KvRow label="Provisioned org">
-                <span>{provisionedReference(approvedOrgId, 'organization')}</span>
+              <KvRow label={t('platformOrganizations.signupDrawerBody.provisionedOrg')}>
+                <span>{provisionedReference(approvedOrgId, 'organization', t)}</span>
               </KvRow>
             ) : null}
             {approvedUserId ? (
-              <KvRow label="Provisioned user">
+              <KvRow label={t('platformOrganizations.signupDrawerBody.provisionedUser')}>
                 <span>
                   {summary?.approved_user_email
-                    ? `User ready · ${summary.approved_user_email}`
-                    : provisionedReference(approvedUserId, 'user')}
+                    ? fill(t('platformOrganizations.signupDrawerBody.userReady'), { approved_user_email: String(summary.approved_user_email) })
+                    : provisionedReference(approvedUserId, 'user', t)}
                 </span>
               </KvRow>
             ) : null}
@@ -1252,7 +1274,7 @@ function SignupDrawerBody({
         {Object.keys(decisionMeta).length > 0 ? (
           <IntakeContextGrid
             values={decisionMeta}
-            emptyText="No additional decision notes were captured."
+            emptyText={t('platformOrganizations.signupDrawerBody.noAdditionalDecisionNotes')}
             testId="org-signup-decision-metadata"
           />
         ) : null}
@@ -1264,28 +1286,28 @@ function SignupDrawerBody({
             className="section-eyebrow"
             style={{ marginTop: 8 }}
           >
-            Activation and invite
+            {t('platformOrganizations.signupDrawerBody.activationAndInvite')}
           </div>
           <div className="kvgrid" data-testid="org-signup-activation-status">
-            <KvRow label="Invite email">
+            <KvRow label={t('platformOrganizations.signupDrawerBody.inviteEmail')}>
               {lastErrorMessage ? (
-                <Chip size="xs" kind="danger" label="invite failed" />
+                <Chip size="xs" kind="danger" label={t('platformOrganizations.signupDrawerBody.inviteFailed')} />
               ) : inviteEmailSentAt ? (
-                <span className="mono">Sent · {inviteEmailSentAt}</span>
+                <span className="mono">{fillNodes(t('platformOrganizations.signupDrawerBody.sent'), { inviteEmailSentAt: <bdi>{String(inviteEmailSentAt)}</bdi> })}</span>
               ) : approvedAuthUserId ? (
-                <Chip size="xs" kind="info" label="auth user ready" />
+                <Chip size="xs" kind="info" label={t('platformOrganizations.signupDrawerBody.authUserReady')} />
               ) : (
-                <span className="state__hint">Not recorded</span>
+                <span className="state__hint">{t('platformOrganizations.signupDrawerBody.notRecorded')}</span>
               )}
             </KvRow>
-            <KvRow label="Invite redirect">
-              <span className="mono">{compactStatusDetail(inviteRedirectTo)}</span>
+            <KvRow label={t('platformOrganizations.signupDrawerBody.inviteRedirect')}>
+              <span className="mono">{compactStatusDetail(inviteRedirectTo, t)}</span>
             </KvRow>
-            <KvRow label="Auth user">
-              <span>{provisionedReference(approvedAuthUserId, 'user')}</span>
+            <KvRow label={t('platformOrganizations.signupDrawerBody.authUser')}>
+              <span>{provisionedReference(approvedAuthUserId, 'user', t)}</span>
             </KvRow>
             {lastErrorMessage ? (
-              <KvRow label="Last invite error">
+              <KvRow label={t('platformOrganizations.signupDrawerBody.lastInviteError')}>
                 <span>
                   {lastErrorCode ? `${lastErrorCode} · ` : ''}
                   {lastErrorMessage}
@@ -1297,13 +1319,13 @@ function SignupDrawerBody({
           {approvedOrgId ? (
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '8px 14px 12px', flexWrap: 'wrap' }}>
               <Button
-                label="Open user access"
+                label={t('platformOrganizations.signupDrawerBody.openUserAccess')}
                 iconName="user_in"
                 kind="ghost"
                 onClick={() => onOpenUserAccess(approvedOrgId, approvedUserId ?? summary?.approved_user_email ?? row.approved_user_email ?? null)}
               />
               <Button
-                label="Open readiness"
+                label={t('platformOrganizations.signupDrawerBody.openReadiness')}
                 iconName="check"
                 kind="ghost"
                 onClick={() => onOpenReadiness(approvedOrgId)}
@@ -1317,19 +1339,19 @@ function SignupDrawerBody({
         className="section-eyebrow"
         style={{ marginTop: 8 }}
       >
-        Review actions
+        {t('platformOrganizations.signupDrawerBody.reviewActions')}
       </div>
       {!reviewed && canReview && existingOrganizationOptions.length > 0 ? (
         <div className="kvgrid" data-testid="org-signup-existing-org-link">
-          <KvRow label="Existing organization link">
+          <KvRow label={t('platformOrganizations.signupDrawerBody.existingOrganizationLink')}>
             <select
-              aria-label="Existing organization link"
+              aria-label={t('platformOrganizations.signupDrawerBody.existingOrganizationLink')}
               className="input"
               value={approvedExistingOrganizationId}
               disabled={pending}
               onChange={(event) => setApprovedExistingOrganizationId(event.target.value)}
             >
-              <option value="">Provision new organization</option>
+              <option value="">{t('platformOrganizations.signupDrawerBody.provisionNewOrganization')}</option>
               {existingOrganizationOptions.map((org) => (
                 <option key={org.id} value={org.id}>{org.label}</option>
               ))}
@@ -1343,36 +1365,27 @@ function SignupDrawerBody({
           data-testid="org-signup-review-failure"
           style={{ margin: '6px 14px 4px' }}
         >
-          <div className="state__title">Review blocked</div>
+          <div className="state__title">{t('platformOrganizations.signupDrawerBody.reviewBlocked')}</div>
           <div className="state__hint">{reviewFailure.message}</div>
           <div style={{ marginTop: 6 }}>
-            Request recorded
+            {t('platformOrganizations.signupDrawerBody.requestRecorded')}
           </div>
           <div className="mono" style={{ marginTop: 4 }}>
-            Review status {reviewFailure.status ?? row.status ?? 'unknown'}
+            {fill(t('platformOrganizations.signupDrawerBody.reviewStatus'), { value: String(reviewFailure.status ?? row.status ?? t('platformOrganizations.signupDrawerBody.unknown')) })}
           </div>
         </div>
       ) : null}
       <div style={{ display: 'flex', gap: 8, padding: '6px 14px 16px' }}>
         <Button
-          label="Approve request"
+          label={t('platformOrganizations.signupDrawerBody.approveRequest')}
           iconName="check"
           kind="primary"
           capability={CAP.TENANT_SIGNUP_REQUESTS_REVIEW}
           disabled={!canReview || reviewed || pending}
-          onPointerDown={(event) => {
-            if (event.pointerType !== 'mouse' && event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
-            event.preventDefault();
-            runApprove();
-          }}
-          onMouseDown={(event) => {
-            event.preventDefault();
-            runApprove();
-          }}
           onClick={runApprove}
         />
         <Button
-          label="Reject"
+          label={t('platformOrganizations.signupDrawerBody.reject')}
           iconName="close"
           kind="danger"
           capability={CAP.TENANT_SIGNUP_REQUESTS_REVIEW}
@@ -1385,6 +1398,9 @@ function SignupDrawerBody({
 }
 
 export function OrganizationsModule() {
+  const { t } = useI18n();
+  const orgTableColumns = useMemo(() => orgColumns(t), [t]);
+  const signupTableColumns = useMemo(() => signupColumns(t), [t]);
   const identity = useIdentity();
   const go = useConsoleNavigator();
   const canReadOrgs = useCapability(CAP.ORGANIZATIONS_READ);
@@ -1512,10 +1528,13 @@ export function OrganizationsModule() {
     failed: number,
     alreadyProcessed: number,
   ): string {
-    if (alreadyProcessed > 0) {
-      return `Signup requests refreshed · ${alreadyProcessed} already reviewed · ${ok}/${total}${failed ? ` · ${failed} failed` : ''}`;
-    }
-    return `Signup requests ${decision} · ${ok}/${total}${failed ? ` · ${failed} failed` : ''}`;
+    // One whole sentence per outcome, so each language words it naturally.
+    const key = alreadyProcessed > 0
+      ? (failed ? 'platformOrganizations.organizationsModule.signupRefreshedFailedToast' : 'platformOrganizations.organizationsModule.signupRefreshedToast')
+      : decision === 'approved'
+        ? (failed ? 'platformOrganizations.organizationsModule.signupApprovedFailedToast' : 'platformOrganizations.organizationsModule.signupApprovedToast')
+        : (failed ? 'platformOrganizations.organizationsModule.signupRejectedFailedToast' : 'platformOrganizations.organizationsModule.signupRejectedToast');
+    return fill(t(key), { ok, total, failed, alreadyProcessed });
   }
 
   function reviewedSignupRow(
@@ -1755,7 +1774,7 @@ export function OrganizationsModule() {
             const readback = await refreshSignupReviewFailureReadback(r);
             failures.push({ row: readback.row, summary: readback.summary, error: err });
             pushToast(
-              'Tenant signup review could not be completed. Review the selected requests and try again.',
+              t('platformOrganizations.organizationsModule.tenantSignupReviewCould'),
               'danger',
             );
           }),
@@ -1776,15 +1795,15 @@ export function OrganizationsModule() {
     if (!canApplySignupReview) {
       pushToast(
         hasPlatformSignupScope
-          ? 'Approval requires tenant signup review permission'
-          : 'Approval requires platform scope',
+          ? t('platformOrganizations.organizationsModule.approvalRequiresTenantSignup')
+          : t('platformOrganizations.organizationsModule.approvalRequiresPlatformScope'),
         'danger',
       );
       return;
     }
     void applyDecision(rs, 'approved', undefined, options).then(({ ok, failed, alreadyProcessed, results, failures }) => {
       pushToast(
-        `tenant-signup-review - ${signupReviewToast('approved', ok, rs.length, failed, alreadyProcessed)}`,
+        signupReviewToast('approved', ok, rs.length, failed, alreadyProcessed),
         failed === 0 && alreadyProcessed === 0 ? 'good' : 'warn',
       );
       if (failed === 0) {
@@ -1812,14 +1831,14 @@ export function OrganizationsModule() {
     if (!canApplySignupReview) {
       pushToast(
         hasPlatformSignupScope
-          ? 'Rejection requires tenant signup review permission'
-          : 'Rejection requires platform scope',
+          ? t('platformOrganizations.organizationsModule.rejectionRequiresTenantSignup')
+          : t('platformOrganizations.organizationsModule.rejectionRequiresPlatformScope'),
         'danger',
       );
       return;
     }
     modal.open({
-      title: rs.length > 1 ? `Reject ${rs.length} tenant requests` : 'Reject tenant request',
+      title: rs.length > 1 ? fill(t('platformOrganizations.organizationsModule.rejectTenantRequests'), { length: String(rs.length) }) : t('platformOrganizations.organizationsModule.rejectTenantRequest'),
       body: (
         <RejectReasonForm
           count={rs.length}
@@ -1828,7 +1847,7 @@ export function OrganizationsModule() {
           onSubmit={async (reason) => {
             const { ok, failed, alreadyProcessed, results, failures } = await applyDecision(rs, 'rejected', reason);
             pushToast(
-              `tenant-signup-review - ${signupReviewToast('rejected', ok, rs.length, failed, alreadyProcessed)}`,
+              signupReviewToast('rejected', ok, rs.length, failed, alreadyProcessed),
               failed === 0 ? 'warn' : 'danger',
             );
             if (failed === 0) {
@@ -1859,7 +1878,7 @@ export function OrganizationsModule() {
 
   function openSignupDrawer(row: TenantSignupRequestRow, reviewFailure?: TenantSignupReviewFailure | null) {
     drawer.open({
-      title: `Signup · ${row.organization_name ?? row.org_name ?? row.id}`,
+      title: fill(t('platformOrganizations.organizationsModule.signup'), { value: String(row.organization_name ?? row.org_name ?? row.id) }),
       size: 'lg',
       body: (
         <SignupDrawerBody
@@ -1904,6 +1923,7 @@ export function OrganizationsModule() {
 
   function openTenantConsoleRequest() {
     function RequestBody() {
+      const { t } = useI18n();
       return (
         <TenantConsoleRequestForm
           canReview={canApplySignupReview}
@@ -1914,20 +1934,20 @@ export function OrganizationsModule() {
               const result = await consoleRequestMutation.mutateAsync(args);
               const createdRow = signupRowFromConsoleRequestReadback(result, args);
               modal.close();
-              pushToast(`Tenant signup request saved · ${args.organization_name}`, 'good');
+              pushToast(fill(t('platformOrganizations.requestBody.tenantSignupRequestSaved'), { organization_name: String(args.organization_name) }), 'good');
               if (createdRow) {
                 setStatusFilter(String(createdRow.status ?? 'pending').toLowerCase());
                 openSignupDrawer(createdRow);
               }
             } catch (err) {
-              pushToast('Tenant signup request could not be updated. Review the request and try again.', 'danger');
+              pushToast(t('platformOrganizations.requestBody.tenantSignupRequestCould'), 'danger');
             }
           }}
         />
       );
     }
 
-    modal.open({ title: 'Create tenant request', body: <RequestBody /> });
+    modal.open({ title: t('platformOrganizations.organizationsModule.createTenantRequest'), body: <RequestBody /> });
   }
 
   function openOrgProfile(row: OrgRow) {
@@ -1937,6 +1957,7 @@ export function OrganizationsModule() {
     };
     const encodedOrgId = encodeURIComponent(row.id);
     function ProfileBody() {
+      const { t } = useI18n();
       const [profileRow, setProfileRow] = useState(row);
       const [saveEvidence, setSaveEvidence] = useState<OrgProfileSaveEvidence | null>(null);
       return (
@@ -1959,9 +1980,9 @@ export function OrganizationsModule() {
                 }
                 setProfileRow(updatedRow);
                 setSaveEvidence(orgProfileSaveEvidenceFromResult(updatedRow, result));
-                pushToast(`Organization profile saved · ${updatedRow.name}`, 'good');
+                pushToast(fill(t('platformOrganizations.profileBody.organizationProfileSaved'), { name: String(updatedRow.name) }), 'good');
               } catch (err) {
-                pushToast('Organization profile could not be saved. Review the profile and try again.', 'danger');
+                pushToast(t('platformOrganizations.profileBody.organizationProfileCouldNot'), 'danger');
               }
             }}
           />
@@ -1972,115 +1993,115 @@ export function OrganizationsModule() {
       );
     }
 
-    modal.open({ title: `Organization profile · ${row.name}`, body: <ProfileBody /> });
+    modal.open({ title: fill(t('platformOrganizations.organizationsModule.organizationProfile'), { name: String(row.name) }), body: <ProfileBody /> });
   }
 
   return (
     <div className="page page--split-table" data-testid="organizations-page">
       <PageHeader
         moduleKey="organizations"
-        eyebrow="Platform"
-        titleAccent="Organizations"
+        eyebrow={t('platformOrganizations.organizationsModule.platform')}
+        titleAccent={t('platformOrganizations.organizationsModule.titleAccent')}
         titlePlain=""
-        pills={[<span key="resources" className="chip chip--xs mono">Tenant registry · signup queue</span>]}
+        pills={[<span key="resources" className="chip chip--xs mono">{t('platformOrganizations.organizationsModule.tenantRegistrySignupQueue')}</span>]}
         actions={[
           <Button
             key="new-request"
-            label="New tenant request"
+            label={t('platformOrganizations.organizationsModule.newTenantRequest')}
             iconName="plus"
             kind="primary"
             capability={CAP.TENANT_SIGNUP_REQUESTS_REVIEW}
             disabled={!hasPlatformSignupScope}
-            title={!hasPlatformSignupScope ? 'Tenant signup review requires platform scope.' : undefined}
+            title={!hasPlatformSignupScope ? t('platformOrganizations.organizationsModule.tenantSignupReviewRequires') : undefined}
             onClick={openTenantConsoleRequest}
           />,
         ]}
       />
 
-      <div className="section-eyebrow">{hasPlatformSignupScope ? 'Tenants' : 'Your organization'}</div>
+      <div className="section-eyebrow">{hasPlatformSignupScope ? t('platformOrganizations.organizationsModule.tenants') : t('platformOrganizations.organizationsModule.yourOrganization')}</div>
       {!canReadOrgs ? (
         <StateView
           kind="denied"
           capability={CAP.ORGANIZATIONS_READ}
-          hint="Tenant list requires organization permission."
+          hint={t('platformOrganizations.organizationsModule.tenantListRequiresOrganization')}
         />
       ) : !hasPlatformSignupScope && !hasTenantOrganizationScope ? (
         <StateView
           kind="denied"
-          title="Tenant scope required"
+          title={t('platformOrganizations.organizationsModule.tenantScopeRequired')}
           capability={CAP.ORGANIZATIONS_READ}
-          hint="Organization profile requires an active tenant scope."
+          hint={t('platformOrganizations.organizationsModule.organizationProfileRequiresAn')}
         />
       ) : orgsQuery.isLoading ? (
         <StateView kind="loading" />
       ) : orgsQuery.isError ? (
         <StateView
           kind="error"
-          title="Tenant registry failed"
-          hint={queryErrorHint(orgsQuery.error, 'Tenant registry could not be loaded')}
+          title={t('platformOrganizations.organizationsModule.tenantRegistryFailed')}
+          hint={queryErrorHint(orgsQuery.error, t('platformOrganizations.organizationsModule.tenantRegistryCouldNotLoad'))}
         />
       ) : organizationRowsOutOfScope.length > 0 ? (
         <StateView
           kind="error"
-          title="Organization registry scope failed"
-          hint="Some organizations are outside the active tenant scope, so the tenant registry is hidden until the scope policy is repaired."
+          title={t('platformOrganizations.organizationsModule.organizationRegistryScopeFailed')}
+          hint={t('platformOrganizations.organizationsModule.someOrganizationsAreOutside')}
         />
       ) : (
         <DataTable<OrgRow>
-          columns={ORG_COLUMNS}
+          columns={orgTableColumns}
           rows={visibleOrganizationRows}
           viewKey="organizations"
           entityKind="organizations"
           emptyText={
             hasPlatformSignupScope
-              ? 'No tenant organizations are registered yet. Approve a signup request to create the first tenant.'
-              : 'No organization profile is visible for the current tenant scope.'
+              ? t('platformOrganizations.organizationsModule.noTenantOrganizationsAre')
+              : t('platformOrganizations.organizationsModule.noOrganizationProfileIs')
           }
           onRowClick={openOrgProfile}
         />
       )}
 
-      <div className="section-eyebrow">Signup requests</div>
+      <div className="section-eyebrow">{t('platformOrganizations.organizationsModule.signupRequests')}</div>
       {!canReadSignups ? (
         <StateView
           kind="denied"
           capability={CAP.TENANT_SIGNUP_REQUESTS_READ}
-          hint="Tenant signup queue requires tenant signup permission."
+          hint={t('platformOrganizations.organizationsModule.tenantSignupQueueRequires')}
         />
       ) : !hasPlatformSignupScope ? (
         <StateView
           kind="denied"
-          title="Platform scope required"
+          title={t('platformOrganizations.organizationsModule.platformScopeRequired')}
           capability={CAP.TENANT_SIGNUP_REQUESTS_REVIEW}
-          hint="Tenant signup review creates or rejects organizations and must run from platform scope."
+          hint={t('platformOrganizations.organizationsModule.tenantSignupReviewCreates')}
         />
       ) : requestsQuery.isLoading ? (
         <StateView kind="loading" />
       ) : requestsQuery.isError ? (
         <StateView
           kind="error"
-          title="Signup requests failed"
-          hint={queryErrorHint(requestsQuery.error, 'Signup requests could not be loaded')}
+          title={t('platformOrganizations.organizationsModule.signupRequestsFailed')}
+          hint={queryErrorHint(requestsQuery.error, t('platformOrganizations.organizationsModule.signupRequestsCouldNotLoad'))}
         />
       ) : statusFilters.length <= 1 ? (
         <StateView
           kind="error"
-          hint="Tenant signup statuses are not configured."
+          hint={t('platformOrganizations.organizationsModule.tenantSignupStatusesAre')}
         />
       ) : (
         <>
           {requestSummaryQuery.isError ? (
             <StateView
               kind="error"
-              title="Signup summary projection failed"
+              title={t('platformOrganizations.organizationsModule.signupSummaryProjectionFailed')}
               hint={queryErrorHint(
                 requestSummaryQuery.error,
-                'Signup request summary could not be loaded',
+                t('platformOrganizations.organizationsModule.signupSummaryCouldNotLoad'),
               )}
             />
           ) : null}
           <div className="dt-toolbar">
-            <span className="eyebrow">Status</span>
+            <span className="eyebrow">{t('platformOrganizations.organizationsModule.status')}</span>
             {statusFilters.map((f) => (
               <button
                 key={f}
@@ -2098,26 +2119,26 @@ export function OrganizationsModule() {
             </span>
           </div>
           <DataTable<TenantSignupRequestRow>
-            columns={SIGNUP_COLUMNS}
+            columns={signupTableColumns}
             rows={filteredSignups}
             viewKey="tenant_signup_requests"
             entityKind="tenant_signup_requests"
             emptyText={
               statusFilter === 'all'
-                ? 'No tenant signup requests are waiting in this queue.'
-                : `No tenant signup requests match ${statusFilter}.`
+                ? t('platformOrganizations.organizationsModule.noTenantSignupRequests')
+                : fill(t('platformOrganizations.organizationsModule.noTenantSignupRequests2'), { statusFilter: String(statusFilter) })
             }
             onRowClick={openSignupDrawer}
             bulkActions={[
               {
-                label: 'Approve',
+                label: t('platformOrganizations.organizationsModule.approve'),
                 icon: 'check',
                 kind: 'primary',
                 capability: CAP.TENANT_SIGNUP_REQUESTS_REVIEW,
                 onClick: onApprove,
               },
               {
-                label: 'Reject',
+                label: t('platformOrganizations.organizationsModule.reject'),
                 icon: 'close',
                 kind: 'danger',
                 capability: CAP.TENANT_SIGNUP_REQUESTS_REVIEW,
