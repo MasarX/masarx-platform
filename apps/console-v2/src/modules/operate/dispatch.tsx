@@ -1309,6 +1309,9 @@ function routeStopTenantActionDisabledReason(
   return undefined;
 }
 
+const NO_RUNS: RouteRunRow[] = [];
+const NO_STOPS: RouteStopRow[] = [];
+
 export function DispatchModule() {
   const { t } = useI18n();
   const { scope, user } = useIdentity();
@@ -1479,14 +1482,15 @@ export function DispatchModule() {
   const runAssignmentResponseMutation = useExecuteRouteRunAssignmentResponse();
   const activeTenantId = dispatchText(scope.tenant?.id);
 
-  // Dispatch is a working canvas: keep an in-memory copy that mirrors what
-  // the demo did with mutable arrays so DnD reassignment is reflected
-  // without a full refetch round-trip. Rollback handlers come from the
-  // mutation flow (optimistic move + revert on error).
-  const [runs, setRuns] = useState<RouteRunRow[]>([]);
+  // Runs and stops render straight from the canonical queries, so readiness,
+  // the restricted-stops state and Refresh describe the same snapshot (#689).
+  const runs = runsData?.rows ?? NO_RUNS;
   const heldRuns = useHeldRows(runs, (run) => run.id);
-  const [stops, setStops] = useState<RouteStopRow[]>([]);
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const stops = stopsData?.rows ?? NO_STOPS;
+  const [pickedRunId, setActiveRunId] = useState<string | null>(null);
+  // A picked run that is no longer listed falls back to the first run in the same render.
+  const activeRunId =
+    pickedRunId && runs.some((run) => run.id === pickedRunId) ? pickedRunId : (runs[0]?.id ?? null);
   const [dndOver, setDndOver] = useState<string | null>(null);
   const [selectedStops, setSelectedStops] = useState<Set<string>>(new Set());
   const [bulkMoveTargetRunId, setBulkMoveTargetRunId] = useState('');
@@ -1504,23 +1508,14 @@ export function DispatchModule() {
     );
   }, [drivers, picker, runs, scope.tenant?.id]);
 
-  const applyCanonicalRuns = useCallback((rows: RouteRunRow[]) => {
-    const nextRuns = rows.map((r) => ({ ...r }));
-    setRuns(nextRuns);
-    setActiveRunId((current) =>
-      current && nextRuns.some((r) => r.id === current) ? current : (nextRuns[0]?.id ?? null),
-    );
-  }, []);
-
-  const applyCanonicalStops = useCallback((rows: RouteStopRow[]) => {
-    const nextStops = rows.map((s) => ({ ...s }));
-    const liveStopIds = new Set(nextStops.map((s) => s.id));
-    setStops(nextStops);
+  // Drop selected stops that are no longer in the canonical list.
+  useEffect(() => {
+    const liveStopIds = new Set(stops.map((s) => s.id));
     setSelectedStops((current) => {
       const kept = new Set(Array.from(current).filter((id) => liveStopIds.has(id)));
       return kept.size === current.size ? current : kept;
     });
-  }, []);
+  }, [stops]);
 
   function dispatchLifecycleDisabledReasonForRun(run: RouteRunRow | null | undefined): string | undefined {
     return routeRunTenantActionDisabledReason(run, activeTenantId, t);
@@ -1557,15 +1552,6 @@ export function DispatchModule() {
     }
     return undefined;
   }
-
-  // Local DnD state is only a temporary interaction buffer. Canonical query
-  // rows own the visible canvas after every refetch/mutation refresh.
-  useEffect(() => {
-    if (runsData?.rows) applyCanonicalRuns(runsData.rows);
-  }, [runsData?.rows, applyCanonicalRuns]);
-  useEffect(() => {
-    if (stopsData?.rows) applyCanonicalStops(stopsData.rows);
-  }, [stopsData?.rows, applyCanonicalStops]);
 
   // W14-1 — sibling-resource indices (memoized). These replace the previously
   // rendered FE alias fields (driver / vehicle / cod_total / partner) with
@@ -1695,12 +1681,6 @@ export function DispatchModule() {
   );
 
   useEffect(() => {
-    if (!activeRunId && runs.length) {
-      setActiveRunId(runs[0]!.id);
-    }
-  }, [runs, activeRunId]);
-
-  useEffect(() => {
     const focus = readUrlParam('route_stop') ?? readUrlParam('focus');
     if (!focus || focusedRouteStopRef.current === focus) return;
     const stop = stops.find((row) => row.id === focus || row.shipment_id === focus);
@@ -1710,7 +1690,8 @@ export function DispatchModule() {
     setSelectedStops(new Set([stop.id]));
   }, [stops]);
 
-  const activeRun = runs.find((r) => r.id === activeRunId);
+  // No active run until both core reads are in, so no action or restriction shows early.
+  const activeRun = runsLoading || stopsLoading ? undefined : runs.find((r) => r.id === activeRunId);
   const activeRouteOrgId = activeRun?.organization_id ?? scope.tenant?.id ?? null;
   const activeRunDirectory = activeRun ? runDirectoryById.get(activeRun.id) : undefined;
   const podPolicyScope = useMemo(
@@ -2093,8 +2074,6 @@ export function DispatchModule() {
         activeRouteStopTasksResult,
       ].find((result) => result.error)?.error;
       if (error) throw error;
-      if (runsResult.data?.rows) applyCanonicalRuns(runsResult.data.rows);
-      if (stopsResult.data?.rows) applyCanonicalStops(stopsResult.data.rows);
       if (options?.toast) pushToast(t('dispatch.toast.refreshed'), 'good');
       return {
         runs: runsResult.data?.rows ?? [],
@@ -2111,8 +2090,6 @@ export function DispatchModule() {
       return null;
     }
   }, [
-    applyCanonicalRuns,
-    applyCanonicalStops,
     runAssignEventsQuery,
     runAssignQuery,
     runDirectoryQuery,

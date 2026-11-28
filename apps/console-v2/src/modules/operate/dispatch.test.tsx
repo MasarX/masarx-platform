@@ -12,6 +12,7 @@
 //      backend SSOT exists yet — see CLAIM-B-FIX2 revision).
 
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import { Profiler } from 'react';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test/render';
@@ -22,6 +23,7 @@ import { en } from '@/lib/seed-raw/i18n/en.js';
 import { ar } from '@/lib/seed-raw/i18n/ar.js';
 import * as api from '@/lib/api';
 import { ui_get_resource_v1, ui_list_resource_complete } from '@/lib/data-source';
+import { qk } from '@/lib/queries';
 
 function pageActions(container: HTMLElement) {
   return within(container.querySelector<HTMLElement>('.page-header__actions')!);
@@ -394,5 +396,84 @@ describe('routeStopDeliveryOption', () => {
       .toEqual({ label: reception, tone: 'info', instruction: null });
     expect(routeStopDeliveryOption(stop({ option: 'safe_place', place: 'other', instruction: ' Side gate ' }), t))
       .toEqual({ label: other, tone: 'info', instruction: 'Side gate' });
+  });
+});
+
+// #689 — Dispatch must not show readiness, a restricted state or an enabled
+// Refresh from a render where route_runs is in but route_stops is not.
+describe('DispatchModule readiness (#689)', () => {
+  it('waits for route_stops before showing the run ready, with no false restriction or Refresh flip', async () => {
+    const user = userEvent.setup();
+    let releaseStops!: () => void;
+    const stopsHeld = new Promise<void>((resolve) => { releaseStops = resolve; });
+    let releaseStopTasks!: () => void;
+    const stopTasksHeld = new Promise<void>((resolve) => { releaseStopTasks = resolve; });
+    const listSpy = vi.spyOn(api, 'ui_list_resource_complete').mockImplementation(async (resource, opts) => {
+      if (resource === 'route_stops') await stopsHeld;
+      if (resource === 'tasks' && opts?.filter?.resource_type === 'route_stop') await stopTasksHeld;
+      return ui_list_resource_complete(resource, opts);
+    });
+    // One entry per React commit, read from the committed DOM.
+    const commits: Array<{ ready: boolean; stopsShown: boolean; restricted: boolean; refresh: 'absent' | 'disabled' | 'enabled' }> = [];
+    const recordCommit = () => {
+      const refresh = document
+        .querySelector('#dispatch-pane-runs-title')
+        ?.closest('.pane__header')
+        ?.querySelector<HTMLButtonElement>('button[aria-label="Refresh"]');
+      commits.push({
+        ready: document.querySelector('.run-row.is-active') !== null,
+        stopsShown: document.querySelector('.dnd-stop') !== null,
+        restricted: /stop details (are )?restricted/i.test(document.body.textContent ?? ''),
+        refresh: !refresh ? 'absent' : refresh.disabled ? 'disabled' : 'enabled',
+      });
+    };
+    try {
+      const { container, queryClient } = renderWithProviders(
+        <Profiler id="dispatch" onRender={recordCommit}><DispatchModule /></Profiler>,
+        { capabilities: ['all'] },
+      );
+      const reconcile = () => pageActions(container).getByRole('button', { name: /Reconcile scan-out/ });
+
+      // Runs and the directory (with its stop counts) are in; stops are held.
+      await waitFor(() => {
+        expect(queryClient.getQueryState(qk.completeList('route_runs'))?.status).toBe('success');
+        expect(queryClient.getQueryState(qk.completeList('route_run_directory'))?.status).toBe('success');
+      });
+      expect(commits.some((c) => c.ready || c.restricted || c.refresh !== 'absent')).toBe(false);
+      expect(reconcile()).toBeDisabled();
+
+      // Stops are in; the active-stop task reads are held.
+      const beforeStops = commits.length;
+      releaseStops();
+      await waitFor(() => {
+        expect(container.querySelector('.run-row.is-active')).not.toBeNull();
+      });
+      const afterStops = commits.slice(beforeStops);
+      expect(afterStops.some((c) => c.ready)).toBe(true);
+      expect(afterStops.filter((c) => c.ready).every((c) => c.stopsShown)).toBe(true);
+      expect(commits.some((c) => c.restricted)).toBe(false);
+      expect(commits.some((c) => c.refresh === 'enabled')).toBe(false);
+      expect(reconcile()).not.toBeDisabled();
+
+      // Active-stop task reads settle; only now may Refresh enable.
+      releaseStopTasks();
+      const runsHeader = container.querySelector('#dispatch-pane-runs-title')!.closest<HTMLElement>('.pane__header')!;
+      const refresh = within(runsHeader).getByRole('button', { name: /^Refresh$/i });
+      await waitFor(() => {
+        expect(refresh).not.toBeDisabled();
+      });
+      expect(commits.some((c) => c.restricted)).toBe(false);
+
+      listSpy.mockClear();
+      await user.click(refresh);
+      await waitFor(() => {
+        const resources = listSpy.mock.calls.map(([resource]) => resource);
+        expect(resources).toEqual(expect.arrayContaining(['route_runs', 'route_stops']));
+      });
+    } finally {
+      releaseStops();
+      releaseStopTasks();
+      listSpy.mockRestore();
+    }
   });
 });
