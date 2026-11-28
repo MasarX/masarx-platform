@@ -36,6 +36,7 @@ const nextConfig = {
   outputFileTracingRoot: monorepoRoot,
   serverExternalPackages: ["exceljs", "jszip"],
   allowedDevOrigins: resolveAllowedDevOrigins(),
+  ...(process.env.SWEEP_CONSOLE_JOURNEYS === "1" ? { devIndicators: false } : {}),
   turbopack: {
     root: monorepoRoot
   },

@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { isTruthy } from "./env";
 
 const deterministicCss = `
@@ -136,7 +136,13 @@ type ViewportMeasurement = {
   ratio: number;
 };
 
-type EvidenceFailure = "BAD_ARGUMENT" | "NOT_IN_VIEW" | "MASK_MISSING" | "CAPTURE_FAILED";
+type EvidenceFailure =
+  | "BAD_ARGUMENT"
+  | "NOT_IN_VIEW"
+  | "MASK_MISSING"
+  | "THEME_MISMATCH"
+  | "NAVIGATION_NOT_READY"
+  | "CAPTURE_FAILED";
 
 class EvidenceError extends Error {
   constructor(code: EvidenceFailure) {
@@ -225,6 +231,7 @@ export async function captureRouteEvidence(
   assertedLocator: Locator,
   options: RouteEvidenceOptions,
 ) {
+  let failure: EvidenceFailure = "CAPTURE_FAILED";
   try {
     const args = validateRouteEvidenceOptions(options);
     const info = test.info();
@@ -245,6 +252,21 @@ export async function captureRouteEvidence(
       throw new EvidenceError("MASK_MISSING");
     }
 
+    failure = "THEME_MISMATCH";
+    const theme = info.project.use.colorScheme === "dark" ? "dark" : "light";
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+
+    failure = "NAVIGATION_NOT_READY";
+    const sidebar = page.getByTestId("console-app-shell-sidebar");
+    await expect(sidebar.locator(":scope > .opacity-0")).toHaveCount(0);
+    const navLink = sidebar.getByTestId("navigation-list").getByRole("link", { includeHidden: true }).first();
+    if (await page.getByTestId("console-app-shell-mobile-open").isVisible()) {
+      await expect(navLink).toBeAttached();
+    } else {
+      await expect(navLink).toBeVisible();
+    }
+
+    failure = "CAPTURE_FAILED";
     const imagePath = info.outputPath(entry.image);
     await page.screenshot({
       path: imagePath,
@@ -259,6 +281,6 @@ export async function captureRouteEvidence(
       contentType: "application/json",
     });
   } catch (error) {
-    throw error instanceof EvidenceError ? error : new EvidenceError("CAPTURE_FAILED");
+    throw error instanceof EvidenceError ? error : new EvidenceError(failure);
   }
 }
