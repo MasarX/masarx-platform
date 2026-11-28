@@ -360,6 +360,7 @@
       "previewFailed": "تعذر السماح بالمعاينة الخاصة. حاول مجددًا."
     },
     "common": {
+      "errorReference": "المرجع: ⁦{id}⁩",
       "workflowFirst": "‏Workflow-first",
       "remove": "‏Remove",
       "invalidJson": "‏أدخل JSON صالحًا في هذا الحقل، ثم أرسل مرة أخرى."
