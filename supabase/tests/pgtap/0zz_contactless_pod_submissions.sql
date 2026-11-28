@@ -1,6 +1,6 @@
 BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
-SELECT plan(24);
+SELECT plan(26);
 
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid = 'public.contactless_pod_submissions'::regclass),
   'signing receipts have row-level security');
@@ -13,6 +13,24 @@ SELECT ok(has_function_privilege('authenticated', 'api.pending_customer_sign_eve
   AND NOT has_function_privilege('anon', 'api.pending_customer_sign_events_v1(uuid)', 'EXECUTE')
   AND NOT has_function_privilege('service_role', 'api.pending_customer_sign_events_v1(uuid)', 'EXECUTE'),
   'only the authenticated application role can poll signing receipts');
+
+SELECT set_eq(
+  $$SELECT p.oid::regprocedure
+    FROM pg_catalog.pg_proc AS p
+    JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace
+    CROSS JOIN pg_catalog.pg_roles AS r
+    WHERE n.nspname IN ('public', 'api')
+      AND p.prokind <> 'p'
+      AND r.rolname = 'contactless_pod_intake'
+      AND has_function_privilege(r.oid, p.oid, 'EXECUTE')$$,
+  $$SELECT unnest(ARRAY[
+    'api.begin_contactless_pod_attempt_v1(text)'::regprocedure,
+    'api.submit_contactless_pod_v1(text, uuid, text, integer)'::regprocedure
+  ])$$,
+  'the signing intake role can execute exactly the two signing RPCs in public and api');
+SELECT ok((SELECT NOT rolcanlogin AND NOT rolsuper AND NOT rolbypassrls AND NOT rolinherit
+  FROM pg_catalog.pg_roles WHERE rolname = 'contactless_pod_intake'),
+  'the signing intake role has NOLOGIN, NOSUPERUSER, NOBYPASSRLS and NOINHERIT');
 
 CREATE FUNCTION pg_temp.contactless_fixture()
 RETURNS TABLE (org uuid, driver uuid, task uuid)
