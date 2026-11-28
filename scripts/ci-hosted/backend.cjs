@@ -22,6 +22,7 @@ const { buildSupabaseCliAsset } = require('../ops/ci/supabase-cli-asset.js');
 const root = process.cwd();
 const HOSTED_PORT_MIN = 15420;
 const HOSTED_PORT_MAX = 15431;
+const CLONE_COMMAND_TIMEOUT = 15000;
 const bucketSections = text => text.split(/(?=^\[)/m).filter(section => section.startsWith('[storage.buckets.')).join('\n');
 function canBindPort(port) {
   return new Promise((resolve, reject) => {
@@ -96,10 +97,12 @@ async function waitForCronPause(db, wait = delay) {
   throw new Error('pg_cron did not acknowledge the launch pause');
 }
 
-async function configureHostedDatabase(admin, db, logConnections) {
+async function configureHostedDatabase(admin, db, disposableShard) {
   const commands = ["ALTER SYSTEM SET cron.launch_active_jobs = 'off'"];
-  if (logConnections) {
+  if (disposableShard) {
     commands.push(
+      // Worker clones can spend seconds pre-zeroing each new WAL segment on a slow disk.
+      'ALTER SYSTEM SET wal_init_zero = off',
       'ALTER SYSTEM SET log_connections = on',
       'ALTER SYSTEM SET log_disconnections = on',
       "ALTER SYSTEM SET log_line_prefix = '%h %m [%p] %b %qapp=%a user=%u db=%d '",
@@ -218,21 +221,66 @@ async function withHostedCloneIsolation(admin, restore, clone) {
   }
 }
 
+async function withHostedCloneServices({ checked, env, project, summary, remaining = () => CLONE_COMMAND_TIMEOUT }, clone) {
+  const cloneBudget = () => Math.min(CLONE_COMMAND_TIMEOUT, remaining());
+  const services = (await checked('docker', ['ps', '--filter', `label=com.supabase.cli.project=${project}`, '--format', '{{.Names}}'],
+    env, cloneBudget(), { quiet: true })).trim().split(/\s+/).filter(name => name && name !== `supabase_db_${project}`)
+    .map(container => {
+      const service = container.slice(0, -(project.length + 1));
+      if (container !== `${service}_${project}` || !/^supabase_[a-z0-9_]+$/.test(service)) {
+        throw new Error('Unexpected auxiliary container name in hosted clone window');
+      }
+      return { container, service };
+    });
+  if (!services.length) return clone();
+
+  async function changeServices(step, options, timeout) {
+    const results = await Promise.allSettled(services.map(({ container, service }) =>
+      stage(summary, `database-clone-${step}:${service}`, async () => {
+        try {
+          await checked('docker', [step, ...options, container], env, timeout, { quiet: true, printQuietFailure: false });
+        } catch (error) {
+          const timedOut = Boolean(error.failure?.timeout);
+          const failure = new Error(`Docker ${step} ${timedOut ? 'timed out' : 'failed'} for ${service}`);
+          failure.failure = { timeout: timedOut };
+          throw failure;
+        }
+      })));
+    const failures = results.filter(result => result.status === 'rejected').map(result => result.reason);
+    if (failures.length === 1) throw failures[0];
+    if (failures.length) {
+      const error = new Error(failures.map(failure => failure.message).join('; '));
+      error.failure = { timeout: failures.some(failure => failure.failure.timeout) };
+      throw error;
+    }
+  }
+
+  // The job tears down its disposable stack on a failed stop. Starting then could race a pending stop.
+  await changeServices('stop', ['--time', '1'], cloneBudget());
+  let cloneError;
+  try {
+    return await clone();
+  } catch (error) {
+    cloneError = error;
+    throw error;
+  } finally {
+    try { await changeServices('start', [], CLONE_COMMAND_TIMEOUT); }
+    catch (error) {
+      if (!cloneError) throw error;
+      console.error(error.message);
+    }
+  }
+}
+
 const integrationSnapshot = 'integration_pristine';
 
-async function snapshotIntegrationDatabase({ checked, env, admin, dockerRoot, project }) {
+async function snapshotIntegrationDatabase({ checked, env, admin, dockerRoot, project, summary }) {
   const size = Number((await admin("SELECT pg_database_size('postgres')")).trim());
   if (!Number.isSafeInteger(size) || size < 1) throw new Error('Could not measure the pristine integration database');
   diskFloor(dockerRoot, size);
-  const services = (await checked('docker', ['ps', '--filter', `label=com.supabase.cli.project=${project}`, '--format', '{{.Names}}'],
-    env, 15000, { quiet: true })).trim().split(/\s+/).filter(name => name && name !== `supabase_db_${project}`);
-  try {
-    if (services.length) await checked('docker', ['stop', ...services], env, 15000);
-    await withHostedCloneIsolation(admin, admin, restore =>
-      cloneHostedDatabases(admin, [integrationSnapshot], [], restore));
-  } finally {
-    if (services.length) await checked('docker', ['start', ...services], env, 15000);
-  }
+  await withHostedCloneServices({ checked, env, project, summary }, () =>
+    withHostedCloneIsolation(admin, admin, restore =>
+      cloneHostedDatabases(admin, [integrationSnapshot], [], restore)));
   return (await admin(`SELECT oid FROM pg_database WHERE datname = '${integrationSnapshot}'`)).trim();
 }
 
@@ -321,27 +369,21 @@ async function runHostedShard({ selected, checked, testEnv, admin, summary, dock
   try {
     const [setupResult] = await Promise.allSettled([execute('setup', setup.length ? setup : selected.slice(0, 1), 'postgres', !setup.length)]);
     if (setupResult.status === 'rejected' && !fs.existsSync('ci-reports/pgtap-setup.json')) throw setupResult.reason;
-    const boundedAdmin = (...commands) => admin(Math.min(15000, remaining()), ...commands);
+    const boundedAdmin = (...commands) => admin(Math.min(CLONE_COMMAND_TIMEOUT, remaining()), ...commands);
     const cloneAdmin = (...commands) => timeHostedCloneCommand(summary, boundedAdmin, ...commands);
     const migratedDatabaseBytes = Number((await cloneAdmin("SELECT pg_database_size('postgres')")).trim());
     if (!Number.isSafeInteger(migratedDatabaseBytes) || migratedDatabaseBytes < 1) throw new Error('Could not measure migrated database size');
     summary.migratedDatabaseBytes = migratedDatabaseBytes;
     console.log(`Migrated database size: ${migratedDatabaseBytes} bytes`);
     diskFloor(dockerRoot, databases.length * migratedDatabaseBytes);
-    const services = (await checked('docker', ['ps', '--filter', `label=com.supabase.cli.project=${project}`, '--format', '{{.Names}}'],
-      testEnv, Math.min(15000, remaining()), { quiet: true })).trim().split(/\s+/)
-      .filter(name => name && name !== `supabase_db_${project}`);
-    const restoreAdmin = (...commands) => admin(15000, ...commands);
+    const restoreAdmin = (...commands) => admin(CLONE_COMMAND_TIMEOUT, ...commands);
     let results;
     try {
-      try {
-        if (services.length) await checked('docker', ['stop', ...services], testEnv, Math.min(15000, remaining()));
+      await withHostedCloneServices({ checked, env: testEnv, project, summary, remaining }, async () => {
         await withHostedCloneIsolation(cloneAdmin, restoreAdmin, async restoreTemplate => {
           await cloneHostedDatabases(cloneAdmin, databases, created, restoreTemplate);
         });
-      } finally {
-        if (services.length) await checked('docker', ['start', ...services], testEnv, 15000);
-      }
+      });
       diskFloor(dockerRoot);
       results = await Promise.allSettled(workers.map((files, index) => execute(`worker-${index}`, files, index === 0 ? 'postgres' : databases[index - 1])));
     } finally {
@@ -709,9 +751,9 @@ async function qualify(diagnostic) {
       console.log(`Migration cron isolation: ${JSON.stringify(summary.cron)}`);
     } finally { await db.end(); }
     if (shard) {
-      const templateAdmin = (...commands) => stackAdminFor('template1', 15000, ...commands);
+      const templateAdmin = (...commands) => stackAdminFor('template1', CLONE_COMMAND_TIMEOUT, ...commands);
       const integrationOid = edge && await timed('integration-database-snapshot', () =>
-        snapshotIntegrationDatabase({ checked, env, admin: templateAdmin, dockerRoot, project }));
+        snapshotIntegrationDatabase({ checked, env, admin: templateAdmin, dockerRoot, project, summary }));
       if (edge) {
         // Keep the replayed volume and let the CLI start and health-check PostgREST against it.
         await timed('integration-stack-stop', () => checked(cli, ['stop', '--workdir', temp], cliEnv, 120000));
@@ -847,4 +889,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, installHostedCli, writeHostedStackConfig, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, timeHostedCloneCommand, dropHostedDatabases, withHostedCloneIsolation, snapshotIntegrationDatabase, pgtapDeadline };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, installHostedCli, writeHostedStackConfig, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, timeHostedCloneCommand, dropHostedDatabases, withHostedCloneIsolation, withHostedCloneServices, snapshotIntegrationDatabase, pgtapDeadline };
