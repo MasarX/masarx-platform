@@ -87,6 +87,8 @@ Missing settings fail the affected suite. The hosted integration shards supply t
 
 ### 4) Edge Smoke Tests (cloud)
 
+Run [Verify DEV Edge startup](../../.github/workflows/dev-edge-startup.yml) on `main` after its push deployment succeeds. The job records the frozen upload run, attempt, job and commit, then checks the expected response and a Supabase runtime execution marker for every enabled DEV Edge function. It uses only `OPTIONS` with the DEV anon JWT where gateway verification requires it. These checks exercise startup and the handler's initial response. The label renderer deploy probe and the cloud smoke suite below exercise application behavior.
+
 Smoke tests hit deployed edge endpoints and validate end-to-end wiring
 (secrets, auth, routing, basic RPC behavior).
 
