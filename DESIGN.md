@@ -204,9 +204,10 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 
 - Verify UI changes in CI or from preview artifacts, never by local runs or renders. This covers tests, lint, type checks, builds, screenshots, accessibility scans, speed measurements and sweep captures.
 - When a check named in this file has no CI job yet, add the job to the workflow in the PR that relies on it.
+- The pull request UI job runs two Next.js Console specs from `tests/e2e`. See [the delivery checks](DELIVERY.md#checks) for their routes and coverage.
 - These checks named in this file have no CI job yet:
   - The ESLint configs in section 8 (Lint). No CI task runs ESLint. [#431](https://github.com/MasarX/masarx-platform/issues/431)
-  - Accessibility of Console, Console V2 and portal screens: rendered contrast, tab order and 24 by 24 pixel targets. Landing E2E covers only landing and public tracking, and CI does not run `tests/e2e`. [#301](https://github.com/MasarX/masarx-platform/issues/301), [#270](https://github.com/MasarX/masarx-platform/issues/270)
+  - Accessibility of Console, Console V2 and portal screens: rendered contrast, tab order and 24 by 24 pixel targets. Landing E2E covers only landing and public tracking. [#301](https://github.com/MasarX/masarx-platform/issues/301), [#270](https://github.com/MasarX/masarx-platform/issues/270)
   - Daily signed-in captures, coverage of other screens, and captures against a preview using the synthetic sweep accounts. [#432](https://github.com/MasarX/masarx-platform/issues/432)
   - CI comparison of visual baselines. [#683](https://github.com/MasarX/masarx-platform/issues/683)
 
