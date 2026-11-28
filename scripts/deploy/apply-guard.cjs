@@ -2,6 +2,7 @@ const { appendFileSync, readFileSync } = require('node:fs');
 const { RETRYABLE_NETWORK_ERROR_CODES } = require('../ops/ci/github-api-retry');
 
 const attemptMarker = 'Record database push attempt';
+const completionMarker = 'Record database apply completion';
 const legacyDeploy = 'Apply migrations and deploy registered edge functions';
 const defaultHistoryDays = '30';
 const deploymentBranches = ['main', 'dev'];
@@ -189,17 +190,21 @@ async function evaluate(get, env, record) {
           // Missing step data cannot rule out an apply attempt.
           const steps = Array.isArray(job.steps) ? job.steps : undefined;
           const marker = steps?.find(step => step.name === attemptMarker);
+          const completion = steps?.find(step => step.name === completionMarker);
           const legacy = steps?.find(step => step.name === legacyDeploy);
           // Cancellation can prevent the marker from running after the combined step starts.
           const attempted = !steps || ['success', 'cancelled', 'timed_out'].includes(legacy?.conclusion)
             || marker?.conclusion === 'success' || (!marker && legacy?.conclusion === 'failure');
-          if (!attempted) continue;
+          const completed = completion?.conclusion === 'success';
+          if (!attempted && !completed) continue;
 
+          // Older runs have only the combined job conclusion as evidence.
+          const conclusion = completed ? 'success' : (completion ? 'incomplete' : job.conclusion);
           const completedAt = Date.parse(job.completed_at);
           if (!Number.isFinite(completedAt)) throw new Error('Invalid database completion time');
           if (!latest || completedAt > latest.completedAt ||
-              (completedAt === latest.completedAt && job.conclusion !== 'success')) {
-            latest = { id: run.id, conclusion: job.conclusion, completedAt };
+              (completedAt === latest.completedAt && conclusion !== 'success')) {
+            latest = { id: run.id, conclusion, completedAt };
           }
         }
       }

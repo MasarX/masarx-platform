@@ -556,6 +556,8 @@ jobs:
       superseded: ${{ steps.apply_guard.outputs.superseded }}
       configured: ${{ steps.guard.outputs.configured }}
       not_configured: ${{ steps.guard.outputs.configured == 'false' }}
+      database_apply: ${{ steps.record_apply_completion.outcome == 'success' && 'success' || steps.deploy.outputs.attempted == 'true' && 'incomplete' || 'unrecorded' }}
+      edge_publication: ${{ steps.deploy.outputs.apply_completed == 'true' && steps.deploy.outcome || 'skipped' }}
       edge_deployed: ${{ steps.deploy.outcome == 'success' }}
     steps:
       - name: Guard configuration
@@ -750,6 +752,7 @@ jobs:
           apply_status=0
           apply_elapsed=$SECONDS
           bash scripts/deploy/sync-outbound-wake-endpoint.sh
+          printf 'apply_completed=true\n' >> "$GITHUB_OUTPUT"
           trap 'exec 1>&3 2>&4 3>&- 4>&-; echo "::error::Edge secret update failed" >&2' ERR
           exec 3>&1 4>&2 >/dev/null 2>&1
           "$cli" secrets set --project-ref "$SUPABASE_PROJECT_REF" --env-file "$secret_file"
@@ -793,8 +796,16 @@ jobs:
           while IFS=$'\t' read -r function_name auth_mode; do
             flags=()
             if [[ "$auth_mode" == public_no_jwt ]]; then flags+=(--no-verify-jwt); fi
-            "$cli" functions deploy "$function_name" --project-ref "$SUPABASE_PROJECT_REF" --use-api --workdir "$EDGE_FROZEN_WORKDIR" "${flags[@]}"
+            "$cli" functions deploy "$function_name" --project-ref "$SUPABASE_PROJECT_REF" --use-api --workdir "$EDGE_FROZEN_WORKDIR" "${flags[@]}" || {
+              status=$?
+              printf '::error::Edge publication failed for %s.\n' "$function_name"
+              exit "$status"
+            }
           done < <(printf '%s\n' "${edge_deploy[@]}")
+      - name: Record database apply completion
+        id: record_apply_completion
+        if: ${{ always() && steps.deploy.outputs.apply_completed == 'true' }}
+        run: echo 'Database apply completed'
       - name: Record database push attempt
         if: ${{ always() && steps.deploy.outputs.attempted == 'true' }}
         run: echo 'Database push started'
@@ -1459,4 +1470,7 @@ jobs:
                       result = 'skipped: not configured'
                   url = 'See deploy log' if outputs.get('preview_origin') else outputs.get('url') or '?'
                   summary.write(f"| {name} | {result} | {url} |\n")
+                  if name == 'database':
+                      for phase, key in (('Database apply', 'database_apply'), ('Edge publication', 'edge_publication')):
+                          summary.write(f"| {phase} | {outputs.get(key) or 'unrecorded'} | |\n")
           PY
