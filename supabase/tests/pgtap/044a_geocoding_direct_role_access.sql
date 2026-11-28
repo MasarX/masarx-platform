@@ -2,14 +2,10 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 
-SELECT plan(144);
+SELECT plan(159);
 
 CREATE TEMP TABLE geocoding_direct_roles (role_name text) ON COMMIT DROP;
 INSERT INTO geocoding_direct_roles VALUES ('geocoding_manual_role'), ('geocoding_worker_role');
-
--- SET ROLE needs membership; the manual role has no members, so the runner joins it only inside this rolled-back transaction.
--- Name the grantee: GRANT ... TO CURRENT_USER crashes the hosted test server (signal 11).
-DO $$ BEGIN EXECUTE format('GRANT geocoding_manual_role TO %I', current_user); END $$;
 
 CREATE TEMP TABLE geocoding_role_fixture ON COMMIT DROP AS
 SELECT org_number, gen_random_uuid() AS org_id, gen_random_uuid() AS client_id,
@@ -80,6 +76,14 @@ $$;
 SELECT ok(NOT pg_roles.rolcanlogin, role_name || ' requires role activation')
 FROM geocoding_direct_roles JOIN pg_roles ON rolname::text = role_name;
 
+SELECT ok(NOT pg_has_role('service_role', role_name, 'MEMBER'),
+          format('service_role can operate without membership in %s', role_name))
+FROM geocoding_direct_roles
+ORDER BY role_name;
+
+-- Name the grantee: GRANT ... TO CURRENT_USER crashes the hosted test server.
+DO $$ BEGIN EXECUTE format('GRANT geocoding_manual_role, geocoding_worker_role TO %I', current_user); END $$;
+
 SELECT is(pg_temp.geocoding_role_probe(role_name, format('SELECT 1 WHERE current_user::text = %L', role_name)),
           '1', role_name || ' is the effective role during the probe')
 FROM geocoding_direct_roles;
@@ -92,15 +96,27 @@ SELECT ok(NOT has_function_privilege(role_name, 'public.current_user_org_id()', 
 FROM geocoding_direct_roles;
 
 SELECT ok(
-  has_table_privilege(role_name, relation, 'SELECT') AND
-  has_table_privilege(role_name, relation, 'INSERT') = (role_name = 'geocoding_worker_role') AND
-  has_table_privilege(role_name, relation, 'UPDATE') = (role_name = 'geocoding_worker_role') AND
-  NOT has_table_privilege(role_name, relation, 'DELETE'),
-  format('%s retains its table ACL on %s', role_name, relation))
+  NOT has_table_privilege(role_name, relation, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN') AND
+  NOT has_any_column_privilege(role_name, relation, 'SELECT, INSERT, UPDATE, REFERENCES'),
+  format('%s has no table or column privileges on %s', role_name, relation))
 FROM geocoding_direct_roles
 CROSS JOIN (VALUES ('public.geocodes'), ('public.geocoding_attempts'), ('public.geocoding_alias_audit')) AS tables(relation);
 
-SELECT ok(pg_has_role('service_role', 'geocoding_worker_role', 'MEMBER'), 'service_role retains worker membership');
+SELECT ok(NOT EXISTS (
+  SELECT 1 FROM pg_policy
+  CROSS JOIN LATERAL unnest(polroles) AS policy_roles(role_oid)
+  WHERE polrelid = relation::regclass
+    AND CASE WHEN role_oid = 0 THEN true ELSE pg_has_role(role_name, role_oid, 'USAGE') END
+), format('no row policy on %s applies to %s', relation, role_name))
+FROM geocoding_direct_roles
+CROSS JOIN (VALUES ('public.geocodes'), ('public.geocoding_attempts'), ('public.geocoding_alias_audit')) AS tables(relation);
+
+SELECT ok(
+  has_table_privilege(role_name, relation, 'SELECT') = (role_name = 'service_role'),
+  format('%s has the expected SELECT privilege on %s', role_name, relation))
+FROM (VALUES ('geocoding_worker_role'), ('service_role')) AS roles(role_name)
+CROSS JOIN (VALUES ('public.addresses'), ('public.providers'), ('public.settings_versions'), ('public.settings')) AS tables(relation);
+
 SET LOCAL request.jwt.claim.sub = '';
 SET LOCAL request.jwt.claim.role = 'service_role';
 SET LOCAL request.jwt.claims = '{"role":"service_role"}';
@@ -122,7 +138,7 @@ SELECT set_config('request.jwt.claim.sub', user_id::text, true),
 FROM geocoding_role_fixture WHERE org_number = 1;
 
 SELECT is(pg_temp.geocoding_role_probe(role_name, statement), '42501: permission denied for schema public',
-          format('current %s cannot %s %s for organization %s', role_name, operation, relation_name, org_number))
+          format('retired %s cannot %s %s for organization %s', role_name, operation, relation_name, org_number))
 FROM geocoding_direct_roles CROSS JOIN geocoding_role_statements
 WHERE operation <> 'seed';
 
@@ -131,20 +147,23 @@ SELECT is(pg_temp.geocoding_role_probe('authenticated', statement),
           format('authenticated sees only its organization in %s (organization %s)', relation_name, org_number))
 FROM geocoding_role_statements WHERE operation = 'select';
 
--- Reproduce only the helper ACL from before #397 without reopening PUBLIC or the schema.
+-- Bypass schema lookup and helper ACLs inside the fixture to exercise table denial.
+GRANT USAGE ON SCHEMA public TO geocoding_manual_role, geocoding_worker_role;
 GRANT EXECUTE ON FUNCTION public.current_user_org_id() TO geocoding_manual_role, geocoding_worker_role;
 
-SELECT ok(has_function_privilege(role_name, 'public.current_user_org_id()', 'EXECUTE'),
-          role_name || ' has organization helper EXECUTE in the comparison fixture')
+SELECT ok(has_schema_privilege(role_name, 'public', 'USAGE') AND
+          has_function_privilege(role_name, 'public.current_user_org_id()', 'EXECUTE'),
+          role_name || ' has schema USAGE and organization helper EXECUTE in the comparison fixture')
 FROM geocoding_direct_roles;
 
-SELECT is(pg_temp.geocoding_role_probe(role_name, statement), '42501: permission denied for schema public',
-          format('helper EXECUTE alone leaves %s denied %s on %s for organization %s',
+SELECT is(pg_temp.geocoding_role_probe(role_name, statement), '42501: permission denied for table ' || relation_name,
+          format('table privileges deny %s %s on %s for organization %s',
                  role_name, operation, relation_name, org_number))
 FROM geocoding_direct_roles CROSS JOIN geocoding_role_statements
 WHERE operation <> 'seed';
 
 REVOKE EXECUTE ON FUNCTION public.current_user_org_id() FROM geocoding_manual_role, geocoding_worker_role;
+REVOKE USAGE ON SCHEMA public FROM geocoding_manual_role, geocoding_worker_role;
 
 SET LOCAL request.jwt.claim.sub = '';
 SET LOCAL request.jwt.claim.role = 'service_role';
