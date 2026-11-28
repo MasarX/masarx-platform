@@ -97,12 +97,17 @@ async function waitForCronPause(db, wait = delay) {
   throw new Error('pg_cron did not acknowledge the launch pause');
 }
 
+// Worker clones can spend seconds pre-zeroing each new WAL segment on a slow disk; the shard's database is discarded with its job.
+async function disableHostedWalInitZero(admin) {
+  if ((await admin('ALTER SYSTEM SET wal_init_zero = off', 'SELECT pg_reload_conf()')).trim() !== 't') {
+    throw new Error('Could not reload WAL segment setup for the disposable CI database');
+  }
+}
+
 async function configureHostedDatabase(admin, db, disposableShard) {
   const commands = ["ALTER SYSTEM SET cron.launch_active_jobs = 'off'"];
   if (disposableShard) {
     commands.push(
-      // Worker clones can spend seconds pre-zeroing each new WAL segment on a slow disk.
-      'ALTER SYSTEM SET wal_init_zero = off',
       'ALTER SYSTEM SET log_connections = on',
       'ALTER SYSTEM SET log_disconnections = on',
       "ALTER SYSTEM SET log_line_prefix = '%h %m [%p] %b %qapp=%a user=%u db=%d '",
@@ -697,6 +702,7 @@ async function qualify(diagnostic) {
       // Disable background ANALYZE before exposing the application migrations to this stack.
       summary.autovacuum = await timed('autovacuum-off', () => disableHostedAutovacuum(status.DB_URL, dbPort, stackAdmin, db));
       // The disposable fixture uses the registered schedules without launching background jobs.
+      if (disposableShard) await disableHostedWalInitZero(stackAdmin);
       await timed('cron-pause', () => configureHostedDatabase(stackAdmin, db, disposableShard));
       const versions = migrationInventory(fs.readdirSync('supabase/migrations'));
       fs.rmdirSync(path.join(sb, 'migrations'));
@@ -889,4 +895,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, installHostedCli, writeHostedStackConfig, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, timeHostedCloneCommand, dropHostedDatabases, withHostedCloneIsolation, withHostedCloneServices, snapshotIntegrationDatabase, pgtapDeadline };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, disableHostedWalInitZero, configureHostedDatabase, hostedStackPorts, installHostedCli, writeHostedStackConfig, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, timeHostedCloneCommand, dropHostedDatabases, withHostedCloneIsolation, withHostedCloneServices, snapshotIntegrationDatabase, pgtapDeadline };

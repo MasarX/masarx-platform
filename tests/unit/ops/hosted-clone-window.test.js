@@ -1,4 +1,6 @@
-const { configureHostedDatabase, withHostedCloneServices } = require('../../../scripts/ci-hosted/backend.cjs');
+const fs = require('fs');
+const path = require('path');
+const { disableHostedWalInitZero, withHostedCloneServices } = require('../../../scripts/ci-hosted/backend.cjs');
 
 const project = 'fixture';
 const storage = `supabase_storage_${project}`;
@@ -9,20 +11,15 @@ const env = {};
 
 test('disposable hosted shards skip WAL segment preallocation on the server', async () => {
   const admin = jest.fn().mockResolvedValue('t');
-  const db = { query: jest.fn().mockResolvedValue({ rows: [{ setting: 'off', context: 'sighup' }] }) };
+  await disableHostedWalInitZero(admin);
+  expect(admin).toHaveBeenCalledTimes(1);
+  expect(admin).toHaveBeenCalledWith('ALTER SYSTEM SET wal_init_zero = off', 'SELECT pg_reload_conf()');
 
-  await configureHostedDatabase(admin, db, true);
-  expect(admin).toHaveBeenCalledWith(
-    "ALTER SYSTEM SET cron.launch_active_jobs = 'off'",
-    'ALTER SYSTEM SET wal_init_zero = off',
-    'ALTER SYSTEM SET log_connections = on',
-    'ALTER SYSTEM SET log_disconnections = on',
-    expect.stringContaining('ALTER SYSTEM SET log_line_prefix'),
-    'SELECT pg_reload_conf()',
-  );
+  await expect(disableHostedWalInitZero(jest.fn().mockResolvedValue('f'))).rejects.toThrow('Could not reload WAL segment setup');
 
-  await configureHostedDatabase(admin, db, false);
-  expect(admin).toHaveBeenLastCalledWith("ALTER SYSTEM SET cron.launch_active_jobs = 'off'", 'SELECT pg_reload_conf()');
+  // Only the disposable pgTAP shard turns it off, before the reload that pauses pg_cron.
+  const source = fs.readFileSync(path.join(__dirname, '../../../scripts/ci-hosted/backend.cjs'), 'utf8');
+  expect(source).toMatch(/if \(disposableShard\) await disableHostedWalInitZero\(stackAdmin\);\n\s*await timed\('cron-pause'/);
 });
 
 test('stops services concurrently within the shard budget and restarts them after a failed clone', async () => {
