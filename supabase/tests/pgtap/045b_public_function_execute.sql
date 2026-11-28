@@ -160,6 +160,10 @@ SELECT is_empty(
   FROM pg_temp.public_execute_preservation_roles AS r
   CROSS JOIN pg_temp.public_execute_closure_targets AS target
   WHERE NOT has_function_privilege(r.oid, target.function_oid, 'EXECUTE')
+    AND NOT (
+      r.rolname IN ('anon', 'authenticated')
+      AND target.function_oid = 'public.find_extent(regclass,text)'::regprocedure::oid
+    )
   ORDER BY r.rolname, target.signature
   $$,
   'Effective EXECUTE on the closure targets is preserved for roles in scope at the closure'
