@@ -3,7 +3,7 @@
   Registers the 360dialog inbound webhook to our edge function.
 
   Usage:
-    ENV_FILE=config/env/.env.cloud node scripts/qa/set-360dialog-webhook.js [WEBHOOK_URL]
+    ENV_FILE=path/to/cloud-config node scripts/qa/set-360dialog-webhook.js [WEBHOOK_URL]
 */
 const { Pool } = require('pg');
 const { loadEnv } = require('../utils/load-env');

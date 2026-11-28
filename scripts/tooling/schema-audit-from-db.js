@@ -823,7 +823,7 @@ async function run({ schemas, exposedSchemas, format, out, full, includeHost }) 
   const scanSchemas = Array.from(new Set([...(resolvedSchemas || []), ...(apiSchemas || [])])).filter(Boolean);
   const dbUrl = String(process.env.DATABASE_URL || '').trim();
   if (!dbUrl) {
-    console.error('[schema-audit] DATABASE_URL is required. Set ENV_FILE=config/env/.env.cloud or export DATABASE_URL.');
+    console.error('[schema-audit] DATABASE_URL is required. Set ENV_FILE=path/to/cloud-config or export DATABASE_URL.');
     process.exit(2);
   }
 

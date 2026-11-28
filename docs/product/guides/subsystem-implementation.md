@@ -78,7 +78,7 @@ CI Compliance (Required)
 - Decision-first: expect recent decision counts for your subsystem under `decision_log` (category should match your handlers).
 - Webhook response health: watch `response_failed` and failure reasons; HMAC and policy misconfig are the most common.
 - How to run locally:
-  - `ENV_FILE=config/env/.env.cloud npm run ci:summary` (JSON summary; also writes a Markdown step summary in GitHub Actions)
+  - `ENV_FILE=path/to/cloud-config npm run ci:summary` (JSON summary; also writes a Markdown step summary in GitHub Actions)
   - `SELECT jsonb_pretty(ci_observability_summary());` for SQL-only inspection.
   - Inspect the view: `SELECT * FROM ci_observability_summary_v LIMIT 1;`
 

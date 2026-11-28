@@ -4,13 +4,13 @@
 - Start from a clean environment before executing scenarios:
   - Cloud (recommended for destructive testing): `npm run cloud:provision` (project-per-workspace)
   - Local (optional): `npm run local:start` then `npx supabase@2 db reset --yes`
-- Seed the deterministic baseline: `ENV_FILE=config/env/.env.cloud node scripts/data/seed-test-data.js <volume>` (or `ENV_FILE=config/env/.env.local ...` for local).
+- Seed the deterministic baseline: `ENV_FILE=path/to/cloud-config node scripts/data/seed-test-data.js <volume>` (or `ENV_FILE=path/to/local-config ...` for local).
 - When the product blueprint changes, update this document and the automation backlog in the same commit.
 
 ## Execution Overview
 
 1. Environment check:
-   - Cloud: `config/env/.env.cloud` present (and org tokens available if provisioning).
+   - Cloud: `path/to/cloud-config` present (and org tokens available if provisioning).
    - Local: Docker Desktop, Supabase CLI, Node.js 18+, psql.
 2. Reset/provision and seed: provision an isolated cloud project (preferred) or reset a local stack, then run `node scripts/data/seed-test-data.js <volume>` (see `docs/tests/SEED_BASELINES.md`).
 3. Automation wave: run the canonical gate (`npm test` -> `npm run verify:cloud:core`) and any targeted commands listed per scenario.
@@ -20,7 +20,7 @@
 
 ### Cloud Supabase Runs
 
-- Ensure `config/env/.env.cloud` is present (or set `ENV_FILE=config/env/.env.cloud` in your shell).
+- Ensure `path/to/cloud-config` is present (or set `ENV_FILE=path/to/cloud-config` in your shell).
 - Prefer a fresh isolated project when you need a clean slate: `npm run cloud:provision -- "<workspace-name>"`.
 - Apply migrations (included in the gate): `npm run db:push`.
 - Deploy edge functions + secrets (included in the gate): `npm run deploy:edge`.

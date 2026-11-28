@@ -2,12 +2,11 @@
 
 This guide explains how to run, interpret, and extend the test suites for the MasarX Delivery Platform.
 
-The repo is cloud-first: most suites run against the Supabase cloud database using `ENV_FILE=config/env/.env.cloud`
-(or an exported `DATABASE_URL`). Local runs are optional and should use the `local:*` commands.
+The repo is cloud-first: most suites run against the Supabase cloud database using `ENV_FILE=path/to/cloud-config` (or an exported `DATABASE_URL`). Replace the sample path with the path to your private cloud configuration file. Local runs are optional and should use the `local:*` commands.
 
 Shell note:
-- PowerShell: `$env:ENV_FILE = "config/env/.env.cloud"; <command>`
-- bash/zsh: `ENV_FILE=config/env/.env.cloud <command>`
+- PowerShell: `$env:ENV_FILE = "path/to/cloud-config"; <command>`
+- bash/zsh: `ENV_FILE=path/to/cloud-config <command>`
 
 ---
 
@@ -55,7 +54,7 @@ Schema validation runs against the cloud database using `psql` (the runner strea
 on first failure).
 
 ```bash
-ENV_FILE=config/env/.env.cloud npm run test:pgtap
+ENV_FILE=path/to/cloud-config npm run test:pgtap
 ```
 
 Covers (examples):
@@ -73,7 +72,7 @@ Integration tests exercise workflow orchestration, settings/policies, webhook in
 and worker flows against the cloud database.
 
 ```bash
-ENV_FILE=config/env/.env.cloud npm run test:integration -- --runInBand
+ENV_FILE=path/to/cloud-config npm run test:integration -- --runInBand
 ```
 
 Live external calls are guarded by env toggles (for example: `RUN_LIVE_*` flags).
@@ -93,7 +92,7 @@ Smoke tests hit deployed edge endpoints and validate end-to-end wiring
 (secrets, auth, routing, basic RPC behavior).
 
 ```bash
-ENV_FILE=config/env/.env.cloud npm run test:edge-smoke
+ENV_FILE=path/to/cloud-config npm run test:edge-smoke
 ```
 
 ---
@@ -104,8 +103,8 @@ The load runner uses Docker when available, and can fall back to a local Go tool
 build for xk6 when Docker is unavailable.
 
 ```bash
-ENV_FILE=config/env/.env.cloud npm run test:load -- --scenario=partition-performance
-ENV_FILE=config/env/.env.cloud npm run test:load -- --scenario=webhook-ingest-http
+ENV_FILE=path/to/cloud-config npm run test:load -- --scenario=partition-performance
+ENV_FILE=path/to/cloud-config npm run test:load -- --scenario=webhook-ingest-http
 ```
 
 Notes:

@@ -6,7 +6,7 @@
  * then updates settings (cache) to point to the new version.
  *
  * Usage:
- *   ENV_FILE=config/env/.env.cloud \
+ *   ENV_FILE=path/to/cloud-config \
  *   node scripts/ops/upsert-settings.js \
  *     --category basket_policy \
  *     --scope-type client \

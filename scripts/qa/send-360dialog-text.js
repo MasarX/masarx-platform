@@ -4,7 +4,7 @@
   Builds a simple message from the latest shipment in the database.
 
   Usage:
-    ENV_FILE=config/env/.env.cloud node scripts/qa/send-360dialog-text.js <E164_PHONE>
+    ENV_FILE=path/to/cloud-config node scripts/qa/send-360dialog-text.js <E164_PHONE>
 
   Notes:
   - Free-form text requires an active 24-hour session in WhatsApp; otherwise 360dialog will reject.

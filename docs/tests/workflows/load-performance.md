@@ -64,7 +64,7 @@ gh workflow run "Weekly Load Test" -f ref=<branch-or-sha>
   - Set to `0` to preserve rows for debugging (be deliberate; prefer scripted cleanup over manual SQL).
 
 All of these are read from `__ENV` at runtime; nothing is hardcoded per project
-or tier. Adjust them via `config/env/.env.cloud` instead of editing tests.
+or tier. Adjust them via `path/to/cloud-config` instead of editing tests.
 
 Optional load-test runner controls:
 

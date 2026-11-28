@@ -55,7 +55,7 @@ async function main() {
 
   const dbUrl = (process.env.DATABASE_URL || '').trim();
   if (!dbUrl) {
-    throw new Error('DATABASE_URL is not set (expected ENV_FILE=config/env/.env.cloud or exported env vars).');
+    throw new Error('DATABASE_URL is not set (expected ENV_FILE=path/to/cloud-config or exported env vars).');
   }
 
   const client = new Client({ connectionString: dbUrl });

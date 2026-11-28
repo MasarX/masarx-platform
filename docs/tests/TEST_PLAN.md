@@ -4,7 +4,7 @@ This matrix tracks what we verify, how we automate it, and what evidence to capt
 
 ## Canonical Gates
 
-- Cloud (CI-equivalent): `ENV_FILE=config/env/.env.cloud npm test` (runs `verify:cloud:core`)
+- Cloud (CI-equivalent): `ENV_FILE=path/to/cloud-config npm test` (runs `verify:cloud:core`)
 - Local (optional): `npm run local:configure` + `npm run local:env` + `npm run local:start` + `npm run local:verify`
 
 ## Workflow Matrix
@@ -25,9 +25,9 @@ This matrix tracks what we verify, how we automate it, and what evidence to capt
 
 ```bash
 # Single integration file
-ENV_FILE=config/env/.env.cloud npm run test:integration -- tests/integration/webhook-ingest.test.js --runInBand
+ENV_FILE=path/to/cloud-config npm run test:integration -- tests/integration/webhook-ingest.test.js --runInBand
 
 # Single test name pattern
-ENV_FILE=config/env/.env.cloud npm run test:integration -- --testNamePattern="idempotency" --runInBand
+ENV_FILE=path/to/cloud-config npm run test:integration -- --testNamePattern="idempotency" --runInBand
 ```
 
