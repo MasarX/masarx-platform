@@ -274,3 +274,12 @@ export function hasMobileV2Capability(
 ): boolean {
   return capabilities.includes("*") || capabilities.includes(capability);
 }
+
+/**
+ * #600: the cash drop and COD ledger need `cash_drop.write`. Without it the
+ * read is disabled, so the screen would show zero values; it shows the
+ * access-denied state with its recovery action instead.
+ */
+export function isMobileV2CashDropTabDenied(tabId: string, cashDropAccessEnabled: boolean): boolean {
+  return !cashDropAccessEnabled && (tabId === "mobile-cash-drop" || tabId === "mobile-cod-ledger");
+}

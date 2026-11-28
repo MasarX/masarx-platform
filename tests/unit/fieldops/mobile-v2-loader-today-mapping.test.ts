@@ -244,8 +244,16 @@ describe("mapFieldopsLoaderTodayEnvelope — real wave data passes through hones
       expect(mapped.scannedParcels).toBe(0);
       expect(mapped.driversWaiting).toBe(0);
       expect(mapped.drivers).toEqual([]);
-      // Quick-action navigation tiles fall back from the fixture.
-      expect(mapped.quickActions).toBe(FIXTURE.quickActions);
+      // #600 Design decision: live mode shows no fixture tiles (error state).
+      expect(mapped.quickActions).toBeNull();
+    }
+  });
+
+  test("showcase mode still renders the fixture tiles for a null / non-object input (#600)", async () => {
+    for (const raw of [null, undefined, 42, "oops"]) {
+      const query = fieldopsSurfaceQuery(null, FIXTURE, async () => mapFieldopsLoaderTodayEnvelope(raw, FIXTURE));
+      expect(query.initialData?.quickActions).toBe(FIXTURE.quickActions);
+      await expect(query.queryFn()).resolves.toBe(FIXTURE);
     }
   });
 

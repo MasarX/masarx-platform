@@ -41,6 +41,7 @@ import {
   collectMobileV2Capabilities,
   filterMobileV2Navigation,
   hasMobileV2Capability,
+  isMobileV2CashDropTabDenied,
   parseMobileV2NavigationPayload,
   type MobileV2NavigationItem,
   type MobileV2NavigationSection,
@@ -431,7 +432,13 @@ import {
   normalizeMobileV2Role,
   newIdempotencyKey,
   buildNeutralFieldopsLoaderTodayEnvelope,
+  mapFieldopsRiderTodayEnvelope,
   type MobileV2CashDropEnvelope,
+  type MobileV2LookupEnvelope,
+  type MobileV2ReturnsEnvelope,
+  type MobileV2RiderTodayEnvelope,
+  type MobileV2SortationEnvelope,
+  type MobileV2SupervisorQueueEnvelope,
   type MobileV2EorEnvelope,
   type MobileV2WalletEnvelope,
   type MobileV2DamageHoldReadback,
@@ -547,6 +554,32 @@ const EMPTY_MOBILE_V2_EOR: MobileV2EorEnvelope = Object.freeze({
   routeLabel: "",
   recon: null,
   lastRecon: null,
+});
+const EMPTY_MOBILE_V2_SORTATION: MobileV2SortationEnvelope = Object.freeze({
+  bays: Object.freeze([]),
+  recent: Object.freeze([]),
+  inductedThisSession: 0,
+  throughputPerHour: 0,
+  minutesElapsed: 0,
+});
+const EMPTY_MOBILE_V2_LOOKUP: MobileV2LookupEnvelope = Object.freeze({
+  records: Object.freeze([]),
+  recent: Object.freeze([]),
+});
+const EMPTY_MOBILE_V2_RETURNS: MobileV2ReturnsEnvelope = Object.freeze({
+  failed: Object.freeze([]),
+  returned: Object.freeze([]),
+  codCollected: 0,
+});
+const EMPTY_MOBILE_V2_HUB_PICKUP: ReadonlyArray<MobileV2HubPickupQueueItem> = Object.freeze([]);
+const EMPTY_MOBILE_V2_HOLD: ReadonlyArray<MobileV2HoldItem> = Object.freeze([]);
+// The fixture supplies only the cosmetic currency label here.
+const EMPTY_MOBILE_V2_RIDER_TODAY: MobileV2RiderTodayEnvelope =
+  mapFieldopsRiderTodayEnvelope(null, MOBILE_V2_PREVIEW_RIDER_TODAY);
+const EMPTY_MOBILE_V2_SUPERVISOR_QUEUE: MobileV2SupervisorQueueEnvelope = Object.freeze({
+  supervisorName: "",
+  queue: Object.freeze([]),
+  activeId: "",
 });
 const MOBILE_V2_FIELDOPS_EVIDENCE_BUCKET = "fieldops-evidence";
 
@@ -1185,18 +1218,12 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
       minutesElapsed: 278,
     },
   });
-  const liveSortation = sortationRpc.data ?? {
-    bays: SAMPLE_SORTATION_BAYS,
-    recent: SAMPLE_SORTATION_RECENT,
-    inductedThisSession: 677,
-    throughputPerHour: 146,
-    minutesElapsed: 278,
-  };
+  const liveSortation = sortationRpc.data ?? EMPTY_MOBILE_V2_SORTATION;
   const lookupRpc = useFieldopsLookupRpc({
     query: lookupQuery,
     fallback: { records: SAMPLE_LOOKUP_RECORDS, recent: SAMPLE_LOOKUP_RECENT },
   });
-  const liveLookup = lookupRpc.data ?? { records: SAMPLE_LOOKUP_RECORDS, recent: SAMPLE_LOOKUP_RECENT };
+  const liveLookup = lookupRpc.data ?? EMPTY_MOBILE_V2_LOOKUP;
   const walletRpc = useFieldopsWalletRpc({
     fallback: SAMPLE_WALLET,
     enabled: walletAccessEnabled,
@@ -1215,14 +1242,14 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
   const [returnsLatestReadback, setReturnsLatestReadback] =
     React.useState<MobileV2ReturnsReadback | null>(null);
   const [returningStopId, setReturningStopId] = React.useState<string | null>(null);
-  const rpcReturns = returnsRpc.data ?? SAMPLE_RETURNS;
+  const rpcReturns = returnsRpc.data ?? EMPTY_MOBILE_V2_RETURNS;
   const liveReturns = isShowcase && returnsOverride !== null
     ? { ...rpcReturns, failed: returnsOverride.failed, returned: returnsOverride.returned }
     : rpcReturns;
 
   const SAMPLE_HUB_PICKUP = MOBILE_V2_PREVIEW_HUB_PICKUP;
   const hubPickupRpc = useFieldopsHubPickupRpc({ fallback: SAMPLE_HUB_PICKUP });
-  const liveHubPickup = hubPickupRpc.data ?? SAMPLE_HUB_PICKUP;
+  const liveHubPickup = hubPickupRpc.data ?? EMPTY_MOBILE_V2_HUB_PICKUP;
   const [hubPickupActiveId, setHubPickupActiveId] = React.useState<string | null>(null);
   const [hubPickupOtp, setHubPickupOtp] = React.useState("");
 
@@ -1231,7 +1258,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
   const latestDamageHoldRpc = useFieldopsLatestDamageHoldRpc({
     enabled: false,
   });
-  const liveHold = holdRpc.data ?? SAMPLE_HOLD;
+  const liveHold = holdRpc.data ?? EMPTY_MOBILE_V2_HOLD;
 
   const SAMPLE_CASH_DROP: MobileV2CashDropEnvelope = MOBILE_V2_PREVIEW_CASH_DROP;
   const cashDropRpc = useFieldopsCashDropRpc({
@@ -1507,11 +1534,11 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
   const loaderTodayRpc = useFieldopsLoaderTodayRpc({ fallback: MOBILE_V2_PREVIEW_LOADER_TODAY });
   const liveLoaderToday = loaderTodayRpc.data ?? buildNeutralFieldopsLoaderTodayEnvelope(MOBILE_V2_PREVIEW_LOADER_TODAY);
   const riderTodayRpc = useFieldopsRiderTodayRpc({ fallback: MOBILE_V2_PREVIEW_RIDER_TODAY });
-  const liveRiderToday = riderTodayRpc.data ?? MOBILE_V2_PREVIEW_RIDER_TODAY;
+  const liveRiderToday = riderTodayRpc.data ?? EMPTY_MOBILE_V2_RIDER_TODAY;
   const supervisorQueueRpc = useFieldopsSupervisorQueueRpc({
     fallback: MOBILE_V2_PREVIEW_SUPERVISOR_QUEUE,
   });
-  const liveSupervisorQueue = supervisorQueueRpc.data ?? MOBILE_V2_PREVIEW_SUPERVISOR_QUEUE;
+  const liveSupervisorQueue = supervisorQueueRpc.data ?? EMPTY_MOBILE_V2_SUPERVISOR_QUEUE;
   const [supervisorActiveId, setSupervisorActiveId] = React.useState<string | null>(null);
 
   // E3 fix: shell-chrome identity (drawer header + More screen) is
@@ -3966,7 +3993,8 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
     "mobile-trip-detail": tripsRpc.error,
     "mobile-trip-nav": tripsRpc.error,
   };
-  const routeReadDenied = isMobileV2RpcAccessDenied(routeReadErrors[activeTabId]);
+  const routeReadDenied = isMobileV2RpcAccessDenied(routeReadErrors[activeTabId])
+    || isMobileV2CashDropTabDenied(activeTabId, cashDropAccessEnabled);
   const routeReadAccess = getStrings(resolveLocaleCode(ctx.locale)).routeReadAccess;
 
   return (
@@ -4040,7 +4068,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                                               : activeTabId === "mobile-loader-today"
                                                 ? `Hello, ${liveLoaderToday.greetingName}`
                                                 : activeTabId === "mobile-rider-today"
-                                                  ? `Hello, ${liveRiderToday.greetingName}`
+                                                  ? (riderTodayRpc.data === undefined ? "" : `Hello, ${liveRiderToday.greetingName}`)
                                                   : activeTabId === "mobile-supervisor-today"
                                                     ? "Approvals"
                                                     // Design ScrTasks (flow-tasks.jsx:486-490) renders the
@@ -4105,14 +4133,16 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
               : activeTabId === "mobile-wallet"
                 ? "Pay & earnings"
                 : activeTabId === "mobile-returns"
-                  ? `${liveReturns.failed.length} failed · ${liveReturns.returned.length} returned`
+                  ? (returnsRpc.data === undefined ? "" : `${liveReturns.failed.length} failed · ${liveReturns.returned.length} returned`)
                   : activeTabId === "mobile-hub-pickup"
                     ? (() => {
+                        if (hubPickupRpc.data === undefined) return "";
                         const remaining = liveHubPickup.filter((q) => !hubPickupResolved.has(q.id)).length;
                         return `${remaining} customer${remaining === 1 ? "" : "s"} waiting`;
                       })()
                     : activeTabId === "mobile-hold"
                       ? (() => {
+                          if (holdRpc.data === undefined) return "";
                           const remaining = liveHold.filter((h) => !holdResolved.has(h.id)).length;
                           return `${remaining} parcel${remaining === 1 ? "" : "s"} need a decision`;
                         })()
@@ -4172,11 +4202,13 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                                           // returns an empty `employeeId` until a rider-gig source
                                           // table ships (E5), so an absent id must not leave a stray
                                           // " ·  · " separator.
-                                          ? ["Bike", liveRiderToday.employeeId, liveRiderToday.online ? "Online" : "Offline"]
+                                          ? (riderTodayRpc.data === undefined ? "" : ["Bike", liveRiderToday.employeeId, liveRiderToday.online ? "Online" : "Offline"]
                                               .filter((seg) => seg.length > 0)
-                                              .join(" · ")
+                                              .join(" · "))
                                           : activeTabId === "mobile-supervisor-today"
-                                            ? `${liveSupervisorQueue.queue.length} pending · ${liveSupervisorQueue.supervisorName}`
+                                            ? (supervisorQueueRpc.data === undefined ? "" : [`${liveSupervisorQueue.queue.length} pending`, liveSupervisorQueue.supervisorName]
+                                                .filter((seg) => seg.length > 0)
+                                                .join(" · "))
                                             : `${ctx.theme.name} · ${activeRole}`
         }
         onBack={
@@ -4298,9 +4330,11 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
             </FxChip>
             )
           ) : activeTabId === "mobile-returns" ? (
+            returnsRpc.data === undefined ? null : (
             <FxChip theme={ctx.theme} tone="warning" icon="package" dense>
               {`${liveReturns.failed.reduce((n, s) => n + s.parcels, 0) + liveReturns.returned.reduce((n, s) => n + s.parcels, 0)} parcels`}
             </FxChip>
+            )
           ) : activeTabId === "mobile-hub-pickup" ? (
             <FxChip theme={ctx.theme} tone="info" icon="user" dense>
               Counter
@@ -4354,6 +4388,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
             </FxChip>
           ) : activeTabId === "mobile-rider-today" ? (
             // F1: rider-home right chip — design ScrRiderToday online state.
+            riderTodayRpc.data === undefined ? null : (
             <FxChip
               theme={ctx.theme}
               tone={liveRiderToday.online ? "success" : "neutral"}
@@ -4362,11 +4397,14 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
             >
               {liveRiderToday.online ? "Online" : "Offline"}
             </FxChip>
+            )
           ) : activeTabId === "mobile-supervisor-today" ? (
             // F1: supervisor-home right chip — pending-approvals count.
+            supervisorQueueRpc.data === undefined ? null : (
             <FxChip theme={ctx.theme} tone="warning" icon="alert" dense>
               {String(liveSupervisorQueue.queue.length)}
             </FxChip>
+            )
           ) : (
             <FxRow gap={6}>
               <FxStatusDot theme={ctx.theme} kind="current" size={8} />

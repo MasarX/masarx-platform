@@ -578,11 +578,6 @@ async function callRpc<TParams extends Record<string, unknown>>(
   return data;
 }
 
-function withFallback<T>(value: T | null | undefined, fallback: T): T {
-  if (value === null || value === undefined) return fallback;
-  return value;
-}
-
 /**
  * True when an RPC error is a "function does not exist" failure — i.e.
  * the resolver has not been migrated onto the connected database yet.
@@ -1906,7 +1901,7 @@ export function useFieldopsTripsRpc(
 }
 
 // ---------------------------------------------------------------------------
-// Sortation — bays + recent. Stubbed until aggregator lands; returns fallback.
+// Sortation — bays + recent from resolve_fieldops_sortation_v1.
 // ---------------------------------------------------------------------------
 
 export interface UseFieldopsSortationOptions {
@@ -1919,30 +1914,42 @@ export interface UseFieldopsSortationOptions {
   };
 }
 
+export type MobileV2SortationEnvelope = UseFieldopsSortationOptions["fallback"];
+
+/** #600: the resolver always emits every key; anything else is malformed. */
+export function mapFieldopsSortationEnvelope(raw: unknown): MobileV2SortationEnvelope {
+  const r = asRecord(raw);
+  const inducted = r === null ? null : parseFiniteNumber(r.inducted);
+  const throughputPerHour = r === null ? null : parseFiniteNumber(r.throughput_per_hour);
+  const minutesElapsed = r === null ? null : parseFiniteNumber(r.minutes_elapsed);
+  if (
+    r === null || !Array.isArray(r.bays) || !Array.isArray(r.recent) ||
+    inducted === null || throughputPerHour === null || minutesElapsed === null
+  ) {
+    throw mobileV2MalformedPayload("resolve_fieldops_sortation_v1");
+  }
+  return Object.freeze({
+    bays: r.bays as ReadonlyArray<MobileV2SortationBay>,
+    recent: r.recent as ReadonlyArray<MobileV2SortationInduction>,
+    inductedThisSession: inducted,
+    throughputPerHour,
+    minutesElapsed,
+  });
+}
+
 export function useFieldopsSortationRpc(
   options: UseFieldopsSortationOptions,
-): UseQueryResult<UseFieldopsSortationOptions["fallback"], Error> {
+): UseQueryResult<MobileV2SortationEnvelope, Error> {
   const ctx = useMobileV2Rpc();
-  return useQuery<UseFieldopsSortationOptions["fallback"], Error>({
+  return useQuery<MobileV2SortationEnvelope, Error>({
     queryKey: ["mobile-v2", "sortation"],
-    queryFn: async () => {
-      if (isPreviewMode(ctx.supabase)) return options.fallback;
-      const raw = await callRpc({
-        supabase: ctx.supabase,
+    ...fieldopsSurfaceQuery(ctx.supabase, options.fallback, async (supabase) =>
+      mapFieldopsSortationEnvelope(await callRpc({
+        supabase,
         schema: "api",
         name: "resolve_fieldops_sortation_v1",
         params: { p_active_role: ctx.activeRole, p_context: ctx.policyContext ?? {} },
-      });
-      if (raw === null || typeof raw !== "object") return options.fallback;
-      const r = raw as Record<string, unknown>;
-      return Object.freeze({
-        bays: withFallback(r.bays as ReadonlyArray<MobileV2SortationBay> | undefined, options.fallback.bays),
-        recent: withFallback(r.recent as ReadonlyArray<MobileV2SortationInduction> | undefined, options.fallback.recent),
-        inductedThisSession: withFallback(r.inducted as number | undefined, options.fallback.inductedThisSession),
-        throughputPerHour: withFallback(r.throughput_per_hour as number | undefined, options.fallback.throughputPerHour),
-        minutesElapsed: withFallback(r.minutes_elapsed as number | undefined, options.fallback.minutesElapsed),
-      });
-    },
+      }))),
   });
 }
 
@@ -1958,36 +1965,36 @@ export interface UseFieldopsLookupOptions {
   };
 }
 
+export type MobileV2LookupEnvelope = UseFieldopsLookupOptions["fallback"];
+
+/** #600: `records` and `recent` are always lists; anything else is malformed. */
+export function mapFieldopsLookupEnvelope(raw: unknown): MobileV2LookupEnvelope {
+  const r = asRecord(raw);
+  if (r === null || !Array.isArray(r.records) || !Array.isArray(r.recent)) {
+    throw mobileV2MalformedPayload("resolve_fieldops_lookup_v1");
+  }
+  return Object.freeze({
+    records: r.records as ReadonlyArray<MobileV2LookupRecord>,
+    recent: r.recent as ReadonlyArray<MobileV2LookupRecent>,
+  });
+}
+
 export function useFieldopsLookupRpc(
   options: UseFieldopsLookupOptions,
-): UseQueryResult<UseFieldopsLookupOptions["fallback"], Error> {
+): UseQueryResult<MobileV2LookupEnvelope, Error> {
   const ctx = useMobileV2Rpc();
-  return useQuery<UseFieldopsLookupOptions["fallback"], Error>({
+  return useQuery<MobileV2LookupEnvelope, Error>({
     queryKey: ["mobile-v2", "lookup", options.query],
-    queryFn: async () => {
-      if (isPreviewMode(ctx.supabase)) return options.fallback;
-      const raw = await callRpc({
-        supabase: ctx.supabase,
+    ...fieldopsSurfaceQuery(ctx.supabase, options.fallback, async (supabase) =>
+      mapFieldopsLookupEnvelope(await callRpc({
+        supabase,
         name: "resolve_fieldops_lookup_v1",
         params: {
           p_active_role: ctx.activeRole,
           p_context: ctx.policyContext ?? {},
           p_query: options.query,
         },
-      });
-      if (raw === null || typeof raw !== "object") return options.fallback;
-      const r = raw as Record<string, unknown>;
-      return Object.freeze({
-        records: withFallback(
-          r.records as ReadonlyArray<MobileV2LookupRecord> | undefined,
-          options.fallback.records,
-        ),
-        recent: withFallback(
-          r.recent as ReadonlyArray<MobileV2LookupRecent> | undefined,
-          options.fallback.recent,
-        ),
-      });
-    },
+      }))),
   });
 }
 
@@ -2115,8 +2122,8 @@ export function mobileV2CashDropMatchesWrite(
 }
 
 // ---------------------------------------------------------------------------
-// Returns — driver returns failed/RTO stops to hub. Stubbed against
-// resolve_fieldops_returns_v1; returns fallback envelope otherwise.
+// Returns — driver returns failed/RTO stops to hub, from
+// resolve_fieldops_returns_v1.
 // ---------------------------------------------------------------------------
 
 export interface UseFieldopsReturnsOptions {
@@ -2163,44 +2170,29 @@ function parseMobileV2ReturnsReturnedStop(row: unknown): MobileV2ReturnsRtoStop 
   return Object.freeze(stopId === null ? base : { ...base, stopId });
 }
 
-function parseMobileV2ReturnsFailedList(
-  value: unknown,
-  fallback: ReadonlyArray<MobileV2ReturnsStop>,
-): ReadonlyArray<MobileV2ReturnsStop> {
-  if (!Array.isArray(value)) return fallback;
-  if (value.length === 0) return Object.freeze([]);
-  const out = value
-    .map(parseMobileV2ReturnsFailedStop)
-    .filter((item): item is MobileV2ReturnsStop => item !== null);
+// #600: a non-list, or a non-empty list with no valid row, is malformed.
+function parseMobileV2ReturnsList<T>(value: unknown, parseRow: (row: unknown) => T | null): ReadonlyArray<T> {
+  if (!Array.isArray(value)) throw mobileV2MalformedPayload("resolve_fieldops_returns_v1");
+  const out = value.map(parseRow).filter((item): item is T => item !== null);
+  if (value.length > 0 && out.length === 0) throw mobileV2MalformedPayload("resolve_fieldops_returns_v1");
   return Object.freeze(out);
 }
 
-function parseMobileV2ReturnsReturnedList(
-  value: unknown,
-  fallback: ReadonlyArray<MobileV2ReturnsRtoStop>,
-): ReadonlyArray<MobileV2ReturnsRtoStop> {
-  if (!Array.isArray(value)) return fallback;
-  if (value.length === 0) return Object.freeze([]);
-  const out = value
-    .map(parseMobileV2ReturnsReturnedStop)
-    .filter((item): item is MobileV2ReturnsRtoStop => item !== null);
-  return Object.freeze(out);
-}
-
+// `_fallback` is unused since #600: a malformed live payload is an error,
+// never fixture returns. It stays so existing callers keep compiling.
 export function mapFieldopsReturnsEnvelope(
   raw: unknown,
-  fallback: MobileV2ReturnsEnvelope,
+  _fallback?: MobileV2ReturnsEnvelope,
 ): MobileV2ReturnsEnvelope {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return fallback;
-  const r = raw as Record<string, unknown>;
+  const r = asRecord(raw);
+  const codCollected = r === null ? null : parseFiniteNumber(r.cod_collected ?? r.cod_collected_sar);
+  if (r === null || codCollected === null) throw mobileV2MalformedPayload("resolve_fieldops_returns_v1");
   return Object.freeze({
-    failed: parseMobileV2ReturnsFailedList(r.failed, fallback.failed),
-    returned: parseMobileV2ReturnsReturnedList(r.returned, fallback.returned),
-    codCollected: parseFiniteNumber(r.cod_collected ?? r.cod_collected_sar) ?? fallback.codCollected,
-    currency:
-      typeof r.currency === "string" && r.currency.length > 0
-        ? r.currency
-        : fallback.currency,
+    failed: parseMobileV2ReturnsList(r.failed, parseMobileV2ReturnsFailedStop),
+    returned: parseMobileV2ReturnsList(r.returned, parseMobileV2ReturnsReturnedStop),
+    codCollected,
+    // An absent currency stays absent; the screen applies its display default.
+    ...(typeof r.currency === "string" && r.currency.length > 0 ? { currency: r.currency } : {}),
   });
 }
 
@@ -2226,35 +2218,28 @@ export function useFieldopsReturnsRpc(
   const ctx = useMobileV2Rpc();
   return useQuery<UseFieldopsReturnsOptions["fallback"], Error>({
     queryKey: ["mobile-v2", "returns", ctx.activeRole],
-    queryFn: async () => {
-      if (isPreviewMode(ctx.supabase)) return options.fallback;
-      const raw = await callRpc({
-        supabase: ctx.supabase,
+    ...fieldopsSurfaceQuery(ctx.supabase, options.fallback, async (supabase) =>
+      mapFieldopsReturnsEnvelope(await callRpc({
+        supabase,
         name: "resolve_fieldops_returns_v1",
         params: { p_active_role: ctx.activeRole, p_context: ctx.policyContext ?? {} },
-      });
-      return mapFieldopsReturnsEnvelope(raw, options.fallback);
-    },
+      }))),
   });
 }
 
 // ---------------------------------------------------------------------------
-// Hub pickup — counter staff queue. Stubbed against
-// resolve_fieldops_hub_pickup_v1; returns fallback queue otherwise.
+// Hub pickup — counter staff queue from resolve_fieldops_hub_pickup_v1.
 // ---------------------------------------------------------------------------
 
 export interface UseFieldopsHubPickupOptions {
   readonly fallback: ReadonlyArray<MobileV2HubPickupQueueItem>;
 }
 
-function parseHubPickupList(
-  raw: unknown,
-  fallback: ReadonlyArray<MobileV2HubPickupQueueItem>,
-): ReadonlyArray<MobileV2HubPickupQueueItem> {
+export function parseHubPickupList(raw: unknown): ReadonlyArray<MobileV2HubPickupQueueItem> {
   // P0 audit fix: shape-validate RPC payload before exposing to UI.
-  // Empty array is a legitimate "queue empty" state — only fall back
-  // when payload is malformed (not an array).
-  if (!Array.isArray(raw)) return fallback;
+  // Empty array is a legitimate "queue empty" state. A non-array, or rows
+  // that are all invalid, is a malformed payload (#600).
+  if (!Array.isArray(raw)) throw mobileV2MalformedPayload("resolve_fieldops_hub_pickup_v1");
   if (raw.length === 0) return Object.freeze([]);
   const out: MobileV2HubPickupQueueItem[] = [];
   for (const r of raw) {
@@ -2274,7 +2259,8 @@ function parseHubPickupList(
       }) as MobileV2HubPickupQueueItem,
     );
   }
-  return out.length > 0 ? Object.freeze(out) : fallback;
+  if (out.length === 0) throw mobileV2MalformedPayload("resolve_fieldops_hub_pickup_v1");
+  return Object.freeze(out);
 }
 
 export function useFieldopsHubPickupRpc(
@@ -2283,34 +2269,28 @@ export function useFieldopsHubPickupRpc(
   const ctx = useMobileV2Rpc();
   return useQuery<ReadonlyArray<MobileV2HubPickupQueueItem>, Error>({
     queryKey: ["mobile-v2", "hub-pickup", ctx.activeRole],
-    queryFn: async () => {
-      if (isPreviewMode(ctx.supabase)) return options.fallback;
-      const raw = await callRpc({
-        supabase: ctx.supabase,
+    ...fieldopsSurfaceQuery(ctx.supabase, options.fallback, async (supabase) =>
+      parseHubPickupList(await callRpc({
+        supabase,
         name: "resolve_fieldops_hub_pickup_v1",
         params: { p_active_role: ctx.activeRole, p_context: ctx.policyContext ?? {} },
-      });
-      return parseHubPickupList(raw, options.fallback);
-    },
+      }))),
   });
 }
 
 // ---------------------------------------------------------------------------
-// Hold queue — exceptions awaiting decision. Stubbed against
-// resolve_fieldops_hold_v1; returns fallback list otherwise.
+// Hold queue — exceptions awaiting decision, from resolve_fieldops_hold_v1.
 // ---------------------------------------------------------------------------
 
 export interface UseFieldopsHoldOptions {
   readonly fallback: ReadonlyArray<MobileV2HoldItem>;
 }
 
-function parseHoldList(
-  raw: unknown,
-  fallback: ReadonlyArray<MobileV2HoldItem>,
-): ReadonlyArray<MobileV2HoldItem> {
+export function parseHoldList(raw: unknown): ReadonlyArray<MobileV2HoldItem> {
   // P0 audit fix: shape-validate RPC payload before exposing to UI.
-  // Empty array is a legitimate "no exceptions" state.
-  if (!Array.isArray(raw)) return fallback;
+  // Empty array is a legitimate "no exceptions" state. A non-array, or
+  // rows that are all invalid, is a malformed payload (#600).
+  if (!Array.isArray(raw)) throw mobileV2MalformedPayload("resolve_fieldops_hold_v1");
   if (raw.length === 0) return Object.freeze([]);
   const validReasons = new Set(["addr", "damage", "wrong_route", "other"]);
   const out: MobileV2HoldItem[] = [];
@@ -2335,7 +2315,8 @@ function parseHoldList(
       }) as MobileV2HoldItem,
     );
   }
-  return out.length > 0 ? Object.freeze(out) : fallback;
+  if (out.length === 0) throw mobileV2MalformedPayload("resolve_fieldops_hold_v1");
+  return Object.freeze(out);
 }
 
 export function useFieldopsHoldRpc(
@@ -2344,16 +2325,13 @@ export function useFieldopsHoldRpc(
   const ctx = useMobileV2Rpc();
   return useQuery<ReadonlyArray<MobileV2HoldItem>, Error>({
     queryKey: ["mobile-v2", "hold", ctx.activeRole],
-    queryFn: async () => {
-      if (isPreviewMode(ctx.supabase)) return options.fallback;
-      const raw = await callRpc({
-        supabase: ctx.supabase,
+    ...fieldopsSurfaceQuery(ctx.supabase, options.fallback, async (supabase) =>
+      parseHoldList(await callRpc({
+        supabase,
         schema: "api",
         name: "resolve_fieldops_hold_v1",
         params: { p_active_role: ctx.activeRole, p_context: ctx.policyContext ?? {} },
-      });
-      return parseHoldList(raw, options.fallback);
-    },
+      }))),
   });
 }
 
@@ -2797,14 +2775,14 @@ export interface UseFieldopsLoaderTodayOptions {
  *
  * `raw` is the resolver's JSON response. Every loader-session/business
  * field is read honestly: a missing/NULL field degrades to a neutral
- * empty/zero value, NEVER to fixture business data. `fallback` supplies
- * only the row-defined quick-action navigation tiles when the resolver
- * omits them. Exported for direct unit testing of the E6 honest-degrade
- * contract without a react-query harness.
+ * empty/zero value, NEVER to fixture business data. Exported for direct
+ * unit testing of the E6 honest-degrade contract without a react-query
+ * harness. `_fallback` is unused since #600: showcase tiles come only
+ * from `fieldopsSurfaceQuery`; it stays so existing callers keep compiling.
  */
 export function mapFieldopsLoaderTodayEnvelope(
   raw: unknown,
-  fallback: MobileV2LoaderTodayEnvelope,
+  _fallback?: MobileV2LoaderTodayEnvelope,
 ): MobileV2LoaderTodayEnvelope {
   const r =
     raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
@@ -2831,12 +2809,11 @@ export function mapFieldopsLoaderTodayEnvelope(
     driversWaiting:
       typeof r.drivers_waiting === "number" ? r.drivers_waiting : 0,
     // Quick-action tiles are a row-defined navigation surface. #600: a
-    // resolver envelope without a tile list is malformed, so the section
-    // shows its error state (null), never the fixture tiles. A non-object
-    // payload never reaches here from a live read (the hook rejects it).
-    quickActions: raw !== null && typeof raw === "object"
-      ? (Array.isArray(r.quick_actions) ? (r.quick_actions as ReadonlyArray<MobileV2LoaderQuickAction>) : null)
-      : fallback.quickActions,
+    // missing or malformed tile list (or a non-object payload) gives the
+    // section its error state (null), never the fixture tiles.
+    quickActions: Array.isArray(r.quick_actions)
+      ? (r.quick_actions as ReadonlyArray<MobileV2LoaderQuickAction>)
+      : null,
     // An absent `drivers` key → empty list (honest "no queue"); only
     // fall back to [] (never the fixture queue).
     drivers: Array.isArray(r.drivers)
@@ -2849,7 +2826,7 @@ export function buildNeutralFieldopsLoaderTodayEnvelope(
   fallback: MobileV2LoaderTodayEnvelope,
 ): MobileV2LoaderTodayEnvelope {
   // #600: neutral means no fixture tiles either; null is the error state.
-  return Object.freeze({ ...mapFieldopsLoaderTodayEnvelope(null, fallback), quickActions: null });
+  return mapFieldopsLoaderTodayEnvelope(null, fallback);
 }
 
 export function useFieldopsLoaderTodayRpc(
@@ -2907,9 +2884,9 @@ export function useFieldopsLoaderTodayRpc(
 // "never hide mocks as production" contract.
 //
 // The honest contract is now binary, not per-field:
-//   - Preview mode (`supabase === null`) OR a genuinely-absent resolver
-//     (`isMissingRpcError`) → the typed fixture fallback, which is a
-//     legitimate showcase/offline sample.
+//   - Preview mode (`supabase === null`) → the typed fixture, a
+//     legitimate showcase sample. #600: in live mode an absent resolver
+//     or a non-object payload is an error state, never the fixture.
 //   - A real resolver envelope in production → its real fields pass
 //     through HONESTLY. `active: null` stays `null`; `online` / `rating`
 //     / `shiftDuration` stay false/0/"" when the resolver omits them;
@@ -2969,33 +2946,33 @@ export function mapFieldopsRiderTodayEnvelope(
   });
 }
 
+/**
+ * #600: the live read path. A non-object payload is malformed (an error
+ * state); a resolver envelope maps honestly. `fallback` supplies only the
+ * cosmetic currency label, as in `mapFieldopsRiderTodayEnvelope`.
+ */
+export function readFieldopsRiderTodayPayload(
+  raw: unknown,
+  fallback: MobileV2RiderTodayEnvelope,
+): MobileV2RiderTodayEnvelope {
+  if (asRecord(raw) === null) throw mobileV2MalformedPayload("resolve_fieldops_rider_today_v1");
+  return mapFieldopsRiderTodayEnvelope(raw, fallback);
+}
+
 export function useFieldopsRiderTodayRpc(
   options: UseFieldopsRiderTodayOptions,
 ): UseQueryResult<MobileV2RiderTodayEnvelope, Error> {
   const ctx = useMobileV2Rpc();
   return useQuery<MobileV2RiderTodayEnvelope, Error>({
     queryKey: ["mobile-v2", "rider-today", ctx.activeRole],
-    queryFn: async () => {
-      // Preview/showcase mode: the fixture is a legitimate sample.
-      if (isPreviewMode(ctx.supabase)) return options.fallback;
-      let raw: unknown;
-      try {
-        raw = await callRpc({
-          supabase: ctx.supabase,
-          name: "resolve_fieldops_rider_today_v1",
-          params: { p_active_role: ctx.activeRole, p_context: ctx.policyContext ?? {} },
-        });
-      } catch (error) {
-        // Resolver not migrated onto this DB yet — degrade to the typed
-        // fixture so the home screen renders. Any other error (RLS
-        // denial, network fault) re-throws for the error card.
-        if (isMissingRpcError(error)) return options.fallback;
-        throw error;
-      }
-      // A real resolver response — map it honestly. `active: null` stays
-      // null; the fixture never substitutes live gig business data.
-      return mapFieldopsRiderTodayEnvelope(raw, options.fallback);
-    },
+    // #600: a missing resolver is an error in live mode, like any other
+    // failed read; the fixture is a showcase sample only.
+    ...fieldopsSurfaceQuery(ctx.supabase, options.fallback, async (supabase) =>
+      readFieldopsRiderTodayPayload(await callRpc({
+        supabase,
+        name: "resolve_fieldops_rider_today_v1",
+        params: { p_active_role: ctx.activeRole, p_context: ctx.policyContext ?? {} },
+      }), options.fallback)),
   });
 }
 
@@ -3010,13 +2987,30 @@ export function useFieldopsRiderTodayRpc(
 // route_runs awaiting review + fieldops_v2_incidents — both canonical
 // tables — into the approvals queue. An empty queue is a legitimate
 // "no approvals" state and is preserved verbatim (NOT replaced by the
-// fixture). If the resolver is absent on a not-yet-migrated DB the hook
-// degrades to the typed fixture via `isMissingRpcError`; genuine RLS /
-// network failures still surface as an error card.
+// fixture). #600: in live mode an absent resolver, an RLS or network
+// failure, or a malformed payload surfaces as an error card; the fixture
+// is a showcase sample only.
 // ---------------------------------------------------------------------------
 
 export interface UseFieldopsSupervisorQueueOptions {
   readonly fallback: MobileV2SupervisorQueueEnvelope;
+}
+
+/**
+ * #600: `queue` is always a list (an empty list is "no pending
+ * approvals"); anything else is malformed. Absent labels stay empty.
+ */
+export function mapFieldopsSupervisorQueueEnvelope(raw: unknown): MobileV2SupervisorQueueEnvelope {
+  const r = asRecord(raw);
+  if (r === null || !Array.isArray(r.queue)) {
+    throw mobileV2MalformedPayload("resolve_fieldops_supervisor_queue_v1");
+  }
+  const queue = r.queue as ReadonlyArray<MobileV2SupervisorItem>;
+  return Object.freeze({
+    supervisorName: typeof r.supervisor_name === "string" ? r.supervisor_name : "",
+    queue,
+    activeId: typeof r.active_id === "string" ? r.active_id : queue[0]?.id ?? "",
+  });
 }
 
 export function useFieldopsSupervisorQueueRpc(
@@ -3025,38 +3019,14 @@ export function useFieldopsSupervisorQueueRpc(
   const ctx = useMobileV2Rpc();
   return useQuery<MobileV2SupervisorQueueEnvelope, Error>({
     queryKey: ["mobile-v2", "supervisor-queue", ctx.activeRole],
-    queryFn: async () => {
-      if (isPreviewMode(ctx.supabase)) return options.fallback;
-      let raw: unknown;
-      try {
-        raw = await callRpc({
-          supabase: ctx.supabase,
-          name: "resolve_fieldops_supervisor_queue_v1",
-          params: { p_active_role: ctx.activeRole, p_context: ctx.policyContext ?? {} },
-        });
-      } catch (error) {
-        if (isMissingRpcError(error)) return options.fallback;
-        throw error;
-      }
-      if (raw === null || typeof raw !== "object") return options.fallback;
-      const r = raw as Record<string, unknown>;
-      // An empty queue ([]) is a legitimate "no pending approvals"
-      // state — keep it. Only fall back when `queue` is absent entirely.
-      const queue = Array.isArray(r.queue)
-        ? (r.queue as ReadonlyArray<MobileV2SupervisorItem>)
-        : options.fallback.queue;
-      return Object.freeze({
-        supervisorName:
-          typeof r.supervisor_name === "string"
-            ? r.supervisor_name
-            : options.fallback.supervisorName,
-        queue,
-        activeId:
-          typeof r.active_id === "string"
-            ? r.active_id
-            : queue[0]?.id ?? options.fallback.activeId,
-      });
-    },
+    // #600: a missing resolver is an error in live mode; the fixture is a
+    // showcase sample only.
+    ...fieldopsSurfaceQuery(ctx.supabase, options.fallback, async (supabase) =>
+      mapFieldopsSupervisorQueueEnvelope(await callRpc({
+        supabase,
+        name: "resolve_fieldops_supervisor_queue_v1",
+        params: { p_active_role: ctx.activeRole, p_context: ctx.policyContext ?? {} },
+      }))),
   });
 }
 
