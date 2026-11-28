@@ -20,10 +20,10 @@ INSERT INTO credential_acl_cases VALUES
     'SELECT public.resolve_label_renderer_invoke_config_v1(NULL::uuid)', ARRAY['service_role','edge_label_renderer_role']),
   ('public.resolve_settings(text,text,uuid)',
     'SELECT public.resolve_settings(NULL::text,NULL::text,NULL::uuid)',
-    ARRAY['service_role','edge_api_caller_role','edge_api_gateway_role','edge_webhook_role','edge_label_renderer_role','label_renderer_role','geocoding_worker_role','ui_rpc_executor']),
+    ARRAY['service_role','edge_api_caller_role','edge_api_gateway_role','edge_webhook_role','edge_label_renderer_role','label_renderer_role','ui_rpc_executor']),
   ('public.resolve_settings_row(text,text,uuid)',
     'SELECT public.resolve_settings_row(NULL::text,NULL::text,NULL::uuid)',
-    ARRAY['service_role','edge_api_caller_role','edge_api_gateway_role','edge_webhook_role','edge_label_renderer_role','label_renderer_role','geocoding_worker_role','ui_rpc_executor']),
+    ARRAY['service_role','edge_api_caller_role','edge_api_gateway_role','edge_webhook_role','edge_label_renderer_role','label_renderer_role','ui_rpc_executor']),
   ('public.resolve_settings_merged(text,text,uuid)',
     'SELECT public.resolve_settings_merged(NULL::text,NULL::text,NULL::uuid)', ARRAY['service_role','label_renderer_role','edge_label_renderer_role']),
   ('api.resolve_settings_merged(text,text,uuid)',
@@ -82,6 +82,12 @@ SELECT ok(has_function_privilege(runtime_role, signature, 'EXECUTE'), runtime_ro
 FROM credential_acl_cases CROSS JOIN LATERAL unnest(runtime_roles) runtime_role
 JOIN pg_roles ON rolname = runtime_role
 ORDER BY signature, runtime_role;
+
+SELECT ok(NOT has_function_privilege('geocoding_worker_role', signature, 'EXECUTE'),
+          'retired geocoding_worker_role cannot execute ' || signature)
+FROM credential_acl_cases
+WHERE signature IN ('public.resolve_settings(text,text,uuid)', 'public.resolve_settings_row(text,text,uuid)')
+ORDER BY signature;
 
 SELECT ok(NOT has_function_privilege('service_role',
   'public.get_job_call_spec_without_ingress_vault_v1(uuid)', 'EXECUTE'),
