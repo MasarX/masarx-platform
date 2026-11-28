@@ -380,20 +380,26 @@ async function rehearse(report, persist, scratch) {
     });
 
     await phase('migration_hold_and_upgrade', async () => {
+      inProgress.operation = 'install_exact_hold';
       await db.query(hold);
-      await db.query("ALTER DATABASE postgres SET app.local_label_renderer_url = '" + invokeUrl + "'");
+      inProgress.operation = 'authorize_local_renderer_url';
+      await admin("ALTER DATABASE postgres SET app.local_label_renderer_url = '" + invokeUrl + "'");
+      inProgress.operation = 'replay_to_hold_window';
       await migrate(chosen[main], beforeTransportGate);
+      inProgress.operation = 'prove_held_leased_receipts';
       leased = await seed('leased');
       const held = await checkpoint('after_exact_hold_before_transport_gate');
       assert(held.filter(work => work.edgeJobId).every(work => work.queue.scheduled === 'infinity' && !work.queue.leased && work.queue.retries === 0),
         '#919 did not hold the original leased receipts');
       await dispatch(leased, 'job_not_claimable');
 
+      inProgress.operation = 'replay_remaining_migrations';
       await migrate(chosen[main]);
       assert((await db.query("SELECT to_regprocedure('public.hold_renderer_upgrade_job_v1()') IS NULL AS released")).rows[0].released,
         'The release migration did not remove the hold');
       await dispatch(leased, 'job_spec_invalid');
       await checkpoint('tagged_caller_deferred_after_hold_release');
+      delete inProgress.operation;
     });
 
     await phase('mixed_versions', async () => {
