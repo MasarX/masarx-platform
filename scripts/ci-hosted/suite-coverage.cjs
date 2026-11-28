@@ -141,10 +141,13 @@ function ciCoverage(files) {
 
   step('ui', 'SWEEP_LOCALE="$locale" node node_modules/@playwright/test/cli.js test -c scripts/ci-hosted/preview-sweep.config.cjs 2>&1 |');
   // Both locales list the same files, so these values only satisfy the pull request guard for listing.
-  addFiles(covered, playwrightFiles('scripts/ci-hosted/preview-sweep.config.cjs', {
+  const sweepEnv = {
     ...process.env, GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'pull_request', RUNNER_ENVIRONMENT: 'github-hosted',
     RUNNER_TEMP: os.tmpdir(), SWEEP_LOCALE: 'en',
-  }));
+  };
+  addFiles(covered, playwrightFiles('scripts/ci-hosted/preview-sweep.config.cjs', sweepEnv));
+  const journeyStep = step('ui', 'node node_modules/@playwright/test/cli.js test -c scripts/ci-hosted/preview-sweep.config.cjs 2>&1 |');
+  addFiles(covered, playwrightFiles('scripts/ci-hosted/preview-sweep.config.cjs', { ...sweepEnv, ...journeyStep.env }));
 
   for (const [suite, config] of Object.entries(browserSuites)) {
     const browser = step('e2e', 'node scripts/ci-hosted/tasks.cjs ' + suite);
