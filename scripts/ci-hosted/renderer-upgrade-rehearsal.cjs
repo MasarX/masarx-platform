@@ -428,6 +428,13 @@ async function rehearse(report, persist, scratch) {
       await checkpoint('tagged_bundles_restored', completed);
       await use(workers.map(() => main));
       await due(rollback);
+      // The migrated schema defaults dispatch to disabled until the local relay is configured.
+      await db.query(`SELECT public.upsert_settings_value_v1('edge_dispatch_policy', 'global', NULL,
+        jsonb_build_object('endpoint_url', $1::text, 'enabled', true), 1, 'Synthetic renderer rehearsal')`,
+      [bridgeUrl + '/functions/v1/api-caller']);
+      const { rows: [relay] } = await db.query('SELECT endpoint_matches, dispatch_enabled FROM public.outbound_wake_relay_state_v1()');
+      assert(relay.endpoint_matches && relay.dispatch_enabled, 'Local rollback recovery relay is disabled');
+      inProgress.relay = relay;
       const wake = await apiCall('outbound-wake', 'POST', {});
       assert.equal(wake.status, 202, 'Rollback recovery wake was not accepted');
       await wake.body?.cancel();
