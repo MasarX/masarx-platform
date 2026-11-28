@@ -40,7 +40,7 @@ ALTER TABLE public.contactless_pod_submissions ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.contactless_pod_submissions FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.contactless_pod_submissions TO postgres;
 CREATE POLICY contactless_pod_submissions_api_only ON public.contactless_pod_submissions
-  AS RESTRICTIVE FOR ALL TO service_role, anon, authenticated USING (FALSE) WITH CHECK (FALSE);
+  AS RESTRICTIVE FOR ALL TO service_role USING (FALSE) WITH CHECK (FALSE);
 
 INSERT INTO public.table_contracts (
   table_schema, table_name, created_at_required, updated_at_required, audit_enabled, notes
