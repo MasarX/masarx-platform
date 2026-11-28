@@ -65,12 +65,13 @@
       ],
       "allowed_changed_path_re": [
         "^scripts/deploy/apply-guard\\.cjs$",
-        "^tests/unit/ops/(?:dev-deploy-apply-guard(?:-retry)?|stg-deploy-(?:apply-guard|release-ref|workflow))\\.test\\.js$"
+        "^tests/unit/ops/(?:dev-deploy-(?:apply-guard(?:-retry)?|edge-outcome)|stg-deploy-(?:apply-guard|release-ref|workflow))\\.test\\.js$"
       ],
       "test_paths": [
         "tests/unit/ops/deploy-branch-refs.test.js",
         "tests/unit/ops/dev-deploy-apply-guard-retry.test.js",
         "tests/unit/ops/dev-deploy-apply-guard.test.js",
+        "tests/unit/ops/dev-deploy-edge-outcome.test.js",
         "tests/unit/ops/stg-deploy-apply-guard.test.js",
         "tests/unit/ops/stg-deploy-release-ref.test.js",
         "tests/unit/ops/stg-deploy-workflow.test.js"
