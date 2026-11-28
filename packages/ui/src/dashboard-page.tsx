@@ -1044,6 +1044,7 @@ export async function DashboardPage({
                             key={item.id}
                             className="block px-4 py-3 text-sm text-ui-ink transition hover:bg-ui-highlight/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-ui-surface"
                             href={itemHref}
+                            data-testid={`${testIdPrefix}-module-${item.id}`}
                           >
                             {content}
                           </a>
