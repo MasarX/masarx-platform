@@ -27,11 +27,20 @@ CREATE TABLE public.mid_route_stop_injections (
 );
 CREATE INDEX mid_route_stop_injections_pending_idx
   ON public.mid_route_stop_injections (route_id, injected_at DESC) WHERE acknowledged_at IS NULL;
+CREATE INDEX mid_route_stop_injections_route_idx ON public.mid_route_stop_injections (route_id);
+CREATE INDEX mid_route_stop_injections_stop_idx ON public.mid_route_stop_injections (stop_id);
 ALTER TABLE public.mid_route_stop_injections ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.mid_route_stop_injections FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE ON public.mid_route_stop_injections TO service_role;
 CREATE POLICY mid_route_stop_injections_service ON public.mid_route_stop_injections
   FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+
+INSERT INTO public.table_contracts (
+  table_schema, table_name, created_at_required, updated_at_required, audit_enabled, notes
+) VALUES (
+  'public', 'mid_route_stop_injections', FALSE, FALSE, FALSE,
+  'Service-only offer ledger with explicit injection and acknowledgement timestamps.'
+);
 
 CREATE FUNCTION api.pending_mid_route_stops_v1(p_route_id uuid)
 RETURNS TABLE (stop_id uuid, injected_at timestamptz, "position" jsonb, reason text)

@@ -51,7 +51,9 @@ BEGIN
     'idempotency_key', 'signing-fixture-' || org::text
   )) result;
   PERFORM public.assign_task_v1(task, driver);
-  PERFORM public.transition_task_v1(task, 'assigned', NULL, '{}'::jsonb, 'signing-assign-' || org::text);
+  PERFORM public.transition_task_system_v1(
+    task, 'assigned', p_actor_system => 'dispatch_engine', p_idempotency_key => 'signing-assign-' || org::text
+  );
   RETURN NEXT;
 END;
 $$;

@@ -33,11 +33,21 @@ CREATE TABLE public.contactless_pod_submissions (
   signature_artifact_id uuid REFERENCES public.artifacts(id) ON DELETE SET NULL
 );
 CREATE INDEX contactless_pod_submissions_task_idx ON public.contactless_pod_submissions (task_id, created_at DESC);
+CREATE INDEX contactless_pod_submissions_org_idx ON public.contactless_pod_submissions (organization_id);
+CREATE INDEX contactless_pod_submissions_issuer_idx ON public.contactless_pod_submissions (issued_by);
+CREATE INDEX contactless_pod_submissions_artifact_idx ON public.contactless_pod_submissions (signature_artifact_id);
 ALTER TABLE public.contactless_pod_submissions ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.contactless_pod_submissions FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.contactless_pod_submissions TO postgres;
 CREATE POLICY contactless_pod_submissions_api_only ON public.contactless_pod_submissions
-  AS RESTRICTIVE FOR ALL TO PUBLIC USING (FALSE) WITH CHECK (FALSE);
+  AS RESTRICTIVE FOR ALL TO service_role, anon, authenticated USING (FALSE) WITH CHECK (FALSE);
+
+INSERT INTO public.table_contracts (
+  table_schema, table_name, created_at_required, updated_at_required, audit_enabled, notes
+) VALUES (
+  'public', 'contactless_pod_submissions', TRUE, FALSE, FALSE,
+  'Private signing receipts use explicit lifecycle timestamps and hold sensitive signing metadata.'
+);
 
 CREATE FUNCTION public.contactless_pod_signing_origin_v1(p_origin text, p_tenant_enabled boolean)
 RETURNS text LANGUAGE sql IMMUTABLE
