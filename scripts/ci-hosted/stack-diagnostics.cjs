@@ -1,5 +1,7 @@
 'use strict';
 const fs = require('node:fs');
+const { spawn } = require('node:child_process');
+const { createInterface } = require('node:readline');
 const { run } = require('./process.cjs');
 const { sanitize, environmentSecrets, outputTail } = require('./diagnostics.cjs');
 
@@ -41,8 +43,47 @@ async function captureDatabaseLog({ project, env, logFile, execute = run }) {
   }
 }
 
-async function captureIntegrationEdge({ project, env, since, execute = run }) {
-  const services = { edge: `supabase_edge_runtime_${project}`, gateway: `supabase_kong_${project}` };
+const integrationServices = project => ({ edge: `supabase_edge_runtime_${project}`, gateway: `supabase_kong_${project}` });
+const eventFilters = ['--filter', 'type=container', '--filter', 'type=network', '--format', '{{json .}}'];
+const eventLimit = 60;
+
+function integrationLifecycleEvent(project, ids = new Map()) {
+  const names = new Map(Object.entries(integrationServices(project)).map(([service, name]) => [name, service]));
+  const actions = /^(?:create|start|restart|die|oom|kill|stop|destroy|connect|disconnect|health_status: (?:starting|healthy|unhealthy))$/;
+  return ({ Type, Actor, Action, time }) => {
+    const service = Type === 'network' ? ids.get(Actor?.Attributes?.container) : names.get(Actor?.Attributes?.name);
+    if (!service || !actions.test(Action) || !Number.isInteger(time)) return [];
+    if (Type === 'container' && Actor.ID) ids.set(Actor.ID, service);
+    const exitCode = Actor.Attributes?.exitCode;
+    return [{ service, action: Action, time, ...(Action === 'die' && /^\d{1,3}$/.test(exitCode) ? { exitCode: Number(exitCode) } : {}) }];
+  };
+}
+
+function observeIntegrationEdgeLifecycle({ project, env, since, launch = spawn }) {
+  // Docker retains only 256 historical events across the daemon, including the pgTAP clients.
+  const child = launch('docker', ['events', '--since', since, ...eventFilters], { env, stdio: ['ignore', 'pipe', 'ignore'] });
+  const classify = integrationLifecycleEvent(project);
+  const lifecycle = [];
+  let partial = false;
+  let stopping = false;
+  createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', line => {
+    try {
+      lifecycle.push(...classify(JSON.parse(line)));
+      if (lifecycle.length > eventLimit) lifecycle.shift();
+    } catch { partial = true; }
+  });
+  const result = new Promise(resolve => {
+    child.once('error', () => { partial = true; });
+    child.once('close', () => resolve({ lifecycle, lifecycleCapture: stopping && !partial ? 'live' : 'partial' }));
+  });
+  return () => {
+    if (!stopping && child.exitCode === null && child.signalCode === null) stopping = child.kill();
+    return result;
+  };
+}
+
+async function captureIntegrationEdge({ project, env, since, stopEvents, execute = run }) {
+  const services = integrationServices(project);
   const options = { env, timeout: 5000, quiet: true, printQuietFailure: false };
   const capture = async (args, parse) => {
     try { return parse(await execute('docker', args, { ...options, includeStderr: args[0] === 'logs' })); }
@@ -57,6 +98,10 @@ async function captureIntegrationEdge({ project, env, since, execute = run }) {
       ['memory_limit', /out of memory|memory limit|allocation failed|WORKER_RESOURCE_LIMIT/i],
       ['panic', /panicked at|fatal runtime error/i],
       ['worker_shutdown', /worker.{0,40}(?:shutdown|terminated|evicted)/i],
+      ['cache_open_failed', /Could not initialize cache database .*(?:CannotOpen|unable to open (?:the )?database file)/i],
+      ['cache_contention', /Could not initialize cache database .*(?:DatabaseBusy|DatabaseLocked|database is locked)/i],
+      ['cache_replacement', /Could not initialize cache database .*deleting and retrying/i],
+      ['bus_error', /\bSIGBUS\b|\bbus error\b/i],
     ],
     gateway: [
       ['dns_failure', /name resolution failed|dns server error|could not resolve/i],
@@ -69,35 +114,27 @@ async function captureIntegrationEdge({ project, env, since, execute = run }) {
   };
   // Keep timestamps and fixed classifications. Request bodies, URLs and daemon metadata stay out of the report.
   const logs = service => capture(['logs', '--tail', '200', '--timestamps', services[service]], raw => raw.trim().split(/\r?\n/)
-    .filter(line => service === 'edge' || /\/functions\/v1\/label-renderer\b/.test(line))
+    .filter(line => service === 'edge' || /\/functions\/v1\/(?:label-renderer|webhook-receiver)\b/.test(line))
     .flatMap(line => rules[service].filter(([, pattern]) => pattern.test(line))
       .map(([kind]) => ({ at: timestamp(line.split(' ', 1)[0]), kind }))).slice(-30));
   const until = new Date().toISOString();
   const [edge, gateway, edgeLogs, gatewayLogs, events] = await Promise.all([
     state('edge'), state('gateway'), logs('edge'), logs('gateway'),
-    capture(['events', '--since', since, '--until', until, '--filter', 'type=container', '--filter', 'type=network',
-      '--format', '{{json .}}'], raw => raw.trim().split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line))),
+    stopEvents ? undefined : capture(['events', '--since', since, '--until', until, ...eventFilters],
+      raw => raw.trim().split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line))),
   ]);
   const networkIds = row => Object.values(row?.networks ?? {}).filter(network => network.EndpointID).map(network => network.NetworkID);
   const describe = row => row && ({ status: row.state.Status, running: row.state.Running, restarting: row.state.Restarting, oomKilled: row.state.OOMKilled,
     exitCode: row.state.ExitCode, restarts: row.restarts, health: row.state.Health?.Status ?? 'none',
     startedAt: timestamp(row.state.StartedAt), finishedAt: timestamp(row.state.FinishedAt), networkCount: networkIds(row).length });
-  const names = new Map(Object.entries(services).map(([service, name]) => [name, service]));
   const ids = new Map([[edge?.id, 'edge'], [gateway?.id, 'gateway']].filter(([id]) => id));
-  for (const event of events ?? []) {
-    const service = names.get(event.Actor?.Attributes?.name);
-    if (event.Type === 'container' && service) ids.set(event.Actor.ID, service);
-  }
-  const actions = /^(?:create|start|restart|die|oom|kill|stop|destroy|connect|disconnect|health_status: (?:starting|healthy|unhealthy))$/;
-  const lifecycle = events?.flatMap(({ Type, Actor, Action, time }) => {
-    const service = Type === 'network' ? ids.get(Actor?.Attributes?.container) : names.get(Actor?.Attributes?.name);
-    if (!service || !actions.test(Action) || !Number.isInteger(time)) return [];
-    const exitCode = Actor.Attributes?.exitCode;
-    return [{ service, action: Action, time, ...(Action === 'die' && /^\d{1,3}$/.test(exitCode) ? { exitCode: Number(exitCode) } : {}) }];
-  }).slice(-60) ?? null;
+  const history = stopEvents ? await stopEvents() : {
+    lifecycle: events?.flatMap(integrationLifecycleEvent(project, ids)).slice(-eventLimit) ?? null,
+    lifecycleCapture: events ? 'history' : 'unavailable',
+  };
   return { since, until, edge: describe(edge), gateway: describe(gateway),
     sharedNetwork: edge && gateway ? networkIds(edge).some(id => networkIds(gateway).includes(id)) : null,
-    lifecycle, edgeLogs, gatewayLogs };
+    ...history, edgeLogs, gatewayLogs };
 }
 
 async function collectStackDiagnostics({ project, env, dockerRoot, imagePolicy = {}, logFile, execute = run }) {
@@ -154,4 +191,5 @@ async function collectStackDiagnostics({ project, env, dockerRoot, imagePolicy =
   return report;
 }
 
-module.exports = { captureDatabaseLog, captureIntegrationEdge, collectStackDiagnostics, imagePrefix, belongsToStack, isHostedPgtap, needsHostedDatabaseInit };
+module.exports = { captureDatabaseLog, captureIntegrationEdge, observeIntegrationEdgeLifecycle, collectStackDiagnostics,
+  imagePrefix, belongsToStack, isHostedPgtap, needsHostedDatabaseInit };
