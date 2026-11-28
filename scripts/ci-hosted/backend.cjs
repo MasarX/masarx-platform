@@ -9,7 +9,8 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { targetFile, git } = require('./target-policy.cjs');
 const { sanitize, environmentSecrets } = require('./diagnostics.cjs');
 const { run, stage, writeReport } = require('./process.cjs');
-const { captureDatabaseLog, captureIntegrationEdge, collectStackDiagnostics, isHostedPgtap, needsHostedDatabaseInit } = require('./stack-diagnostics.cjs');
+const { captureDatabaseLog, captureIntegrationEdge, observeIntegrationEdgeLifecycle, collectStackDiagnostics,
+  isHostedPgtap, needsHostedDatabaseInit } = require('./stack-diagnostics.cjs');
 const { shardFiles, shardEnvironment, shardResults, hostedBatches } = require('./pgtap.cjs');
 const { integrationEdgeEnvironment, integrationFunctionConfig, integrationShardFiles, integrationCoverage,
   exceptionFile, restoreIntegrationDatabase, runIntegration } = require('./integration.cjs');
@@ -580,6 +581,7 @@ async function qualify(diagnostic) {
     QA_RUN_ID: '', NX_DAEMON: 'false', PATH: `${bin}${path.delimiter}${process.env.PATH}` };
   const cli = path.join(bin, 'supabase');
   let started = false; let guard; let cliEnv = env; let dockerRoot; let integrationStackStartedAt;
+  let stopIntegrationEdgeEvents;
   const summary = { stages: [], sha: process.env.GITHUB_SHA || 'unknown', migrations: 0, pgtap: 'NOT_RUN',
     ...(shard ? { shard, selected, files: [] } : {}),
     integration: disposableShard ? 'NOT_RUN' : 'DEFERRED_TO_HOSTED_SHARDS',
@@ -642,17 +644,18 @@ async function qualify(diagnostic) {
     summary.stackPorts = await hostedStackPorts(canBindPort, disposableShard);
     const { apiPort, dbPort, mailPort } = summary.stackPorts;
     const edge = disposableShard ? integrationEdgeEnvironment(apiPort) : undefined;
+    const edgeRuntimeEnv = edge && { ...edge.vars, RUST_LOG: 'info,deno::cache::cache_db=trace' };
     if (edge) {
       Object.assign(env, edge.vars);
       // The Edge worker reaches Kong on the stack network.
-      cliEnv = { ...cliEnv, ...edge.vars, EDGE_SUPABASE_URL: 'http://kong:8000',
+      cliEnv = { ...cliEnv, ...edgeRuntimeEnv, EDGE_SUPABASE_URL: 'http://kong:8000',
         SUPABASE_AUTH_JWT_SECRET: edge.jwtSecret };
     }
     writeHostedStackConfig(temp, project, summary.stackPorts, major, [
       'site_url = "http://127.0.0.1:3001"',
       ...(edge ? ['jwt_secret = "env(SUPABASE_AUTH_JWT_SECRET)"',
         '[edge_runtime]', 'enabled = true', 'policy = "per_worker"', 'deno_version = 2',
-        '[edge_runtime.secrets]', ...Object.keys(edge.vars).map(name => `${name} = "env(${name})"`),
+        '[edge_runtime.secrets]', ...Object.keys(edgeRuntimeEnv).map(name => `${name} = "env(${name})"`),
         ...integrationFunctionConfig(), '[local_smtp]', 'enabled = true', `port = ${mailPort}`] : []),
     ]);
     const startStack = (name, excludedServices) => {
@@ -765,6 +768,7 @@ async function qualify(diagnostic) {
         await timed('integration-stack-stop', () => checked(cli, ['stop', '--workdir', temp], cliEnv, 120000));
         const integrationExclude = lane.exclude.filter(service => !Object.hasOwn(integrationImages, service));
         integrationStackStartedAt = new Date().toISOString();
+        stopIntegrationEdgeEvents = observeIntegrationEdgeLifecycle({ project, env, since: integrationStackStartedAt });
         await startStack('integration-stack-start', integrationExclude);
         await timed('integration-database-init', () => verifyHostedDatabaseInit(checked, env, databaseContainer));
       }
@@ -843,7 +847,8 @@ async function qualify(diagnostic) {
     if (guard && fs.existsSync(guard.policyFile)) diagnostic.imagePolicy = { ...diagnostic.imagePolicy, ...JSON.parse(fs.readFileSync(guard.policyFile, 'utf8')) };
     saveFailure(diagnostic, error, environmentSecrets(env)); // Persist before stack teardown and temporary-file removal.
     if (summary.integration === 'failed') {
-      diagnostic.integrationEdge = await captureIntegrationEdge({ project, env, since: integrationStackStartedAt }).catch(() => null);
+      diagnostic.integrationEdge = await captureIntegrationEdge({ project, env, since: integrationStackStartedAt,
+        stopEvents: stopIntegrationEdgeEvents }).catch(() => null);
       console.log(`Integration Edge diagnostics: ${JSON.stringify(diagnostic.integrationEdge)}`);
       saveFailure(diagnostic, error, environmentSecrets(env));
     } else if (started && ['stack-start', 'integration-stack-start'].includes(diagnostic.stage)) {
@@ -858,6 +863,7 @@ async function qualify(diagnostic) {
     if (started && (!summary.ok || diagnostic.failure)) {
       await captureDatabaseLog({ project, env, logFile: 'ci-reports/postgres-server.log' });
     }
+    await stopIntegrationEdgeEvents?.();
     // Each pgTAP job on a GitHub-hosted runner owns a disposable VM.
     if (started && disposableShard) console.log('Stack stop delegated to GitHub-hosted VM teardown');
     if (started && !disposableShard) {
