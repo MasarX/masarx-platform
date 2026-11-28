@@ -35,7 +35,8 @@ export interface MobileV2TodayActiveStop {
   readonly sla: string;
   readonly cod: number;
   readonly fragile: boolean;
-  readonly parcels: number;
+  /** Omitted when the live route read carries no parcel count. */
+  readonly parcels?: number;
 }
 
 export interface MobileV2TodayScreenProps {
@@ -46,7 +47,8 @@ export interface MobileV2TodayScreenProps {
   readonly failed: number;
   readonly slaRisk: number;
   readonly etaFinish: string;
-  readonly distanceKm: number;
+  /** `null` when no live distance is known; the screen shows a dash. */
+  readonly distanceKm: number | null;
   readonly codExpected: number;
   readonly codCurrency: string;
   readonly blockers: ReadonlyArray<MobileV2TodayPreShiftBlocker>;
@@ -56,6 +58,12 @@ export interface MobileV2TodayScreenProps {
   readonly onContinueStop?: (stopId: string) => void;
   readonly style?: StyleProp<ViewStyle>;
 }
+
+/** The Today values one route read supplies (#600: live, or the showcase fixture). */
+export type MobileV2TodaySummary = Pick<
+  MobileV2TodayScreenProps,
+  "done" | "total" | "pending" | "failed" | "slaRisk" | "etaFinish" | "distanceKm" | "codExpected" | "codCurrency" | "activeStop"
+>;
 
 export function MobileV2TodayScreen(props: MobileV2TodayScreenProps): React.ReactElement {
   const { theme } = props;
@@ -185,7 +193,7 @@ export function MobileV2TodayScreen(props: MobileV2TodayScreenProps): React.Reac
                 ETA finish
               </Text>
               <Text style={{ fontSize: 14, fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold, fontFamily: MOBILE_V2_FONT_MONO, color: theme.onChrome }}>
-                {props.etaFinish}
+                {props.etaFinish === "" ? "—" : props.etaFinish}
               </Text>
             </FxCol>
             <FxCol gap={2}>
@@ -193,7 +201,7 @@ export function MobileV2TodayScreen(props: MobileV2TodayScreenProps): React.Reac
                 Distance
               </Text>
               <Text style={{ fontSize: 14, fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold, fontFamily: MOBILE_V2_FONT_MONO, color: theme.onChrome }}>
-                {props.distanceKm} km
+                {props.distanceKm === null ? "—" : `${props.distanceKm} km`}
               </Text>
             </FxCol>
             <FxCol gap={2}>
@@ -301,9 +309,11 @@ export function MobileV2TodayScreen(props: MobileV2TodayScreenProps): React.Reac
                     Fragile
                   </FxChip>
                 ) : null}
-                <FxChip theme={theme} tone="neutral" dense mono>
-                  {props.activeStop.parcels}× parcel
-                </FxChip>
+                {props.activeStop.parcels !== undefined ? (
+                  <FxChip theme={theme} tone="neutral" dense mono>
+                    {props.activeStop.parcels}× parcel
+                  </FxChip>
+                ) : null}
               </FxRow>
             </FxCard>
           </Pressable>

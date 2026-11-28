@@ -71,12 +71,24 @@ export interface MobileV2MoreScreenProps {
   readonly userBadge: string;
   /** #600: set while the live profile read loads or has failed; the card shows it instead of an identity. */
   readonly identityState?: MobileV2MoreIdentityState;
+  /** #600: set when the shell gave no device state; sync and outbox show it instead of values. */
+  readonly deviceStateUnknownLabel?: string;
   readonly style?: StyleProp<ViewStyle>;
 }
 
 export type MobileV2MoreIdentityState =
   | { readonly kind: "loading"; readonly label: string }
   | { readonly kind: "error"; readonly message: string; readonly retryLabel: string; readonly onRetry: () => void };
+
+/** #600: the drawer header shows the profile read's loading or error state, never a stale or demo name. */
+export function resolveMobileV2DrawerIdentity(
+  name: string,
+  badge: string,
+  state: MobileV2MoreIdentityState | undefined,
+): { readonly name: string; readonly employeeId?: string } {
+  if (state === undefined) return { name, employeeId: badge };
+  return { name: state.kind === "loading" ? state.label : state.message };
+}
 
 const SECTION_HEAD_STYLE = {
   fontSize: 10,
@@ -97,7 +109,10 @@ export function MobileV2MoreScreen(props: MobileV2MoreScreenProps): React.ReactE
     inFlightCount > 0 ? `${inFlightCount} in-flight` : null,
     failedCount > 0 ? `${failedCount} failed` : null,
   ].filter((segment): segment is string => segment !== null);
-  const outboxLabel = outboxSegments.length > 0 ? outboxSegments.join(" · ") : "clear";
+  const outboxLabel = props.deviceStateUnknownLabel
+    ?? (outboxSegments.length > 0 ? outboxSegments.join(" · ") : "clear");
+  const syncLabel = props.deviceStateUnknownLabel ?? (props.online ? "Online" : "Offline");
+  const statusDot = props.deviceStateUnknownLabel !== undefined ? "pending" : props.online ? "current" : "failed";
   const supportActionHandlers: Readonly<Record<MobileV2MoreSupportActionId, (() => void) | undefined>> = {
     "report-incident": props.onOpenIncident,
     diagnostics: props.onOpenDiagnostics,
@@ -181,14 +196,14 @@ export function MobileV2MoreScreen(props: MobileV2MoreScreenProps): React.ReactE
               </Text>
             </FxCol>
             )}
-            <FxStatusDot theme={theme} kind={props.online ? "current" : "failed"} size={10} />
+            <FxStatusDot theme={theme} kind={statusDot} size={10} />
           </FxRow>
         </FxCard>
 
         {/* Sync / outbox */}
         <FxCol gap={MOBILE_V2_SPACING.md}>
           <Text style={[SECTION_HEAD_STYLE, { color: theme.muted }]}>
-            Sync · {props.online ? "Online" : "Offline"}
+            Sync · {syncLabel}
           </Text>
           <FxCard theme={theme} padding={14}>
             <FxRow justify="space-between" align="center" gap={MOBILE_V2_SPACING.md}>

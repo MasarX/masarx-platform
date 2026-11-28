@@ -52,6 +52,16 @@ export const MOBILE_V2_PREVIEW_CONNECTIVITY: MobileV2Connectivity = Object.freez
 });
 
 /**
+ * #600: connectivity when a live caller passes none. Unknown network
+ * state fails closed to offline, and nothing is claimed as queued.
+ */
+export const MOBILE_V2_UNKNOWN_CONNECTIVITY: MobileV2Connectivity = Object.freeze({
+  online: false,
+  queueCount: 0,
+  syncing: false,
+});
+
+/**
  * Minimal shape of an `expo-network` state object. Kept structural so
  * this module does not import `expo-network` (which is native-only and
  * would break the RN-free jest unit runner). `MobileV2NativeShell`

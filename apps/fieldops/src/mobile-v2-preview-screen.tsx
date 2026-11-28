@@ -302,6 +302,7 @@ import {
 import { MobileV2ListStateView } from "./mobile-v2-list-state-view";
 import {
   MobileV2MoreScreen,
+  resolveMobileV2DrawerIdentity,
   type MobileV2DriverShiftPanel,
   type MobileV2LoaderSessionPanel,
   type MobileV2MoreIdentityState,
@@ -453,6 +454,7 @@ import {
 } from "./mobile-v2-rpc-hooks";
 import {
   MOBILE_V2_PREVIEW_CONNECTIVITY,
+  MOBILE_V2_UNKNOWN_CONNECTIVITY,
   buildMobileV2Connectivity,
   projectMobileV2OutboxEntries,
   projectMobileV2SyncQueueEntries,
@@ -460,7 +462,11 @@ import {
   type MobileV2RawOutboxSyncEntry,
 } from "./mobile-v2-connectivity";
 
-import { MobileV2IncidentSheet, type MobileV2IncidentType } from "./mobile-v2-sheet-incident";
+import {
+  MobileV2IncidentSheet,
+  resolveMobileV2IncidentTypesState,
+  type MobileV2IncidentType,
+} from "./mobile-v2-sheet-incident";
 import {
   MobileV2DamageHoldSheet,
   type MobileV2DamageHoldPhotoCapture,
@@ -538,6 +544,8 @@ const EMPTY_MOBILE_V2_COD_LEDGER_STOPS: ReadonlyArray<MobileV2CodLedgerStop> = O
 const EMPTY_MOBILE_V2_TASKS: ReadonlyArray<MobileV2Task> = Object.freeze([]);
 const EMPTY_MOBILE_V2_ROUTE_ROWS: ReadonlyArray<MobileV2RouteStop> = Object.freeze([]);
 const EMPTY_MOBILE_V2_INCIDENT_TYPES: ReadonlyArray<MobileV2IncidentType> = Object.freeze([]);
+const EMPTY_MOBILE_V2_OUTBOX: ReadonlyArray<MobileV2MoreOutboxEntry> = Object.freeze([]);
+const EMPTY_MOBILE_V2_SYNC_QUEUE: ReadonlyArray<MobileV2SyncEntry> = Object.freeze([]);
 // Name and badge are empty, never the showcase identity.
 const EMPTY_MOBILE_V2_PROFILE: MobileV2ProfileEnvelope = Object.freeze({ name: "", badge: "" });
 const EMPTY_MOBILE_V2_PICKUPS: ReadonlyArray<MobileV2Pickup> = Object.freeze([]);
@@ -797,11 +805,16 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
   // B3 fix: connectivity is REAL in the native shell (props.connectivity
   // wired from device network + outbox) and a fixed design-rehearsal
   // value in the `?v2=preview` showcase (no props → preview fallback).
-  const connectivity = props.connectivity ?? MOBILE_V2_PREVIEW_CONNECTIVITY;
+  // #600: a live caller that passes no device state shows it as unknown
+  // (fail-closed offline, nothing queued), never the showcase rehearsal.
+  const deviceStateUnknown = !isShowcase && (props.connectivity === undefined || props.outboxEntries === undefined);
+  const connectivity = props.connectivity
+    ?? (isShowcase ? MOBILE_V2_PREVIEW_CONNECTIVITY : MOBILE_V2_UNKNOWN_CONNECTIVITY);
   const online = connectivity.online;
   const queueCount = connectivity.queueCount;
-  const outboxEntries = props.outboxEntries ?? MOBILE_V2_PREVIEW_MORE_OUTBOX;
-  const syncQueueEntries = props.syncQueueEntries ?? MOBILE_V2_PREVIEW_SYNC_QUEUE.queue;
+  const outboxEntries = props.outboxEntries ?? (isShowcase ? MOBILE_V2_PREVIEW_MORE_OUTBOX : EMPTY_MOBILE_V2_OUTBOX);
+  const syncQueueEntries = props.syncQueueEntries
+    ?? (isShowcase ? MOBILE_V2_PREVIEW_SYNC_QUEUE.queue : EMPTY_MOBILE_V2_SYNC_QUEUE);
   const syncQueueConnectivity: MobileV2SyncConnectivity = connectivity.syncing
     ? "syncing"
     : online
@@ -906,6 +919,8 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
       routeId: MOBILE_V2_PREVIEW_ROUTE.mapRouteId,
       routeRunId: null,
       manifestSummary: null,
+      currency: MOBILE_V2_PREVIEW_ROUTE.currency,
+      today: MOBILE_V2_PREVIEW_TODAY,
     },
     preferredTaskId: isMobileV2PersistedUuid(activeStopId) ? activeStopTaskId : null,
     query: { staleTime: MOBILE_V2_TAB_FLOW_REFETCH_STALE_MS },
@@ -968,7 +983,8 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
     [routeRows, routeRpc.data?.routeId],
   );
   const [routeSearch, setRouteSearch] = React.useState("");
-  const [routeDensity, setRouteDensity] = React.useState(MOBILE_V2_PREVIEW_ROUTE.density);
+  // #600: live mode starts from the driver's display-density preference.
+  const [routeDensity, setRouteDensity] = React.useState(isShowcase ? MOBILE_V2_PREVIEW_ROUTE.density : ctx.density);
   const [mapFollow, setMapFollow] = React.useState(true);
   const [mapTraffic, setMapTraffic] = React.useState(true);
   // ---------------------------------------------------------------------
@@ -1315,8 +1331,9 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
   const onboardingReadbackRpc = useFieldopsOnboardingReadbackRpc({
     shiftId: preShiftShiftId,
   });
+  // #600: live checklists start unanswered; only the showcase pre-fills.
   const [cleaningCheckedIds, setCleaningCheckedIds] = React.useState<ReadonlyArray<string>>(
-    () => MOBILE_V2_PREVIEW_CLEANING.checkedIds,
+    () => (isShowcase ? MOBILE_V2_PREVIEW_CLEANING.checkedIds : []),
   );
   const [cleaningPhotoArtifact, setCleaningPhotoArtifact] =
     React.useState<MobileV2PodCapturedArtifact | null>(null);
@@ -1355,7 +1372,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
   const [vehiclePhotosVerifiedReadback, setVehiclePhotosVerifiedReadback] =
     React.useState<MobileV2OnboardingVehiclePhotosReadback | null>(null);
   const [preShiftHealthOk, setPreShiftHealthOk] = React.useState(
-    MOBILE_V2_PREVIEW_PRE_SHIFT.healthOk,
+    isShowcase ? MOBILE_V2_PREVIEW_PRE_SHIFT.healthOk : false,
   );
   const [preShiftReadbackPending, setPreShiftReadbackPending] = React.useState(false);
   const [preShiftReadbackError, setPreShiftReadbackError] = React.useState<string | null>(null);
@@ -1527,6 +1544,10 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
     preShiftHealthOk,
     preShiftShiftId,
   ]);
+  const liveTodayBlockers = React.useMemo(
+    () => livePreShiftBlockers.map((b) => ({ key: b.id, title: b.title })),
+    [livePreShiftBlockers],
+  );
   const SAMPLE_EOR = MOBILE_V2_PREVIEW_EOR;
   const eorRpc = useFieldopsEorRpc({ fallback: SAMPLE_EOR, routeRunId: activeRouteRunId });
   const liveEor = eorRpc.data ?? EMPTY_MOBILE_V2_EOR;
@@ -4000,6 +4021,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
 
   const routeReadErrors: Readonly<Record<string, unknown>> = {
     "mobile-tasks": tasksRpc.error,
+    "mobile-today": routeRpc.error,
     "mobile-route": routeRpc.error,
     "mobile-map": routeRpc.error,
     "mobile-cod-ledger": routeRpc.error,
@@ -4210,7 +4232,9 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                                   : activeTabId === "mobile-trips"
                                     ? "Line-haul · inter-hub"
                                     : activeTabId === "mobile-outbox"
-                                      ? `${outboxEntries.length > 0 ? `${outboxEntries.length} active` : `${queueCount} queued`} · ${online ? "online" : "offline"}`
+                                      ? deviceStateUnknown
+                                        ? strings.liveReads.deviceStateUnknown
+                                        : `${outboxEntries.length > 0 ? `${outboxEntries.length} active` : `${queueCount} queued`} · ${online ? "online" : "offline"}`
                                       : activeTabId === "mobile-more"
                                       ? "Settings · support tools"
                                       // F1: loader / rider / supervisor home subtitles.
@@ -4493,6 +4517,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
             // `?v2=preview` showcase has no live outbox so it uses the
             // design-rehearsal fixture (visual baseline unchanged).
             outbox={outboxEntries}
+            deviceStateUnknownLabel={deviceStateUnknown ? strings.liveReads.deviceStateUnknown : undefined}
             userName={profile.name}
             userBadge={profile.badge}
             identityState={profileIdentityState}
@@ -4533,7 +4558,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
             theme={ctx.theme}
             queue={syncQueueEntries}
             connectivity={syncQueueConnectivity}
-            lastSyncMs={props.lastSyncMs ?? MOBILE_V2_PREVIEW_SYNC_QUEUE.lastSyncMs}
+            lastSyncMs={props.lastSyncMs ?? (isShowcase ? MOBILE_V2_PREVIEW_SYNC_QUEUE.lastSyncMs : null)}
             onFlushNow={handleManualSync}
           />
         ) : activeTabId === "mobile-loader-today" ? (
@@ -5410,7 +5435,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
               items={liveCleaningItems}
               checkedIds={cleaningCheckedIds}
               photoCaptured={cleaningPhotoArtifact !== null}
-              photoStamp={cleaningPhotoArtifact?.capturedAt ?? MOBILE_V2_PREVIEW_CLEANING.photoStamp}
+              photoStamp={cleaningPhotoArtifact?.capturedAt ?? (isShowcase ? MOBILE_V2_PREVIEW_CLEANING.photoStamp : undefined)}
               requireCameraCapture={!isShowcase}
               captureBusy={cleaningPhotoRegistering}
               captureError={cleaningCaptureError}
@@ -5505,21 +5530,21 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
             />
           </MobileV2ListStateView>
         ) : activeTabId === "mobile-today" ? (
-          // F12: today-screen values come from the canonical preview
-          // fixture (MOBILE_V2_PREVIEW_TODAY), not inline literals.
+          // #600: Today values come from the route read (fieldopsSurfaceQuery:
+          // live projection, or the showcase fixture), with its list states.
+          <MobileV2ListStateView
+            theme={ctx.theme}
+            isLoading={isMobileV2ListLoading(routeRpc)}
+            isError={routeRpc.isError}
+            errorMessage={formatMobileV2UserError(routeRpc.error, strings.liveReads.todayLoadFailed)}
+            retryLabel={strings.liveReads.retry}
+            onRetry={() => { void routeRpc.refetch(); }}
+          >
+          {routeRpc.data !== undefined ? (
           <MobileV2TodayScreen
             theme={ctx.theme}
-            done={MOBILE_V2_PREVIEW_TODAY.done}
-            total={MOBILE_V2_PREVIEW_TODAY.total}
-            pending={MOBILE_V2_PREVIEW_TODAY.pending}
-            failed={MOBILE_V2_PREVIEW_TODAY.failed}
-            slaRisk={MOBILE_V2_PREVIEW_TODAY.slaRisk}
-            etaFinish={MOBILE_V2_PREVIEW_TODAY.etaFinish}
-            distanceKm={MOBILE_V2_PREVIEW_TODAY.distanceKm}
-            codExpected={MOBILE_V2_PREVIEW_TODAY.codExpected}
-            codCurrency={MOBILE_V2_PREVIEW_TODAY.codCurrency}
-            blockers={MOBILE_V2_PREVIEW_TODAY.blockers}
-            activeStop={MOBILE_V2_PREVIEW_TODAY.activeStop}
+            {...routeRpc.data.today}
+            blockers={isShowcase ? MOBILE_V2_PREVIEW_TODAY.blockers : liveTodayBlockers}
             onOpenPreShift={() => {
               // Route to the Mobile V2 pre-shift gate only when
               // ui_navigation exposes it for this role/capability set.
@@ -5549,10 +5574,13 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
               })
             }
             onContinueStop={(id) => {
-              setToast({ id: `cont-${Date.now()}`, message: `Continuing stop ${id}`, kind: "info" });
+              // Live stop ids are task ids (`stop:<uuid>`); the stop tab keys on the uuid.
+              setActiveStopId(id.startsWith("stop:") ? id.slice("stop:".length) : id);
               setActiveTabId("mobile-stop");
             }}
           />
+          ) : null}
+          </MobileV2ListStateView>
         ) : activeTabId === "mobile-lookup" ? (
           <MobileV2ListStateView
             theme={ctx.theme}
@@ -6523,7 +6551,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
               filterCount={routeFilterCount}
               dirty={false}
               manifestSummary={routeManifestSummary}
-              currency={MOBILE_V2_PREVIEW_ROUTE.currency}
+              currency={routeRpc.data?.currency}
               onConfirmDeparture={handleConfirmRouteDeparture}
               isConfirmingDeparture={confirmRouteDepartureMutation.isPending || routeDepartureReadbackPending}
               onSearchChange={setRouteSearch}
@@ -6595,7 +6623,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
             followEnabled={mapFollow}
             trafficEnabled={mapTraffic}
             locationReadback={mapLocationReadback}
-            currency={MOBILE_V2_PREVIEW_ROUTE.currency}
+            currency={routeRpc.data?.currency}
             onToggleFollow={() => setMapFollow((f) => !f)}
             onToggleTraffic={() => setMapTraffic((t) => !t)}
             onRecordLocation={handleRecordMapLocation}
@@ -6817,7 +6845,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
         theme={ctx.theme}
         visible={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        identity={{ name: profile.name, employeeId: profile.badge }}
+        identity={resolveMobileV2DrawerIdentity(profile.name, profile.badge, profileIdentityState)}
         availableRoles={availableRoles}
         activeRole={activeRole}
         onSelectRole={(role) => {
@@ -6850,13 +6878,15 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
           setIncidentVerifiedReadback(null);
         }}
         types={incidentTypes}
-        typesState={{
+        typesState={resolveMobileV2IncidentTypesState({
           isLoading: isMobileV2ListLoading(incidentTypesRpc),
           isError: incidentTypesRpc.isError,
+          count: incidentTypesRpc.data?.length,
           errorMessage: formatMobileV2UserError(incidentTypesRpc.error, strings.liveReads.incidentTypesLoadFailed),
+          emptyMessage: strings.liveReads.incidentTypesEmpty,
           retryLabel: strings.liveReads.retry,
           onRetry: () => { void incidentTypesRpc.refetch(); },
-        }}
+        })}
         selectedTypeId={incidentTypeId}
         photoCaptured={incidentPhoto}
         statement={incidentStatement}

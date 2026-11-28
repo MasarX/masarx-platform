@@ -9,6 +9,9 @@ export const EN_STRINGS = {
     profileLoading: "Loading your profile…",
     profileLoadFailed: "Unable to load your profile.",
     incidentTypesLoadFailed: "Unable to load incident types.",
+    incidentTypesEmpty: "No incident types are set up.",
+    todayLoadFailed: "Unable to load today's route.",
+    deviceStateUnknown: "Device status unknown",
     retry: "Try again",
   },
   routeLoad: {

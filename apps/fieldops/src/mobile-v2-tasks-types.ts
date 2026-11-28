@@ -183,6 +183,11 @@ function metaString(meta: Readonly<Record<string, unknown>>, key: string): strin
   return trimmed.length === 0 ? null : trimmed;
 }
 
+/** The task's COD currency; the resolvers default a missing `cod_currency` to SAR. */
+export function deriveMobileV2TaskCodCurrency(task: MobileV2Task): string {
+  return metaString(task.meta, "cod_currency") ?? "SAR";
+}
+
 function normalizeMobileV2TaskCompletionState(
   meta: Readonly<Record<string, unknown>>,
 ): MobileV2TaskCompletionState | null {
@@ -218,8 +223,7 @@ export function deriveMobileV2TaskMetaLabel(task: MobileV2Task): string | null {
   if (completionState === "partial") return "Partial";
   const cod = metaNumber(meta, "cod_amount");
   if (cod !== null && cod > 0) {
-    const currency = metaString(meta, "cod_currency") ?? "SAR";
-    return `${formatMobileV2CurrencyCompact(cod, currency, { grouped: false })} COD`;
+    return `${formatMobileV2CurrencyCompact(cod, deriveMobileV2TaskCodCurrency(task), { grouped: false })} COD`;
   }
   const boxes = metaNumber(meta, "box_count");
   if (boxes !== null && boxes > 0) {

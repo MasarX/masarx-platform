@@ -10,6 +10,9 @@ export const AR_STRINGS: FieldOpsStrings = {
     profileLoading: "جارٍ تحميل ملفك الشخصي…",
     profileLoadFailed: "تعذّر تحميل ملفك الشخصي.",
     incidentTypesLoadFailed: "تعذّر تحميل أنواع الحوادث.",
+    incidentTypesEmpty: "لا توجد أنواع حوادث معرّفة.",
+    todayLoadFailed: "تعذّر تحميل مسار اليوم.",
+    deviceStateUnknown: "حالة الجهاز غير معروفة",
     retry: "حاول مرة أخرى",
   },
   routeLoad: {
