@@ -71,6 +71,29 @@ export interface MobileV2IncidentSheetProps {
   readonly style?: StyleProp<ViewStyle>;
 }
 
+/**
+ * #600: the type picker's read state. The database contract always
+ * returns types, so a settled empty registry is an error with a retry.
+ */
+export function resolveMobileV2IncidentTypesState(input: {
+  readonly isLoading: boolean;
+  readonly isError: boolean;
+  readonly count: number | undefined;
+  readonly errorMessage: string;
+  readonly emptyMessage: string;
+  readonly retryLabel: string;
+  readonly onRetry: () => void;
+}): NonNullable<MobileV2IncidentSheetProps["typesState"]> {
+  const empty = !input.isError && input.count === 0;
+  return {
+    isLoading: input.isLoading,
+    isError: input.isError || empty,
+    errorMessage: empty ? input.emptyMessage : input.errorMessage,
+    retryLabel: input.retryLabel,
+    onRetry: input.onRetry,
+  };
+}
+
 function chipToneForNeed(need: MobileV2IncidentNeed): FxChipTone {
   return need === "call_112" || need === "call_999" ? "danger" : "info";
 }

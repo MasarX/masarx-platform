@@ -318,9 +318,11 @@ export interface MobileV2ProfileEnvelope {
   readonly currency?: string;
 }
 import {
+  deriveMobileV2TaskCodCurrency,
   parseMobileV2TaskList,
   type MobileV2Task,
 } from "./mobile-v2-tasks-types";
+import type { MobileV2TodaySummary } from "./mobile-v2-today-screen";
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -978,6 +980,18 @@ export function resolveFieldopsInductionBay(
 // Tasks — resolve_fieldops_tasks_v1
 // ---------------------------------------------------------------------------
 
+/**
+ * #600: an empty task list is an honest empty day. A non-array, or rows
+ * that are all invalid, is a malformed payload, so Tasks, Route and Today
+ * show the error state instead of an empty route.
+ */
+export function readFieldopsTaskList(raw: unknown): ReadonlyArray<MobileV2Task> {
+  if (!Array.isArray(raw)) throw mobileV2MalformedPayload("resolve_fieldops_tasks_v1");
+  const tasks = parseMobileV2TaskList(raw);
+  if (raw.length > 0 && tasks.length === 0) throw mobileV2MalformedPayload("resolve_fieldops_tasks_v1");
+  return tasks;
+}
+
 export interface UseFieldopsTasksOptions {
   /**
    * Preview/offline showcase sample. Returned ONLY in preview mode
@@ -1011,7 +1025,7 @@ export function useFieldopsTasksRpc(
       // NEVER substituted here, so the Tasks screen renders its real
       // "All clear" empty state instead of fabricated jobs. (Genuine RPC
       // errors still throw → react-query isError surfaces the retry card.)
-      return parseMobileV2TaskList(raw);
+      return readFieldopsTaskList(raw);
     }),
     ...options.query,
   });
@@ -1381,6 +1395,46 @@ export interface MobileV2RouteEnvelope {
   readonly routeId: string | null;
   readonly routeRunId: string | null;
   readonly manifestSummary: MobileV2RouteManifestSummary | null;
+  /** COD currency of the route's stops (live `meta.cod_currency`). */
+  readonly currency: string;
+  /** #600: the Today screen's values, projected from the same route read. */
+  readonly today: MobileV2TodaySummary;
+}
+
+/**
+ * Project the Today summary from the live route rows. No live resolver
+ * gives a finish ETA or route distance yet, so ETA is the last open
+ * stop's ETA and distance stays `null` (shown as a dash).
+ */
+export function projectMobileV2TodaySummary(
+  rows: ReadonlyArray<MobileV2RouteStop>,
+  currency: string,
+): MobileV2TodaySummary {
+  const open = rows.filter((r) => r.status !== "done" && r.status !== "failed");
+  const active = open.find((r) => r.status === "current") ?? open[0] ?? null;
+  const lastEta = open.length > 0 ? open[open.length - 1].sla : "—";
+  return Object.freeze({
+    done: rows.filter((r) => r.status === "done").length,
+    total: rows.length,
+    pending: open.length,
+    failed: rows.filter((r) => r.status === "failed").length,
+    slaRisk: rows.filter((r) => r.status === "sla").length,
+    etaFinish: lastEta === "—" ? "" : lastEta,
+    distanceKm: null,
+    codExpected: open.reduce((sum, r) => sum + r.cod, 0),
+    codCurrency: currency,
+    activeStop: active === null
+      ? null
+      : Object.freeze({
+          id: active.id,
+          seq: active.seq,
+          customer: active.customer,
+          address: active.address,
+          sla: active.sla,
+          cod: active.cod,
+          fragile: active.fragile,
+        }),
+  });
 }
 
 export interface MobileV2RouteDepartureConfirmation {
@@ -1609,7 +1663,7 @@ export function useFieldopsRouteRpc(
           p_context: ctx.policyContext ?? {},
         },
       });
-      const tasks = parseMobileV2TaskList(raw);
+      const tasks = readFieldopsTaskList(raw);
       // Route rows are scoped to one backend route run so pickup cards
       // and stale stops cannot render under the selected manifest.
       const routeSelection = selectMobileV2RouteTasks(
@@ -1618,6 +1672,7 @@ export function useFieldopsRouteRpc(
         options.preferredRouteRunId ?? null,
       );
       const { stopTasks, routeRunId, routeId } = routeSelection;
+      const currency = stopTasks.length > 0 ? deriveMobileV2TaskCodCurrency(stopTasks[0]) : "SAR";
       if (stopTasks.length === 0) {
         return Object.freeze({
           rows: Object.freeze([]),
@@ -1625,6 +1680,8 @@ export function useFieldopsRouteRpc(
           routeId: null,
           routeRunId: null,
           manifestSummary: null,
+          currency,
+          today: projectMobileV2TodaySummary([], currency),
         });
       }
       const rows = stopTasks
@@ -1640,6 +1697,8 @@ export function useFieldopsRouteRpc(
         routeId,
         routeRunId,
         manifestSummary,
+        currency,
+        today: projectMobileV2TodaySummary(rows, currency),
       });
     }),
     ...options.query,
@@ -3352,9 +3411,11 @@ export function useFieldopsIncidentTypesRpc(
 }
 
 /**
- * #600: no policy row (or a row with no value) is a valid empty registry.
- * A value that is not a type list, or a non-empty list with no valid type,
- * is malformed. The fixture is never substituted in live mode.
+ * #600: no policy row (or a row with no value) parses to an empty list,
+ * which the incident sheet shows as an error with a retry: the database
+ * contract always returns types. A value that is not a type list, or a
+ * non-empty list with no valid type, is malformed. The fixture is never
+ * substituted in live mode.
  */
 export function mapFieldopsIncidentTypesPayload(raw: unknown): ReadonlyArray<MobileV2IncidentType> {
   const row = Array.isArray(raw) ? raw[0] : raw;
