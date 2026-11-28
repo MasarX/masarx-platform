@@ -41,6 +41,65 @@ async function captureDatabaseLog({ project, env, logFile, execute = run }) {
   }
 }
 
+async function captureIntegrationEdge({ project, env, since, execute = run }) {
+  const services = { edge: `supabase_edge_runtime_${project}`, gateway: `supabase_kong_${project}` };
+  const options = { env, timeout: 5000, quiet: true, printQuietFailure: false };
+  const capture = async (args, parse) => {
+    try { return parse(await execute('docker', args, { ...options, includeStderr: args[0] === 'logs' })); }
+    catch { return null; }
+  };
+  const timestamp = value => /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(value) ? value : null;
+  const stateFormat = '{"id":{{json .Id}},"state":{{json .State}},"restarts":{{json .RestartCount}},"networks":{{json .NetworkSettings.Networks}}}';
+  const state = service => capture(['inspect', '--format', stateFormat, services[service]], JSON.parse);
+  const rules = {
+    edge: [
+      ['worker_boot', /worker.{0,40}(?:boot|creation).{0,40}(?:error|fail)|failed to (?:boot|create) worker/i],
+      ['memory_limit', /out of memory|memory limit|allocation failed|WORKER_RESOURCE_LIMIT/i],
+      ['panic', /panicked at|fatal runtime error/i],
+      ['worker_shutdown', /worker.{0,40}(?:shutdown|terminated|evicted)/i],
+    ],
+    gateway: [
+      ['dns_failure', /name resolution failed|dns server error|could not resolve/i],
+      ['upstream_closed', /upstream prematurely closed|connection reset by peer/i],
+      ['upstream_connect', /connect\(\) failed|connection refused/i],
+      ['upstream_timeout', /upstream timed out/i],
+      ['http_502', /HTTP\/\d(?:\.\d)?" 502\b/],
+      ['http_503', /HTTP\/\d(?:\.\d)?" 503\b/],
+    ],
+  };
+  // Keep timestamps and fixed classifications. Request bodies, URLs and daemon metadata stay out of the report.
+  const logs = service => capture(['logs', '--tail', '200', '--timestamps', services[service]], raw => raw.trim().split(/\r?\n/)
+    .filter(line => service === 'edge' || /\/functions\/v1\/label-renderer\b/.test(line))
+    .flatMap(line => rules[service].filter(([, pattern]) => pattern.test(line))
+      .map(([kind]) => ({ at: timestamp(line.split(' ', 1)[0]), kind }))).slice(-30));
+  const until = new Date().toISOString();
+  const [edge, gateway, edgeLogs, gatewayLogs, events] = await Promise.all([
+    state('edge'), state('gateway'), logs('edge'), logs('gateway'),
+    capture(['events', '--since', since, '--until', until, '--filter', 'type=container', '--filter', 'type=network',
+      '--format', '{{json .}}'], raw => raw.trim().split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line))),
+  ]);
+  const networkIds = row => Object.values(row?.networks ?? {}).filter(network => network.EndpointID).map(network => network.NetworkID);
+  const describe = row => row && ({ status: row.state.Status, running: row.state.Running, restarting: row.state.Restarting, oomKilled: row.state.OOMKilled,
+    exitCode: row.state.ExitCode, restarts: row.restarts, health: row.state.Health?.Status ?? 'none',
+    startedAt: timestamp(row.state.StartedAt), finishedAt: timestamp(row.state.FinishedAt), networkCount: networkIds(row).length });
+  const names = new Map(Object.entries(services).map(([service, name]) => [name, service]));
+  const ids = new Map([[edge?.id, 'edge'], [gateway?.id, 'gateway']].filter(([id]) => id));
+  for (const event of events ?? []) {
+    const service = names.get(event.Actor?.Attributes?.name);
+    if (event.Type === 'container' && service) ids.set(event.Actor.ID, service);
+  }
+  const actions = /^(?:create|start|restart|die|oom|kill|stop|destroy|connect|disconnect|health_status: (?:starting|healthy|unhealthy))$/;
+  const lifecycle = events?.flatMap(({ Type, Actor, Action, time }) => {
+    const service = Type === 'network' ? ids.get(Actor?.Attributes?.container) : names.get(Actor?.Attributes?.name);
+    if (!service || !actions.test(Action) || !Number.isInteger(time)) return [];
+    const exitCode = Actor.Attributes?.exitCode;
+    return [{ service, action: Action, time, ...(Action === 'die' && /^\d{1,3}$/.test(exitCode) ? { exitCode: Number(exitCode) } : {}) }];
+  }).slice(-60) ?? null;
+  return { since, until, edge: describe(edge), gateway: describe(gateway),
+    sharedNetwork: edge && gateway ? networkIds(edge).some(id => networkIds(gateway).includes(id)) : null,
+    lifecycle, edgeLogs, gatewayLogs };
+}
+
 async function collectStackDiagnostics({ project, env, dockerRoot, imagePolicy = {}, logFile, execute = run }) {
   const report = { containers: [], logs: [], unhealthy: [], errors: [], imagePolicy };
   const secrets = environmentSecrets(env);
@@ -95,4 +154,4 @@ async function collectStackDiagnostics({ project, env, dockerRoot, imagePolicy =
   return report;
 }
 
-module.exports = { captureDatabaseLog, collectStackDiagnostics, imagePrefix, belongsToStack, isHostedPgtap, needsHostedDatabaseInit };
+module.exports = { captureDatabaseLog, captureIntegrationEdge, collectStackDiagnostics, imagePrefix, belongsToStack, isHostedPgtap, needsHostedDatabaseInit };

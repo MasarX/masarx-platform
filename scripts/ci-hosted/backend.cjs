@@ -9,7 +9,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { targetFile, git } = require('./target-policy.cjs');
 const { sanitize, environmentSecrets } = require('./diagnostics.cjs');
 const { run, stage, writeReport } = require('./process.cjs');
-const { captureDatabaseLog, collectStackDiagnostics, isHostedPgtap, needsHostedDatabaseInit } = require('./stack-diagnostics.cjs');
+const { captureDatabaseLog, captureIntegrationEdge, collectStackDiagnostics, isHostedPgtap, needsHostedDatabaseInit } = require('./stack-diagnostics.cjs');
 const { shardFiles, shardEnvironment, shardResults, hostedBatches } = require('./pgtap.cjs');
 const { integrationEdgeEnvironment, integrationFunctionConfig, integrationShardFiles, integrationCoverage,
   exceptionFile, restoreIntegrationDatabase, runIntegration } = require('./integration.cjs');
@@ -579,7 +579,7 @@ async function qualify(diagnostic) {
   const env = { ...process.env, ENV_FILE: os.devNull, ENV_FILE_OVERRIDE: '0', ENV_FILE_APPEND: '0',
     QA_RUN_ID: '', NX_DAEMON: 'false', PATH: `${bin}${path.delimiter}${process.env.PATH}` };
   const cli = path.join(bin, 'supabase');
-  let started = false; let guard; let cliEnv = env; let dockerRoot;
+  let started = false; let guard; let cliEnv = env; let dockerRoot; let integrationStackStartedAt;
   const summary = { stages: [], sha: process.env.GITHUB_SHA || 'unknown', migrations: 0, pgtap: 'NOT_RUN',
     ...(shard ? { shard, selected, files: [] } : {}),
     integration: disposableShard ? 'NOT_RUN' : 'DEFERRED_TO_HOSTED_SHARDS',
@@ -764,6 +764,7 @@ async function qualify(diagnostic) {
         // Keep the replayed volume and let the CLI start and health-check PostgREST against it.
         await timed('integration-stack-stop', () => checked(cli, ['stop', '--workdir', temp], cliEnv, 120000));
         const integrationExclude = lane.exclude.filter(service => !Object.hasOwn(integrationImages, service));
+        integrationStackStartedAt = new Date().toISOString();
         await startStack('integration-stack-start', integrationExclude);
         await timed('integration-database-init', () => verifyHostedDatabaseInit(checked, env, databaseContainer));
       }
@@ -841,7 +842,11 @@ async function qualify(diagnostic) {
     if (summary.integration === 'running') summary.integration = 'failed';
     if (guard && fs.existsSync(guard.policyFile)) diagnostic.imagePolicy = { ...diagnostic.imagePolicy, ...JSON.parse(fs.readFileSync(guard.policyFile, 'utf8')) };
     saveFailure(diagnostic, error, environmentSecrets(env)); // Persist before stack teardown and temporary-file removal.
-    if (started && ['stack-start', 'integration-stack-start'].includes(diagnostic.stage)) {
+    if (summary.integration === 'failed') {
+      diagnostic.integrationEdge = await captureIntegrationEdge({ project, env, since: integrationStackStartedAt }).catch(() => null);
+      console.log(`Integration Edge diagnostics: ${JSON.stringify(diagnostic.integrationEdge)}`);
+      saveFailure(diagnostic, error, environmentSecrets(env));
+    } else if (started && ['stack-start', 'integration-stack-start'].includes(diagnostic.stage)) {
       diagnostic.startupDiagnostics = await stage(summary, 'stack-diagnostics', () => collectStackDiagnostics({
         project, env, dockerRoot, imagePolicy: diagnostic.imagePolicy, logFile,
       })).catch(diagnosticError => ({ error: sanitize(diagnosticError.message) }));
