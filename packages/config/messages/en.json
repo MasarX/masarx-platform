@@ -360,6 +360,7 @@
       "previewFailed": "Could not authorize a private preview. Try again."
     },
     "common": {
+      "errorReference": "Reference: {id}",
       "workflowFirst": "Workflow-first",
       "remove": "Remove",
       "invalidJson": "Enter valid JSON in this field, then submit again."

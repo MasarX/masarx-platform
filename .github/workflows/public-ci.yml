@@ -301,6 +301,7 @@ jobs:
           node scripts/ci-hosted/database-selfcheck.cjs
           node --test scripts/ci-hosted/images.test.cjs scripts/tests/bootstrap/online-index-fixtures.test.js
           node --test scripts/ci-hosted/integration.test.cjs
+          node --test scripts/ci-hosted/privacy-check.test.cjs
           node scripts/ci-hosted/review-verdict.cjs --self-check
       - name: Check deploy branch references
         timeout-minutes: 1
@@ -315,6 +316,18 @@ jobs:
         env:
           GROUP_HEAD: ${{ github.event.merge_group.head_sha }}
         run: node scripts/ci-hosted/identity-guard.cjs
+      # Last step: it fetches the full commit history without file contents and checks out the candidate head.
+      - name: Check candidate commits and added content
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        env:
+          PRIVACY_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          PRIVACY_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: |
+          git config remote.origin.promisor true
+          git config remote.origin.partialclonefilter blob:none
+          git fetch --no-tags --filter=blob:none --unshallow origin "$PRIVACY_BASE" "$PRIVACY_HEAD"
+          git checkout --quiet --detach "$PRIVACY_HEAD"
+          node scripts/ci-hosted/privacy-check.cjs "$PRIVACY_BASE" "$PRIVACY_HEAD"
 
   lint:
     name: Lint

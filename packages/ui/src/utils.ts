@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { getPublicConfig, resolveUiMessages } from "@masarx/config";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -42,11 +43,48 @@ export function getUiErrorMessage(error: unknown): string | null {
 // App-authored error whose message is meant to be shown; formatUiError shows it through formatUiMessage.
 export class UiMessageError extends Error {}
 
-// Visible error text is the caller's translated fallback; backend text never passes through (#723).
+// Reference fields of the shared Edge Function error envelope (buildErrorEnvelope), in display order.
+const UI_ERROR_REFERENCE_KEYS = ["correlation_id", "request_id", "trace_id"] as const;
+// Only a UUID or a short token passes, so free text and long values never reach the screen.
+const UI_ERROR_REFERENCE_PATTERN =
+  /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[A-Za-z0-9][A-Za-z0-9_-]{5,31})$/i;
+
+export function getUiErrorReference(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const record = error as Record<string, unknown>;
+  for (const key of UI_ERROR_REFERENCE_KEYS) {
+    const value = typeof record[key] === "string" ? record[key].trim() : "";
+    if (UI_ERROR_REFERENCE_PATTERN.test(value)) return value;
+  }
+  return null;
+}
+
+// Appends the translated "Reference: {id}" line; without a catalog entry the fallback stands alone.
+function withUiErrorReference(fallback: string, error: unknown) {
+  const id = getUiErrorReference(error);
+  if (!id) return fallback;
+  try {
+    let locale = "en";
+    try {
+      locale = getPublicConfig().locale || "en";
+    } catch {
+      locale = "en";
+    }
+    const ui = resolveUiMessages(locale).ui as { common?: { errorReference?: unknown } } | undefined;
+    const template = ui?.common?.errorReference;
+    return typeof template === "string" ? `${fallback} ${template.replace("{id}", id)}` : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+// Visible error text is the caller's translated fallback plus an opaque reference ID; backend text never passes through (#723).
 export function formatUiError(error: unknown, fallback: string) {
   if (error instanceof UiMessageError) return formatUiMessage(error.message, fallback);
   const message = sanitizeUiError(getUiErrorMessage(error));
-  if (!message || isAuthorizationUiError(error) || !isCapabilityDeniedMessage(message)) return fallback;
+  if (!message || isAuthorizationUiError(error) || !isCapabilityDeniedMessage(message)) {
+    return withUiErrorReference(fallback, error);
+  }
   // Retain blocked-state classification without exposing the rest of the message.
   const key = extractCapabilityDeniedKey(message);
   return key ? `Capability denied: ${key}` : "Capability denied";

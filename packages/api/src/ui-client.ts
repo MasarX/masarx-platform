@@ -141,7 +141,12 @@ export function createUiClientFromSupabase(
               typeof (error as { message?: unknown }).message === "string"
             ? (error as { message: string }).message
             : `${params.functionName} ${params.action} failed with status ${response.status}`;
-      throw new Error(message);
+      // Keep the envelope's reference fields so formatUiError can show the opaque ID (#723).
+      throw Object.assign(new Error(message), {
+        correlation_id: record?.correlation_id,
+        request_id: record?.request_id,
+        trace_id: record?.trace_id,
+      });
     }
     if (!record) {
       throw new Error(`${params.functionName} ${params.action} returned an invalid JSON response.`);
