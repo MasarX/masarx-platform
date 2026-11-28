@@ -1,4 +1,5 @@
 import {
+  fieldopsSurfaceQuery,
   mapFieldopsWalletEnvelope,
   mobileV2CashDropMatchesWrite,
   mobileV2WalletWithdrawalMatchesWrite,
@@ -52,24 +53,29 @@ describe("mapFieldopsWalletEnvelope", () => {
     });
   });
 
-  test("does not replace malformed live withdrawal readback with fixture business data", () => {
-    const envelope = mapFieldopsWalletEnvelope(
-      {
-        wallet: {
-          balance_sar: null,
-          week_to_date_sar: "bad",
-          posts_to_bank_label: "",
-        },
-        latest_withdrawal: {
-          state: "requested",
-          amount_sar: 75,
-        },
-      },
-      FALLBACK,
-    );
+  const MALFORMED_WALLET = {
+    wallet: {
+      balance_sar: null,
+      week_to_date_sar: "bad",
+      posts_to_bank_label: "",
+    },
+    latest_withdrawal: {
+      state: "requested",
+      amount_sar: 75,
+    },
+  };
 
-    expect(envelope.wallet).toEqual(FALLBACK.wallet);
-    expect(envelope.latestWithdrawal).toBeNull();
+  // #600: retired "a malformed wallet returns FALLBACK.wallet"; live mode errors.
+  test("live mode: a malformed wallet is an error, never fixture money", () => {
+    expect(() => mapFieldopsWalletEnvelope(MALFORMED_WALLET, FALLBACK)).toThrow(/malformed payload/);
+  });
+
+  test("showcase mode: the same malformed input still renders the fixture wallet", async () => {
+    const readLive = jest.fn(async () => mapFieldopsWalletEnvelope(MALFORMED_WALLET, FALLBACK));
+    const query = fieldopsSurfaceQuery(null, FALLBACK, readLive);
+    expect(query.initialData).toBe(FALLBACK);
+    await expect(query.queryFn()).resolves.toBe(FALLBACK);
+    expect(readLive).not.toHaveBeenCalled();
   });
 });
 

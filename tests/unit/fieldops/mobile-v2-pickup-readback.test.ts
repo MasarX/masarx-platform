@@ -1,4 +1,5 @@
 import {
+  fieldopsSurfaceQuery,
   findMobileV2PickupReadback,
   parsePickupList,
 } from "../../../apps/fieldops/src/mobile-v2-rpc-hooks";
@@ -109,8 +110,8 @@ describe("Mobile V2 pickup readback parsing", () => {
     })?.id).toBe(ROUTE_STOP_ID);
   });
 
-  test("returns fallback only for malformed payloads", () => {
-    const fallback = parsePickupList([
+  function fixturePickups() {
+    return parsePickupList([
       {
         id: "fixture",
         wb: "fixture",
@@ -125,9 +126,22 @@ describe("Mobile V2 pickup readback parsing", () => {
         sealRequired: false,
       },
     ], []);
+  }
 
-    expect(parsePickupList("bad", fallback)).toBe(fallback);
+  // #600: retired "returns fallback for malformed payloads"; live mode errors.
+  test("live mode: a malformed payload is an error, never the fallback", () => {
+    const fallback = fixturePickups();
+    expect(() => parsePickupList("bad", fallback)).toThrow(/malformed payload/);
     expect(parsePickupList([], fallback)).toEqual([]);
+  });
+
+  test("showcase mode: the same malformed input still renders the fixture", async () => {
+    const fallback = fixturePickups();
+    const readLive = jest.fn(async () => parsePickupList("bad", fallback));
+    const query = fieldopsSurfaceQuery(null, fallback, readLive);
+    expect(query.initialData).toBe(fallback);
+    await expect(query.queryFn()).resolves.toBe(fallback);
+    expect(readLive).not.toHaveBeenCalled();
   });
 });
 

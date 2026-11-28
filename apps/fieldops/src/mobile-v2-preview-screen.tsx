@@ -86,6 +86,7 @@ import { MobileV2LoginScreen, type MobileV2LoginStep } from "./mobile-v2-login-s
 import { isMobileV2RpcAccessDenied, useFieldopsTasksRpc } from "./mobile-v2-rpc-hooks";
 import {
   filterMobileV2TasksByQuery,
+  type MobileV2Task,
 } from "./mobile-v2-tasks-types";
 import { MobileV2StopScreen, type MobileV2StopDetail } from "./mobile-v2-stop-screen";
 import {
@@ -429,7 +430,10 @@ import {
   useMobileV2Rpc,
   normalizeMobileV2Role,
   newIdempotencyKey,
+  buildNeutralFieldopsLoaderTodayEnvelope,
   type MobileV2CashDropEnvelope,
+  type MobileV2EorEnvelope,
+  type MobileV2WalletEnvelope,
   type MobileV2DamageHoldReadback,
   type MobileV2IncidentReadback,
   type MobileV2OnboardingCleaningReadback,
@@ -519,6 +523,31 @@ const SAMPLE_STOP = MOBILE_V2_PREVIEW_STOP;
 const EMPTY_MOBILE_V2_NAVIGATION: ReadonlyArray<MobileV2NavigationSection> = Object.freeze([]);
 const EMPTY_MOBILE_V2_POD_ARTIFACTS: ReadonlyArray<MobileV2PodCapturedArtifact> = Object.freeze([]);
 const EMPTY_MOBILE_V2_COD_LEDGER_STOPS: ReadonlyArray<MobileV2CodLedgerStop> = Object.freeze([]);
+// #600: what a live screen holds while a read is loading or failed. The
+// list-state wrappers show the loading or error state over it; fixtures
+// reach screens only through the read hooks in showcase mode.
+const EMPTY_MOBILE_V2_TASKS: ReadonlyArray<MobileV2Task> = Object.freeze([]);
+const EMPTY_MOBILE_V2_PICKUPS: ReadonlyArray<MobileV2Pickup> = Object.freeze([]);
+const EMPTY_MOBILE_V2_TRIPS: ReadonlyArray<MobileV2Trip> = Object.freeze([]);
+const EMPTY_MOBILE_V2_WALLET: MobileV2WalletEnvelope = Object.freeze({
+  wallet: Object.freeze({ balanceSar: 0, weekToDateSar: 0, postsToBankLabel: "" }),
+  week: Object.freeze([]),
+  breakdown: Object.freeze([]),
+  latestWithdrawal: null,
+});
+const EMPTY_MOBILE_V2_CASH_DROP: MobileV2CashDropEnvelope = Object.freeze({
+  expectedSar: 0,
+  safeLocation: "",
+  lastDrop: null,
+});
+const EMPTY_MOBILE_V2_EOR: MobileV2EorEnvelope = Object.freeze({
+  summary: Object.freeze({ delivered: 0, total: 0, failed: 0 }),
+  checklist: Object.freeze([]),
+  performanceNote: null,
+  routeLabel: "",
+  recon: null,
+  lastRecon: null,
+});
 const MOBILE_V2_FIELDOPS_EVIDENCE_BUCKET = "fieldops-evidence";
 
 function isMobileV2VehicleAngleId(value: string): value is MobileV2VehicleAngleId {
@@ -817,8 +846,8 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                 void tasksRpc.refetch();
               },
             }
-          : { kind: "ready", tasks: tasksRpc.data ?? SAMPLE_TASKS },
-    [tasksRpc.isLoading, tasksRpc.isError, tasksRpc.error, tasksRpc.data, tasksRpc.refetch, SAMPLE_TASKS],
+          : { kind: "ready", tasks: tasksRpc.data ?? EMPTY_MOBILE_V2_TASKS },
+    [tasksRpc.isLoading, tasksRpc.isError, tasksRpc.error, tasksRpc.data, tasksRpc.refetch],
   );
   const [tripsTab, setTripsTab] = React.useState<MobileV2TripsTab>("all");
   // Active stop identity is declared before the Route RPC so readback can pin
@@ -1144,9 +1173,9 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
   // is unavailable (placeholder env) so the preview still renders. In
   // production these read resolve_fieldops_*_v1 over supabase-js.
   const pickupsRpc = useFieldopsPickupsRpc({ fallback: SAMPLE_PICKUPS });
-  const livePickups = pickupsRpc.data ?? SAMPLE_PICKUPS;
+  const livePickups = pickupsRpc.data ?? EMPTY_MOBILE_V2_PICKUPS;
   const tripsRpc = useFieldopsTripsRpc({ fallback: SAMPLE_TRIPS });
-  const liveTrips = tripsRpc.data ?? SAMPLE_TRIPS;
+  const liveTrips = tripsRpc.data ?? EMPTY_MOBILE_V2_TRIPS;
   const sortationRpc = useFieldopsSortationRpc({
     fallback: {
       bays: SAMPLE_SORTATION_BAYS,
@@ -1172,7 +1201,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
     fallback: SAMPLE_WALLET,
     enabled: walletAccessEnabled,
   });
-  const liveWallet = walletRpc.data ?? SAMPLE_WALLET;
+  const liveWallet = walletRpc.data ?? EMPTY_MOBILE_V2_WALLET;
 
   const SAMPLE_RETURNS = MOBILE_V2_PREVIEW_RETURNS;
   const returnsRpc = useFieldopsReturnsRpc({ fallback: SAMPLE_RETURNS });
@@ -1209,9 +1238,10 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
     fallback: SAMPLE_CASH_DROP,
     enabled: cashDropAccessEnabled,
   });
-  const liveCashDrop: MobileV2CashDropEnvelope = cashDropRpc.data ?? SAMPLE_CASH_DROP;
+  const liveCashDrop: MobileV2CashDropEnvelope = cashDropRpc.data ?? EMPTY_MOBILE_V2_CASH_DROP;
   const [cashCounted, setCashCounted] = React.useState<number | null>(null);
-  const cashCountedEffective = cashCounted ?? liveCashDrop.expectedSar;
+  // #600: live counted cash starts empty; only the showcase pre-fills it.
+  const cashCountedEffective = cashCounted ?? (isShowcase ? liveCashDrop.expectedSar : null);
   const [cashSupervisor, setCashSupervisor] = React.useState("");
   const [cashPhotoCaptured, setCashPhotoCaptured] = React.useState<boolean>(false);
   const [cashPhotoArtifactId, setCashPhotoArtifactId] = React.useState<string | null>(null);
@@ -1465,7 +1495,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
   ]);
   const SAMPLE_EOR = MOBILE_V2_PREVIEW_EOR;
   const eorRpc = useFieldopsEorRpc({ fallback: SAMPLE_EOR, routeRunId: activeRouteRunId });
-  const liveEor = eorRpc.data ?? SAMPLE_EOR;
+  const liveEor = eorRpc.data ?? EMPTY_MOBILE_V2_EOR;
   const [eorChecked, setEorChecked] = React.useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
@@ -1475,7 +1505,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
   // resolver-backed with a fixture fallback, consistent with the driver
   // `mobile-today` / route wiring.
   const loaderTodayRpc = useFieldopsLoaderTodayRpc({ fallback: MOBILE_V2_PREVIEW_LOADER_TODAY });
-  const liveLoaderToday = loaderTodayRpc.data ?? MOBILE_V2_PREVIEW_LOADER_TODAY;
+  const liveLoaderToday = loaderTodayRpc.data ?? buildNeutralFieldopsLoaderTodayEnvelope(MOBILE_V2_PREVIEW_LOADER_TODAY);
   const riderTodayRpc = useFieldopsRiderTodayRpc({ fallback: MOBILE_V2_PREVIEW_RIDER_TODAY });
   const liveRiderToday = riderTodayRpc.data ?? MOBILE_V2_PREVIEW_RIDER_TODAY;
   const supervisorQueueRpc = useFieldopsSupervisorQueueRpc({
@@ -3069,6 +3099,8 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
   const registerCashDropArtifact = React.useCallback(async (
     capture?: MobileV2CashDropPhotoCapture,
   ): Promise<void> => {
+    const countedSar = cashCountedEffective;
+    if (countedSar === null) return;
     setCashPhotoCaptureBusy(true);
     setCashPhotoCaptureError(null);
     try {
@@ -3117,8 +3149,8 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
             surface: "mobile_v2_cash_drop",
             active_role: activeRole,
             expected_sar: liveCashDrop.expectedSar,
-            actual_sar: cashCountedEffective,
-            variance_sar: cashCountedEffective - liveCashDrop.expectedSar,
+            actual_sar: countedSar,
+            variance_sar: countedSar - liveCashDrop.expectedSar,
             proof_type: "cash_drop_envelope",
             artifact_kind: "cash_drop_envelope",
             captured_at: capturedAt,
@@ -4064,7 +4096,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                 // is omitted — no live route-distance resolver yet.
                 `${routeMapView.routeId} · ${routeMapView.pendingCount} pending`
               : activeTabId === "mobile-pickups"
-            ? `${livePickups.filter((p) => p.status === "pending").length} pending · ${livePickups.reduce((n, p) => n + p.picked, 0)}/${livePickups.reduce((n, p) => n + p.expectedQty, 0)} parcels`
+            ? (pickupsRpc.data === undefined ? "" : `${livePickups.filter((p) => p.status === "pending").length} pending · ${livePickups.reduce((n, p) => n + p.picked, 0)}/${livePickups.reduce((n, p) => n + p.expectedQty, 0)} parcels`)
             : activeTabId === "mobile-pickup-detail"
               ? (() => {
                   const p = livePickups.find((x) => x.id === activePickupId);
@@ -4094,7 +4126,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                           // EOR route labels are resolver-driven. Empty
                           // labels render the live summary alone instead of
                           // falling back to fixture text.
-                          ? (liveEor.routeLabel.length > 0
+                          ? (eorRpc.data === undefined ? "" : liveEor.routeLabel.length > 0
                               ? `${liveEor.routeLabel} · ${liveEor.summary.delivered}/${liveEor.summary.total} delivered`
                               : `${liveEor.summary.delivered}/${liveEor.summary.total} delivered`)
                           : activeTabId === "mobile-trip-nav"
@@ -4260,9 +4292,11 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
               ) : null;
             })()
           ) : activeTabId === "mobile-wallet" ? (
+            walletRpc.data === undefined ? null : (
             <FxChip theme={ctx.theme} tone="success" icon="cash" dense mono>
               {`${liveWallet.wallet.balanceSar} SAR`}
             </FxChip>
+            )
           ) : activeTabId === "mobile-returns" ? (
             <FxChip theme={ctx.theme} tone="warning" icon="package" dense>
               {`${liveReturns.failed.reduce((n, s) => n + s.parcels, 0) + liveReturns.returned.reduce((n, s) => n + s.parcels, 0)} parcels`}
@@ -4276,9 +4310,11 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
               Exceptions
             </FxChip>
           ) : activeTabId === "mobile-cash-drop" ? (
+            cashDropRpc.data === undefined ? null : (
             <FxChip theme={ctx.theme} tone="warning" icon="cash" dense mono>
               {`${liveCashDrop.expectedSar} SAR expected`}
             </FxChip>
+            )
           ) : activeTabId === "mobile-cod-ledger" ? (
             <FxChip theme={ctx.theme} tone="warning" icon="cash" dense mono>
               {`${liveCodLedgerExpected} SAR expected`}
@@ -4438,6 +4474,8 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
           >
             <MobileV2LoaderTodayScreen
               theme={ctx.theme}
+              locale={ctx.locale}
+              onRetryQuickActions={() => { void loaderTodayRpc.refetch(); }}
               waveLabel={liveLoaderToday.waveLabel}
               cutOff={liveLoaderToday.cutOff}
               coldChainCount={liveLoaderToday.coldChainCount}
@@ -4572,7 +4610,19 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
           })()
         ) : activeTabId === "mobile-trip-nav" ? (
           (() => {
-            const tr = liveTrips.find((x) => x.id === activeTripId) ?? liveTrips[0]!;
+            const tr = liveTrips.find((x) => x.id === activeTripId) ?? liveTrips[0];
+            if (tr === undefined) {
+              return (
+                <MobileV2ListStateView
+                  theme={ctx.theme}
+                  isLoading={isMobileV2ListLoading(tripsRpc)}
+                  isError={tripsRpc.isError}
+                  onRetry={() => { void tripsRpc.refetch(); }}
+                >
+                  {null}
+                </MobileV2ListStateView>
+              );
+            }
             const etaMinSafe = tr.etaMin ?? 0;
             const arrive = `${String(Math.floor(etaMinSafe / 60)).padStart(2, "0")}:${String(etaMinSafe % 60).padStart(2, "0")}`;
             return (
@@ -4821,6 +4871,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
           >
           <MobileV2CashDropScreen
             theme={ctx.theme}
+            locale={ctx.locale}
             expectedSar={liveCashDrop.expectedSar}
             countedSar={cashCountedEffective}
             supervisorName={cashSupervisor}
@@ -4842,17 +4893,19 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
             onSupervisorChange={setCashSupervisor}
             onCapturePhoto={registerCashDropArtifact}
             onSubmit={() => {
+              const countedSar = cashCountedEffective;
+              if (countedSar === null) return;
               signCashDropMutation.mutate(
                 {
                   p_expected_sar: liveCashDrop.expectedSar,
-                  p_actual_sar: cashCountedEffective,
+                  p_actual_sar: countedSar,
                   // Variance writes require a supervisor name + photo id;
                   // pass-through preserves the migration's CHECK contract.
                   p_supervisor_name: cashSupervisor.trim().length > 0 ? cashSupervisor : null,
                   // Variance photo evidence must be the persisted artifact id
                   // returned by register_mobile_artifact_v1.
                   p_photo_id:
-                    cashCountedEffective !== liveCashDrop.expectedSar
+                    countedSar !== liveCashDrop.expectedSar
                       ? cashPhotoArtifactId
                       : null,
                 },
@@ -4865,8 +4918,8 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                         cashDropReadback.data?.lastDrop ?? null,
                         write,
                         liveCashDrop.expectedSar,
-                        cashCountedEffective,
-                        cashCountedEffective !== liveCashDrop.expectedSar
+                        countedSar,
+                        countedSar !== liveCashDrop.expectedSar
                           ? cashPhotoArtifactId
                           : null,
                       )
@@ -4880,7 +4933,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                     }
                     setToast({
                       id: `cd-sub-${Date.now()}`,
-                      message: `Cash drop submitted · ${cashCountedEffective} SAR`,
+                      message: `Cash drop submitted · ${countedSar} SAR`,
                       kind: "success",
                     });
                     setCashSupervisor("");
@@ -5543,7 +5596,19 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
           </MobileV2ListStateView>
         ) : activeTabId === "mobile-trip-detail" ? (
           (() => {
-            const base = liveTrips.find((x) => x.id === activeTripId) ?? liveTrips[0]!;
+            const base = liveTrips.find((x) => x.id === activeTripId) ?? liveTrips[0];
+            if (base === undefined) {
+              return (
+                <MobileV2ListStateView
+                  theme={ctx.theme}
+                  isLoading={isMobileV2ListLoading(tripsRpc)}
+                  isError={tripsRpc.isError}
+                  onRetry={() => { void tripsRpc.refetch(); }}
+                >
+                  {null}
+                </MobileV2ListStateView>
+              );
+            }
             const stageOverride = isShowcase ? tripStageOverrides.get(base.id) : undefined;
             const tr = stageOverride !== undefined ? { ...base, stage: stageOverride } : base;
             return (
@@ -5649,7 +5714,19 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
           </MobileV2ListStateView>
         ) : activeTabId === "mobile-pickup-detail" ? (
           (() => {
-            const base = livePickups.find((x) => x.id === activePickupId) ?? livePickups[0]!;
+            const base = livePickups.find((x) => x.id === activePickupId) ?? livePickups[0];
+            if (base === undefined) {
+              return (
+                <MobileV2ListStateView
+                  theme={ctx.theme}
+                  isLoading={isMobileV2ListLoading(pickupsRpc)}
+                  isError={pickupsRpc.isError}
+                  onRetry={() => { void pickupsRpc.refetch(); }}
+                >
+                  {null}
+                </MobileV2ListStateView>
+              );
+            }
             const boost = pickupPickedBoost.get(base.id) ?? 0;
             const p = { ...base, picked: Math.min(base.expectedQty, base.picked + boost) };
             const incPicked = (delta: number) =>

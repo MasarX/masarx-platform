@@ -171,7 +171,8 @@ export interface MobileV2LoaderTodayEnvelope {
   readonly totalParcels: number;
   readonly scannedParcels: number;
   readonly driversWaiting: number;
-  readonly quickActions: ReadonlyArray<MobileV2LoaderQuickAction>;
+  /** Row-defined tiles. `null`: the live tile list is missing or malformed (#600 error state). */
+  readonly quickActions: ReadonlyArray<MobileV2LoaderQuickAction> | null;
   readonly drivers: ReadonlyArray<MobileV2LoaderDriverQueueEntry>;
 }
 
@@ -938,6 +939,30 @@ export function isMobileV2ListLoading(
 }
 
 /**
+ * #600: a live resolver payload that fails shape validation. The parsers
+ * throw it so react-query reports `isError` and the screen shows its
+ * standard error state with a retry, never a fixture in its place.
+ */
+export function mobileV2MalformedPayload(rpc: string): Error {
+  return new Error(`mobile_v2_rpc:${rpc} malformed payload`);
+}
+
+/**
+ * #600: the one gate between fixtures and FieldOps screens. Showcase mode
+ * (no Supabase client) shows the fixture from the first paint. A live read
+ * starts with no data, so the screen shows its loading state, and it only
+ * ever settles to the resolver's parsed payload or an error.
+ */
+export function fieldopsSurfaceQuery<T>(
+  supabase: SupabaseClient | null,
+  fixture: T,
+  readLive: (client: SupabaseClient) => Promise<T>,
+): { readonly initialData: T | undefined; readonly queryFn: () => Promise<T> } {
+  if (isPreviewMode(supabase)) return { initialData: fixture, queryFn: async () => fixture };
+  return { initialData: undefined, queryFn: () => readLive(supabase) };
+}
+
+/**
  * Re-audit E11: the loader induction bay must be sourced ONLY from a
  * settled `resolve_fieldops_loader_today_v1` envelope — never the
  * screen-level `liveLoaderToday = loaderTodayRpc.data ?? FIXTURE`
@@ -977,11 +1002,9 @@ export function useFieldopsTasksRpc(
   const fallback = options.fallback ?? [];
   return useQuery<ReadonlyArray<MobileV2Task>, Error>({
     queryKey: ["mobile-v2", "tasks", ctx.activeRole, ctx.policyContext ?? null],
-    queryFn: async () => {
-      // Preview/showcase mode: the fixture is a legitimate sample.
-      if (isPreviewMode(ctx.supabase)) return fallback;
+    ...fieldopsSurfaceQuery(ctx.supabase, fallback, async (supabase) => {
       const raw = await callRpc({
-        supabase: ctx.supabase,
+        supabase,
         name: "resolve_fieldops_tasks_v1",
         params: {
           p_active_role: ctx.activeRole,
@@ -994,7 +1017,7 @@ export function useFieldopsTasksRpc(
       // "All clear" empty state instead of fabricated jobs. (Genuine RPC
       // errors still throw → react-query isError surfaces the retry card.)
       return parseMobileV2TaskList(raw);
-    },
+    }),
     ...options.query,
   });
 }
@@ -1686,7 +1709,9 @@ function parsePickupStatus(raw: unknown): MobileV2Pickup["status"] {
   return "pending";
 }
 
-export function parsePickupList(raw: unknown, fallback: ReadonlyArray<MobileV2Pickup>): ReadonlyArray<MobileV2Pickup> {
+// `_fallback` is unused since #600: live reads never substitute fixtures.
+// It stays in the signature so existing callers keep compiling.
+export function parsePickupList(raw: unknown, _fallback?: ReadonlyArray<MobileV2Pickup>): ReadonlyArray<MobileV2Pickup> {
   // P0 audit fix: previously fabricated `expectedQty` and `priority`
   // from the task `priority` numeric (e.g. priority 88 -> 9 parcels)
   // which invented business data. Now we read shape-correct fields only:
@@ -1694,9 +1719,9 @@ export function parsePickupList(raw: unknown, fallback: ReadonlyArray<MobileV2Pi
   // (production: resolve_fieldops_pickups_v1 ships those fields), or
   // we report a truthful empty (expectedQty=0, status="pending",
   // priority="normal", sealRequired=false) until they exist.
-  // 2nd-pass audit fix: empty array is a legitimate "no pickups today"
-  // state — only fall back when payload is malformed (not an array).
-  if (!Array.isArray(raw)) return fallback;
+  // An empty array is a legitimate "no pickups today" state. A non-array,
+  // or rows that are all invalid, is a malformed payload (#600).
+  if (!Array.isArray(raw)) throw mobileV2MalformedPayload("resolve_fieldops_pickups_v1");
   if (raw.length === 0) return Object.freeze([]);
   const out: MobileV2Pickup[] = [];
   for (const r of raw) {
@@ -1752,7 +1777,8 @@ export function parsePickupList(raw: unknown, fallback: ReadonlyArray<MobileV2Pi
       }),
     );
   }
-  return out.length > 0 ? Object.freeze(out) : fallback;
+  if (out.length === 0) throw mobileV2MalformedPayload("resolve_fieldops_pickups_v1");
+  return Object.freeze(out);
 }
 
 export function findMobileV2PickupReadback(
@@ -1780,15 +1806,14 @@ export function useFieldopsPickupsRpc(
   const fallback = options.fallback ?? [];
   return useQuery<ReadonlyArray<MobileV2Pickup>, Error>({
     queryKey: ["mobile-v2", "pickups", ctx.activeRole],
-    queryFn: async () => {
-      if (isPreviewMode(ctx.supabase)) return fallback;
+    ...fieldopsSurfaceQuery(ctx.supabase, fallback, async (supabase) => {
       const raw = await callRpc({
-        supabase: ctx.supabase,
+        supabase,
         name: "resolve_fieldops_pickups_v1",
         params: { p_active_role: ctx.activeRole, p_context: ctx.policyContext ?? {} },
       });
-      return parsePickupList(raw, fallback);
-    },
+      return parsePickupList(raw);
+    }),
     ...options.query,
   });
 }
@@ -1804,14 +1829,14 @@ export interface UseFieldopsTripsOptions {
   readonly query?: Omit<UseQueryOptions<ReadonlyArray<MobileV2Trip>, Error>, "queryKey" | "queryFn">;
 }
 
-export function parseTripList(raw: unknown, fallback: ReadonlyArray<MobileV2Trip>): ReadonlyArray<MobileV2Trip> {
+// `_fallback` is unused since #600: live reads never substitute fixtures.
+// It stays in the signature so existing callers keep compiling.
+export function parseTripList(raw: unknown, _fallback?: ReadonlyArray<MobileV2Trip>): ReadonlyArray<MobileV2Trip> {
   // P0 audit fix #1: shape-validate so a future migration drift doesn't
   // render `undefined.name` in the UI.
-  // P0 audit fix #2 (2nd pass): only fall back when payload is NOT a
-  // valid array (truly malformed). An empty array is a legitimate empty
-  // state from the backend; returning fallback there would mask "no
-  // trips today" with sample data for an authenticated driver.
-  if (!Array.isArray(raw)) return fallback;
+  // An empty array is a legitimate "no trips today" state. A non-array,
+  // or rows that are all invalid, is a malformed payload (#600).
+  if (!Array.isArray(raw)) throw mobileV2MalformedPayload("resolve_fieldops_trips_v1");
   if (raw.length === 0) return Object.freeze([]);
   const out: MobileV2Trip[] = [];
   for (const r of raw) {
@@ -1857,7 +1882,8 @@ export function parseTripList(raw: unknown, fallback: ReadonlyArray<MobileV2Trip
       }) as MobileV2Trip,
     );
   }
-  return out.length > 0 ? Object.freeze(out) : fallback;
+  if (out.length === 0) throw mobileV2MalformedPayload("resolve_fieldops_trips_v1");
+  return Object.freeze(out);
 }
 
 export function useFieldopsTripsRpc(
@@ -1867,15 +1893,14 @@ export function useFieldopsTripsRpc(
   const fallback = options.fallback ?? [];
   return useQuery<ReadonlyArray<MobileV2Trip>, Error>({
     queryKey: ["mobile-v2", "trips", ctx.activeRole],
-    queryFn: async () => {
-      if (isPreviewMode(ctx.supabase)) return fallback;
+    ...fieldopsSurfaceQuery(ctx.supabase, fallback, async (supabase) => {
       const raw = await callRpc({
-        supabase: ctx.supabase,
+        supabase,
         name: "resolve_fieldops_trips_v1",
         params: { p_active_role: ctx.activeRole, p_context: ctx.policyContext ?? {} },
       });
-      return parseTripList(raw, fallback);
-    },
+      return parseTripList(raw);
+    }),
     ...options.query,
   });
 }
@@ -1991,16 +2016,14 @@ export function useFieldopsWalletRpc(
   const enabled = options.enabled ?? true;
   return useQuery<MobileV2WalletEnvelope, Error>({
     queryKey: ["mobile-v2", "wallet", ctx.activeRole],
-    queryFn: async () => {
-      if (!enabled) return options.fallback;
-      if (isPreviewMode(ctx.supabase)) return options.fallback;
+    ...fieldopsSurfaceQuery(ctx.supabase, options.fallback, async (supabase) => {
       const raw = await callRpc({
-        supabase: ctx.supabase,
+        supabase,
         name: "resolve_fieldops_wallet_v1",
         params: { p_active_role: ctx.activeRole, p_context: ctx.policyContext ?? {} },
       });
-      return mapFieldopsWalletEnvelope(raw, options.fallback);
-    },
+      return mapFieldopsWalletEnvelope(raw);
+    }),
     enabled,
   });
 }
@@ -2023,33 +2046,31 @@ function parseWalletWithdrawal(raw: unknown): MobileV2WalletWithdrawal | null {
   });
 }
 
+// `_fallback` is unused since #600: a malformed live wallet is an error,
+// never fixture money. It stays in the signature so callers keep compiling.
 export function mapFieldopsWalletEnvelope(
   raw: unknown,
-  fallback: MobileV2WalletEnvelope,
+  _fallback?: MobileV2WalletEnvelope,
 ): MobileV2WalletEnvelope {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return fallback;
-  const r = raw as Record<string, unknown>;
-  const w = r.wallet !== null && typeof r.wallet === "object" && !Array.isArray(r.wallet)
-    ? (r.wallet as Record<string, unknown>)
-    : undefined;
-  const wallet: MobileV2WalletBalance =
-    w !== undefined
-      ? Object.freeze({
-          balanceSar: parseFiniteNumber(w.balance_sar) ?? fallback.wallet.balanceSar,
-          weekToDateSar: parseFiniteNumber(w.week_to_date_sar) ?? fallback.wallet.weekToDateSar,
-          postsToBankLabel:
-            typeof w.posts_to_bank_label === "string" && w.posts_to_bank_label.trim().length > 0
-              ? w.posts_to_bank_label
-              : fallback.wallet.postsToBankLabel,
-        })
-      : fallback.wallet;
+  const r = asRecord(raw);
+  const w = r === null ? null : asRecord(r.wallet);
+  const balanceSar = w === null ? null : parseFiniteNumber(w.balance_sar);
+  const weekToDateSar = w === null ? null : parseFiniteNumber(w.week_to_date_sar);
+  if (
+    r === null || w === null || balanceSar === null || weekToDateSar === null ||
+    !Array.isArray(r.week) || !Array.isArray(r.breakdown)
+  ) {
+    throw mobileV2MalformedPayload("resolve_fieldops_wallet_v1");
+  }
+  const wallet: MobileV2WalletBalance = Object.freeze({
+    balanceSar,
+    weekToDateSar,
+    postsToBankLabel: typeof w.posts_to_bank_label === "string" ? w.posts_to_bank_label : "",
+  });
   return Object.freeze({
     wallet,
-    week: withFallback(r.week as ReadonlyArray<MobileV2WalletWeekBar> | undefined, fallback.week),
-    breakdown: withFallback(
-      r.breakdown as ReadonlyArray<MobileV2WalletBreakdownRow> | undefined,
-      fallback.breakdown,
-    ),
+    week: r.week as ReadonlyArray<MobileV2WalletWeekBar>,
+    breakdown: r.breakdown as ReadonlyArray<MobileV2WalletBreakdownRow>,
     latestWithdrawal: parseWalletWithdrawal(r.latest_withdrawal),
   });
 }
@@ -2354,16 +2375,14 @@ export function useFieldopsCashDropRpc(
   const enabled = options.enabled ?? true;
   return useQuery<MobileV2CashDropEnvelope, Error>({
     queryKey: ["mobile-v2", "cash-drop", ctx.activeRole],
-    queryFn: async () => {
-      if (!enabled) return options.fallback;
-      if (isPreviewMode(ctx.supabase)) return options.fallback;
+    ...fieldopsSurfaceQuery(ctx.supabase, options.fallback, async (supabase) => {
       const raw = await callRpc({
-        supabase: ctx.supabase,
+        supabase,
         name: "resolve_fieldops_cash_drop_v1",
         params: { p_active_role: ctx.activeRole, p_context: ctx.policyContext ?? {} },
       });
-      return mapFieldopsCashDropEnvelope(raw, options.fallback);
-    },
+      return mapFieldopsCashDropEnvelope(raw);
+    }),
     enabled,
   });
 }
@@ -2409,18 +2428,20 @@ function parseCashDropLastDrop(raw: unknown): MobileV2CashDropLastDrop | null {
   });
 }
 
+// `_fallback` is unused since #600: a malformed live cash drop is an
+// error, never fixture money. It stays so existing callers keep compiling.
 export function mapFieldopsCashDropEnvelope(
   raw: unknown,
-  fallback: MobileV2CashDropEnvelope,
+  _fallback?: MobileV2CashDropEnvelope,
 ): MobileV2CashDropEnvelope {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return fallback;
-  const r = raw as Record<string, unknown>;
+  const r = asRecord(raw);
+  const expectedSar = r === null ? null : parseFiniteNumber(r.expected_sar);
+  if (r === null || expectedSar === null || typeof r.safe_location !== "string") {
+    throw mobileV2MalformedPayload("resolve_fieldops_cash_drop_v1");
+  }
   return Object.freeze({
-    expectedSar: parseFiniteNumber(r.expected_sar) ?? fallback.expectedSar,
-    safeLocation:
-      typeof r.safe_location === "string" && r.safe_location.trim().length > 0
-        ? r.safe_location
-        : fallback.safeLocation,
+    expectedSar,
+    safeLocation: r.safe_location,
     lastDrop: parseCashDropLastDrop(r.latest_drop),
   });
 }
@@ -2624,10 +2645,14 @@ export interface UseFieldopsEorOptions {
  */
 export function mapFieldopsEorEnvelope(
   raw: unknown,
-  fallback: MobileV2EorEnvelope,
+  _fallback?: MobileV2EorEnvelope,
 ): MobileV2EorEnvelope {
-  const r =
-    raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  // #600: the resolver always emits summary + checklist; without them the
+  // payload is malformed and the screen shows its error state, not fixtures.
+  const r = asRecord(raw);
+  if (r === null || asRecord(r.summary) === null || !Array.isArray(r.checklist)) {
+    throw mobileV2MalformedPayload("resolve_fieldops_eor_v1");
+  }
   const reconRaw =
     r.recon !== null && typeof r.recon === "object"
       ? (r.recon as Record<string, unknown>)
@@ -2682,13 +2707,9 @@ export function mapFieldopsEorEnvelope(
         })()
       : null;
   return Object.freeze({
-    // summary / checklist are the resolver's real aggregation; the typed
-    // fallback is kept only as a shape guard for a malformed payload.
-    summary: (r.summary as MobileV2EorSummary | undefined) ?? fallback.summary,
-    checklist: withFallback(
-      r.checklist as ReadonlyArray<MobileV2EorChecklistItem> | undefined,
-      fallback.checklist,
-    ),
+    // summary / checklist are the resolver's real aggregation.
+    summary: r.summary as MobileV2EorSummary,
+    checklist: r.checklist as ReadonlyArray<MobileV2EorChecklistItem>,
     // performanceNote: honest null when the resolver omits it.
     performanceNote:
       typeof r.performance_note === "string" ? r.performance_note : null,
@@ -2706,32 +2727,22 @@ export function useFieldopsEorRpc(
   const ctx = useMobileV2Rpc();
   return useQuery<MobileV2EorEnvelope, Error>({
     queryKey: ["mobile-v2", "eor", ctx.activeRole, options.routeRunId ?? null],
-    queryFn: async () => {
-      // Preview/showcase mode: the fixture is a legitimate sample.
-      if (isPreviewMode(ctx.supabase)) return options.fallback;
-      let raw: unknown;
-      try {
-        raw = await callRpc({
-          supabase: ctx.supabase,
-          name: "resolve_fieldops_eor_v1",
-          params: {
-            p_active_role: ctx.activeRole,
-            p_context: {
-              ...(ctx.policyContext ?? {}),
-              ...(options.routeRunId ? { route_run_id: options.routeRunId } : {}),
-            },
+    // #600: a missing resolver is an error in live mode, like any other
+    // failed read; the fixture is a showcase sample only.
+    ...fieldopsSurfaceQuery(ctx.supabase, options.fallback, async (supabase) => {
+      const raw = await callRpc({
+        supabase,
+        name: "resolve_fieldops_eor_v1",
+        params: {
+          p_active_role: ctx.activeRole,
+          p_context: {
+            ...(ctx.policyContext ?? {}),
+            ...(options.routeRunId ? { route_run_id: options.routeRunId } : {}),
           },
-        });
-      } catch (error) {
-        // Resolver not migrated onto this DB yet — degrade to the typed
-        // fixture. Any other error (RLS denial, network fault) is
-        // re-thrown for the error card.
-        if (isMissingRpcError(error)) return options.fallback;
-        throw error;
-      }
-      // A real resolver response — map it honestly.
-      return mapFieldopsEorEnvelope(raw, options.fallback);
-    },
+        },
+      });
+      return mapFieldopsEorEnvelope(raw);
+    }),
   });
 }
 
@@ -2819,13 +2830,13 @@ export function mapFieldopsLoaderTodayEnvelope(
       typeof r.scanned_parcels === "number" ? r.scanned_parcels : 0,
     driversWaiting:
       typeof r.drivers_waiting === "number" ? r.drivers_waiting : 0,
-    // Quick-action tiles are a row-defined navigation surface (not
-    // tenant business data); the resolver always returns them, but if it
-    // omits the key keep the fixture's identical navigation grid.
-    quickActions: withFallback(
-      r.quick_actions as ReadonlyArray<MobileV2LoaderQuickAction> | undefined,
-      fallback.quickActions,
-    ),
+    // Quick-action tiles are a row-defined navigation surface. #600: a
+    // resolver envelope without a tile list is malformed, so the section
+    // shows its error state (null), never the fixture tiles. A non-object
+    // payload never reaches here from a live read (the hook rejects it).
+    quickActions: raw !== null && typeof raw === "object"
+      ? (Array.isArray(r.quick_actions) ? (r.quick_actions as ReadonlyArray<MobileV2LoaderQuickAction>) : null)
+      : fallback.quickActions,
     // An absent `drivers` key → empty list (honest "no queue"); only
     // fall back to [] (never the fixture queue).
     drivers: Array.isArray(r.drivers)
@@ -2837,7 +2848,8 @@ export function mapFieldopsLoaderTodayEnvelope(
 export function buildNeutralFieldopsLoaderTodayEnvelope(
   fallback: MobileV2LoaderTodayEnvelope,
 ): MobileV2LoaderTodayEnvelope {
-  return mapFieldopsLoaderTodayEnvelope(null, fallback);
+  // #600: neutral means no fixture tiles either; null is the error state.
+  return Object.freeze({ ...mapFieldopsLoaderTodayEnvelope(null, fallback), quickActions: null });
 }
 
 export function useFieldopsLoaderTodayRpc(
@@ -2846,28 +2858,29 @@ export function useFieldopsLoaderTodayRpc(
   const ctx = useMobileV2Rpc();
   return useQuery<MobileV2LoaderTodayEnvelope, Error>({
     queryKey: ["mobile-v2", "loader-today", ctx.activeRole],
-    queryFn: async () => {
-      // Preview/showcase mode: the fixture is a legitimate sample.
-      if (isPreviewMode(ctx.supabase)) return options.fallback;
+    ...fieldopsSurfaceQuery(ctx.supabase, options.fallback, async (supabase) => {
       let raw: unknown;
       try {
         raw = await callRpc({
-          supabase: ctx.supabase,
+          supabase,
           schema: "api",
           name: "resolve_fieldops_loader_today_v1",
           params: { p_active_role: ctx.activeRole, p_context: ctx.policyContext ?? {} },
         });
       } catch (error) {
-        // Resolver not migrated onto this DB yet — degrade to the typed
-        // fixture so the loader home renders. Any other error (RLS
+        // Resolver not migrated onto this DB yet — degrade to the neutral
+        // envelope so the loader home renders. Any other error (RLS
         // denial, network fault) is re-thrown for the error card.
         if (isMissingRpcError(error)) return buildNeutralFieldopsLoaderTodayEnvelope(options.fallback);
         throw error;
       }
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+        throw mobileV2MalformedPayload("resolve_fieldops_loader_today_v1");
+      }
       // A real resolver response — map it honestly. Resolver-NULL
       // wave/bay/route/cut-off degrade to "", never the fixture values.
       return mapFieldopsLoaderTodayEnvelope(raw, options.fallback);
-    },
+    }),
   });
 }
 

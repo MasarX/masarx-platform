@@ -25,6 +25,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 
 import { FxButton, FxCard, FxCol, FxRow } from "./mobile-v2-primitives";
 import { FxIcon } from "./mobile-v2-icon";
+import { getStrings, resolveLocaleCode } from "./i18n";
 import {
   MOBILE_V2_FONT_MONO,
   MOBILE_V2_FONT_SANS,
@@ -61,7 +62,9 @@ export interface MobileV2CashDropPhotoCapture {
 export interface MobileV2CashDropScreenProps {
   readonly theme: MobileV2Theme;
   readonly expectedSar: number;
-  readonly countedSar: number;
+  /** `null`: nothing counted yet. Live mode starts here, never at the expected amount (#600). */
+  readonly countedSar: number | null;
+  readonly locale?: string;
   readonly supervisorName: string;
   readonly safeLocation: string;
   readonly lastDrop?: MobileV2CashDropLastDrop | null;
@@ -118,7 +121,9 @@ export function MobileV2CashDropScreen(
   props: MobileV2CashDropScreenProps,
 ): React.ReactElement {
   const { theme, expectedSar, countedSar } = props;
-  const { variance, hasVariance } = computeMobileV2CashVariance(countedSar, expectedSar);
+  const copy = getStrings(resolveLocaleCode(props.locale)).cashDrop;
+  const notCounted = countedSar === null;
+  const { variance, hasVariance } = computeMobileV2CashVariance(countedSar ?? expectedSar, expectedSar);
   // Zero-hardcoding: currency symbol resolved through the centralized
   // formatter keyed by the ladder-resolved currency code (default SAR).
   const currency = props.currency ?? "SAR";
@@ -225,7 +230,7 @@ export function MobileV2CashDropScreen(
                   letterSpacing: -1.5,
                 }}
               >
-                {countedSar}
+                {countedSar ?? "—"}
               </Text>
               <Text
                 style={{
@@ -248,8 +253,7 @@ export function MobileV2CashDropScreen(
               }}
             >
               Expected {formatMobileV2CurrencyCompact(expectedSar, currency)} · variance{" "}
-              {variance >= 0 ? "+" : ""}
-              {variance}
+              {notCounted ? "—" : `${variance >= 0 ? "+" : ""}${variance}`}
             </Text>
           </FxCol>
         </View>
@@ -272,7 +276,7 @@ export function MobileV2CashDropScreen(
                 variant="soft"
                 size="sm"
                 onPress={() =>
-                  props.onCountedChange(applyMobileV2CashAdjust(countedSar, d))
+                  props.onCountedChange(applyMobileV2CashAdjust(countedSar ?? 0, d))
                 }
                 accessibilityLabel={`Adjust counted by ${d}`}
               >
@@ -531,13 +535,25 @@ export function MobileV2CashDropScreen(
                 full
                 size="lg"
                 icon="check"
-                disabled={submitBlocked}
+                disabled={submitBlocked || notCounted}
                 onPress={props.onSubmit}
-                accessibilityLabel={`Submit cash drop ${formatMobileV2CurrencyCompact(countedSar, currency)}`}
+                accessibilityLabel={`Submit cash drop${countedSar === null ? "" : ` ${formatMobileV2CurrencyCompact(countedSar, currency)}`}`}
               >
-                Submit drop · {formatMobileV2CurrencyCompact(countedSar, currency)}
+                Submit drop{countedSar === null ? "" : ` · ${formatMobileV2CurrencyCompact(countedSar, currency)}`}
               </FxButton>
-              {submitBlocked ? (
+              {notCounted ? (
+                <Text
+                  style={{
+                    fontSize: 11,
+                    color: theme.muted,
+                    fontFamily: MOBILE_V2_FONT_SANS,
+                    textAlign: "center",
+                    marginTop: MOBILE_V2_SPACING.xs,
+                  }}
+                >
+                  {copy.countedEmpty}
+                </Text>
+              ) : submitBlocked ? (
                 <Text
                   style={{
                     fontSize: 11,

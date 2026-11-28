@@ -19,6 +19,7 @@
 
 import {
   buildNeutralFieldopsLoaderTodayEnvelope,
+  fieldopsSurfaceQuery,
   mapFieldopsLoaderTodayEnvelope,
   resolveFieldopsInductionBay,
 } from "../../../apps/fieldops/src/mobile-v2-rpc-hooks";
@@ -181,17 +182,27 @@ describe("mapFieldopsLoaderTodayEnvelope — E6 honest-degrade", () => {
     expect(mapped.greetingName).not.toBe(FIXTURE.greetingName);
   });
 
-  test("quick-action tiles are a row-defined navigation surface — fixture fallback only when omitted", () => {
+  // #600: retired "omitted quick actions return the fixture set". Live mode
+  // shows no fixture tiles: `null` drives the section's error state.
+  test("quick-action tiles pass through; omitted tiles are the error state, never the fixture", () => {
     // Resolver returns the tiles → pass through.
     const withTiles = mapFieldopsLoaderTodayEnvelope(realResolverEnvelope(), FIXTURE);
     expect(withTiles.quickActions).toEqual(FIXTURE_QUICK_ACTIONS);
-    // Resolver omits the key → keep the fixture's identical navigation
-    // grid (these are route ids + labels, not tenant business data).
     const withoutTiles = mapFieldopsLoaderTodayEnvelope(
       realResolverEnvelope({ quick_actions: undefined }),
       FIXTURE,
     );
-    expect(withoutTiles.quickActions).toBe(FIXTURE.quickActions);
+    expect(withoutTiles.quickActions).toBeNull();
+  });
+
+  test("showcase mode: omitted tiles still render the fixture tiles", async () => {
+    const readLive = jest.fn(async () =>
+      mapFieldopsLoaderTodayEnvelope(realResolverEnvelope({ quick_actions: undefined }), FIXTURE),
+    );
+    const query = fieldopsSurfaceQuery(null, FIXTURE, readLive);
+    expect(query.initialData?.quickActions).toBe(FIXTURE.quickActions);
+    await expect(query.queryFn()).resolves.toBe(FIXTURE);
+    expect(readLive).not.toHaveBeenCalled();
   });
 });
 
