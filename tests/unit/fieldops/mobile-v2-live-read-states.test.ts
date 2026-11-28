@@ -2,24 +2,42 @@
 // error, never fixture data. `fieldopsSurfaceQuery` is the one place that
 // confines fixtures to showcase mode; the mappers reject malformed
 // payloads so react-query reports an error. These tests pin each state for
-// pickups, trips, wallet, cash drop and loader quick actions.
+// every FieldOps read surface, the loader quick actions and the cash drop
+// access-denied state.
 
 import {
   fieldopsSurfaceQuery,
   isMobileV2ListLoading,
   mapFieldopsCashDropEnvelope,
   mapFieldopsLoaderTodayEnvelope,
+  mapFieldopsLookupEnvelope,
+  mapFieldopsReturnsEnvelope,
+  mapFieldopsSortationEnvelope,
+  mapFieldopsSupervisorQueueEnvelope,
   mapFieldopsWalletEnvelope,
   buildNeutralFieldopsLoaderTodayEnvelope,
+  parseHoldList,
+  parseHubPickupList,
   parsePickupList,
   parseTripList,
+  readFieldopsRiderTodayPayload,
 } from "../../../apps/fieldops/src/mobile-v2-rpc-hooks";
+import { isMobileV2CashDropTabDenied } from "../../../apps/fieldops/src/mobile-v2-navigation";
 import {
   MOBILE_V2_PREVIEW_CASH_DROP,
+  MOBILE_V2_PREVIEW_HUB_PICKUP,
   MOBILE_V2_PREVIEW_LOADER_TODAY,
+  MOBILE_V2_PREVIEW_LOOKUP_RECORDS,
   MOBILE_V2_PREVIEW_PICKUPS,
+  MOBILE_V2_PREVIEW_RETURNS,
+  MOBILE_V2_PREVIEW_RIDER_TODAY,
+  MOBILE_V2_PREVIEW_SORTATION_BAYS,
+  MOBILE_V2_PREVIEW_SORTATION_RECENT,
+  MOBILE_V2_PREVIEW_SUPERVISOR_QUEUE,
   MOBILE_V2_PREVIEW_TRIPS,
   MOBILE_V2_PREVIEW_WALLET,
+  buildMobileV2PreviewHold,
+  buildMobileV2PreviewLookupRecent,
 } from "../../../apps/fieldops/src/fixtures";
 
 // Any non-null client means live mode; the reads below never touch it.
@@ -30,6 +48,8 @@ interface Surface {
   readonly fixture: unknown;
   readonly map: (raw: unknown) => unknown;
   readonly malformed: unknown;
+  /** A valid empty resolver payload; it maps to empty lists and zeros. */
+  readonly empty?: unknown;
 }
 
 const SURFACES: ReadonlyArray<Surface> = [
@@ -41,6 +61,61 @@ const SURFACES: ReadonlyArray<Surface> = [
     fixture: MOBILE_V2_PREVIEW_CASH_DROP,
     map: (raw) => mapFieldopsCashDropEnvelope(raw),
     malformed: { expected_sar: "lots", safe_location: 7 },
+  },
+  {
+    name: "sortation",
+    fixture: {
+      bays: MOBILE_V2_PREVIEW_SORTATION_BAYS,
+      recent: MOBILE_V2_PREVIEW_SORTATION_RECENT,
+      inductedThisSession: 677,
+      throughputPerHour: 146,
+      minutesElapsed: 278,
+    },
+    map: (raw) => mapFieldopsSortationEnvelope(raw),
+    malformed: { bays: [], recent: [] },
+    empty: { bays: [], recent: [], inducted: 0, throughput_per_hour: 0, minutes_elapsed: 0 },
+  },
+  {
+    name: "lookup",
+    fixture: { records: MOBILE_V2_PREVIEW_LOOKUP_RECORDS, recent: buildMobileV2PreviewLookupRecent() },
+    map: (raw) => mapFieldopsLookupEnvelope(raw),
+    malformed: { records: null, recent: [] },
+    empty: { records: [], recent: [] },
+  },
+  {
+    name: "returns",
+    fixture: MOBILE_V2_PREVIEW_RETURNS,
+    map: (raw) => mapFieldopsReturnsEnvelope(raw),
+    malformed: { failed: "none", returned: [], cod_collected_sar: 0 },
+    empty: { failed: [], returned: [], cod_collected_sar: 0 },
+  },
+  {
+    name: "hub pickup",
+    fixture: MOBILE_V2_PREVIEW_HUB_PICKUP,
+    map: (raw) => parseHubPickupList(raw),
+    malformed: { rows: [] },
+    empty: [],
+  },
+  {
+    name: "hold",
+    fixture: buildMobileV2PreviewHold(),
+    map: (raw) => parseHoldList(raw),
+    malformed: [{ parcel: 7 }],
+    empty: [],
+  },
+  {
+    name: "rider today",
+    fixture: MOBILE_V2_PREVIEW_RIDER_TODAY,
+    map: (raw) => readFieldopsRiderTodayPayload(raw, MOBILE_V2_PREVIEW_RIDER_TODAY),
+    malformed: 42,
+    empty: { greeting_name: null, employee_id: null, active: null, upcoming: [] },
+  },
+  {
+    name: "supervisor queue",
+    fixture: MOBILE_V2_PREVIEW_SUPERVISOR_QUEUE,
+    map: (raw) => mapFieldopsSupervisorQueueEnvelope(raw),
+    malformed: { supervisor_name: "Lead", queue: null },
+    empty: { supervisor_name: null, queue: [], active_id: null },
   },
 ];
 
@@ -69,6 +144,42 @@ describe.each(SURFACES)("FieldOps $name read states (#600)", (surface) => {
     expect(query.initialData).toBe(surface.fixture);
     await expect(query.queryFn()).resolves.toBe(surface.fixture);
     expect(readLive).not.toHaveBeenCalled();
+  });
+});
+
+// Every list in a valid empty payload maps to [] and every number to 0.
+function expectNoFixtureValues(value: unknown): void {
+  if (Array.isArray(value)) {
+    expect(value).toEqual([]);
+  } else if (typeof value === "number") {
+    expect(value).toBe(0);
+  } else if (value !== null && typeof value === "object") {
+    for (const field of Object.values(value)) expectNoFixtureValues(field);
+  }
+}
+
+describe.each(SURFACES.filter((surface) => surface.empty !== undefined))(
+  "FieldOps $name valid-empty live read (#600)",
+  (surface) => {
+    test("an empty resolver payload renders empty, never fixture rows", async () => {
+      const query = fieldopsSurfaceQuery(LIVE_CLIENT, surface.fixture, async () => surface.map(surface.empty));
+      const data = await query.queryFn();
+      expect(data).not.toBe(surface.fixture);
+      expectNoFixtureValues(data);
+    });
+  },
+);
+
+describe("FieldOps cash drop access denied (#600)", () => {
+  test("a live user without cash_drop.write gets the denied state on cash drop and COD ledger", () => {
+    expect(isMobileV2CashDropTabDenied("mobile-cash-drop", false)).toBe(true);
+    expect(isMobileV2CashDropTabDenied("mobile-cod-ledger", false)).toBe(true);
+  });
+
+  test("the capability, or another surface, is never denied", () => {
+    expect(isMobileV2CashDropTabDenied("mobile-cash-drop", true)).toBe(false);
+    expect(isMobileV2CashDropTabDenied("mobile-cod-ledger", true)).toBe(false);
+    expect(isMobileV2CashDropTabDenied("mobile-wallet", false)).toBe(false);
   });
 });
 
