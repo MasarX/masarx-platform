@@ -6,6 +6,9 @@ name: Verify DEV Edge startup
 permissions:
   contents: read
 
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
 jobs:
   startup:
     if: github.ref == 'refs/heads/main' && github.repository == 'MasarX/masarx-platform'
