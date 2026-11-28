@@ -3,7 +3,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(39);
+SELECT plan(40);
 
 SELECT ok(
   NOT has_function_privilege('anon', 'api.record_scan_event_v1(jsonb)', 'EXECUTE')
@@ -54,7 +54,8 @@ DECLARE
   boxless_tracking text := 'PGTS' || upper(left(boxless_shipment::text, 8));
   fixture_capture_time timestamptz := now();
   expired_reason text := 'pgt_expired_' || left(org_id::text, 8);
-  reason_codes jsonb := jsonb_build_array('scanner_unavailable', expired_reason);
+  draft_reason text := 'pgt_draft_' || left(org_id::text, 8);
+  reason_codes jsonb := jsonb_build_array('scanner_unavailable', expired_reason, draft_reason);
   payload jsonb;
   policy jsonb;
   scan record;
@@ -108,9 +109,15 @@ BEGIN
          (boxless_stop, org_id, run_id, client_id, boxless_shipment, 'delivery', 2);
 
   INSERT INTO public.lookup_values (lookup_definition_id, value, label, status, effective_from, effective_until)
-  VALUES ((SELECT id FROM public.lookup_definitions WHERE category = 'stop_scan_manual_entry_reason'),
-    expired_reason, 'Expired fixture reason', 'active',
-    fixture_capture_time - interval '2 days', fixture_capture_time - interval '1 day');
+  SELECT ld.id, r.value, r.label, r.status, r.effective_from, r.effective_until
+  FROM public.lookup_definitions ld
+  CROSS JOIN (VALUES
+    (expired_reason, 'Expired fixture reason', 'active',
+      fixture_capture_time - interval '2 days', fixture_capture_time - interval '1 day'),
+    (draft_reason, 'Draft fixture reason', 'draft',
+      fixture_capture_time - interval '1 day', fixture_capture_time + interval '1 day')
+  ) AS r(value, label, status, effective_from, effective_until)
+  WHERE ld.category = 'stop_scan_manual_entry_reason';
 
   -- Client onboarding seeds a policy that takes precedence over the tenant default.
   SELECT s.cached_value INTO STRICT policy
@@ -160,6 +167,8 @@ BEGIN
     ('reason outside the resolved policy', jsonb_set(payload, '{metadata,scan_reason_code}', '"barcode_unreadable"'),
       'Select an active manual-entry reason for the stop parcel scan'),
     ('expired reason listed in policy', jsonb_set(payload, '{metadata,scan_reason_code}', to_jsonb(expired_reason)),
+      'Select an active manual-entry reason for the stop parcel scan'),
+    ('draft reason listed in policy', jsonb_set(payload, '{metadata,scan_reason_code}', to_jsonb(draft_reason)),
       'Select an active manual-entry reason for the stop parcel scan'),
     ('non-string reason', jsonb_set(payload, '{metadata,scan_reason_code}', '42'),
       'Select an active manual-entry reason for the stop parcel scan'),
@@ -271,7 +280,8 @@ BEGIN
   PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', foreign_driver, 'role', 'authenticated')::text, true);
   RETURN NEXT throws_ok(format('SELECT api.resolve_fieldops_stop_detail_v1(%L)', stop_id), '42501', NULL,
     'cross-tenant driver cannot read the stop parcel state');
-  RETURN NEXT throws_ok(format('SELECT * FROM api.record_scan_event_v1(%L)', payload), '23514', NULL,
+  RETURN NEXT throws_ok(format('SELECT * FROM api.record_scan_event_v1(%L)', payload), '23514',
+    format('record_scan_event_v1: organization mismatch (event org %s, route_stop org %s)', foreign_org, org_id),
     'cross-tenant driver cannot write a stop parcel scan');
 
   PERFORM set_config('request.jwt.claim.sub', '', true);
