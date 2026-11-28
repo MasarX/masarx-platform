@@ -14,6 +14,7 @@ Sources:
 - **Console and Portal shell**: `apps/shared/app-layout.tsx` drives locale, config, theme, telemetry, navigation, capabilities, and auth gating via `AuthGate`.
 - **Context**: every console/portal page uses shared `createUiServerClient().context(appKey)` and permission-aware navigation data from `ui.context`.
 - **API surface**: `/api/ui-event` and `/api/resource-download` are frontend server endpoints for telemetry events and signed resource downloads.
+- **Client imports**: supply `name` and `slug` when creating clients through universal import. The database generates each client ID on save.
 - **Field Ops execution boundary**: route acceptance, scan-out, stop progress, customer contact, delivery completion, exceptions, and shift closeout remain Field Ops-owned executor journeys. Console and Portal may expose oversight or support views for the same route/task resources, but they must not become the primary mutation surface for driver execution.
 
 ## Routing conventions
