@@ -91,8 +91,9 @@ Servers delivers each run's private `result.json` and `nightly.log` under its UT
 
 - `ci` runs per change and creates an isolated database with generated fixtures when the database lane runs.
 - `dev` hosts the integration database and receives deployments on merges to `main`. Use generated fixtures for validation.
-- `stg` is the GitHub environment for production-like qualification with approved test data. The deploy gate is pending.
-- `prod` is configured for production data and approved releases. Production deployments are paused.
+- `stg` is the GitHub environment for production-like qualification with approved test data. It has no deployed project, and the deploy gate is pending.
+- `prod` is the GitHub environment for production data and approved releases. It has no deployed project, and production deployments are paused.
+- DEV is the only deploy target until the owner is satisfied (owner, 26 Nov).
 - Keep each environment's data separate. Use generated fixtures for tests.
 
 ### DEV Management API credentials

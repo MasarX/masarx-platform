@@ -4,7 +4,7 @@
 
 - Repository: https://github.com/MasarX/masarx-platform · main branch: main
 - Board (private): https://github.com/orgs/MasarX/projects/9 · Project brief: the board README
-- Environments: `ci` and `dev` are active. `stg` and `prod` are configured. See [delivery environments](DELIVERY.md#environments).
+- Environments: `ci` and `dev` are active. `stg` and `prod` exist only as GitHub environments, with no deployed project. DEV is the only target until the owner is satisfied (owner, 26 Nov). See [delivery environments](DELIVERY.md#environments).
 - Release plan: [repository milestones](https://github.com/MasarX/masarx-platform/milestones).
 - Leads (thread titles): "MasarX Master", "MasarX Delivery", "MasarX QA", "MasarX Design"
 - UI project: yes
