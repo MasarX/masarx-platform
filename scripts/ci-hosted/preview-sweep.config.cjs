@@ -21,11 +21,15 @@ const nextEnv = {
   NEXT_PUBLIC_LOCALE: SWEEP_LOCALE,
   MASARX_RPC_RETRIES: '0',
 };
-const server = (command, port, env) => ({
-  command, port, env, cwd: root, reuseExistingServer: false, timeout: 120_000,
+const server = (command, readiness, env) => ({
+  command, ...readiness, env, cwd: root, reuseExistingServer: false, timeout: 120_000,
   stdout: 'ignore', stderr: 'ignore',
 });
-const consoleServer = server('npm run dev --workspace @masarx/console -- --hostname ' + loopback, ports.console, nextEnv);
+const consoleServer = server(
+  'npm run dev --workspace @masarx/console -- --hostname ' + loopback,
+  consoleJourneys ? { url: origin(ports.console) + '/operations/routes' } : { port: ports.console },
+  nextEnv,
+);
 const credentialsFile = join(RUNNER_TEMP, 'console-journey-credentials.json');
 const journeyViewports = { desktop: { width: 1440, height: 900 }, phone: { width: 390, height: 844 } };
 if (consoleJourneys) {
@@ -56,16 +60,16 @@ module.exports = defineConfig({
     trace: 'off', screenshot: 'off', video: 'off',
   },
   webServer: [
-    server('node scripts/ci-hosted/deny-egress.cjs', ports.proxy),
+    server('node scripts/ci-hosted/deny-egress.cjs', { port: ports.proxy }),
     ...(consoleJourneys ? [
-      server('node scripts/ci-hosted/preview-sweep-fixture.cjs', ports.fixture, {
+      server('node scripts/ci-hosted/preview-sweep-fixture.cjs', { port: ports.fixture }, {
         E2E_SWEEP_CREDENTIALS_FILE: credentialsFile,
       }),
       consoleServer,
     ] : [
       consoleServer,
-      server('npm run dev --workspace @masarx/portal -- --hostname ' + loopback, ports.portal, nextEnv),
-      server('npm run dev --workspace @masarx/console-v2 -- --host ' + loopback + ' --strictPort', ports['console-v2'], {
+      server('npm run dev --workspace @masarx/portal -- --hostname ' + loopback, { port: ports.portal }, nextEnv),
+      server('npm run dev --workspace @masarx/console-v2 -- --host ' + loopback + ' --strictPort', { port: ports['console-v2'] }, {
         VITE_SUPABASE_URL: fixtureUrl,
         VITE_SUPABASE_ANON_KEY: fixtureKey,
         VITE_USE_SEED: 'false',
