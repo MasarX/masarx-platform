@@ -1,0 +1,56 @@
+name: Verify DEV Edge startup
+
+'on':
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
+jobs:
+  startup:
+    if: github.ref == 'refs/heads/main' && github.repository == 'MasarX/masarx-platform'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      actions: read
+      contents: read
+    environment:
+      name: dev
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Check every function after the matching frozen Edge upload
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          actions="repos/$GITHUB_REPOSITORY/actions"
+          current_deploy() {
+            gh api "$actions/workflows/deploy.yml/runs?branch=main&event=push&per_page=1" |
+              jq -er --arg sha "$GITHUB_SHA" '.workflow_runs[0]
+                | select(.head_sha == $sha and .conclusion == "success") | [.id, .run_attempt] | @tsv'
+          }
+          deploy=$(current_deploy) || { echo 'The latest main push deploy must have succeeded at this SHA.'; exit 1; }
+          read -r run attempt <<< "$deploy"
+          job=$(gh api "$actions/runs/$run/attempts/$attempt/jobs?per_page=100" |
+            jq -er '.jobs[] | select(.name == "database" and .conclusion == "success")
+              | select(any(.steps[]; .name == "Verify Edge frozen lock" and .conclusion == "success"))
+              | select(any(.steps[]; .name == "Apply migrations and deploy registered edge functions" and .conclusion == "success"))
+              | .id') || { echo 'The deployment has no successful frozen build and upload.'; exit 1; }
+          printf 'DEV frozen Edge deploy run=%s attempt=%s job=%s sha=%s\n' "$run" "$attempt" "$job" "$GITHUB_SHA"
+          probe_status=0
+          node scripts/qa/verify-dev-edge-startup.cjs || probe_status=$?
+          [[ $(current_deploy) == "$deploy" ]] || { echo 'The matching deploy changed during the startup checks.'; exit 1; }
+          exit "$probe_status"
