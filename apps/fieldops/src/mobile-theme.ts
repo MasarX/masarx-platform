@@ -69,6 +69,26 @@ const PALETTES = {
     dangerSoft: "#3a1414",
     overlayScrim: "rgba(2, 6, 23, 0.72)",
   },
+  sunlight: {
+    pageBg: "#fafafa",
+    viewportBg: "#fafafa",
+    cardBg: "#ffffff",
+    cardBgSubtle: "#f4f4f5",
+    border: "#52525b",
+    borderMuted: "#71717a",
+    text: "#000000",
+    textMuted: "#1f1f1f",
+    accent: "#155e75",
+    accentSoft: "#cffafe",
+    accentText: "#ffffff",
+    success: "#14532d",
+    successSoft: "#dcfce7",
+    warning: "#78350f",
+    warningSoft: "#fef3c7",
+    danger: "#7f1d1d",
+    dangerSoft: "#fee2e2",
+    overlayScrim: "rgba(0, 0, 0, 0.65)",
+  },
 } as const;
 
 export function resolveAppliedFieldOpsTheme(
@@ -80,7 +100,7 @@ export function resolveAppliedFieldOpsTheme(
 }
 
 export function getFieldOpsThemeTokens(
-  theme: AppliedFieldOpsTheme,
+  theme: AppliedTheme,
   platform: FieldOpsThemePlatform
 ): FieldOpsThemeTokens {
   return {
@@ -109,6 +129,23 @@ const COMPONENT_COLORS = {
     successFg: "#86efac", warningFg: "#fde047", dangerFg: "#fca5a5",
     meta: "#94a3b8", metaFg: "#94a3b8", metaSoft: "#1e293b", metaBorder: "#334155",
   },
+  sunlight: {
+    focusRing: "#155e75", control: "#ffffff", controlText: "#000000",
+    info: "#0c4a6e", infoSoft: "#e0f2fe", infoBorder: "#7dd3fc", infoFg: "#082f49",
+    successFg: "#14532d", warningFg: "#78350f", dangerFg: "#7f1d1d",
+    meta: "#1f1f1f", metaFg: "#1f1f1f", metaSoft: "#f4f4f5", metaBorder: "#a1a1aa",
+  },
+};
+
+export type ThemePalette = Record<keyof FieldOpsThemeTokens["color"] | keyof typeof COMPONENT_COLORS.light, string>;
+export const LIGHT_PALETTE = Object.freeze({ ...PALETTES.light, ...COMPONENT_COLORS.light });
+export const DARK_PALETTE = Object.freeze({ ...PALETTES.dark, ...COMPONENT_COLORS.dark });
+export const SUNLIGHT_PALETTE = Object.freeze({ ...PALETTES.sunlight, ...COMPONENT_COLORS.sunlight });
+
+const THEME_PALETTES: Record<AppliedTheme, ThemePalette> = {
+  light: LIGHT_PALETTE,
+  dark: DARK_PALETTE,
+  sunlight: SUNLIGHT_PALETTE,
 };
 
 const COMPONENT_SPACING = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 };
@@ -117,7 +154,7 @@ const COMPONENT_FONT_WEIGHT = { regular: 400, medium: 500, semibold: 600, bold: 
 const COMPONENT_FONT_LINE_HEIGHT = { tight: 1.2, snug: 1.35, normal: 1.5, relaxed: 1.65 };
 
 export type ThemeMode = MobileThemeMode;
-export type AppliedTheme = AppliedFieldOpsTheme;
+export type AppliedTheme = AppliedFieldOpsTheme | "sunlight";
 export const resolveAppliedTheme = resolveAppliedFieldOpsTheme;
 
 export function getTokensForTheme(
@@ -127,7 +164,7 @@ export function getTokensForTheme(
   const base = getFieldOpsThemeTokens(theme, platform);
   return {
     ...base,
-    color: { ...base.color, ...COMPONENT_COLORS[theme] },
+    color: { ...THEME_PALETTES[theme] },
     spacing: { ...COMPONENT_SPACING },
     font: {
       ...base.font,
@@ -147,4 +184,52 @@ export function getTokensForMode(
   platform?: FieldOpsThemePlatform,
 ): ThemeTokens {
   return getTokensForTheme(resolveAppliedTheme(mode, systemScheme), platform);
+}
+
+export function buildDataThemeAttribute(applied: AppliedTheme): string {
+  if (applied === "dark" || applied === "sunlight") return applied;
+  return "light";
+}
+
+export function paletteToCssVariables(palette: ThemePalette): Record<string, string> {
+  return Object.fromEntries(Object.entries(palette).map(([key, value]) => [
+    `--fieldops-color-${key.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()}`,
+    value,
+  ]));
+}
+
+export function fontToCssVariables(font: ThemeTokens["font"]): Record<string, string> {
+  return {
+    ...(font.sans ? { "--fieldops-font-sans": font.sans } : {}),
+    "--fieldops-font-mono": font.mono,
+    ...Object.fromEntries(Object.entries(font.scale).map(([key, value]) => [`--fieldops-font-size-${key}`, `${value}px`])),
+    ...Object.fromEntries(Object.entries(font.weight).map(([key, value]) => [`--fieldops-font-weight-${key}`, String(value)])),
+    ...Object.fromEntries(Object.entries(font.lineHeight).map(([key, value]) => [`--fieldops-font-line-height-${key}`, String(value)])),
+  };
+}
+
+export function spacingToCssVariables(spacing: ThemeTokens["spacing"]): Record<string, string> {
+  return Object.fromEntries(Object.entries(spacing).map(([key, value]) => [`--fieldops-spacing-${key}`, `${value}px`]));
+}
+
+export function radiusToCssVariables(radius: ThemeTokens["radius"]): Record<string, string> {
+  return Object.fromEntries(Object.entries(radius).map(([key, value]) => [`--fieldops-radius-${key}`, `${value}px`]));
+}
+
+export function tokensToCssVariables(tokens: ThemeTokens): Record<string, string> {
+  return {
+    ...paletteToCssVariables(tokens.color),
+    ...fontToCssVariables(tokens.font),
+    ...spacingToCssVariables(tokens.spacing),
+    ...radiusToCssVariables(tokens.radius),
+  };
+}
+
+export function buildThemeStyleBlock(tokens: ThemeTokens, applied: AppliedTheme): string {
+  const selector = `:root, :root[data-theme="${buildDataThemeAttribute(applied)}"]`;
+  const declarations = Object.entries(tokensToCssVariables(tokens))
+    .map(([key, value]) => `  ${key}: ${value};`)
+    .join("\n");
+  const bodyStyle = tokens.font.sans ? "html, body { font-family: var(--fieldops-font-sans); }\n" : "";
+  return `${selector} {\n${declarations}\n}\n${bodyStyle}`;
 }

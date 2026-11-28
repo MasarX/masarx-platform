@@ -1,6 +1,6 @@
 {
   "schema": "masarx.resource-import-exceljs.v1",
-  "package_lock_sha256": "6777345bc4b5697baf7b0934d3124eedeb7a195ff116099fe3588c79e4e4f93e",
+  "package_lock_sha256": "f357e5f66ff5e999f5e899eab3fb660b6fb5a1d1beac9a375fd550aa1b6201b0",
   "generator_sha256": "7096138e75dc3c06907af6a16a46fd1bb98dfca15ca0f739481d262544781601",
   "esbuild_version": "0.28.2",
   "packages": [

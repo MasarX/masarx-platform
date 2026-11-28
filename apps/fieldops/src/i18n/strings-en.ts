@@ -18,6 +18,14 @@ export const EN_STRINGS = {
     queueFailed: "Request could not be queued or synced. Check connection and the sync queue before trying again.",
     lastDiscrepancy: "Last server-recorded discrepancy",
   },
+  customerSigning: {
+    unavailable: "Customer signing is unavailable for this delivery.",
+    openFailed: "Could not open the customer signing link.",
+    showQr: "Show customer signing QR code",
+    qrLabel: "Customer signing QR code",
+    shareLink: "Share customer signing link",
+    received: "Customer signature received.",
+  },
   addressActions: {
     copy: "Copy address",
     share: "Share address",
@@ -125,6 +133,7 @@ export const EN_STRINGS = {
   },
   realMap: {
     points: "Plotted items",
+    mapToneLabels: { done: "Done", issue: "Issue", active: "Active", neutral: "Other" },
     eta: "ETA (minutes)",
     status: "Status",
     unknownStatus: "Unavailable",
@@ -151,6 +160,8 @@ export const EN_STRINGS = {
   "settlementStatus": "Settlement status"
 },
   actionFeedback: {
+    backgroundLocationSync: "Location updates sync when the device reconnects.",
+    saveLocationUpdate: "Save location update",
     incidentUnavailable: "Route-stop incident task is no longer actionable.",
     incidentVerified: "Incident recorded and verified from the server.",
     incidentPending: "Incident result is pending verification. Check the server before reporting again.",
@@ -313,6 +324,8 @@ export const EN_STRINGS = {
     sequence_prefix: "Stop {n}",
   },
   route: {
+    offerPending: "Dispatch has proposed a change to this route.",
+    progressLabel: "Completion of visible route stops",
     departureRequest: "Request departure",
     departureRequestExplanation: "The request waits for connection and server approval. The route is not departed until the server confirms current load reconciliation.",
     departureQueued: "Departure queued — awaiting server approval",
@@ -530,6 +543,8 @@ export const EN_STRINGS = {
     account: "Account",
     driverShift: "Driver shift",
     noActiveShift: "No active driver shift on this device.",
+    activeShift: "Shift active",
+    shiftOpenedAt: "Opened",
     startShift: "Start shift",
     endShift: "End shift",
     taskVisibility: "Task visibility",

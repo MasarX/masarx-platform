@@ -103,6 +103,11 @@
       "enabled": true
     },
     {
+      "name": "contactless-pod-intake",
+      "auth_mode": "public_no_jwt",
+      "enabled": true
+    },
+    {
       "name": "tenant-signup-console-request",
       "auth_mode": "public_no_jwt",
       "enabled": true

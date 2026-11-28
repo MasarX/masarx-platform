@@ -19,6 +19,14 @@ export const AR_STRINGS: FieldOpsStrings = {
     queueFailed: "تعذر وضع الطلب في القائمة أو مزامنته. تحقق من الاتصال وقائمة المزامنة قبل المحاولة مجدداً.",
     lastDiscrepancy: "آخر اختلاف مسجل في الخادم",
   },
+  customerSigning: {
+    unavailable: "توقيع العميل غير متاح لهذا التسليم.",
+    openFailed: "تعذر فتح رابط توقيع العميل.",
+    showQr: "عرض رمز الاستجابة السريعة لتوقيع العميل",
+    qrLabel: "رمز الاستجابة السريعة لتوقيع العميل",
+    shareLink: "مشاركة رابط توقيع العميل",
+    received: "تم استلام توقيع العميل.",
+  },
   addressActions: {
     copy: "نسخ العنوان",
     share: "مشاركة العنوان",
@@ -126,6 +134,7 @@ export const AR_STRINGS: FieldOpsStrings = {
   },
   realMap: {
     points: "العناصر المعروضة",
+    mapToneLabels: { done: "مكتمل", issue: "مشكلة", active: "نشط", neutral: "أخرى" },
     eta: "الوصول المتوقع (دقائق)",
     status: "الحالة",
     unknownStatus: "غير متاحة",
@@ -152,6 +161,8 @@ export const AR_STRINGS: FieldOpsStrings = {
   "settlementStatus": "حالة التسوية"
 },
   actionFeedback: {
+    backgroundLocationSync: "تتم مزامنة تحديثات الموقع عند إعادة اتصال الجهاز.",
+    saveLocationUpdate: "حفظ تحديث الموقع",
     incidentUnavailable: "مهمة الإبلاغ عن حادثة التوقف لم تعد قابلة للتنفيذ.",
     incidentVerified: "تم تسجيل الحادثة والتحقق منها في الخادم.",
     incidentPending: "نتيجة الحادثة بانتظار التحقق. تحقق من الخادم قبل الإبلاغ مجدداً.",
@@ -315,6 +326,8 @@ export const AR_STRINGS: FieldOpsStrings = {
     sequence_prefix: "المحطة {n}",
   },
   route: {
+    offerPending: "اقترح فريق التوزيع تغييرًا على هذا المسار.",
+    progressLabel: "اكتمال محطات المسار الظاهرة",
     departureRequest: "طلب المغادرة",
     departureRequestExplanation: "ينتظر الطلب الاتصال وموافقة الخادم. لا تُعتمد مغادرة المسار حتى يؤكد الخادم مطابقة الحمولة الحالية.",
     departureQueued: "طلب المغادرة في الانتظار — بانتظار موافقة الخادم",
@@ -533,6 +546,8 @@ export const AR_STRINGS: FieldOpsStrings = {
     account: "الحساب",
     driverShift: "وردية السائق",
     noActiveShift: "لا توجد وردية سائق نشطة على هذا الجهاز.",
+    activeShift: "الوردية نشطة",
+    shiftOpenedAt: "بدأت في",
     startShift: "بدء الوردية",
     endShift: "إنهاء الوردية",
     taskVisibility: "ظهور المهام",

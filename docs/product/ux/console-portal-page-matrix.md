@@ -140,6 +140,7 @@ Sources:
 | Home | `/` | loading, empty, error, denied | Portal landing dashboard. |
 | Sign-in | `/signin` | loading, error, denied | Explicit sign-in route alias for auth entry. |
 | Tracking | `/tracking` | loading, empty, error, denied | Tracking query entry + result filtering. Authenticated shipment results reuse the shipment detail footer, including canonical timeline events and signed proof-of-delivery asset downloads when policy-visible artifacts exist. |
+| Customer delivery signing | `/delivery-signing` | loading, ready, submitted, expired, error | Customer opens the task signing link and submits a signature to the private proof intake. The page supports Arabic, right-to-left layout, and keyboard controls. |
 | Commands catalog | `/commands` | loading, empty, error, denied | Command catalog for tenant users. |
 | Shipment create command | `/commands/shipments.create` | loading, error, denied, submitted | Tenant shipment-create command surface. |
 | Label designer | `/labels/designer` | loading, empty, error, denied | Label designer parity surface. |

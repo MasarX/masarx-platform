@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+require("../../scripts/ops/mobile/fieldops-expo-peer-resolver.cjs");
 const { getDefaultConfig } = require("expo/metro-config");
 
 let getSentryExpoConfig = null;

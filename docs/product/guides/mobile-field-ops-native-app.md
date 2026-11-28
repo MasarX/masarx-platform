@@ -71,6 +71,8 @@ Native tool routes (mobile `href`)
   - route-stop pickup exceptions still finalize the stop through the completed task-transition bridge, so the app must not invent a separate pickup state machine
 - Delivery completion uses the same composer and canonical `tasks.complete` command, but selected `delivery_handover_mode` rows may require a saved recipient signature. The mobile shell must honor the lookup metadata and fail closed before queueing when signature proof is required.
 - Delivery POD capture must also persist canonical proof anchors: `pod.captured_at` plus a normalized proof geostamp (`latitude`, `longitude`, optional `accuracy_m`) so shipment actions, tracking, and support views all resolve from the same backend truth.
+- Assigned drivers can share a short-lived customer signing link or show its QR code from the delivery task when the tenant opts in through `customer_device_sign_policy`. The Portal submits the signature to the configured intake, which stores the evidence privately. FieldOps shows receipt when the server confirms it.
+- With `mid_route_injection_policy` enabled, FieldOps checks for pending offers on the driver's active route. The driving safety policy controls when FieldOps can announce an offer.
 
 ## Driver reassignment requests
 - The row-driven route-stop command uses the existing composer and scoped candidate RPC, retaining active same-organization driver identity, capacity remaining, ETA, and distance. Missing lookup data is not an unrestricted driver chooser.
@@ -90,6 +92,7 @@ Native tool routes (mobile `href`)
 - Push token registration is controlled by `mobile_push_policy` and updates `user_devices.push_token` through the same idempotent `register_user_device_v1` path.
 - Console/Portal device-governance support reads the same `public.user_devices` ledger through the registry-driven `user_devices` resource, and operator revoke flows must use `api.ui_execute_user_device_revoke_v1` so browser clients stay pinned to `db.schema=api`.
 - Attestation challenge + envelope flow is controlled by `mobile_attestation_policy`; clients request one-time challenges via `issue_mobile_attestation_challenge_v1` and attach attestation metadata to ingest writes.
+- Re-attestation updates the existing device record. An authorized revocation can clear its push token without a new device challenge.
 
 ## SSOT contracts (mobile)
 - `ui_me_v1`

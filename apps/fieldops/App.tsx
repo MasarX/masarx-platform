@@ -1,6 +1,13 @@
 import { createPendingEvidence, encodeEvidenceBytes, handoffPendingEvidence, clearEvidenceLocalState, replaceEvidenceManagerAfterClear, type PendingEvidence, type EvidenceScope } from "./src/mobile-pending-evidence";
 import { MobileRealMap } from "./src/mobile-real-map";
+import { ContactlessPodQR } from "./src/components/ContactlessPodQR";
+import { normalizeHapticEventPolicy } from "./src/haptic-event-policy";
+import { emitSensoryFeedback } from "./src/mobile-sensory-feedback";
+import { ShiftSummaryScreen } from "./src/screens/ShiftSummaryScreen";
 import { MobileTaskWorkspace } from "./src/mobile-task-workspace";
+import { StatusChip } from "./src/components/StatusChip";
+import { normalizeStatusThemePolicy, resolveToneFromPolicy, type StatusThemePolicyValue } from "./src/status-theme-policy";
+import { resolveDriverSafetyUiMode } from "./src/driver-safety-lock-stages";
 import { buildMobileMapListEntries, buildMobileRealMapModel } from "./src/mobile-real-map-model";
 import { assertMobileCommandSelection, hasMobileCommandDisabledState, validateMobileComposerNumberValue,
   isMobileOutboxSyncBatchSuccessful, describeMobileActionReceiptStatus, formatMobileActionReceipt,
@@ -26,6 +33,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -97,6 +105,7 @@ import {
   resolveComposerIdentityRequired,
   resolveComposerOtpRequired,
   resolveComposerPodPolicyState,
+  resolveComposerPodRequirements,
   resolveComposerSignatureRequired,
 } from "./src/mobile-composer-pod";
 import { openDriverSignup } from "./src/mobile-driver-signup";
@@ -2610,6 +2619,13 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   });
   const policyContext = React.useMemo(() => buildPolicyContextFromMe(me), [me]);
 
+  const statusThemePolicyQuery = useQuery({
+    queryKey: ["policy", "status_theme_policy", stableStringify(policyContext)],
+    queryFn: () => resolvePolicyRow(client, "resolve_status_theme_policy", policyContext),
+    enabled: Boolean(me?.user?.id),
+    staleTime: 5 * 60_000,
+  });
+
   const diagnosticsPolicyQuery = useQuery({
     queryKey: ["policy", "mobile_diagnostics_policy", stableStringify(policyContext)],
     queryFn: () => resolvePolicyRow(client, "resolve_mobile_diagnostics_policy", policyContext),
@@ -2980,6 +2996,33 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     [driverSafetyPolicy, effectiveSpeedKph]
   );
   const drivingModeLocked = drivingSafetyState.locked;
+  const feedbackPolicies = useQuery({
+    queryKey: ["fieldops-device-feedback", sessionUserId, me?.access_scope?.scope_id],
+    enabled: effectiveOnline && Platform.OS !== "web" && Boolean(me?.access_scope?.scope_id),
+    retry: false,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data, error } = await client.schema("api").rpc("resolve_haptic_event_policy");
+      const value = asRecord(Array.isArray(data) ? data[0] : data).value;
+      return error || !value ? null : normalizeHapticEventPolicy(value);
+    },
+  });
+  const feedbackState = React.useRef<{
+    actor: string;
+    drivingLocked: boolean;
+    policies: typeof feedbackPolicies.data;
+  }>({ actor: sessionUserId, drivingLocked: drivingModeLocked, policies: feedbackPolicies.data });
+  React.useLayoutEffect(() => {
+    feedbackState.current = { actor: sessionUserId, drivingLocked: drivingModeLocked, policies: feedbackPolicies.data };
+  }, [drivingModeLocked, feedbackPolicies.data, sessionUserId]);
+  const emitDriverFeedback = React.useCallback((event: string) => {
+    const { actor, drivingLocked, policies } = feedbackState.current;
+    if (actor !== sessionUserId || !policies) return;
+    emitSensoryFeedback(event, { haptics: policies, drivingLocked });
+  }, [sessionUserId]);
+  const routeOfferUiMode = resolveDriverSafetyUiMode(
+    effectiveSpeedKph, asRecord(asRecord(driverSafetyPolicyQuery.data).value).lock_stages,
+  );
   const navBlockedWhileDriving =
     drivingModeLocked && !canNavigateWhileMoving(drivingSafetyState, activeNavKey);
   const navigationItems = React.useMemo(
@@ -3591,6 +3634,16 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     enabled: Boolean(me?.user?.id && manifestRouteRunId && (isRouteSurface || isTasksSurface)),
     staleTime: 30_000,
   });
+  const pendingRouteOffers = useQuery({
+    queryKey: ["route", "pending-stop-offers", manifestRouteRunId, displayedRouteScope, sessionUserId],
+    enabled: Boolean(isRouteSurface && effectiveOnline && routeExecutionManifestQuery.data && manifestRouteRunId),
+    retry: false,
+    refetchInterval: 15_000,
+    queryFn: async () => {
+      const { data, error } = await client.rpc("pending_mid_route_stops_v1", { p_route_id: manifestRouteRunId });
+      return !error && Array.isArray(data) ? data.length : 0;
+    },
+  });
   const confirmRouteDepartureMutation = useMutation({
     mutationFn: async (input: {
       routeRunId: string;
@@ -3834,7 +3887,69 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   const composerSupportsEvidence = composerSupportsPod || Boolean(composerSelfEvidence) || composerFinancialEvidence || composerIsIncident;
   const composerCaptureEpoch = React.useRef(0);
   const composerSubmitInFlight = React.useRef(false);
-  React.useEffect(() => { composerCaptureEpoch.current += 1; }, [composerCommand, sessionUserId]);
+  React.useEffect(() => { composerCaptureEpoch.current += 1; }, [composerCommand, selectedResourceId, sessionUserId]);
+  const signingTenantId = me?.access_scope?.scope_type === "tenant" ? me.access_scope.scope_id : null;
+  const signingScope = effectiveOnline && !drivingModeLocked && composerCommand?.key === "tasks.complete" &&
+    sessionUserId && signingTenantId && selectedResourceId
+    ? JSON.stringify([sessionUserId, signingTenantId, selectedResourceId]) : null;
+  const signingScopeRef = React.useRef(signingScope);
+  React.useLayoutEffect(() => { signingScopeRef.current = signingScope; }, [signingScope]);
+  const signingInFlight = React.useRef(false);
+  const [issuedSigningLink, setSigningLink] = React.useState<{ scope: string; url: string; expiresAt: number } | null>(null);
+  const signingLink = issuedSigningLink?.scope === signingScope ? issuedSigningLink : null;
+  React.useEffect(() => {
+    setSigningLink(null);
+  }, [signingScope]);
+  React.useEffect(() => {
+    if (!signingLink) return;
+    const timer = setTimeout(() => setSigningLink(null), Math.max(0, signingLink.expiresAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [signingLink]);
+  const contactlessSigningAvailable = useQuery({
+    queryKey: ["contactless-signing", signingTenantId, sessionUserId, selectedResourceId],
+    enabled: Boolean(signingScope),
+    retry: false,
+    queryFn: async () => {
+      const { data, error } = await client.rpc("contactless_pod_link_available_v1", { p_task_id: selectedResourceId });
+      return !error && data === true;
+    },
+  });
+  const customerSigningResults = useQuery({
+    queryKey: ["contactless-signing-result", signingTenantId, sessionUserId, selectedResourceId],
+    enabled: Boolean(signingScope) && contactlessSigningAvailable.data === true,
+    retry: false,
+    refetchInterval: 8_000,
+    queryFn: async () => {
+      const { data, error } = await client.rpc("pending_customer_sign_events_v1", { p_driver_id: sessionUserId });
+      return !error && Array.isArray(data) && data.some((event) => asRecord(event).task_id === selectedResourceId);
+    },
+  });
+  const openContactlessSigning = useMutation({
+    mutationFn: async ({ taskId, share }: { taskId: string; share: boolean }) => {
+      if (!signingScope || signingScope !== signingScopeRef.current || signingInFlight.current) return;
+      signingInFlight.current = true;
+      const epoch = composerCaptureEpoch.current;
+      try {
+        const expiresAt = Date.now() + 14 * 60_000;
+        const { data, error } = signingLink && signingLink.expiresAt > Date.now()
+          ? { data: signingLink.url, error: null }
+          : await client.rpc("mint_contactless_pod_token_v1", { p_task_id: taskId });
+        if (epoch !== composerCaptureEpoch.current || signingScope !== signingScopeRef.current) return;
+        if (error || typeof data !== "string") {
+          setComposerError(strings.customerSigning.unavailable);
+          return;
+        }
+        if (!signingLink || signingLink.expiresAt <= Date.now()) setSigningLink({ scope: signingScope, url: data, expiresAt });
+        if (share) await Share.share({ message: data });
+      } catch {
+        if (epoch === composerCaptureEpoch.current && signingScope === signingScopeRef.current) {
+          setComposerError(strings.customerSigning.openFailed);
+        }
+      } finally {
+        signingInFlight.current = false;
+      }
+    },
+  });
   const composerPodPolicyContext = React.useMemo(() => {
     if (!composerSupportsPod) return null;
     const detail = asRecord(detailQuery.data?.detail);
@@ -3877,15 +3992,10 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       composerSupportsPod,
     ]
   );
-  const composerPodRequirements = React.useMemo(() => {
-    if (composerCommand?.key === "tasks.complete") {
-      return asRecord(composerPodPolicyValue.completed);
-    }
-    if (composerCommand?.key === "tasks.exception") {
-      return asRecord(composerPodPolicyValue.exception);
-    }
-    return {};
-  }, [composerCommand?.key, composerPodPolicyValue]);
+  const composerPodRequirements = React.useMemo(
+    () => resolveComposerPodRequirements(composerCommand?.key, composerPodPolicyValue),
+    [composerCommand?.key, composerPodPolicyValue],
+  );
   const composerEvidencePolicy = React.useMemo(
     () => asRecord(composerPodPolicyValue.binary_evidence),
     [composerPodPolicyValue]
@@ -3924,20 +4034,31 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       const capturedGeneration = completionReadbackScopeVersion();
       const record = await latestCompletionReadback(cacheStore, sessionUserId, completionReadbackScope, selectedResourceId || "");
       if (captured !== completionReadbackCurrent.current || !record) return null;
-      if (!record.accepted) return { verified: false, kind: record.expected.kind, settlementStatus: null };
+      if (!record.accepted) return { verified: false, kind: record.expected.kind, settlementStatus: null, delivered: false, queueId: record.queueId };
       let settlementStatus: string | null = null;
+      let delivered = false;
       const verified = await verifyCompletionReadback(record, async (taskId, taskEventId, signal) => {
         const { data, error } = await client.schema("api").rpc(record.expected.kind === "financial_amount_v1" ? "ui_get_financial_task_readback_v1" : "ui_get_task_completion_readback_v1", {
           p_task_id: taskId, p_task_event_id: taskEventId,
         }).abortSignal(signal);
         if (error) throw error;
         settlementStatus = record.expected.kind === "financial_amount_v1" ? coerceValueText(asRecord(data).settlement_status) : null;
+        delivered = asRecord(asRecord(data).stop).delivery_attempt_outcome === "delivered";
         return data;
       }, () => captured === completionReadbackCurrent.current && capturedGeneration === completionReadbackScopeVersion());
-      return { verified, kind: record.expected.kind, settlementStatus: verified ? settlementStatus : null };
+      return { verified, kind: record.expected.kind, settlementStatus: verified ? settlementStatus : null, delivered, queueId: record.queueId };
     },
   });
   const completionReadbackVerified = completionReadbackQuery.isSuccess && !completionReadbackQuery.isFetching && completionReadbackQuery.data?.verified === true;
+  const lastProofFeedback = React.useRef<string | null>(null);
+  const confirmedDeliveryQueue = completionReadbackVerified && completionReadbackQuery.data?.delivered
+    ? completionReadbackQuery.data.queueId : null;
+  React.useEffect(() => {
+    if (!confirmedDeliveryQueue || confirmedDeliveryQueue !== lastActionReceipt?.queueId ||
+        confirmedDeliveryQueue === lastProofFeedback.current) return;
+    lastProofFeedback.current = confirmedDeliveryQueue;
+    emitDriverFeedback("pod.completed");
+  }, [confirmedDeliveryQueue, emitDriverFeedback, lastActionReceipt?.queueId]);
   const incidentReadbackQuery = useQuery({
     queryKey: ["incident-readback", completionReadbackIdentity, lastActionReceipt?.queueId, lastSyncSuccessAt, effectiveOnline],
     enabled: cacheInitSuccess && resource === "tasks" && Boolean(selectedResourceId),
@@ -4131,6 +4252,16 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     composerSignatureStrokeRef.current = null;
     setComposerSignatureStrokes([]);
     setComposerError((current) => (current ? null : current));
+  }, []);
+
+  React.useEffect(() => {
+    const subscription = AppState.addEventListener("change", state => {
+      if (state === "background") {
+        composerSignatureStrokeRef.current = null;
+        setComposerSignatureStrokes([]);
+      }
+    });
+    return () => subscription.remove();
   }, []);
 
   const composerSignatureResponder = React.useMemo(
@@ -5918,6 +6049,36 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                     {strings.composer.signatureStatus.replace("{status}", () => String(composerSignatureArtifact ? strings.composer.signatureSaved : strings.composer.signatureToCapture))}
                   </Text>
                 ) : null}
+                {signingScope && contactlessSigningAvailable.data === true && selectedResourceId &&
+                  customerSigningResults.data !== true ? (
+                  <>
+                    {signingLink ? (
+                      <ContactlessPodQR signingUrl={signingLink.url} accessibilityLabel={strings.customerSigning.qrLabel} testID="mobile-customer-signing-qr" />
+                    ) : (
+                      <Pressable accessibilityRole="button"
+                        testID="mobile-show-customer-signing-qr"
+                        disabled={openContactlessSigning.isPending || composerSubmitting}
+                        onPress={() => openContactlessSigning.mutate({ taskId: selectedResourceId, share: false })}
+                        style={styles.secondaryButton}
+                      >
+                        <Text style={styles.secondaryButtonText}>{strings.customerSigning.showQr}</Text>
+                      </Pressable>
+                    )}
+                    <Pressable accessibilityRole="button"
+                      testID="mobile-share-customer-signing-link"
+                      disabled={openContactlessSigning.isPending || composerSubmitting}
+                      onPress={() => openContactlessSigning.mutate({ taskId: selectedResourceId, share: true })}
+                      style={styles.secondaryButton}
+                    >
+                      <Text style={styles.secondaryButtonText}>{strings.customerSigning.shareLink}</Text>
+                    </Pressable>
+                  </>
+                ) : null}
+                {signingScope && contactlessSigningAvailable.data === true && customerSigningResults.data === true ? (
+                  <Text accessibilityLiveRegion="polite" style={styles.noticeSubtext}>
+                    {strings.customerSigning.received}
+                  </Text>
+                ) : null}
                 {composerOtpRequired ? (
                   <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
                     {strings.composer.otpStatus.replace("{status}", () => String(sanitizeOtpCode(composerValues.otp_code) ? strings.composer.otpEntered : strings.composer.otpNeeded))}
@@ -6360,6 +6521,24 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
               </Text>
             </View>
           ) : null}
+          {isRouteSurface && !drivingModeLocked && routeOfferUiMode !== "suppressed" && (pendingRouteOffers.data ?? 0) > 0 ? (
+            <Text accessibilityLiveRegion="polite" style={styles.noticeSubtext}>
+              {strings.route.offerPending}
+            </Text>
+          ) : null}
+          {routeSummary && routeSummary.totalStops > 0 && !drivingModeLocked ? (
+            <View
+              testID="mobile-route-progress"
+              accessibilityRole="progressbar"
+              accessibilityLabel={strings.route.progressLabel}
+              accessibilityValue={{ min: 0, max: routeSummary.totalStops, now: routeSummary.doneStops }}
+              style={{ height: 8, borderRadius: 4, overflow: "hidden", backgroundColor: themeTokens.color.border }}
+            >
+              <View
+                style={{ width: `${(routeSummary.doneStops / routeSummary.totalStops) * 100}%`, height: "100%", backgroundColor: themeTokens.color.success }}
+              />
+            </View>
+          ) : null}
 
               {availableActions.some(command => command.selection?.mode === "none" || Boolean(selectedResourceId)) ? (
                 <View style={styles.actionsBar}>
@@ -6517,6 +6696,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                       resourceId={selectedResourceId}
                       surfaceLabel={isRouteSurface ? strings.detail.routeStop : strings.detail.taskStop}
                       diagnosticsEnabled={diagnosticsEnabled}
+                      statusThemePolicy={normalizeStatusThemePolicy(asRecord(statusThemePolicyQuery.data).value)}
                       interactionLocked={drivingModeLocked}
                       addressActionStrings={strings.addressActions}
                       addressPolicy={addressPolicy}
@@ -6832,6 +7012,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
               diagnosticsEnabled={diagnosticsEnabled}
               scanContext={scanContext}
               activeOpsSessionId={activeDriverShift?.opsSessionId ?? null}
+              onScanSaved={() => emitDriverFeedback("scan.success")}
               onSync={() => syncMutation.mutate()}
               onClearContext={() => setScanContext(null)}
               onSetScanInputMode={async (next) => {
@@ -7294,6 +7475,7 @@ function ScanScreen({
   diagnosticsEnabled,
   scanContext,
   activeOpsSessionId,
+  onScanSaved,
   onSync,
   onClearContext,
   onSetScanInputMode,
@@ -7324,6 +7506,7 @@ function ScanScreen({
   diagnosticsEnabled: boolean;
   scanContext: DriverScanContext | null;
   activeOpsSessionId: string | null;
+  onScanSaved: () => void;
   onSync: () => void;
   onClearContext: () => void;
   onSetScanInputMode: (next: MobileScanInputMode) => Promise<void>;
@@ -7606,6 +7789,7 @@ function ScanScreen({
         actorId,
         returnScope,
       });
+      onScanSaved();
       if (online && !syncing) onSync();
     } finally {
       isQueueingScanRef.current = false;
@@ -8383,7 +8567,7 @@ function LocationScreen({
         <Text style={styles.noticeSubtext}>
           {Platform.OS === "web"
             ? "Location capture works while the app is open; background tracking requires the native app."
-            : "Outbox-driven updates via task manager."}
+            : strings.actionFeedback.backgroundLocationSync}
         </Text>
       </View>
 
@@ -8916,11 +9100,9 @@ function MoreScreen({
 
       <View style={styles.noticeCard}>
         <Text style={styles.noticeText}>{strings.more.driverShift}</Text>
-        <Text style={styles.noticeSubtext}>
-          {activeDriverShift
-            ? `Shift active${activeDriverShift.openedAt ? ` since ${activeDriverShift.openedAt}` : ""}`
-            : strings.more.noActiveShift}
-        </Text>
+        <ShiftSummaryScreen shift={activeDriverShift}
+          activeLabel={strings.more.activeShift} inactiveLabel={strings.more.noActiveShift}
+          openedLabel={strings.more.shiftOpenedAt} textStyle={styles.noticeSubtext} />
         <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
           Readiness: auth ok - {canStartShift ? "device online" : "connect online and register device"}
         </Text>
@@ -9608,6 +9790,7 @@ function RouteSurfaceDetailExtensions({
   resourceId,
   surfaceLabel,
   diagnosticsEnabled,
+  statusThemePolicy,
   interactionLocked,
   addressActionStrings,
   addressPolicy,
@@ -9630,6 +9813,7 @@ function RouteSurfaceDetailExtensions({
   resourceId: string | null;
   surfaceLabel: string;
   diagnosticsEnabled: boolean;
+  statusThemePolicy: StatusThemePolicyValue;
   interactionLocked: boolean;
   addressActionStrings: FieldOpsStrings["addressActions"];
   addressPolicy: MobileAddressPolicy;
@@ -9768,8 +9952,9 @@ function RouteSurfaceDetailExtensions({
     [strings, interactionLocked, onEnqueueUiEvents, platform, withRouteActionLock]
   );
 
+  const operationalStatus = formatOperationalStatusChip(stop.status, stop.statusReason);
   const statusChips = [
-    formatOperationalStatusChip(stop.status, stop.statusReason),
+    operationalStatus,
     stop.sequence != null ? `Stop #${stop.sequence}` : null,
     stop.kind ? formatKeyLabel(stop.kind) : null,
     stop.etaMin != null ? `${Math.round(stop.etaMin)}m ETA` : null,
@@ -9910,9 +10095,11 @@ function RouteSurfaceDetailExtensions({
         {statusChips.length ? (
           <View style={[styles.cardChips, { marginTop: 10 }]}>
             {statusChips.map((chipValue) => (
-              <View key={chipValue} style={styles.chip}>
-                <Text style={styles.chipText}>{chipValue}</Text>
-              </View>
+              <StatusChip key={chipValue} label={chipValue} tone={
+                chipValue === operationalStatus
+                  ? resolveToneFromPolicy(statusThemePolicy, stop.status)
+                  : "meta"
+              } />
             ))}
           </View>
         ) : null}
