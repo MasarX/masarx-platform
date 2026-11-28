@@ -52,11 +52,11 @@ Seed invariants:
 ## Seed Script Execution
 
 ```bash
-ENV_FILE=config/env/.env.cloud node scripts/data/seed-test-data.js 10000  # default volume (cloud)
-ENV_FILE=config/env/.env.cloud node scripts/data/seed-test-data.js 100    # smoke / CI runs (cloud)
+ENV_FILE=path/to/cloud-config node scripts/data/seed-test-data.js 10000  # default volume (cloud)
+ENV_FILE=path/to/cloud-config node scripts/data/seed-test-data.js 100    # smoke / CI runs (cloud)
 
 # Local (after npm run local:env / npm run local:start)
-ENV_FILE=config/env/.env.local node scripts/data/seed-test-data.js 10000
+ENV_FILE=path/to/local-config node scripts/data/seed-test-data.js 10000
 ```
 
 Repeatability:

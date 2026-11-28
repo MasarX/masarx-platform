@@ -535,7 +535,7 @@ async function main() {
   loadEnv();
   const candidates = resolveDbUrlCandidates(process.env);
   if (!candidates.length) {
-    die('DATABASE_URL or DATABASE_URL_DIRECT is not set (expected ENV_FILE=config/env/.env.cloud or exported env vars).');
+    die('DATABASE_URL or DATABASE_URL_DIRECT is not set (expected ENV_FILE=path/to/cloud-config or exported env vars).');
   }
 
   const local = listLocalMigrations();

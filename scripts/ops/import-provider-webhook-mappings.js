@@ -9,7 +9,7 @@
  *  - Points the source at a primary mapping (first intent or specified)
  *
  * Usage:
- *   ENV_FILE=config/env/.env.cloud \
+ *   ENV_FILE=path/to/cloud-config \
  *   node scripts/ops/import-provider-webhook-mappings.js \
  *     --client-slug test-client-2-1 \
  *     --source-identifier acme-provider \

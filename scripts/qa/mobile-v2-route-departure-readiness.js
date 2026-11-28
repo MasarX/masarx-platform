@@ -7,10 +7,10 @@
   "Confirm departure" action and prove same-context backend readback.
 
   Examples:
-    ENV_FILE=config/env/.env.local node scripts/qa/mobile-v2-route-departure-readiness.js \
+    ENV_FILE=path/to/local-config node scripts/qa/mobile-v2-route-departure-readiness.js \
       --org-id <org_uuid> --driver-email <driver@tenant.local> --create-fixture --prepare
 
-    ENV_FILE=config/env/.env.local node scripts/qa/mobile-v2-route-departure-readiness.js \
+    ENV_FILE=path/to/local-config node scripts/qa/mobile-v2-route-departure-readiness.js \
       --org-id <org_uuid> --driver-user-id <user_uuid> --route-run-id <run_uuid> --prepare
 */
 

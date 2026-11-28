@@ -8,7 +8,7 @@
  *
  * Usage:
  *   node scripts/benchmarks/run-geocoding-benchmarks.js --limit-per-category=50 --ensure-corpus --policies=all
- *   env: ENV_FILE=config/env/.env.cloud (or DATABASE_URL directly)
+ *   env: ENV_FILE=path/to/cloud-config (or DATABASE_URL directly)
  */
 
 const { Pool } = require('pg');

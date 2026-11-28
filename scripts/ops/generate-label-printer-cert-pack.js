@@ -131,7 +131,7 @@ async function main() {
   const labelType = typeof args['label-type'] === 'string' ? String(args['label-type']).toLowerCase() : 'shipping';
   const limit = Number.isFinite(Number(args.limit)) ? Math.max(1, Math.floor(Number(args.limit))) : 12;
 
-  if (!process.env.DATABASE_URL) die('Missing DATABASE_URL (set ENV_FILE=config/env/.env.cloud)');
+  if (!process.env.DATABASE_URL) die('Missing DATABASE_URL (set ENV_FILE=path/to/cloud-config)');
   if (!orgId) die('Missing --org-id');
   if (!clientId) die('Missing --client-id');
 

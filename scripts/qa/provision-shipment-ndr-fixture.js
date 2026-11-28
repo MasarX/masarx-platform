@@ -8,7 +8,7 @@
   product proof.
 
   Example:
-    ENV_FILE=config/env/.env.local node scripts/qa/provision-shipment-ndr-fixture.js --org-id <org_uuid>
+    ENV_FILE=path/to/local-config node scripts/qa/provision-shipment-ndr-fixture.js --org-id <org_uuid>
 */
 
 const { randomBytes } = require("crypto");

@@ -17,8 +17,8 @@
  * - Requires explicit confirmation for large paid runs.
  *
  * Examples:
- *   ENV_FILE=config/env/.env.cloud node scripts/qa/benchmark-geo-ai-xlsx.js --input "Test Adresses.xlsx" --sheet "export (12)" --scenario line_only --limit 25
- *   ENV_FILE=config/env/.env.cloud node scripts/qa/benchmark-geo-ai-xlsx.js --input "Test Adresses.xlsx" --sheet "export (12)" --scenario line_plus_city --limit 200 --confirm-paid
+ *   ENV_FILE=path/to/cloud-config node scripts/qa/benchmark-geo-ai-xlsx.js --input "Test Adresses.xlsx" --sheet "export (12)" --scenario line_only --limit 25
+ *   ENV_FILE=path/to/cloud-config node scripts/qa/benchmark-geo-ai-xlsx.js --input "Test Adresses.xlsx" --sheet "export (12)" --scenario line_plus_city --limit 200 --confirm-paid
  */
 
 const fs = require('fs');
@@ -952,7 +952,7 @@ async function main() {
 
   if (!process.env.DATABASE_URL) {
     throw new Error(
-      'DATABASE_URL is required (set ENV_FILE=config/env/.env.cloud or export DATABASE_URL).',
+      'DATABASE_URL is required (set ENV_FILE=path/to/cloud-config or export DATABASE_URL).',
     );
   }
 

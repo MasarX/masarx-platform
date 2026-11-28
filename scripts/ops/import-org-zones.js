@@ -3,7 +3,7 @@
  * Import org zones and zone_district mappings from a JSON file.
  *
  * Usage:
- *   ENV_FILE=config/env/.env.cloud \
+ *   ENV_FILE=path/to/cloud-config \
  *   node scripts/ops/import-org-zones.js \
  *     --organization-id <uuid> \
  *     --zones-file docs/ops/examples/zones-import.sample.json \

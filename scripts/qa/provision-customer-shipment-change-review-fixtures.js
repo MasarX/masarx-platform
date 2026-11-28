@@ -6,7 +6,7 @@
     - two pending_review location_change requests
 
   Usage:
-    ENV_FILE=config/env/.env.local node scripts/qa/provision-customer-shipment-change-review-fixtures.js
+    ENV_FILE=path/to/local-config node scripts/qa/provision-customer-shipment-change-review-fixtures.js
 */
 const fs = require('fs');
 const path = require('path');

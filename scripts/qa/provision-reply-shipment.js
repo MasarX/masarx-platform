@@ -3,7 +3,7 @@
   Provision a recipient + shipment so Dialog360 auto-replies (status/eta) can find data by sender phone number.
 
   Usage:
-    ENV_FILE=config/env/.env.cloud node scripts/qa/provision-reply-shipment.js --phone +9665XXXXXXX [--status in_transit] [--eta 2025-12-31]
+    ENV_FILE=path/to/cloud-config node scripts/qa/provision-reply-shipment.js --phone +9665XXXXXXX [--status in_transit] [--eta 2025-12-31]
 
   Defaults:
     - Resolves organization/client from webhook source `dialog360_reply` (override with --org-id/--org-slug/--client-id/--client-slug).

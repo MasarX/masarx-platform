@@ -83,7 +83,7 @@ async function listRemoteMigrations(dbUrl) {
   let dbUrl = process.env.DATABASE_URL || '';
   dbUrl = dbUrl.replace(/^['"]|['"]$/g, '');
   if (!dbUrl) {
-    console.error('[db-drift-check] DATABASE_URL is not set (expected parent env via ENV_FILE=config/env/.env.cloud)');
+    console.error('[db-drift-check] DATABASE_URL is not set (expected parent env via ENV_FILE=path/to/cloud-config)');
     process.exit(2);
   }
 

@@ -4,8 +4,8 @@
   the live reschedule-date request flow against the real local backend.
 
   Usage:
-    ENV_FILE=config/env/.env.local node scripts/qa/provision-public-tracking-reschedule-fixture.js
-    ENV_FILE=config/env/.env.local node scripts/qa/provision-public-tracking-reschedule-fixture.js --tracking PT-TRACK-002
+    ENV_FILE=path/to/local-config node scripts/qa/provision-public-tracking-reschedule-fixture.js
+    ENV_FILE=path/to/local-config node scripts/qa/provision-public-tracking-reschedule-fixture.js --tracking PT-TRACK-002
 */
 const { Pool } = require('pg');
 const { loadEnv } = require('../utils/load-env');

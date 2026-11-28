@@ -3,7 +3,7 @@
   Provision "fully filled" shipments for label-designer preview (shipment_label_payload_v).
 
   Usage:
-    ENV_FILE=config/env/.env.cloud node scripts/qa/provision-label-designer-demo-shipments.js \
+    ENV_FILE=path/to/cloud-config node scripts/qa/provision-label-designer-demo-shipments.js \
       --user-email uyjztrzhvqwxjmjxvyjwviwj@example.invalid \
       --count 3
 

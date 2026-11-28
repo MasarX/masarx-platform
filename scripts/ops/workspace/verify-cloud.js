@@ -25,7 +25,7 @@ function tryRun(label, npmScript, env) {
 
 (async () => {
   const envFile = process.env.ENV_FILE;
-  if (!envFile) throw new Error('ENV_FILE must point to config/env/.env.cloud');
+  if (!envFile) throw new Error('ENV_FILE must point to your private cloud configuration file');
 
   const env = { ...process.env, ENV_FILE: envFile };
   await run('node', ['scripts/ops/assert-cloud-env.js'], { env });

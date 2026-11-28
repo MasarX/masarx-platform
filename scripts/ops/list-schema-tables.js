@@ -27,7 +27,7 @@ for (const arg of args) {
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
-  console.error('[list-schema-tables] DATABASE_URL is not set. Load config/env/.env.cloud or provide ENV_FILE.');
+  console.error('[list-schema-tables] DATABASE_URL is not set. Load your private cloud configuration file or provide ENV_FILE.');
   process.exit(1);
 }
 

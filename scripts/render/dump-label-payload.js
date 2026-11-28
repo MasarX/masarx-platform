@@ -36,7 +36,7 @@ function printHelp() {
   console.log('Dump compose_label_payload(<job_id>) to a JSON file.');
   console.log('');
   console.log('Usage:');
-  console.log('  ENV_FILE=config/env/.env.cloud node scripts/render/dump-label-payload.js --job-id <uuid> [--out <path>]');
+  console.log('  ENV_FILE=path/to/cloud-config node scripts/render/dump-label-payload.js --job-id <uuid> [--out <path>]');
   console.log('');
   console.log('Options:');
   console.log('  --job-id <uuid>   Required label_jobs.id');
@@ -63,7 +63,7 @@ async function main() {
 
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
-    console.error('DATABASE_URL not set (set ENV_FILE=config/env/.env.cloud or export DATABASE_URL)');
+    console.error('DATABASE_URL not set (set ENV_FILE=path/to/cloud-config or export DATABASE_URL)');
     process.exit(1);
   }
 

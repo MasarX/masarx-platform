@@ -6,7 +6,7 @@
     - one pending shipment outside the soft-cancel window
 
   Usage:
-    ENV_FILE=config/env/.env.local node scripts/qa/provision-shipment-amend-cancel-fixtures.js
+    ENV_FILE=path/to/local-config node scripts/qa/provision-shipment-amend-cancel-fixtures.js
 */
 const fs = require("fs");
 const path = require("path");
