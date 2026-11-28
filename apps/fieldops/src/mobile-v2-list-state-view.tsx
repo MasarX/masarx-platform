@@ -8,8 +8,10 @@
 import * as React from "react";
 import { ActivityIndicator, Text, View, type StyleProp, type ViewStyle } from "react-native";
 
+import { getStrings, resolveLocaleCode } from "./i18n";
 import { FxButton, FxCard, FxCol } from "./mobile-v2-primitives";
 import { FxIcon } from "./mobile-v2-icon";
+import { useOptionalMobileV2Theme } from "./mobile-v2-theme-context";
 import {
   MOBILE_V2_FONT_SANS,
   MOBILE_V2_SPACING,
@@ -46,6 +48,9 @@ export function MobileV2ListStateView(
   props: MobileV2ListStateViewProps,
 ): React.ReactElement {
   const { theme } = props;
+  // Default text follows the active V2 locale, so a caller that passes no text never shows untranslated copy.
+  const strings = getStrings(resolveLocaleCode(useOptionalMobileV2Theme()?.locale));
+  const copy = strings.listState;
   if (props.isLoading) {
     return (
       <View style={[{ flex: 1, backgroundColor: theme.bg }, props.style]}>
@@ -61,7 +66,7 @@ export function MobileV2ListStateView(
                   fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold,
                 }}
               >
-                Loading…
+                {copy.loading}
               </Text>
               <Text
                 style={{
@@ -71,7 +76,7 @@ export function MobileV2ListStateView(
                   textAlign: "center",
                 }}
               >
-                Fetching from cloud · falls back to last-known state if offline.
+                {copy.loadingDetail}
               </Text>
             </FxCol>
           </FxCard>
@@ -120,7 +125,7 @@ export function MobileV2ListStateView(
                   fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold,
                 }}
               >
-                {props.errorTitle ?? "Couldn’t reach the server"}
+                {props.errorTitle ?? copy.errorTitle}
               </Text>
               <Text
                 style={{
@@ -131,7 +136,7 @@ export function MobileV2ListStateView(
                 }}
                 numberOfLines={3}
               >
-                {props.errorMessage ?? "The data resolver failed. Check your connection or retry."}
+                {props.errorMessage ?? copy.errorMessage}
               </Text>
               {props.onRetry !== undefined ? (
                 <FxButton
@@ -139,9 +144,9 @@ export function MobileV2ListStateView(
                   variant="soft"
                   icon="cloud-up"
                   onPress={props.onRetry}
-                  accessibilityLabel={props.retryLabel ?? "Retry loading"}
+                  accessibilityLabel={props.retryLabel ?? copy.retryAccessibility}
                 >
-                  {props.retryLabel ?? "Retry"}
+                  {props.retryLabel ?? strings.liveReads.retry}
                 </FxButton>
               ) : null}
             </FxCol>

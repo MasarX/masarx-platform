@@ -11,6 +11,13 @@ export const EN_STRINGS = {
     incidentTypesLoadFailed: "Unable to load incident types.",
     retry: "Try again",
   },
+  listState: {
+    loading: "Loading…",
+    loadingDetail: "Fetching from cloud · falls back to last-known state if offline.",
+    errorTitle: "Couldn’t reach the server",
+    errorMessage: "The data resolver failed. Check your connection or retry.",
+    retryAccessibility: "Try again to load the data",
+  },
   routeLoad: {
     title: "Route parcel loading", cold: "Cold-chain", weight: "Known weight",
     partial: "Unrecorded parcels", scanned: "Scanned", pending: "Not yet scanned",
