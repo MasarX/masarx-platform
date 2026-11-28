@@ -12,6 +12,8 @@ import { Pressable, ScrollView, Text, View, type StyleProp, type ViewStyle } fro
 import Svg, { Circle } from "react-native-svg";
 
 import { FxIcon } from "./mobile-v2-icon";
+import { getStrings, resolveLocaleCode } from "./i18n";
+import { MobileV2ListStateView } from "./mobile-v2-list-state-view";
 import type { MobileV2IconName } from "./mobile-v2-icon-specs";
 import {
   FxAvatar,
@@ -63,8 +65,11 @@ export interface MobileV2LoaderTodayScreenProps {
   readonly totalParcels: number;
   readonly scannedParcels: number;
   readonly driversWaiting: number;
-  readonly quickActions: ReadonlyArray<MobileV2LoaderQuickAction>;
+  /** `null`: the live tile list is missing or malformed, so the section shows its error state (#600). `[]` hides the section. */
+  readonly quickActions: ReadonlyArray<MobileV2LoaderQuickAction> | null;
   readonly drivers: ReadonlyArray<MobileV2LoaderDriverQueueEntry>;
+  readonly locale?: string;
+  readonly onRetryQuickActions?: () => void;
   readonly onSelectAction?: (id: MobileV2LoaderQuickActionId) => void;
   readonly style?: StyleProp<ViewStyle>;
 }
@@ -91,6 +96,8 @@ export function MobileV2LoaderTodayScreen(
   props: MobileV2LoaderTodayScreenProps,
 ): React.ReactElement {
   const { theme } = props;
+  const copy = getStrings(resolveLocaleCode(props.locale)).loaderToday;
+  const quickActions = props.quickActions;
   const pct = props.totalParcels > 0
     ? Math.round((props.scannedParcels / props.totalParcels) * 100)
     : 0;
@@ -303,9 +310,26 @@ export function MobileV2LoaderTodayScreen(
           </FxRow>
         </View>
 
-        {/* Quick actions */}
+        {/* Quick actions (#600): a valid empty list hides the row; a
+            missing or malformed list shows the standard error state. */}
+        {quickActions !== null && quickActions.length === 0 ? null : (
         <FxCol gap={MOBILE_V2_SPACING.lg}>
           <Text style={[SECTION_HEAD_STYLE, { color: theme.muted }]}>Quick actions</Text>
+          {quickActions === null ? (
+            <MobileV2ListStateView
+              theme={theme}
+              isLoading={false}
+              isError
+              errorTitle={copy.quickActionsErrorTitle}
+              errorMessage={copy.quickActionsErrorMessage}
+              retryLabel={copy.retry}
+              onRetry={props.onRetryQuickActions}
+              style={{ flex: 0 }}
+            >
+              {null}
+            </MobileV2ListStateView>
+          ) : (
+          <>
           {/* Design grid (flow-loader.jsx:60) is `gap:10` with NO outer
               padding. Each cell adds `paddingVertical`/`paddingHorizontal`
               of 5 to build the 10px inter-card gutter; the negative margin
@@ -320,7 +344,7 @@ export function MobileV2LoaderTodayScreen(
               marginVertical: -MOBILE_V2_SPACING.xl / 2,
             }}
           >
-            {props.quickActions.map((a) => (
+            {quickActions.map((a) => (
               <View
                 key={a.id}
                 style={{
@@ -377,7 +401,10 @@ export function MobileV2LoaderTodayScreen(
               </View>
             ))}
           </View>
+          </>
+          )}
         </FxCol>
+        )}
 
         {/* Drivers in queue */}
         <FxCol gap={MOBILE_V2_SPACING.lg}>

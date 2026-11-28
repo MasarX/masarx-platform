@@ -1,4 +1,5 @@
 import {
+  fieldopsSurfaceQuery,
   mapFieldopsCashDropEnvelope,
   mobileV2CashDropMatchesWrite,
   type MobileV2CashDropEnvelope,
@@ -83,22 +84,27 @@ describe("mapFieldopsCashDropEnvelope", () => {
     });
   });
 
-  test("does not replace malformed live fields with fixture business readback", () => {
-    const envelope = mapFieldopsCashDropEnvelope(
-      {
-        expected_sar: null,
-        safe_location: "",
-        latest_drop: {
-          state: "balanced",
-          actual_sar: 137,
-        },
-      },
-      FALLBACK,
-    );
+  const MALFORMED_CASH_DROP = {
+    expected_sar: null,
+    safe_location: "",
+    latest_drop: {
+      state: "balanced",
+      actual_sar: 137,
+    },
+  };
 
-    expect(envelope.expectedSar).toBe(FALLBACK.expectedSar);
-    expect(envelope.safeLocation).toBe(FALLBACK.safeLocation);
-    expect(envelope.lastDrop).toBeNull();
+  // #600: retired "a malformed payload returns the fallback expectedSar and
+  // safeLocation"; live mode errors.
+  test("live mode: a malformed cash-drop payload is an error, never fixture amounts", () => {
+    expect(() => mapFieldopsCashDropEnvelope(MALFORMED_CASH_DROP, FALLBACK)).toThrow(/malformed payload/);
+  });
+
+  test("showcase mode: the same malformed input still renders the fixture cash drop", async () => {
+    const readLive = jest.fn(async () => mapFieldopsCashDropEnvelope(MALFORMED_CASH_DROP, FALLBACK));
+    const query = fieldopsSurfaceQuery(null, FALLBACK, readLive);
+    expect(query.initialData).toBe(FALLBACK);
+    await expect(query.queryFn()).resolves.toBe(FALLBACK);
+    expect(readLive).not.toHaveBeenCalled();
   });
 
   test("requires matching backend decision, amounts, and variance artifact for submitted readback", () => {

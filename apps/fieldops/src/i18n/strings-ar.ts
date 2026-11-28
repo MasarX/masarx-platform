@@ -1057,6 +1057,14 @@ export const AR_STRINGS: FieldOpsStrings = {
     saving: "جارٍ حفظ المطابقة",
     handBack: "التسليم وإنهاء الوردية",
   },
+  cashDrop: {
+    countedEmpty: "عُدّ النقد وأدخل المبلغ للإرسال",
+  },
+  loaderToday: {
+    quickActionsErrorTitle: "الإجراءات السريعة غير متاحة",
+    quickActionsErrorMessage: "تعذّر تحميل الإجراءات السريعة. حاول مرة أخرى.",
+    retry: "حاول مرة أخرى",
+  },
   composer: {
     actionInput: "بيانات الإجراء",
     actionInputDescription: "أدخل البيانات المطلوبة قبل إدراج هذا الإجراء في قائمة الانتظار.",

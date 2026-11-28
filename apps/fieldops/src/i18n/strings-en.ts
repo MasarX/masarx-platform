@@ -1054,6 +1054,14 @@ export const EN_STRINGS = {
     saving: "Saving reconciliation",
     handBack: "Hand back & end shift",
   },
+  cashDrop: {
+    countedEmpty: "Count the cash and enter the amount to submit",
+  },
+  loaderToday: {
+    quickActionsErrorTitle: "Quick actions unavailable",
+    quickActionsErrorMessage: "We couldn't load your quick actions. Try again.",
+    retry: "Try again",
+  },
   composer: {
     actionInput: "Action input",
     actionInputDescription: "Provide required details before queueing this action.",

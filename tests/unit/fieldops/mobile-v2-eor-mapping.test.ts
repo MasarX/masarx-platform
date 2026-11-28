@@ -18,6 +18,7 @@
 // mode / a genuinely-absent resolver (covered by the hook, not here).
 
 import {
+  fieldopsSurfaceQuery,
   mapFieldopsEorEnvelope,
   type MobileV2EorEnvelope,
 } from "../../../apps/fieldops/src/mobile-v2-rpc-hooks";
@@ -222,16 +223,18 @@ describe("mapFieldopsEorEnvelope — E7 honest-degrade", () => {
     expect(mapped.recon).toBeNull();
   });
 
-  test("a malformed (non-object) resolver payload keeps the typed shape but no fixture business data", () => {
-    const mapped = mapFieldopsEorEnvelope(null, FIXTURE);
-    // summary / checklist keep the typed fallback shape (shape guard)...
-    expect(mapped.summary).toEqual(FIXTURE.summary);
-    expect(mapped.checklist).toEqual(FIXTURE.checklist);
-    // ...but route label + recon still degrade honestly, never fixture.
-    expect(mapped.routeLabel).toBe("");
-    expect(mapped.recon).toBeNull();
-    expect(mapped.lastRecon).toBeNull();
-    expect(mapped.performanceNote).toBeNull();
+  // #600: retired "a null payload returns the fixture summary and
+  // checklist"; live mode errors.
+  test("live mode: a malformed (non-object) resolver payload is an error, never the fixture", () => {
+    expect(() => mapFieldopsEorEnvelope(null, FIXTURE)).toThrow(/malformed payload/);
+  });
+
+  test("showcase mode: the same malformed input still renders the fixture", async () => {
+    const readLive = jest.fn(async () => mapFieldopsEorEnvelope(null, FIXTURE));
+    const query = fieldopsSurfaceQuery(null, FIXTURE, readLive);
+    expect(query.initialData).toBe(FIXTURE);
+    await expect(query.queryFn()).resolves.toBe(FIXTURE);
+    expect(readLive).not.toHaveBeenCalled();
   });
 
   test("the mapped envelope is frozen", () => {
