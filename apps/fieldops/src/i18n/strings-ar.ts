@@ -5,6 +5,13 @@ export const AR_STRINGS: FieldOpsStrings = {
     message: "اختر دورًا مصرحًا به أو اطلب صلاحية الوصول من المسؤول.",
     openMenu: "فتح قائمة الأدوار",
   },
+  liveReads: {
+    accessLoadFailed: "تعذّر تحميل صلاحياتك.",
+    profileLoading: "جارٍ تحميل ملفك الشخصي…",
+    profileLoadFailed: "تعذّر تحميل ملفك الشخصي.",
+    incidentTypesLoadFailed: "تعذّر تحميل أنواع الحوادث.",
+    retry: "حاول مرة أخرى",
+  },
   routeLoad: {
     title: "تحميل طرود المسار", cold: "السلسلة الباردة", weight: "الوزن المسجل",
     partial: "طرود ببيانات غير مسجلة", scanned: "تم المسح", pending: "لم تُمسح بعد",

@@ -69,8 +69,14 @@ export interface MobileV2MoreScreenProps {
   readonly loaderSession?: MobileV2LoaderSessionPanel;
   readonly userName: string;
   readonly userBadge: string;
+  /** #600: set while the live profile read loads or has failed; the card shows it instead of an identity. */
+  readonly identityState?: MobileV2MoreIdentityState;
   readonly style?: StyleProp<ViewStyle>;
 }
+
+export type MobileV2MoreIdentityState =
+  | { readonly kind: "loading"; readonly label: string }
+  | { readonly kind: "error"; readonly message: string; readonly retryLabel: string; readonly onRetry: () => void };
 
 const SECTION_HEAD_STYLE = {
   fontSize: 10,
@@ -131,6 +137,27 @@ export function MobileV2MoreScreen(props: MobileV2MoreScreenProps): React.ReactE
                 {props.userName.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()}
               </Text>
             </View>
+            {props.identityState !== undefined ? (
+              <FxCol gap={MOBILE_V2_SPACING.md} style={{ flex: 1, minWidth: 0, alignItems: "flex-start" }}>
+                <Text
+                  accessibilityLiveRegion="polite"
+                  style={{ fontSize: 13, color: theme.muted, fontFamily: MOBILE_V2_FONT_SANS, textAlign: "auto" }}
+                >
+                  {props.identityState.kind === "loading" ? props.identityState.label : props.identityState.message}
+                </Text>
+                {props.identityState.kind === "error" ? (
+                  <FxButton
+                    theme={theme}
+                    variant="soft"
+                    size="sm"
+                    onPress={props.identityState.onRetry}
+                    accessibilityLabel={props.identityState.retryLabel}
+                  >
+                    {props.identityState.retryLabel}
+                  </FxButton>
+                ) : null}
+              </FxCol>
+            ) : (
             <FxCol gap={2} style={{ flex: 1, minWidth: 0 }}>
               <Text
                 style={{
@@ -153,6 +180,7 @@ export function MobileV2MoreScreen(props: MobileV2MoreScreenProps): React.ReactE
                 {props.userBadge} · {props.activeRole}
               </Text>
             </FxCol>
+            )}
             <FxStatusDot theme={theme} kind={props.online ? "current" : "failed"} size={10} />
           </FxRow>
         </FxCard>

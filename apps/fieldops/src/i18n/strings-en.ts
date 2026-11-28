@@ -4,6 +4,13 @@ export const EN_STRINGS = {
     message: "Choose an authorized role or ask your administrator for access.",
     openMenu: "Open role menu",
   },
+  liveReads: {
+    accessLoadFailed: "Unable to load your access.",
+    profileLoading: "Loading your profile…",
+    profileLoadFailed: "Unable to load your profile.",
+    incidentTypesLoadFailed: "Unable to load incident types.",
+    retry: "Try again",
+  },
   routeLoad: {
     title: "Route parcel loading", cold: "Cold-chain", weight: "Known weight",
     partial: "Unrecorded parcels", scanned: "Scanned", pending: "Not yet scanned",

@@ -19,6 +19,7 @@ import { FxButton, FxCard, FxChip, FxCol, FxRow } from "./mobile-v2-primitives";
 import { FxIcon } from "./mobile-v2-icon";
 import type { FxChipTone } from "./mobile-v2-primitives-styles";
 import { MobileV2BottomSheet } from "./mobile-v2-bottom-sheet";
+import { MobileV2ListStateView } from "./mobile-v2-list-state-view";
 import { isMobileV2IncidentReady } from "./mobile-v2-sheet-readiness";
 // Incident-type contract lives in the RN-free `mobile-v2-incident-types`
 // module so the RPC hooks layer + this sheet share one definition.
@@ -59,6 +60,14 @@ export interface MobileV2IncidentSheetProps {
   readonly submitting?: boolean;
   readonly latestIncident?: MobileV2IncidentReadback | null;
   readonly readbackError?: string | null;
+  /** #600: the live type read's state; the picker shows loading or error-with-retry instead of a list. */
+  readonly typesState?: {
+    readonly isLoading: boolean;
+    readonly isError: boolean;
+    readonly errorMessage: string;
+    readonly retryLabel: string;
+    readonly onRetry: () => void;
+  };
   readonly style?: StyleProp<ViewStyle>;
 }
 
@@ -126,6 +135,14 @@ export function MobileV2IncidentSheet(
       {/* Type picker — full-bleed rows separated by 1px borders. The
           negative side margin escapes the sheet content's 14px inset so
           the rows reach the panel edges, matching design SheetIncident. */}
+      <MobileV2ListStateView
+        theme={theme}
+        isLoading={props.typesState?.isLoading ?? false}
+        isError={props.typesState?.isError ?? false}
+        errorMessage={props.typesState?.errorMessage}
+        retryLabel={props.typesState?.retryLabel}
+        onRetry={props.typesState?.onRetry}
+      >
       <View
         style={{
           marginHorizontal: -MOBILE_V2_SPACING["3xl"],
@@ -201,6 +218,7 @@ export function MobileV2IncidentSheet(
           );
         })}
       </View>
+      </MobileV2ListStateView>
 
       {/* Detail / required-fields panel — only shown after a type is picked */}
       {props.readbackError ? (
