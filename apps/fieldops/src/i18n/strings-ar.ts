@@ -12,6 +12,13 @@ export const AR_STRINGS: FieldOpsStrings = {
     incidentTypesLoadFailed: "تعذّر تحميل أنواع الحوادث.",
     retry: "حاول مرة أخرى",
   },
+  listState: {
+    loading: "جارٍ التحميل…",
+    loadingDetail: "جارٍ الجلب من السحابة · يُعرض آخر وضع معروف عند انقطاع الاتصال.",
+    errorTitle: "تعذّر الوصول إلى الخادم",
+    errorMessage: "تعذّر تحميل البيانات. تحقق من الاتصال أو حاول مرة أخرى.",
+    retryAccessibility: "حاول مرة أخرى لتحميل البيانات",
+  },
   routeLoad: {
     title: "تحميل طرود المسار", cold: "السلسلة الباردة", weight: "الوزن المسجل",
     partial: "طرود ببيانات غير مسجلة", scanned: "تم المسح", pending: "لم تُمسح بعد",
