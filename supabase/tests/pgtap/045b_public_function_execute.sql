@@ -109,8 +109,14 @@ CREATE TEMP VIEW public_execute_preservation_roles AS
       ('supabase_replication_admin'),
       ('supabase_storage_admin'),
       ('ui_rpc_executor')
-  ), later_created_roles (role_name) AS (
-    SELECT (parse_ident(parsed.parts[1]))[1]::name
+  ), role_creations (role_name, after_closure) AS (
+    SELECT
+      (parse_ident(parsed.parts[1]))[1]::name,
+      migration.version > (
+        SELECT version
+        FROM supabase_migrations.schema_migrations
+        WHERE name = 'revoke_public_function_execute'
+      )
     FROM supabase_migrations.schema_migrations AS migration
     CROSS JOIN LATERAL unnest(migration.statements) AS recorded(statement)
     CROSS JOIN LATERAL regexp_matches(
@@ -118,11 +124,12 @@ CREATE TEMP VIEW public_execute_preservation_roles AS
       '\mCREATE[[:space:]]+ROLE[[:space:]]+("(?:[^"]|"")+"|[[:alpha:]_][[:alnum:]_$]*)',
       'gi'
     ) AS parsed(parts)
-    WHERE migration.version > (
-      SELECT version
-      FROM supabase_migrations.schema_migrations
-      WHERE name = 'revoke_public_function_execute'
-    )
+  ), later_created_roles (role_name) AS (
+    -- A name also created at or before the closure is a closure-era role, so a later re-create keeps it in scope.
+    SELECT role_name
+    FROM role_creations
+    GROUP BY role_name
+    HAVING bool_and(coalesce(after_closure, false))
   )
   SELECT r.oid, r.rolname
   FROM pg_roles AS r
@@ -170,9 +177,13 @@ SELECT ok(
   'The preservation check excludes a role created in a later migration'
 );
 
-SELECT ok(
-  EXISTS (SELECT 1 FROM pg_temp.public_execute_preservation_roles WHERE rolname = 'anon'),
-  'The preservation check includes anon, a role that existed at the closure and is outside the loss allowlist'
+SELECT set_eq(
+  $$
+  SELECT rolname::text FROM pg_temp.public_execute_preservation_roles
+  WHERE rolname IN ('anon', 'authenticated', 'service_role')
+  $$,
+  ARRAY['anon', 'authenticated', 'service_role'],
+  'The preservation check includes anon, authenticated and service_role, which existed at the closure and are outside the loss allowlist'
 );
 
 SELECT finish();
