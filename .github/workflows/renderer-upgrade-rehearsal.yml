@@ -6,6 +6,7 @@ name: Renderer upgrade rehearsal
     branches: [main]
     paths:
       - '.github/workflows/renderer-upgrade-rehearsal.yml'
+      - 'config/ci/hosted-integration-images.json'
       - 'scripts/ci-hosted/renderer-upgrade-rehearsal.cjs'
 
 permissions:
