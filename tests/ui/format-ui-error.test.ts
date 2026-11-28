@@ -173,3 +173,55 @@ test("sanitization handles long token-like text and leaves unrelated field names
   expect(sanitizeUiError("secret_ref=vault-reference token_id=reference private_key_id=reference"))
     .toBe("secret_ref=vault-reference token_id=reference private_key_id=reference");
 });
+
+describe("formatUiError reference ID (#723)", () => {
+  const previousLocale = process.env.NEXT_PUBLIC_LOCALE;
+  const referenceId = "3f2b8c1e-5d4a-4e6b-9c7d-1a2b3c4d5e6f";
+  const backendText = "Synthetic relation zz_synthetic_rows could not be read";
+
+  afterEach(() => {
+    if (previousLocale === undefined) delete process.env.NEXT_PUBLIC_LOCALE;
+    else process.env.NEXT_PUBLIC_LOCALE = previousLocale;
+  });
+
+  test("an unrecognised backend error with a reference ID shows the English fallback and the ID", () => {
+    process.env.NEXT_PUBLIC_LOCALE = "en";
+    const result = formatUiError({ message: backendText, correlation_id: referenceId }, "Try again.");
+    expect(result).toBe(`Try again. Reference: ${referenceId}`);
+    expect(result).not.toContain("zz_synthetic_rows");
+  });
+
+  test("an unrecognised backend error with a reference ID shows the Arabic fallback and the isolated ID", () => {
+    process.env.NEXT_PUBLIC_LOCALE = "ar";
+    const result = formatUiError({ message: backendText, correlation_id: referenceId }, "حاول مرة أخرى.");
+    expect(result).toBe(`حاول مرة أخرى. المرجع: ⁦${referenceId}⁩`);
+    expect(result).not.toContain("zz_synthetic_rows");
+  });
+
+  test("a short request token in its own field is shown", () => {
+    process.env.NEXT_PUBLIC_LOCALE = "en";
+    expect(formatUiError({ message: backendText, request_id: "req_7Hq2LmZ9" }, "Try again."))
+      .toBe("Try again. Reference: req_7Hq2LmZ9");
+  });
+
+  test("an unrecognised backend error without a reference ID shows the fallback only", () => {
+    process.env.NEXT_PUBLIC_LOCALE = "en";
+    expect(formatUiError(new Error(backendText), "Try again.")).toBe("Try again.");
+    expect(formatUiError({ message: backendText, correlation_id: null }, "Try again.")).toBe("Try again.");
+  });
+
+  test("an ID-shaped string inside backend message text is not picked out", () => {
+    process.env.NEXT_PUBLIC_LOCALE = "en";
+    expect(formatUiError(new Error(`Request ${referenceId} failed`), "Try again.")).toBe("Try again.");
+  });
+
+  test.each([
+    ["free text", { correlation_id: backendText }],
+    ["an over-long token", { request_id: "a".repeat(33) }],
+    ["markup", { trace_id: "<b>synthetic</b>" }],
+    ["a non-string value", { request_id: 12345678 }],
+  ])("a reference field holding %s is not shown", (_label, fields) => {
+    process.env.NEXT_PUBLIC_LOCALE = "en";
+    expect(formatUiError({ message: backendText, ...fields }, "Try again.")).toBe("Try again.");
+  });
+});

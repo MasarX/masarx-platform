@@ -96,4 +96,24 @@ describe("UI edge client response handling", () => {
       })
     );
   });
+
+  test("keeps the error envelope's reference fields on the thrown error (#723)", async () => {
+    const body = {
+      code: "http_500",
+      message: "Request failed",
+      status: 500,
+      correlation_id: "3f2b8c1e-5d4a-4e6b-9c7d-1a2b3c4d5e6f",
+      trace_id: null,
+      request_id: "req_7Hq2LmZ9",
+      error: "Request failed",
+    };
+    jest.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify(body), { status: 500 }));
+
+    await expect(createClient().mappingStudio.parse({})).rejects.toMatchObject({
+      message: "Request failed",
+      correlation_id: "3f2b8c1e-5d4a-4e6b-9c7d-1a2b3c4d5e6f",
+      request_id: "req_7Hq2LmZ9",
+      trace_id: null,
+    });
+  });
 });
