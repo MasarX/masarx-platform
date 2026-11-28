@@ -2,7 +2,7 @@
 /**
  * verify-cloud-e2e-gate.js
  *
- * Post-deploy E2E gate for shared environments (stg/prod):
+ * Retired post-deploy wrapper. See DELIVERY.md for the retirement decision.
  * - Assumes the target project is already deployed (migrations + edge).
  * - Runs shared-env-safe smoke checks first, then mandatory proofs, then extended UI coverage.
  * - Retries only infrastructure-class failures once with a bounded delay.

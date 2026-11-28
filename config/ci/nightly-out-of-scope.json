@@ -33,7 +33,7 @@
     "name": "Deployed API and Edge tests",
     "reason": "Requires deployed function endpoints and environment-specific test identities.",
     "covered_by": "Post-deploy API work tracked in #133.",
-    "suites": ["test:integration:cloud", "test:edge-smoke:cloud", "test:pgtap:cloud"]
+    "suites": ["test:integration:cloud", "test:edge-smoke:cloud"]
   },
   {
     "name": "Live third-party logistics adapter tests",

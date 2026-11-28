@@ -232,7 +232,7 @@ if (skipDbPush) {
   skippedSteps.push({ label: 'db:push', reason: 'VERIFY_SKIP_DB_PUSH=1' });
 }
 if (skipPgtap) {
-  skippedSteps.push({ label: 'test:pgtap:cloud', reason: 'VERIFY_SKIP_PGTAP=1' });
+  skippedSteps.push({ label: 'test:pgtap', reason: 'VERIFY_SKIP_PGTAP=1' });
 }
 if (skipEdgeDeploy) {
   skippedSteps.push({ label: 'edge:deploy', reason: 'EDGE_DEPLOY_SKIP=1' });
@@ -265,7 +265,7 @@ function writeSkippedEvidenceLog(fileName, message) {
 
 function ensureSkippedEvidenceLogs() {
   if (skipPgtap) {
-    writeSkippedEvidenceLog('pgtap.log', '[verify:cloud:core] test:pgtap:cloud skipped (VERIFY_SKIP_PGTAP=1)');
+    writeSkippedEvidenceLog('pgtap.log', '[verify:cloud:core] test:pgtap skipped (VERIFY_SKIP_PGTAP=1)');
   }
   if (skipEdgeSmoke) {
     writeSkippedEvidenceLog(

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 /**
- * Cloud pgTAP runner
+ * pgTAP runner for an isolated PostgreSQL test database.
  *
- * Loads DATABASE_URL from .env.cloud and executes the pgTAP suite against the
- * shared Supabase database. Mirrors the behaviour of `supabase test db`, but
- * without spinning up local containers.
+ * Hosted CI calls this runner against its disposable database. The CLI needs
+ * a verified, isolated target because fixture bootstrap can write to it.
+ * See DELIVERY.md for the cloud-target qualification retirement.
  */
 
 const fs = require('fs');
@@ -1033,7 +1033,7 @@ async function main() {
 
 async function runSuite(dbCandidates, fullLocal = false, env = process.env, reporter) {
   if (dbCandidates.length === 0) {
-    console.error('[pgTAP] Missing DATABASE_URL/DATABASE_URL_DIRECT/DATABASE_URL_POOLER. Ensure .env.cloud is loaded.');
+    console.error('[pgTAP] Missing DATABASE_URL/DATABASE_URL_DIRECT/DATABASE_URL_POOLER. Configure a verified, isolated test database.');
     exitRunner(1);
   }
   const databaseUrl = dbCandidates[0].dsn;

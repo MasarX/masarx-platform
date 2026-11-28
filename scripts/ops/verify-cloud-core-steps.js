@@ -28,7 +28,7 @@ function planPgtapIntegrationSteps({
   const pgtap = {
     cmd: nodeCmd,
     args: [path.join('scripts', 'tests', 'run-pgtap-cloud.js')],
-    label: 'test:pgtap:cloud',
+    label: 'test:pgtap',
     logFile: 'pgtap.log',
     qaSuiteKey: 'pgtap',
   };
